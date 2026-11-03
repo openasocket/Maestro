@@ -29,11 +29,15 @@ import type {
 	ManagedScope,
 	ProviderInfo,
 	TabPatch,
+	TurnInput,
 	TurnSendReceipt,
 } from '../client/types';
+import { generateUUID } from '../../uuid';
+import { sha256Hex } from '../managed/authority';
 import { managedActorPrincipal } from '../managed/host-adapter';
 import {
 	MANAGED_CAPABILITIES,
+	MANAGED_CONTRACT_VERSION,
 	managedContextProblems,
 	type ManagedCapability,
 	type ManagedInstallationIdentity,
@@ -311,11 +315,11 @@ function sendFailure(
 	type: string,
 	agentId: string,
 	tabId: string,
-	result: Extract<ClientResult<unknown>, { ok: false }>
+	failed: Extract<StandingSend, { ok: false }>
 ): Frame {
-	return result.error.code === 'not-found'
+	return failed.notFound
 		? refusal(type, `Tab not found: ${tabId}`, { sessionId: agentId, reason: 'tab-not-found' })
-		: refusal(type, errorText(result), { sessionId: agentId });
+		: refusal(type, failed.error, { sessionId: agentId });
 }
 
 // ---------------------------------------------------------------------------
@@ -594,6 +598,108 @@ async function answerManaged(
 }
 
 // ---------------------------------------------------------------------------
+// A plain send on the host's standing (MCOMP-09-02)
+// ---------------------------------------------------------------------------
+
+/** How a dispatch verb's send ended: the reply fields, or the refusal and whether it was "not found". */
+type StandingSend = { ok: true; fields: Frame } | { ok: false; error: string; notFound: boolean };
+
+/**
+ * Place one of the dispatch verbs' sends on this host's standing. A scope that reads `standalone`,
+ * or no scope at all (an embedding without `startRuntimeServer`, which holds no standing to read),
+ * sends through `turns.send` as it always has, and the turn service behind the client keeps its own
+ * rule. Any other standing (enrolled, enrolled with nothing answering, an unreadable record) makes
+ * the send a managed submission bound to the host before anything is queued: a context naming this
+ * installation, the principal the host's custody names, no delegation, a fresh request and the
+ * policy generation of this moment, stamped with the transport this handler admits over and
+ * handed to the facade's `submit`, so the run journal records what arrived over the bridge and the
+ * reply names the run. A host whose client has no facade refuses the send; a send the facade did
+ * not admit is refused with its code. Neither falls back to a plain send.
+ */
+async function sendOnStanding(
+	client: MaestroClient,
+	scope: ManagedRequestScope | undefined,
+	agentId: string,
+	tabId: string,
+	input: TurnInput
+): Promise<StandingSend> {
+	const binding = scope?.binding();
+	if (!scope || binding === 'standalone') {
+		const result = await client.turns.send(agentId, tabId, input);
+		return result.ok
+			? { ok: true, fields: receiptFields(result.value) }
+			: { ok: false, error: errorText(result), notFound: result.error.code === 'not-found' };
+	}
+	if (input.images?.length) {
+		return {
+			ok: false,
+			error:
+				'Images cannot be sent to an enrolled host from here. Send the message without them, or use the desktop.',
+			notFound: false,
+		};
+	}
+	if (!client.managed) {
+		return {
+			ok: false,
+			error: `This installation is enrolled (binding: ${binding}) and this host exposes no managed facade to admit the message, so nothing was sent.`,
+			notFound: false,
+		};
+	}
+	const agent = await client.agents.get(agentId);
+	if (!agent.ok) {
+		return { ok: false, error: errorText(agent), notFound: agent.error.code === 'not-found' };
+	}
+	const requestId = generateUUID();
+	const context: ManagedOperationContext = {
+		contractVersion: MANAGED_CONTRACT_VERSION,
+		installation: scope.installation,
+		origin: 'cli',
+		actor: scope.actor(),
+		delegation: { chain: [], grantRef: null },
+		identity: {
+			requestId,
+			// A bridge send is never a replay of an earlier one: each is its own submission.
+			idempotencyKey: generateUUID(),
+			attemptId: generateUUID(),
+			runId: null,
+			rootRunId: null,
+			parentRunId: null,
+		},
+		policyRevision: scope.policyRevision(),
+		workflow: null,
+		traceId: `bridge:${requestId}`,
+		requestedCapabilities: ['runs.submit'],
+	};
+	const text = input.text ?? '';
+	const result = await client.managed.submit({
+		context,
+		input: {
+			agentId,
+			tabId,
+			providerId: agent.value.toolType,
+			modelId: null,
+			content: { text, sha256: sha256Hex(text) },
+			resourceIds: [],
+		},
+		peer: BRIDGE_PEER,
+	});
+	if (!result.ok) return { ok: false, error: errorText(result), notFound: false };
+	const answer = result.value;
+	if (answer.status !== 'ok') {
+		return {
+			ok: false,
+			error: `[${answer.code}] The host did not admit the message (${answer.status}): ${answer.message ?? 'no reason given'}`,
+			notFound: answer.code === 'not-found',
+		};
+	}
+	const { run } = answer.value;
+	return {
+		ok: true,
+		fields: { queued: run.state === 'queued', runId: run.runId },
+	};
+}
+
+// ---------------------------------------------------------------------------
 // The handler
 // ---------------------------------------------------------------------------
 
@@ -633,8 +739,11 @@ export type RequestHandler = (message: Request) => Promise<Frame | undefined>;
 
 export interface RequestHandlerOptions {
 	/**
-	 * The scope managed requests are admitted in (`runtimeManagedScope(runtime)` for a host).
-	 * Absent: `managed_operation` is refused `unsupported`, whatever facade the client has.
+	 * The scope managed requests are admitted in (`runtimeManagedScope(runtime)` for a host), and
+	 * the standing the dispatch verbs' sends are placed on (MCOMP-09-02): a scope that is not
+	 * standalone makes every plain send a managed submission bound to the host. Absent:
+	 * `managed_operation` is refused `unsupported`, whatever facade the client has, and a send
+	 * reaches `turns.send` with the standing the turn service holds on its own.
 	 */
 	managedScope?: ManagedRequestScope;
 }
@@ -842,17 +951,17 @@ export function createRequestHandler(
 					});
 				}
 				const images = imagesOf(message);
-				const result = await client.turns.send(agentId, target.tabId, {
+				const sent = await sendOnStanding(client, options.managedScope, agentId, target.tabId, {
 					text: typeof message.command === 'string' ? message.command : '',
 					...(images ? { images } : {}),
 				});
-				if (!result.ok) return sendFailure(type, agentId, target.tabId, result);
+				if (!sent.ok) return sendFailure(type, agentId, target.tabId, sent);
 				return {
 					type,
 					success: true,
 					sessionId: agentId,
 					tabId: target.tabId,
-					...receiptFields(result.value),
+					...sent.fields,
 				};
 			}
 			case 'send_command': {
@@ -865,17 +974,17 @@ export function createRequestHandler(
 				const images = imagesOf(message);
 				// A busy agent queues the message where the desktop turns it away, so `force` has
 				// nothing to override: the message is accepted either way, and `queued` says which.
-				const result = await client.turns.send(agentId, target.tabId, {
+				const sent = await sendOnStanding(client, options.managedScope, agentId, target.tabId, {
 					text: typeof message.command === 'string' ? message.command : '',
 					...(images ? { images } : {}),
 				});
-				if (!result.ok) return sendFailure(type, agentId, target.tabId, result);
+				if (!sent.ok) return sendFailure(type, agentId, target.tabId, sent);
 				return {
 					type,
 					success: true,
 					sessionId: agentId,
 					tabId: target.tabId,
-					...receiptFields(result.value),
+					...sent.fields,
 				};
 			}
 			case 'new_ai_tab_with_prompt': {
@@ -897,15 +1006,18 @@ export function createRequestHandler(
 					);
 				}
 				const { tabId } = created.value;
-				const result = await client.turns.send(agentId, tabId, { text: prompt });
+				const sent = await sendOnStanding(client, options.managedScope, agentId, tabId, {
+					text: prompt,
+				});
 				// The tab exists by now, so a prompt that could not start is reported with it.
-				if (!result.ok) return refusal(type, errorText(result), { sessionId: agentId, tabId });
+				if (!sent.ok) return refusal(type, sent.error, { sessionId: agentId, tabId });
 				return {
 					type,
 					success: true,
 					sessionId: agentId,
 					tabId,
-					...(result.value.status === 'queued' ? { queued: true } : {}),
+					...(sent.fields.queued === true ? { queued: true } : {}),
+					...(typeof sent.fields.runId === 'string' ? { runId: sent.fields.runId } : {}),
 				};
 			}
 			case 'list_queue': {

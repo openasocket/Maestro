@@ -72,6 +72,40 @@ export interface TurnProcessSpec {
 	transport?: 'acp-stdio';
 }
 
+/**
+ * An own, frozen copy of a spec: the command, every argument, every
+ * environment entry, the stdin text and the shell choice as they are at this
+ * instant (MCOMP-09-02). What an admission sees is this copy and what
+ * `startTurn` spawns is this copy, so no reference the caller still holds (the
+ * plan's argument array, the environment the spec was built from) can change
+ * the effect after the authority has seen it, however long the admission is
+ * awaited. A spec that is already frozen through is returned as it is. The
+ * private prompt artifact (its bytes, path and mode) and the ACP transport
+ * word are part of the effect, so they are carried and frozen too.
+ */
+export function freezeTurnProcessSpec(spec: TurnProcessSpec): Readonly<TurnProcessSpec> {
+	if (
+		Object.isFrozen(spec) &&
+		Object.isFrozen(spec.args) &&
+		Object.isFrozen(spec.env) &&
+		(spec.promptArtifact === undefined || Object.isFrozen(spec.promptArtifact))
+	) {
+		return spec;
+	}
+	return Object.freeze({
+		command: spec.command,
+		args: Object.freeze([...spec.args]) as string[],
+		cwd: spec.cwd,
+		env: Object.freeze({ ...spec.env }),
+		...(spec.stdin !== undefined ? { stdin: spec.stdin } : {}),
+		...(spec.promptArtifact !== undefined
+			? { promptArtifact: Object.freeze({ ...spec.promptArtifact }) }
+			: {}),
+		...(spec.shell !== undefined ? { shell: spec.shell } : {}),
+		...(spec.transport !== undefined ? { transport: spec.transport } : {}),
+	});
+}
+
 export interface WindowsShellRulesOptions {
 	/** Defaults to the real host. Injected by tests. */
 	isWindowsHost?: boolean;
@@ -191,18 +225,73 @@ export type DispatchAdmissionVerdict =
 	| { ok: false; state: DispatchAdmissionState; code: ManagedDenialCode; message: string };
 
 /**
+ * The host's standing at the spawn sink (MCOMP-09-02): what every `startTurn`
+ * in this process is measured against the instant before `spawn`, whatever
+ * its caller passed or left out. A host that holds a managed binding installs
+ * it once (the library runtime over its binding and attached host; a desktop
+ * over its enterprise service) and releases it when it shuts down. It is read
+ * at every spawn, never cached here, so an enrollment that landed after the
+ * install counts at the next launch. Nothing installed is a host that holds
+ * no binding at all: the explicit standalone this sink has always run as, and
+ * the one compatibility it keeps. Under a managed standing a launch runs on
+ * an admission `leaseAdmission()` minted over the authority answering now, or
+ * not at all: no admission, a gate minted elsewhere, or no authority answering
+ * is refused before any effect, and none of them falls back to a plain spawn.
+ */
+export interface TurnSinkStanding {
+	/** `managed`: the installation is enrolled, whether or not anything answers for it now. */
+	standing(): 'standalone' | 'managed';
+	/** The id of the authority answering for the installation now; null when none does. */
+	authorityId(): string | null;
+}
+
+let installedStanding: TurnSinkStanding | null = null;
+
+/**
+ * Install the host's standing at the sink. Returns the release, which clears
+ * the install only while it is still the current one, so a host that is
+ * replaced by another in the same process (one runtime after another in a
+ * test) does not clear its successor's word on its way out.
+ */
+export function installTurnSinkStanding(standing: TurnSinkStanding): () => void {
+	installedStanding = standing;
+	return () => {
+		if (installedStanding === standing) installedStanding = null;
+	};
+}
+
+/** The standing installed at the sink, or null when no host has installed one. */
+export function turnSinkStanding(): TurnSinkStanding | null {
+	return installedStanding;
+}
+
+/** The authority each `leaseAdmission()` gate was minted over, by the gate's identity. */
+const gateAuthority = new WeakMap<DispatchAdmission, string>();
+
+/**
+ * The id of the authority a gate was minted over by `leaseAdmission()`, or
+ * null for any other object: a gate written by hand has no provenance the
+ * sink can read, so under a managed standing it admits nothing.
+ */
+export function leaseAdmissionAuthority(gate: DispatchAdmission): string | null {
+	return gateAuthority.get(gate) ?? null;
+}
+
+/**
  * The admission an admitted lease makes at the sink: re-check the lease
  * against the digest of the FINAL snapshot the instant before `spawn`, bind
  * the pid, release with the exit (spawn failure, a stop and who asked for
  * it, or the exit code and signal), and hear a revocation. The one gate
  * every lease-backed sink uses (`runAgentTurn`, the harness dispatch, the
- * CLI spawner), so a caller cannot forget a step of the lifetime.
+ * CLI spawner), so a caller cannot forget a step of the lifetime. The gate
+ * remembers the authority of the lease it was minted over, which is what the
+ * sink reads under a managed standing (`leaseAdmissionAuthority`).
  */
 export function leaseAdmission(
 	authority: Pick<HostAuthority, 'check'>,
 	lease: DispatchLease
 ): DispatchAdmission {
-	return {
+	const gate: DispatchAdmission = {
 		admit(final) {
 			const verdict = authority.check(lease, dispatchSnapshotDigest(final));
 			if (verdict.ok) return { ok: true };
@@ -224,6 +313,55 @@ export function leaseAdmission(
 			),
 		onRevoked: (listener) => lease.onRevoked(listener),
 	};
+	gateAuthority.set(gate, lease.authorityId);
+	return gate;
+}
+
+/**
+ * What the installed standing says of one launch's admission, the instant
+ * before `spawn` (MCOMP-09-02): nothing, when no standing is installed or it
+ * reads standalone; else the refusal. Under a managed standing an omitted
+ * admission is refused as unavailable (nothing can run it plain), a gate not
+ * minted by `leaseAdmission()` or minted over another authority is refused
+ * as an invalid lease, and a standing with no authority answering refuses
+ * every launch as unavailable.
+ */
+function sinkStandingRefusal(
+	admission: StartTurnOptions['admission']
+): DispatchRefusedError | undefined {
+	const standing = installedStanding;
+	if (!standing || standing.standing() !== 'managed') return undefined;
+	if (!admission) {
+		return new DispatchRefusedError(
+			'unavailable',
+			'runtime-unavailable',
+			'This installation is enrolled and the launch carries no admission, so nothing was started: a process on an enrolled host runs under a lease from the authority answering for the installation, or not at all.'
+		);
+	}
+	const live = standing.authorityId();
+	if (live === null) {
+		return new DispatchRefusedError(
+			'unavailable',
+			'runtime-unavailable',
+			'This installation is enrolled and no authority answers for it now, so nothing was started.'
+		);
+	}
+	const minted = leaseAdmissionAuthority(admission.gate);
+	if (minted === null) {
+		return new DispatchRefusedError(
+			'denied',
+			'lease-invalid',
+			`The admission for this launch was not minted by leaseAdmission() over the authority answering for this installation (${live}), so nothing was started.`
+		);
+	}
+	if (minted !== live) {
+		return new DispatchRefusedError(
+			'denied',
+			'lease-invalid',
+			`The lease for this launch was minted by authority ${minted}, and ${live} answers for this installation now, so nothing was started.`
+		);
+	}
+	return undefined;
 }
 
 /** Thrown by `startTurn` when admission refuses. Nothing spawned; owned preparation is cleaned. */
@@ -241,7 +379,10 @@ export class DispatchRefusedError extends Error {
 export interface StartTurnOptions {
 	/**
 	 * The managed admission to ask right before the spawn, with the attribution
-	 * the spec does not carry. Absent: an unmanaged turn, admitted by nobody.
+	 * the spec does not carry. Absent: an unmanaged turn, admitted by nobody,
+	 * which only a host with no managed standing installed runs; under a
+	 * managed standing (`installTurnSinkStanding`) the omission is refused
+	 * before any effect, never run plain.
 	 */
 	admission?: { gate: DispatchAdmission; attribution: DispatchAttribution };
 	/**
@@ -373,29 +514,24 @@ export function startTurn(
 	handlers: TurnHandlers,
 	options: StartTurnOptions
 ): TurnHandle {
-	// The gate may call host code. Keep its callbacks from replacing the bytes,
+	// The final spec is this copy and no other: frozen before the standing or
+	// the admission reads it, spawned as read (MCOMP-09-02). The gate may call
+	// host code; the frozen copy keeps its callbacks from replacing the bytes,
 	// destination or launch inputs between preparation and the final admission.
-	if (spec.promptArtifact) {
-		spec = {
-			...spec,
-			args: [...spec.args],
-			env: { ...spec.env },
-			promptArtifact: { ...spec.promptArtifact },
-		};
-	}
+	const final = freezeTurnProcessSpec(spec);
 	// A routed ACP process started as a one-shot turn would get a closed stdin and an
 	// output-only parser: a parallel unmanaged run that silently drops its interactions.
 	if (
-		spec.transport === 'acp-stdio' &&
+		final.transport === 'acp-stdio' &&
 		(!options.keepStdinOpen ||
-			spec.stdin !== undefined ||
-			spec.promptArtifact ||
+			final.stdin !== undefined ||
+			final.promptArtifact ||
 			options.parser ||
 			options.agentId)
 	) {
 		throw new Error('An ACP process can only be started by its protocol driver.');
 	}
-	const artifact = spec.promptArtifact;
+	const artifact = final.promptArtifact;
 	let artifactFd: number | undefined;
 	const removeArtifact = (): void => {
 		if (!artifact || artifactFd === undefined) return;
@@ -421,16 +557,22 @@ export function startTurn(
 			artifactFd = undefined;
 		}
 	};
-	const hasStdin = spec.stdin !== undefined && spec.stdin !== '';
+	const hasStdin = final.stdin !== undefined && final.stdin !== '';
 	const stdinMode = hasStdin ? 'pipe' : (options.emptyStdin ?? 'pipe');
 
+	// The host's standing first (MCOMP-09-02): under a managed standing a launch
+	// with no admission, or with one the live authority did not mint, is refused
+	// here, before any effect, and never spawned plain.
+	const refused = sinkStandingRefusal(options.admission);
+	if (refused) throw refused;
+
 	// The admission sees exactly what spawn sees: the snapshot is built from
-	// this spec, here, and nothing runs between the verdict and the spawn.
+	// the final spec, here, and nothing runs between the verdict and the spawn.
 	const gate = options.admission?.gate;
 	const admit = (): void => {
 		if (options.admission) {
 			const { attribution } = options.admission;
-			const verdict = options.admission.gate.admit(buildDispatchSnapshot(spec, attribution));
+			const verdict = options.admission.gate.admit(buildDispatchSnapshot(final, attribution));
 			if (!verdict.ok) throw new DispatchRefusedError(verdict.state, verdict.code, verdict.message);
 		}
 	};
@@ -450,7 +592,7 @@ export function startTurn(
 				artifact.flag !== 'wx' ||
 				artifact.cleanup !== 'turn' ||
 				typeof artifact.content !== 'string' ||
-				spec.stdin !== undefined
+				final.stdin !== undefined
 			) {
 				throw new Error('Prompt-file delivery requires an exclusive local artifact without stdin.');
 			}
@@ -473,10 +615,10 @@ export function startTurn(
 		if (artifact && options.signal?.aborted) {
 			throw new Error('Prompt-file launch was cancelled before spawn.');
 		}
-		child = spawn(spec.command, spec.args, {
-			cwd: spec.cwd,
-			env: spec.env,
-			shell: spec.shell ?? false,
+		child = spawn(final.command, final.args, {
+			cwd: final.cwd,
+			env: final.env,
+			shell: final.shell ?? false,
 			stdio: [stdinMode, 'pipe', 'pipe'],
 		});
 	} catch (error) {
@@ -641,7 +783,7 @@ export function startTurn(
 	// Only the prompt's own write counts against the turn. A later write by a
 	// caller that keeps stdin open is that caller's to report.
 	if (hasStdin) {
-		child.stdin?.write(spec.stdin, (error) => {
+		child.stdin?.write(final.stdin, (error) => {
 			if (error) stdinError ??= error;
 		});
 	}

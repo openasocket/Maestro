@@ -1,0 +1,481 @@
+{
+	"schemaVersion": 1,
+	"schema": "maestro-qualification-receipt/1",
+	"artifactId": "MAESTRO-M0-RUNTIME",
+	"owner": "maestro",
+	"proofClass": "qualified-evidence",
+	"producerDocument": "MCOMP-04",
+	"task": "MCOMP-04-01",
+	"stage": "S02",
+	"backlog": ["BASE-01", "G-04"],
+	"recordedAt": "2026-10-30T06:48:15.326Z",
+	"recordedWith": { "node": "v26.13.0", "platform": "darwin-arm64" },
+	"standing": "the bootstrap runtime, published for the counterpart adapter (GCOMP-04, GCOMP-05) now: one immutable archive named by digest, shown here to be the bytes the pin and the BUILD receipt name, reproducible from the implementation it names, loadable in a plain Node with no Electron, answering the published adapter conformance from its own bytes, and running one narrow real effect slice (the synthetic harness route under the Node permission model) through its public lease gate with allow, deny, unauthenticated, changed-input, replay, expiry and revocation observed on this host. It grants no lease or policy authority, enables no provider support and proves no paired, native or real-provider outcome: the pair is the tasks that require MEGA-RUNTIME-ADAPTER, the P0 closure and its replacement M0 archive are MCOMP-10, native hosts are their own stages",
+	"grants": { "authority": "none", "lease": "none", "policy": "none" },
+	"qualifies": {
+		"archive-identity": true,
+		"reproducible-build": true,
+		"plain-node-load": true,
+		"conformance-over-archived-bytes": true,
+		"synthetic-harness-route": "exactly this: a synthetic Node program launched through the public lease gate of the archived library on this host, with the declared grants enforced by the Node permission model",
+		"paired": false,
+		"provider": false,
+		"native": false
+	},
+	"revisions": {
+		"branch": "feature/mega-maestro-v1.1.0-rc",
+		"implementation": {
+			"commit": "35266afc2ab2ea0b3ff278de1998d150f4ba9d13",
+			"committedAt": "2026-10-30T02:21:36-04:00",
+			"digest": "75805d4299b1e56fb7ceaf424d54fb4eed8fefeb68b470d3ed5cada882335844",
+			"rules": "maestro-implementation-tree/1",
+			"fileCount": 6587,
+			"dirty": false,
+			"dirtyEntries": 0,
+			"map": "source/implementation.json inside the archive"
+		},
+		"observed": {
+			"head": "a2920320f8ff24c8b1fe58773f717c4e236d0131",
+			"headCommittedAt": "2026-10-30T02:30:23-04:00",
+			"headTree": "dd9ca1804cb307c60ae1304b610f9ab19b24c78d",
+			"treeDirty": false,
+			"trackedChanges": 0,
+			"untrackedOutsideInputSet": [
+				".sloptimize/",
+				"Plans/integration-completion/evidence/completion-runtime-bootstrap.json",
+				"rustygraphify-out/"
+			],
+			"untrackedInsideInputSet": [],
+			"coordinationCommitsSinceImplementation": [
+				"a2920320f8ff24c8b1fe58773f717c4e236d0131 2026-10-30T02:30:23-04:00 MAESTRO: MCOMP-03-05 publish MAESTRO-M0-RUNTIME-BUILD: Plans/integration",
+				"0a56e0fa1c18e25a8e8a70dfc37378ae7d076b4f 2026-10-30T02:22:03-04:00 MAESTRO: MCOMP-03-05A reconcile the program manifest with the inserted c",
+				"a43300f2482e6e825881c95610d667b8ee2e3c20 2026-10-30T02:22:03-04:00 MAESTRO: MCOMP-03-05A re-pin MAESTRO-M0-RUNTIME after the implementation"
+			],
+			"filesMovedSinceImplementation": [
+				"Plans/integration-completion/evidence/m0-build.json",
+				"Plans/integration-completion/program.json",
+				"Plans/integration-completion/runtime-conformance.json"
+			],
+			"filesMovedInsideInputSet": [],
+			"rule": "HEAD sits ahead of the implementation commit by commits under Plans/ alone (the pin, the manifest, the BUILD receipt); the packager reads that as coordinationOnly and the archive stays current; this receipt is one more such commit"
+		},
+		"rcBase": {
+			"ref": "v1.1.0-RC",
+			"commit": "6400a6da0cfbae97bd90c4b361eea163fc3a1223",
+			"isAncestor": true,
+			"role": "comparison point only, never a build target"
+		}
+	},
+	"inputs": {
+		"buildReceipt": {
+			"artifactId": "MAESTRO-M0-RUNTIME-BUILD",
+			"file": "Plans/integration-completion/evidence/m0-build.json",
+			"sha256": "796a9c0ac01581efb96ad616ba08df51f56d473562856b67a7183033008a952c",
+			"commit": "a2920320f8ff24c8b1fe58773f717c4e236d0131",
+			"recordedAt": "2026-10-30T06:30:22.224Z",
+			"agreesWithPinAndBytes": "archiveSha256, archiveSha512, bytes, manifestSha256, payloadDigest, payloadFiles, implementationDigest, implementationCommit, entrySha256, libraryInputSha256, pinSha256, committed",
+			"rule": "the BUILD receipt is consumed, not restated: every archive, payload, implementation and library identity it names was compared with the committed pin and with the bytes on disk before this receipt was written; its type-check and lint results stand for this receipt because the implementation digest is the same"
+		},
+		"implementationDigest": "75805d4299b1e56fb7ceaf424d54fb4eed8fefeb68b470d3ed5cada882335844",
+		"library": {
+			"version": "0.32.0",
+			"sourceRevision": "955fd7b4d4fd34ad35df4c00ba60c40c8100bb19",
+			"inputSha256": "fd606bdab76b61c5ff7ccf6ea7d26da89d46c5fe49de93a3ae1b6044a2cebde1",
+			"inputFiles": 323,
+			"entrySha256": "b21f1f7d39675d39e8cc2b7468caa7d5a4cfd04b31aa09d64351900f73164f0d",
+			"builtWithNode": "26.12.1",
+			"map": "source/library-inputs.json inside the archive"
+		},
+		"versions": {
+			"app": "1.1.0-RC",
+			"library": "0.32.0",
+			"managedContract": "maestro-managed/1",
+			"endpointProtocol": 1,
+			"nodeRange": ">=20",
+			"acceptedContracts": "@mega-maestro/contracts >=0.1.0 <0.2.0, endpoint protocols 1"
+		},
+		"contractsComponent": "absent: no clean Mega-Maestro contracts artifact is pinned in this checkout (CP-01, owner mega-maestro)",
+		"components": { "library": 295, "contracts": 0, "conformance": 1, "source": 2 }
+	},
+	"archive": {
+		"artifactId": "MAESTRO-M0-RUNTIME",
+		"kind": "maestro-runtime",
+		"formatVersion": 2,
+		"immutable": "the archive is identified by archive.sha256 and nothing else; its bytes are not rewritten by anything this program does. A consumer BUILD that supersedes it (MCOMP-10 packages a replacement versioned M0 archive) is a new archive with a new digest, and this digest stays what it was qualified for here; nothing a consumer records changes it",
+		"pin": {
+			"file": "Plans/integration-completion/runtime-conformance.json",
+			"status": "pinned",
+			"committed": true,
+			"sha256": "41e75234ac5618d510679bae9e4084ee03124a62e56f948ec251433923d796fd",
+			"rule": "a counterpart adapter records qualifiedAgainst.maestroRuntimeSha256 = archive.sha256 in its own pin, read by scripts/mega-maestro-pair.mjs; nothing an adapter records is written here, so qualification cannot change the archive it names"
+		},
+		"location": {
+			"directory": "dist/mega-maestro-runtime/0.32.0/759b947aaf546631e573642e5a9c8450adafa74a239e42741766cc1acef05a3e",
+			"file": "dist/mega-maestro-runtime/0.32.0/759b947aaf546631e573642e5a9c8450adafa74a239e42741766cc1acef05a3e/runtime.tgz",
+			"relativeTo": "the Maestro checkout; the sibling checkout reaches it as ../Maestro/<file>; dist/ is not in git, so the bytes travel by digest, never by path",
+			"rule": "obtain the archive by archive.sha256 and verify the sidecar and sha512; the directory is where the packager lands it"
+		},
+		"file": "runtime.tgz",
+		"sha256": "759b947aaf546631e573642e5a9c8450adafa74a239e42741766cc1acef05a3e",
+		"sha512": "106b2be395da76e69a7674891e725caf8d0289ff7e9681f118b62f4bd31c39a93a172b5f8d9e26b106144edf9963f185375929d8d92c7ac9b3adbc4d50b05ad2",
+		"bytes": 2444724,
+		"sidecar": {
+			"file": "runtime.tgz.sha256",
+			"content": "759b947aaf546631e573642e5a9c8450adafa74a239e42741766cc1acef05a3e  runtime.tgz"
+		},
+		"beside": {
+			"artifact.json": "647d7f2e1018a6ced7b85f975197535b5c2225b2722189a8ee6f18d8507035f0",
+			"acceptance.json": "39f970c8b27b25ed6b8463c4b98140ad072847878193929fd3c7377dc75f6010"
+		},
+		"manifestSha256": "a6d2fbae560a32f718b50c73248e8623835e89ead7c72a030301677e6562f464",
+		"payloadDigest": "92182876f557f645a01b9748ff6da5057e1cec75f14d88cec6786d95cce276c9",
+		"payloadFiles": 298,
+		"payload": {
+			"entry": {
+				"path": "library/index.js",
+				"sha256": "b21f1f7d39675d39e8cc2b7468caa7d5a4cfd04b31aa09d64351900f73164f0d"
+			},
+			"named": {
+				"library/README.md": "f238eb9f8b69ab2a4e7173d310aad9183a5e32d15c63a6aae667525f0199719d",
+				"library/index.d.ts": "b74a2430c659e8bda6f00155a1932874cf7ac0f2039e8f9f242cfa70cf1e75ea",
+				"library/index.js": "b21f1f7d39675d39e8cc2b7468caa7d5a4cfd04b31aa09d64351900f73164f0d",
+				"library/index.js.map": "786c868d7460deff41871781d6f224603abe744b7fdca3c73d0268cbb108b88a",
+				"library/package.json": "f8d5c8c2bdcac18cfd9cef1e5e82b3b0efc7bf99fbe0dae1d58799831276417c",
+				"library/provenance.json": "8c231b36246f3a922504084c15505ff85d069b8d0cc49cbea21d872502f98c5b",
+				"conformance/capabilities.json": "727b2fca3570ab9a0a86ca1797e38859b14761fed5fe27395db49ac6766a7aa5",
+				"source/implementation.json": "058edb27b28848c727bbca340c4678cde08baf06d74e75c9378637d2b40becbc",
+				"source/library-inputs.json": "82d0062a654bfa377e5826d7405787dee99e3c11b7423c4dd312b524fe2091e3"
+			},
+			"managedDeclarations": {
+				"library/types/shared/maestro-lib/managed/types.d.ts": "8e747aa9e19821e3d84ad0fef105a755016071edef6e209e7ad3ebf6b0e163d9",
+				"library/types/shared/maestro-lib/managed/compatibility.d.ts": "9acd10e3c6112fc0613e2c62f1d2d82d147fe6d224dff17a88d5c375d8bacbb9",
+				"library/types/shared/maestro-lib/managed/authority.d.ts": "7d5396fb16e329e0088f5ee8f6e94f3d5c41576f91b5f45b0efe03556a067a10",
+				"library/types/shared/maestro-lib/managed/endpoint-port.d.ts": "7a4b251aa40e5faf686ebd1435477130c9b368e8094a22844ce8e159a4f32ad3",
+				"library/types/shared/maestro-lib/managed/host-adapter.d.ts": "e852cdcaf4cb45e72f6ca1551b599ca59076343e9655e3de11f1cac8be54ff8a",
+				"library/types/shared/maestro-lib/managed/provider-route.d.ts": "e985a32ab9a8033c6b02c9f4a1218e2ff1a467e5b5842f6af4c8acc28568e150"
+			},
+			"typeDeclarations": 289,
+			"map": "payloadSha256 in manifest.json inside the archive (bound by manifestSha256) and in artifact.json beside it; every entry checked file by file by extract-archive and load-archive"
+		},
+		"managedPort": {
+			"exports": 22,
+			"declarations": 6,
+			"list": "artifact.json managedPort; checked as functions on the loaded bundle by load-archive"
+		},
+		"bootstrap": {
+			"statement": "compiled inputs for the counterpart adapter: this archive grants no lease or policy authority, enables no provider support and proves no paired, native or provider qualification",
+			"routes": {
+				"total": 55,
+				"managedImplemented": 11,
+				"unavailable": 44,
+				"rule": "a route is unavailable until its enforcement producer exists and is exercised; a consumer that reads unsupported must refuse, not fall back"
+			},
+			"harness": "synthetic-harness/node-permission-v1: standalone implemented, managed implemented; qualifies exactly this: a synthetic Node program launched through the protected dispatch on this host; does not qualify any real provider (Claude, Codex, OpenCode or another), anything a provider starts, or the Node permission model as an OS boundary",
+			"counterpart": [
+				"CP-01 (mega-maestro): contracts absent",
+				"CP-02 (mega-maestro): runtimeAdapter absent",
+				"CP-03 (mega-maestro): workflowAuthority absent"
+			]
+		}
+	},
+	"consumer": {
+		"rule": "the instructions a counterpart adapter follows to obtain, verify, load and use this runtime; extract-archive and load-archive below follow them literally and harness-turn and vitest-conformance-archive load what they produced",
+		"instructions": [
+			"1. read the pin Plans/integration-completion/runtime-conformance.json at a Maestro commit this receipt names (HEAD a2920320f8ff24c8b1fe58773f717c4e236d0131 or later, with the archive unchanged) and take runtime.archive.sha256 (759b947aaf546631e573642e5a9c8450adafa74a239e42741766cc1acef05a3e), sha512, bytes and payloadFiles",
+			"2. obtain runtime.tgz and its sidecar runtime.tgz.sha256 whose text is '<sha256>  runtime.tgz'; the packager lands them at dist/mega-maestro-runtime/0.32.0/759b947aaf546631e573642e5a9c8450adafa74a239e42741766cc1acef05a3e/ (the directory name is the sha256, a convenience, not an identity); refuse the archive unless its sha256, sha512 and byte count equal the pin, before reading any entry",
+			"3. list the entries before extracting: every name under package/, none absolute, none containing .., regular files and directories only (no symlink, hardlink, device or other entry); refuse the archive otherwise",
+			"4. extract and read package/manifest.json: its sha256 equals the pin manifestSha256; formatVersion 2, kind maestro-runtime; source.implementation.digest and commit, source.library.inputSha256 and managedPort.entry.sha256 equal the pin; it equals artifact.json beside the archive minus packagedAt, archive and observed",
+			"5. check every file in payloadSha256 by sha256 (298 files), refuse any file the map does not name and any named file that is absent; the sha256 of the canonical (sorted-key) JSON of payloadSha256 equals the pin payloadDigest",
+			"6. load library/index.js (CommonJS; require() or import from an ES module) in Node >=20; nothing in node_modules is needed (node-pty is an optional peer for PTY routes only) and Electron must not be resolvable; the synthetic harness route further needs a Node that honors --permission, --allow-fs-read, --allow-fs-write, --allow-net and --allow-child-process (observed here under v26.13.0; a Node without --allow-net reports the route unsupported)",
+			"7. confirm the bundle says what the manifest says: MAESTRO_LIB_VERSION 0.32.0, MANAGED_CONTRACT_VERSION maestro-managed/1, LOCAL_ENDPOINT_PROTOCOL 1; the 22 managed port exports named in artifact.json are functions",
+			"8. negotiate before anything else: negotiateCompatibility(hostCompatibilityProfile({ providers: getAgentIds() }), { contractVersions: [MANAGED_CONTRACT_VERSION], endpointProtocols: [LOCAL_ENDPOINT_PROTOCOL], transport, required }); on the bare bundle only capabilities.negotiate activates and every other required capability is refused by name (missing-required-capability) until the host composes the facade; a refusal is final, never a fallback",
+			"9. compose the managed facade the way the pin conformance.invocation.host.compose says a host does (createRunJournal, createContextVerifier, createLocalHostAuthority, createManagedOperations over the host own binding, agent repository and turn port); the consumer then calls the ManagedApi (submit, inspect, cancel, interrupt) with { context, input } and validates its own context with managedContextProblems; the host stamps the peer, a caller never names it; the answers follow conformance.correlation and conformance.semantics (denied, unsupported, unavailable, unknown), which vitest-conformance-archive below shows the archived bytes answer",
+			"10. read route support from providerRouteSupport(id) for every id of getVisibleAgentDefinitions(): 55 routes, 11 managed implemented, 44 unavailable; a route read as unsupported is refused, never substituted; the one qualified route is synthetic-harness/node-permission-v1, and what it does and does not qualify is written in artifact.json bootstrap.harness",
+			"11. a launch is admitted at the sink: buildDispatchSnapshot(spec, attribution) digested, HostAuthority.admit() asked with a context a verifier of this bundle bound, the lease handed to leaseAdmission() and the gate to startTurn(); the gate re-checks the final snapshot the instant before the spawn and refuses a changed, released, expired or revoked lease with lease-invalid before any effect (harness-turn below observes each)",
+			"12. record qualifiedAgainst.maestroRuntimeSha256 = 759b947aaf546631e573642e5a9c8450adafa74a239e42741766cc1acef05a3e (the ARCHIVE digest, never the entry digest b21f1f7d39675d39e8cc2b7468caa7d5a4cfd04b31aa09d64351900f73164f0d) in the adapter pin; scripts/mega-maestro-pair.mjs check --runtime <dir> reads it, and a pair against other bytes is not a pair against this runtime",
+			"13. what this runtime does not give: no lease or policy authority (the authority is the host own, bound at the spawn), no provider support, no contracts component (absent: CP-01), no pair; MEGA-RUNTIME-ADAPTER qualifies against this archive, and when a later consumer BUILD names a newer archive the adapter is rebound to that digest and its conformance rerun"
+		]
+	},
+	"dependencies": [
+		{
+			"artifactId": "MAESTRO-M0-RUNTIME-BUILD",
+			"owner": "maestro",
+			"role": "the compiled, unit-tested input this receipt qualifies (required)",
+			"status": "present",
+			"required": true,
+			"file": "Plans/integration-completion/evidence/m0-build.json",
+			"sha256": "796a9c0ac01581efb96ad616ba08df51f56d473562856b67a7183033008a952c",
+			"commit": "a2920320f8ff24c8b1fe58773f717c4e236d0131",
+			"effect": "consumed: its archive identity equals the pin and the bytes (inputs.buildReceipt), its implementation digest equals this tree; its checks are not repeated where the digest makes them the same (the three npm run lint legs, eslint)"
+		},
+		{
+			"artifactId": "MEGA-CONTRACTS-FOUNDATION",
+			"owner": "mega-maestro",
+			"role": "CP-01, the contracts package the importer pins",
+			"status": "absent",
+			"required": false,
+			"file": "vendor/mega-maestro/contracts.pin.json",
+			"sha256": null,
+			"effect": "not an input of this qualification: the archive carries no contracts component and the pair check is blocked by it; the task says not to wait"
+		},
+		{
+			"artifactId": "MEGA-RUNTIME-ADAPTER",
+			"owner": "mega-maestro",
+			"role": "CP-02, the consumer of this receipt (GCOMP-04 builds it against MAESTRO-M0-RUNTIME-BUILD, GCOMP-05 qualifies it against this archive)",
+			"status": "absent",
+			"required": false,
+			"file": "vendor/mega-maestro/runtime-adapter.pin.json",
+			"sha256": null,
+			"effect": "the task says to emit this receipt without waiting for it; the pair stays open until it exists"
+		},
+		{
+			"artifactId": "MAESTRO-SOURCE-BASELINE",
+			"owner": "maestro",
+			"role": "MCOMP-02, the qualified source baseline",
+			"status": "absent",
+			"required": false,
+			"file": "Plans/integration-completion/evidence/source-baseline.json",
+			"sha256": null,
+			"effect": "named for the reader; MCOMP-04-01 requires MAESTRO-M0-RUNTIME-BUILD alone"
+		}
+	],
+	"checks": [
+		{
+			"step": "verify-runtime",
+			"purpose": "the packager verifies the pinned artifact: archive bound to sidecar, manifest and directory by sha256 and sha512, manifest inside equal to artifact.json, archived implementation map equal to the tree now, archived library inputs unchanged, named by the committed pin",
+			"command": "node scripts/package-mega-maestro-runtime.mjs --runtime dist/mega-maestro-runtime/0.32.0/759b947aaf546631e573642e5a9c8450adafa74a239e42741766cc1acef05a3e --json",
+			"exit": "0 (expected 0, as expected)",
+			"exitCode": 0,
+			"asExpected": true,
+			"startedAt": "2026-10-30T06:42:53.760Z",
+			"durationMs": 2127,
+			"logs": ".maestro/playbooks/Working/mcomp-04-01/results/verify-runtime.stdout.log, .maestro/playbooks/Working/mcomp-04-01/results/verify-runtime.stderr.log",
+			"result": {
+				"status": "ready",
+				"archiveSha256": "759b947aaf546631e573642e5a9c8450adafa74a239e42741766cc1acef05a3e",
+				"pinCommitted": true,
+				"implementationCommit": "35266afc2ab2ea0b3ff278de1998d150f4ba9d13",
+				"headMoved": true,
+				"coordinationOnly": true,
+				"treeDirtyAtPackaging": true,
+				"drift": 0,
+				"libraryInputsMoved": 0,
+				"certifiable": true,
+				"problems": []
+			}
+		},
+		{
+			"step": "extract-archive",
+			"purpose": "the consumer instructions below, followed literally: bytes against the pin before any entry is read, every tar entry under package/ with no .. and no link, manifest inside equal to artifact.json beside and to the pin, every payload file by digest; the result is the bundle the next steps load",
+			"command": "node .maestro/playbooks/Working/mcomp-04-01/extract-archive.mjs",
+			"exit": "0 (expected 0, as expected)",
+			"exitCode": 0,
+			"asExpected": true,
+			"startedAt": "2026-10-30T06:42:56.021Z",
+			"durationMs": 593,
+			"logs": ".maestro/playbooks/Working/mcomp-04-01/results/extract-archive.stdout.log, .maestro/playbooks/Working/mcomp-04-01/results/extract-archive.stderr.log",
+			"result": {
+				"status": "extracted",
+				"archive": "sha256 equals pin true, sha512 true, bytes true, sidecar names archive true, directory is sha256 true",
+				"entries": "331 tar entries: 299 regular files, 32 directories, 0 of any other kind; all under package/ true",
+				"manifest": "inside equals beside true; sha256 equals pin true; format true; kind maestro-runtime; implementation digest true, commit true, library inputs true, entry true, payload digest true equal the pin",
+				"payload": "298 files checked against 298 named, 0 mismatched, 0 extra, 0 missing",
+				"extractedTo": ".maestro/playbooks/Working/mcomp-04-01/archive/package",
+				"problems": []
+			}
+		},
+		{
+			"step": "load-archive",
+			"purpose": "the pinned archive loaded as a consumer loads it in a scratch folder with no node_modules above it and no Electron: the bundle says what the manifest says (versions, 22 managed port exports, capabilities.negotiate activated, every other required capability refused by name, 55 routes)",
+			"command": "node .maestro/playbooks/Working/mcomp-03-05/load-pinned-archive.mjs",
+			"exit": "0 (expected 0, as expected)",
+			"exitCode": 0,
+			"asExpected": true,
+			"startedAt": "2026-10-30T06:42:56.771Z",
+			"durationMs": 788,
+			"logs": ".maestro/playbooks/Working/mcomp-04-01/results/load-archive.stdout.log, .maestro/playbooks/Working/mcomp-04-01/results/load-archive.stderr.log",
+			"result": {
+				"status": "agrees",
+				"payload": "298 files checked, 0 mismatched, 0 extra, 0 missing",
+				"loaded": "library/index.js in Node v26.13.0, Electron absent, versions agree with the manifest true, 22 managed port exports functions (0 missing)",
+				"negotiate": "capabilities.negotiate activated with capabilities.negotiate; 8 other capabilities refused by name true",
+				"routes": "55 total, 11 managed implemented, 44 unavailable, agree with the manifest true",
+				"problems": []
+			}
+		},
+		{
+			"step": "scratch-build",
+			"purpose": "the library built again from this tree into a scratch folder and compared file by file with the archived library payload: the archive is reproducible from the implementation it names",
+			"command": "node .maestro/playbooks/Working/mcomp-03-05/scratch-build.mjs",
+			"exit": "0 (expected 0, as expected)",
+			"exitCode": 0,
+			"asExpected": true,
+			"startedAt": "2026-10-30T06:43:49.790Z",
+			"durationMs": 2611,
+			"logs": ".maestro/playbooks/Working/mcomp-04-01/results/scratch-build.stdout.log, .maestro/playbooks/Working/mcomp-04-01/results/scratch-build.stderr.log",
+			"result": {
+				"status": "reproduced",
+				"build": "exit 0, 295 files written, 293 identical to the archived library payload, differing: index.js.map, provenance.json",
+				"reproduced": "entry true (b21f1f7d39675d39e8cc2b7468caa7d5a4cfd04b31aa09d64351900f73164f0d), declarations true (290 files), library inputs true (fd606bdab76b61c5ff7ccf6ea7d26da89d46c5fe49de93a3ae1b6044a2cebde1, 323 files)",
+				"sourceMap": "only the relative source prefix differs true",
+				"provenance": "fields differing sourceRevision, tooling, payloadSha256: sourceRevision a2920320f8ff24c8b1fe58773f717c4e236d0131 now against 955fd7b4d4fd34ad35df4c00ba60c40c8100bb19 archived, tooling node 26.13.0 now against 26.12.1 archived, payload map entry for index.js.map alone",
+				"problems": []
+			}
+		},
+		{
+			"step": "harness-turn",
+			"purpose": "the one real effect slice the public runtime can run on this host, from the archived bundle alone: the synthetic harness route through the public lease gate (route support; invalid request refused; allow with effects confined to the work directory; deny before any effect; unverified context refused; changed inputs refused at the spawn; released lease refused on replay; expired lease refused; revocation stopping a running program), every effect observed on disk, on a loopback listener and on the lease itself",
+			"command": "node .maestro/playbooks/Working/mcomp-04-01/harness-turn.mjs",
+			"exit": "0 (expected 0, as expected)",
+			"exitCode": 0,
+			"asExpected": true,
+			"startedAt": "2026-10-30T06:42:57.693Z",
+			"durationMs": 731,
+			"logs": ".maestro/playbooks/Working/mcomp-04-01/results/harness-turn.stdout.log, .maestro/playbooks/Working/mcomp-04-01/results/harness-turn.stderr.log",
+			"result": {
+				"status": "observed",
+				"library": ".maestro/playbooks/Working/mcomp-04-01/archive/package/library/index.js copied to a scratch folder (node_modules above false, Electron absent), entry sha256 b21f1f7d39675d39e8cc2b7468caa7d5a4cfd04b31aa09d64351900f73164f0d, version 0.32.0, maestro-managed/1, protocol 1",
+				"host": "Node v26.13.0 on darwin-arm64; composed from createContextVerifier, createLocalHostAuthority, inProcessContext, harnessRouteProblems, buildHarnessLaunchSpec, buildDispatchSnapshot, leaseAdmission, startTurn, DispatchRefusedError, syntheticHarnessRouteSupport; program: SYNTHETIC_PROVIDER_SOURCE of src/__tests__/integration/mega-maestro/journeys.ts, read at run time",
+				"admissionsAsked": "req-2 allow f9b147b86be56628; req-3 deny 1d551c070fe3f366; req-5 allow b66a1360ada46377; req-7 allow eeffe4d8c2939fc2",
+				"cases": "route-support: held; invalid-request-refused: held; allow: held; deny-before-effect: held; unverified-context-refused: held; changed-inputs-refused-at-spawn: held; released-lease-refused-on-replay: held; expired-lease-refused: held; revocation-stops-the-process: held",
+				"failed": [],
+				"qualifies": "exactly this: a synthetic Node program launched through the public lease gate of the archived library on this host, with the declared grants enforced by the Node permission model; nothing about any real provider, anything a provider starts, a pair, or the permission model as an OS boundary"
+			}
+		},
+		{
+			"step": "vitest-conformance-archive",
+			"purpose": "the published adapter conformance fixture (the conformance section of the pin) run against the ARCHIVED bundle: every import of the public entry redirected to the extracted library/index.js (redirects-archive.log names both importers), loaded natively",
+			"command": "node node_modules/vitest/vitest.mjs run --config .maestro/playbooks/Working/mcomp-04-01/vitest.archive.config.mts --project node src/__tests__/integration/mega-maestro/conformance.test.ts --reporter=default --reporter=json --outputFile.json=.maestro/playbooks/Working/mcomp-04-01/results/vitest-conformance-archive.report.json",
+			"exit": "0 (expected 0, as expected)",
+			"exitCode": 0,
+			"asExpected": true,
+			"startedAt": "2026-10-30T06:43:11.594Z",
+			"durationMs": 1178,
+			"logs": ".maestro/playbooks/Working/mcomp-04-01/results/vitest-conformance-archive.stdout.log, .maestro/playbooks/Working/mcomp-04-01/results/vitest-conformance-archive.stderr.log",
+			"result": {
+				"tests": { "total": 7, "passed": 7, "failed": 0, "skipped": 0 },
+				"files": [
+					"src/__tests__/integration/mega-maestro/conformance.test.ts: 7 passed, 0 failed, 0 skipped"
+				],
+				"skipped": [],
+				"failed": []
+			}
+		},
+		{
+			"step": "vitest-conformance-control",
+			"purpose": "the negative control of the redirect: the same suite with the public entry redirected to an empty module must fail on the cases that need the real entry; exit 1 is the expected answer",
+			"command": "node node_modules/vitest/vitest.mjs run --config .maestro/playbooks/Working/mcomp-04-01/vitest.archive.config.mts --project node src/__tests__/integration/mega-maestro/conformance.test.ts --reporter=default --reporter=json --outputFile.json=.maestro/playbooks/Working/mcomp-04-01/results/vitest-conformance-control.report.json",
+			"exit": "1 (expected 1, as expected)",
+			"exitCode": 1,
+			"asExpected": true,
+			"startedAt": "2026-10-30T06:43:13.014Z",
+			"durationMs": 1112,
+			"logs": ".maestro/playbooks/Working/mcomp-04-01/results/vitest-conformance-control.stdout.log, .maestro/playbooks/Working/mcomp-04-01/results/vitest-conformance-control.stderr.log",
+			"result": {
+				"tests": { "total": 7, "passed": 4, "failed": 3, "skipped": 0 },
+				"files": [
+					"src/__tests__/integration/mega-maestro/conformance.test.ts: 4 passed, 3 failed, 0 skipped"
+				],
+				"skipped": [],
+				"failed": [
+					"the public adapter conformance fixture names only functions the public entry exports, inside the packaged managed port",
+					"the fixture over a host composed from the public exports (MCOMP-03-03A) passes every negotiation case and operation step, reaching the declared sink as scripted",
+					"the fixture over a host composed from the public exports (MCOMP-03-03A) fails by step id on a host that breaks correlation"
+				]
+			}
+		},
+		{
+			"step": "vitest-public",
+			"purpose": "the focused public suites: managed contracts, contract vectors, the synthetic harness route, the packager, the handoff script, the built entry (built, packaged in-process, loaded from the archive payload), the conformance fixture over source, the early pair, the full pair (its real-pair case guarded), standalone and offline recovery",
+			"command": "node node_modules/vitest/vitest.mjs run src/__tests__/shared/maestro-lib/managed/contracts.test.ts src/__tests__/shared/maestro-lib/managed/contract-vectors.test.ts src/__tests__/shared/maestro-lib/managed/provider-route.test.ts src/__tests__/scripts/package-mega-maestro-runtime.test.ts src/__tests__/scripts/mega-maestro-handoff.test.ts src/shared/maestro-lib/__tests__/built-entry.test.ts src/__tests__/integration/mega-maestro/conformance.test.ts src/__tests__/integration/mega-maestro/early-pair.test.ts src/__tests__/integration/mega-maestro/full-pair.test.ts src/__tests__/integration/mega-maestro/standalone.test.ts src/__tests__/integration/mega-maestro/offline-recovery.test.ts --reporter=default --reporter=json --outputFile.json=.maestro/playbooks/Working/mcomp-04-01/results/vitest-public.report.json",
+			"exit": "0 (expected 0, as expected)",
+			"exitCode": 0,
+			"asExpected": true,
+			"startedAt": "2026-10-30T06:43:22.456Z",
+			"durationMs": 24102,
+			"logs": ".maestro/playbooks/Working/mcomp-04-01/results/vitest-public.stdout.log, .maestro/playbooks/Working/mcomp-04-01/results/vitest-public.stderr.log",
+			"result": {
+				"tests": { "total": 98, "passed": 96, "failed": 0, "skipped": 2 },
+				"files": [
+					"src/__tests__/scripts/mega-maestro-handoff.test.ts: 6 passed, 0 failed, 0 skipped",
+					"src/__tests__/scripts/package-mega-maestro-runtime.test.ts: 6 passed, 0 failed, 0 skipped",
+					"src/__tests__/integration/mega-maestro/conformance.test.ts: 7 passed, 0 failed, 0 skipped",
+					"src/__tests__/integration/mega-maestro/early-pair.test.ts: 8 passed, 0 failed, 1 skipped",
+					"src/__tests__/integration/mega-maestro/full-pair.test.ts: 10 passed, 0 failed, 1 skipped",
+					"src/__tests__/integration/mega-maestro/offline-recovery.test.ts: 5 passed, 0 failed, 0 skipped",
+					"src/__tests__/integration/mega-maestro/standalone.test.ts: 8 passed, 0 failed, 0 skipped",
+					"src/shared/maestro-lib/__tests__/built-entry.test.ts: 7 passed, 0 failed, 0 skipped",
+					"src/__tests__/shared/maestro-lib/managed/contract-vectors.test.ts: 6 passed, 0 failed, 0 skipped",
+					"src/__tests__/shared/maestro-lib/managed/contracts.test.ts: 29 passed, 0 failed, 0 skipped",
+					"src/__tests__/shared/maestro-lib/managed/provider-route.test.ts: 4 passed, 0 failed, 0 skipped"
+				],
+				"skipped": [
+					"early pair: the real endpoint through the harness script runs the certifiable pair: registered, attached, execution admitted through the real broker (blocked: C",
+					"full pair: the real endpoint through the harness script runs the full pair against the packaged runtime: every journey passed, both source digests recorded (blo"
+				],
+				"failed": []
+			}
+		},
+		{
+			"step": "pair-check",
+			"purpose": "the real-pair harness inspecting every input of a pair with this runtime; exit 2 is the expected answer while the counterpart producers are absent",
+			"command": "node scripts/mega-maestro-pair.mjs check --runtime dist/mega-maestro-runtime/0.32.0/759b947aaf546631e573642e5a9c8450adafa74a239e42741766cc1acef05a3e --json",
+			"exit": "2 (expected 2, as expected)",
+			"exitCode": 2,
+			"asExpected": true,
+			"startedAt": "2026-10-30T06:43:57.086Z",
+			"durationMs": 1337,
+			"logs": ".maestro/playbooks/Working/mcomp-04-01/results/pair-check.stdout.log, .maestro/playbooks/Working/mcomp-04-01/results/pair-check.stderr.log",
+			"result": {
+				"runtime": "ready (759b947aaf546631e573642e5a9c8450adafa74a239e42741766cc1acef05a3e), certifiable true",
+				"contractsPin": "absent",
+				"producers": "CP-01 not fresh; CP-02 not fresh; CP-03 not fresh; registration-approval not fresh",
+				"linuxHost": "docker false, pinned image present false",
+				"ready": false,
+				"blockedBy": [
+					"CP-01 (mega-maestro) open",
+					"CP-02 (mega-maestro) open",
+					"CP-03 (mega-maestro) open",
+					"linux-host (maestro) open",
+					"registration-approval (mega-maestro) open"
+				]
+			}
+		}
+	],
+	"cases": {
+		"tests": { "total": 105, "passed": 103, "failed": 0, "skipped": 2 },
+		"archive-integrity": "sha256 equals pin true, sha512 true, bytes true, sidecar names archive true, directory is sha256 true (extracted)",
+		"archive-entries": "331 tar entries: 299 regular files, 32 directories, 0 of any other kind; all under package/ true",
+		"manifest-identity": "inside equals beside true; sha256 equals pin true; format true; kind maestro-runtime; implementation digest true, commit true, library inputs true, entry true, payload digest true equal the pin",
+		"payload-digests": "298 files checked against 298 named, 0 mismatched, 0 extra, 0 missing",
+		"build-receipt-agrees": "every identity the BUILD receipt names equals the pin and the bytes: archiveSha256, archiveSha512, bytes, manifestSha256, payloadDigest, payloadFiles, implementationDigest, implementationCommit, entrySha256, libraryInputSha256, pinSha256, committed",
+		"plain-node-load": "library/index.js in Node v26.13.0, Electron absent, versions agree with the manifest true, 22 managed port exports functions (0 missing)",
+		"negotiation": "capabilities.negotiate activated with capabilities.negotiate; 8 other capabilities refused by name true",
+		"route-disclosure": "55 total, 11 managed implemented, 44 unavailable, agree with the manifest true",
+		"reproducible-build": "reproduced: entry true (b21f1f7d39675d39e8cc2b7468caa7d5a4cfd04b31aa09d64351900f73164f0d), declarations true (290 files), library inputs true (fd606bdab76b61c5ff7ccf6ea7d26da89d46c5fe49de93a3ae1b6044a2cebde1, 323 files); exit 0, 295 files written, 293 identical to the archived library payload, differing: index.js.map, provenance.json",
+		"implementation-bound": "archived implementation map equals the tree now (drift 0); library inputs moved 0; coordinationOnly true; pin committed true",
+		"conformance-over-archived-bytes": "7 of 7 cases of the published fixture passed with the public entry redirected to the archived bundle for 2 importers (src/__tests__/integration/mega-maestro/conformance.test.ts, src/__tests__/integration/mega-maestro/conformance-host.ts); the control with the entry redirected to an empty module failed 3 of 7 cases, the three that need the real entry (named under the vitest-conformance-control check)",
+		"harness-allow": "admitted, exit 0; the program read the declared input (true), was refused the undeclared file (ERR_ACCESS_DENIED), a child (ERR_ACCESS_DENIED) and a loopback connection (ERR_ACCESS_DENIED); the listener heard 0 connections; the work directory holds synthetic-provider-effects.json alone, written in the work directory true; the lease bound the program pid (true) and ended released exited; live leases after 0",
+		"harness-denials": "invalid-request-refused: refused invalid-request (work directory [], admissions asked 0) | deny-before-effect: denied policy-denied (work directory []) | unverified-context-refused: denied unauthenticated (work directory [], policy reader asked 0) | changed-inputs-refused-at-spawn: denied lease-invalid (work directory []) | released-lease-refused-on-replay: denied lease-invalid (work directory [\"synthetic-provider-effects.json 6f5167fe9144f8d76d27474e6424fa0b181c3c982d87206d18997a9c9dcbe291\"]) | expired-lease-refused: denied lease-invalid (work directory [])",
+		"harness-revocation": "the program announced itself within 150 ms with its pid bound (true) and the lease bound; revoke returned true; the exit says stopped by authority (SIGTERM); the lease ended revoked (the policy was withdrawn); process alive afterwards false; work directory []",
+		"route-support": "synthetic-harness/node-permission-v1: standalone implemented, managed implemented, enforced by node-permission-model under Node v26.13.0",
+		"pair": "not run: CP-01 (mega-maestro) open; CP-02 (mega-maestro) open; CP-03 (mega-maestro) open; linux-host (maestro) open; registration-approval (mega-maestro) open; the guarded real-pair cases of early-pair and full-pair stay skipped (recorded under vitest-public)"
+	},
+	"limitations": [
+		"qualified here is the archive and one synthetic route; no real provider (Claude, Codex, OpenCode or another), nothing a provider starts, no pair with the counterpart endpoint, no native host and no OS boundary is qualified; the Node permission model is the enforcement of the one route and is not read as a sandbox",
+		"the pair is blocked by CP-01 (mega-maestro) open; CP-02 (mega-maestro) open; CP-03 (mega-maestro) open; linux-host (maestro) open; registration-approval (mega-maestro) open; the real-pair cases are skipped by that readiness and recorded as skipped; the pair qualifies in the tasks that require MEGA-RUNTIME-ADAPTER, never here",
+		"the BUILD receipt limitations stand unchanged: tsc -p tsconfig.lint.json exits 2 on the pre-existing src/main/plugins/plugin-host-handlers.ts TS2339 (present at v1.1.0-RC, left for MCOMP-01); the informational tests tsc keeps its pre-existing errors; the three lint legs were not rerun here because the implementation digest is the one the BUILD receipt type-checked",
+		"the archive library/provenance.json records sourceRevision 955fd7b4d4fd34ad35df4c00ba60c40c8100bb19 and tooling node 26.12.1; this receipt was recorded under v26.13.0, where the scratch build reproduced the entry and every declaration byte for byte",
+		"the conformance suite over the archived bytes runs under vitest with the public entry redirected by a resolve plugin (vitest.archive.config.mts) and the bundle externalized; the helper modules of the suite (fixtures, the host composer, the packager script) are read from this tree, so the suite proves the archived bundle against the published fixture, not that the suite itself is archived",
+		"the harness program is the provider double of the early-pair suite, read out of journeys.ts at run time; a work directory, the declared and undeclared inputs and the copied library live under the OS temporary directory for the run and are removed afterwards; the step logs under Working hold those temporary absolute paths and are not in git",
+		"MCOMP-04-01 inserted no continuation: no implementation or test moved, so the pin and the archive are untouched and this commit is coordination-only"
+	],
+	"evidence": {
+		"directory": ".maestro/playbooks/Working/mcomp-04-01/results",
+		"inGit": false,
+		"note": "the Working folder is ignored by git; each step keeps its stdout and stderr log and its record there, repository-relative paths only in this receipt",
+		"files": "9 step records (<step>.json) with their <step>.stdout.log and <step>.stderr.log, three vitest JSON reports, the two redirect logs (redirects-archive.log, redirects-control.log): 32 files; drivers beside them: extract-archive.mjs, harness-turn.mjs, vitest.archive.config.mts, control-empty.cjs, run-step.mjs, write-receipt.mjs (load-pinned-archive.mjs and scratch-build.mjs reused from Working/mcomp-03-05)",
+		"redaction": "no credentials, cookies, key material or user content; the receipt text was scanned with the packager findCanaries and for absolute home paths before it was written",
+		"scan": { "canaries": 0, "absolutePaths": 0 }
+	}
+}

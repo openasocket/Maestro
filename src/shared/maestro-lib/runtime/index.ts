@@ -47,7 +47,11 @@ import {
 	type HostAuthority,
 	type PolicySourceSet,
 } from '../managed/authority';
-import { createManagedBinding, type ManagedBinding } from '../managed/binding';
+import {
+	createManagedBinding,
+	type InstallationStandingSource,
+	type ManagedBinding,
+} from '../managed/binding';
 import {
 	createEventJournal,
 	managedEventJournalPath,
@@ -79,6 +83,7 @@ import {
 	type WorkflowOwnerStanding,
 } from '../managed/workflows';
 import { getVisibleAgentDefinitions } from '../providers/definitions';
+import { installTurnSinkStanding } from '../run/start-turn';
 import type { AgentRecord } from '../store/records';
 import { createBackgroundTurns, type BackgroundTurnDeps } from './background-turns';
 import { createRuntimeConsults, type RuntimeConsultsManagedOptions } from './consults';
@@ -147,6 +152,15 @@ export interface MaestroRuntimeOptions {
 		 * into the binding file under the lock. Takes precedence over `authority`.
 		 */
 		host?(installation: ManagedInstallationIdentity): ManagedHostAdapter;
+		/**
+		 * What the protected custody (the sealed identity record and its anchor)
+		 * says of this installation, read on every call (MCOMP-09-04A). With it
+		 * the binding file is a mirror held to the custody: an enrollment the
+		 * custody holds is enrolled with no file, a file the custody does not
+		 * hold supplies no authority, and the lock holder reconciles the mirror
+		 * from the custody. Without it the binding reads the files alone.
+		 */
+		standing?: InstallationStandingSource;
 		/** The approved handle for a resource id a managed submission names. Default: none. */
 		resolveResource?(id: string, context: ManagedAuthenticatedContext): ApprovedResource | null;
 		/** Which agents a verified actor may see. Default: all of them. */
@@ -324,10 +338,12 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 	});
 	const managedHost = options.managed?.host?.(installation) ?? null;
 	const managedAuthority = managedHost?.authority ?? options.managed?.authority;
+	const custodyStanding = options.managed?.standing;
 	const binding = createManagedBinding({
 		paths,
 		fence: () => fenceVerdict(),
 		...(managedAuthority ? { authority: managedAuthority } : {}),
+		...(custodyStanding ? { standing: custodyStanding } : {}),
 		now: deps.now ?? (() => Date.now()),
 	});
 	let phase: RuntimePhase = 'open';
@@ -409,9 +425,36 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 	// holder, so the runtime's own enrollment and the protected custody agree.
 	// A binding for another authority, or a record for another installation,
 	// is left as it is: the binding then reads enrolled-unavailable and says why.
+	// With a custody standing attached (MCOMP-09-04A) the custody decides what
+	// the mirror holds: its enrollment is written when no file carries it yet
+	// (a mirror already there is not a warning), and a stale mirror the custody
+	// holds nothing for is removed by name. The standalone check alone decides
+	// nothing then: the binding already reads enrolled with no file.
+	if (custodyStanding) {
+		const custody = custodyStanding.read();
+		const state = binding.state();
+		if (custody.standing === 'managed' && custody.enrollment) {
+			const enrolled = await binding.enroll(custody.enrollment);
+			if (!enrolled.ok && enrolled.reason !== 'already-enrolled') {
+				logger.warn(
+					`The managed binding could not mirror the custody's enrollment (${enrolled.reason}): ${enrolled.message}`,
+					LOG_CONTEXT
+				);
+			}
+		} else if (custody.standing === 'standalone' && state.state === 'enrolled-unavailable') {
+			const removed = await binding.unenroll({ installationId: state.record.installationId });
+			if (!removed.ok) {
+				logger.warn(
+					`The stale managed binding ${state.file} could not be removed (${removed.reason}): ${removed.message}`,
+					LOG_CONTEXT
+				);
+			}
+		}
+	}
 	if (managedHost) {
 		const identity = managedHost.identity.read();
 		if (
+			!custodyStanding &&
 			identity.status === 'ok' &&
 			identity.record &&
 			identity.record.installationId === installation.installationId &&
@@ -519,8 +562,8 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 	 * What a consult and a group chat turn are admitted with: the headless spawn authority over the
 	 * binding and that same host, with the enrollment's registered actor as the principal, rebuilt
 	 * on every turn so an enrollment that appeared or lapsed applies to the next one (the Auto Run
-	 * port's recipe). The consult stage, the background runner and the turn service's standing
-	 * admission (MRC3-01-01) read the one port.
+	 * port's recipe). The consult stage, the background runner, the turn service's standing
+	 * admission (MRC3-01-01) and the spawn sink's standing below read the one port.
 	 */
 	const backgroundSpawnPort = (): HeadlessSpawnAuthority =>
 		createHeadlessSpawnAuthority({
@@ -531,6 +574,23 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 			actor: managedActorPrincipal(autoRunHost?.identity?.read() ?? null, installation),
 			...(deps.now ? { now: deps.now } : {}),
 		});
+
+	// The host's standing at the spawn sink (MCOMP-09-02A): every `startTurn` and `runAgentTurn`
+	// in this process, whatever its caller passed or left out, is held to the installation standing
+	// the turn service holds, read from the same port on every call so there is no second rule: a
+	// managed standing unless the binding reads standalone, and the id of the authority answering
+	// now, or null while none does (a bare CLI with no attached host, a binding for another
+	// authority, an unreadable file). Released at shutdown; the release clears only this install,
+	// so one runtime after another in a process does not clear its successor's standing.
+	const releaseSinkStanding = installTurnSinkStanding({
+		standing: () => backgroundSpawnPort().standing(),
+		authorityId: () => {
+			const port = backgroundSpawnPort();
+			return port.standing() === 'managed' && port.unavailableReason === null
+				? port.authority.authorityId
+				: null;
+		},
+	});
 
 	// The run releases what it held back (queued chat messages) when it ends, and the turn service
 	// asks whether a run holds an agent: each needs the other, so the run reaches `turns`, declared
@@ -597,8 +657,10 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 		fence,
 		rules: deps.rules,
 		autoRunHolds: (agentId) => autoRun.holds(agentId),
-		// Every plain send is admitted on the binding's standing: an enrolled runtime queues
-		// nothing without a dispatch, a standalone one queues as before.
+		// Every send and every dequeue is admitted on the host's standing (MRC3-01-01, MCOMP-09-01):
+		// an enrolled runtime queues nothing without a dispatch and starts a queued item only once
+		// the live port has re-authorized it; a standalone one queues as before. The port is rebuilt
+		// on every read, so an enrollment that landed while an item waited counts at its start.
 		standing: {
 			port: backgroundSpawnPort,
 			journal: () => (journalLoaded.ok ? journal : null),
@@ -717,6 +779,9 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 				if (eventsLoaded.ok) await eventJournal.flush();
 			} finally {
 				process.off('exit', onExit);
+				// The sink's standing goes with the lock: a later runtime in this process installs its
+				// own, and nothing in between is held to a host that is gone.
+				releaseSinkStanding();
 				lock.release();
 			}
 		})();

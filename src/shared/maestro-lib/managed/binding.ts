@@ -28,15 +28,38 @@
  * The production data directory is read as well as this one: a development or
  * alternate data directory under an enrolled installation is still that
  * installation, so pointing `MAESTRO_USER_DATA` elsewhere does not opt out.
+ * The production directory the data directory itself maps to
+ * (`resolveProductionDataDir`) is read whatever the caller named as the
+ * production directory: a caller's choice can add a directory to read, never
+ * take one away.
+ *
+ * The file is a MIRROR (MCOMP-09-04). Its digest is tamper evidence, not
+ * protection: anyone who can write the data directory can write a well-formed
+ * record or delete one. The standing a host acts on is the protected custody's
+ * (`InstallationStandingSource`: the sealed identity record and its freshness
+ * anchor in the OS credential store, as `src/main/enterprise/identity-store.ts`
+ * keeps them). When a source is attached, the custody decides and the file is
+ * held to it: an enrollment the custody holds and the file lacks is still
+ * enrolled (the lock holder writes the mirror); a file the custody does not
+ * vouch for supplies no authority; a record the custody holds but cannot open
+ * here (unsealable, rolled back, foreign, unprotected on this machine, or
+ * removed while its anchor remains) is managed and unavailable; a revoked or
+ * suspended record is managed and unavailable; and the only way to
+ * standalone is the custody's own authenticated release (a `retired`
+ * record), after which `unenroll` removes the stale mirror by name. Without a
+ * source (a process that holds no custody at all, a test over the files
+ * alone) the file is what is read, as it always was.
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
 import { canonicalJson } from '../../canonicalJson';
 import type { MaestroPaths } from '../paths/resolve';
+import { resolveProductionDataDir } from '../paths/userDataDir';
 import { atomicWriteFile } from '../store/atomic-write';
 import { MANAGED_BINDING_FILE_NAME, type DataDirVerdict } from '../runtime/data-dir-lock';
 import { sha256Hex, unavailableAuthority, type HostAuthority } from './authority';
+import type { ManagedIdentityManagement } from './endpoint-port';
 import {
 	MANAGED_CONTRACT_VERSION,
 	type ManagedContractVersion,
@@ -73,13 +96,19 @@ export function managedBindingPath(dir: string): string {
 	return path.join(dir, MANAGED_BINDING_FILE_NAME);
 }
 
-/** The files that can enroll this process: its own data directory first, then the production one. */
+/**
+ * The files that can enroll this process: its own data directory first, then
+ * the production directory it maps to, then the production directory the
+ * caller named when that is yet another one. A directory is only ever added
+ * to the list, so no choice of `productionDataDir` removes one from it.
+ */
 export function managedBindingFiles(
 	paths: Pick<MaestroPaths, 'userDataDir' | 'productionDataDir'>
 ): string[] {
 	const files = [managedBindingPath(paths.userDataDir)];
-	if (paths.productionDataDir !== paths.userDataDir) {
-		files.push(managedBindingPath(paths.productionDataDir));
+	for (const dir of [resolveProductionDataDir(paths.userDataDir), paths.productionDataDir]) {
+		const file = managedBindingPath(dir);
+		if (!files.includes(file)) files.push(file);
 	}
 	return files;
 }
@@ -159,22 +188,53 @@ export function readManagedBindingFile(file: string): ManagedBindingRead {
 	return { status: 'ok', record: parsed as ManagedBindingRecord };
 }
 
+export type EnrollInput = Omit<ManagedBindingRecord, 'contractVersion' | 'enrolledAt' | 'digest'>;
+
+/**
+ * What the protected custody says of this installation, read on every call
+ * (MCOMP-09-04). The custody is the sealed identity record and its anchor; a
+ * host composes the source over them (`createHostInstallationStanding` in
+ * `src/cli/services/host-managed.ts`), and the binding holds its mirror file
+ * to the answer. `standalone` means the custody holds nothing for this
+ * installation: no record and no anchor, or a record the endpoint retired
+ * (the authenticated release). `managed` with an `enrollment` is a record the
+ * custody opened and trusts, as the mirror would carry it; `managed` with no
+ * `enrollment` is a record it holds but cannot vouch for here, which is never
+ * standalone. `detail` is one sentence for a reason or a log line.
+ */
+export type InstallationStanding =
+	| { standing: 'standalone'; detail: string }
+	| {
+			standing: 'managed';
+			enrollment: (EnrollInput & { enrolledAt: string }) | null;
+			management: ManagedIdentityManagement | null;
+			detail: string;
+	  };
+
+export interface InstallationStandingSource {
+	read(): InstallationStanding;
+}
+
 export interface ManagedBindingDeps {
 	paths: Pick<MaestroPaths, 'userDataDir' | 'productionDataDir'>;
 	/** The data-dir lock's verdict: is this process still the single writer? */
 	fence(): DataDirVerdict;
 	/** The authority the host injected, if it has one. Used only when its id matches the record. */
 	authority?: HostAuthority;
+	/**
+	 * The protected custody's own word on this installation. With it the file
+	 * is a mirror that can neither supply nor erase the standing; without it
+	 * the file is what is read.
+	 */
+	standing?: InstallationStandingSource;
 	now(): number;
 }
-
-export type EnrollInput = Omit<ManagedBindingRecord, 'contractVersion' | 'enrolledAt' | 'digest'>;
 
 export type EnrollOutcome =
 	| { ok: true; record: ManagedBindingRecord; file: string }
 	| {
 			ok: false;
-			reason: 'lock-lost' | 'already-enrolled' | 'unreadable' | 'write-failed';
+			reason: 'lock-lost' | 'already-enrolled' | 'unreadable' | 'custody-mismatch' | 'write-failed';
 			message: string;
 	  };
 
@@ -182,13 +242,18 @@ export type UnenrollOutcome =
 	| { ok: true; file: string }
 	| {
 			ok: false;
-			reason: 'lock-lost' | 'not-enrolled' | 'installation-mismatch' | 'write-failed';
+			reason:
+				| 'lock-lost'
+				| 'not-enrolled'
+				| 'installation-mismatch'
+				| 'management-required'
+				| 'write-failed';
 			message: string;
 	  };
 
 export interface ManagedBinding {
 	state(): ManagedBindingState;
-	/** Re-read the files. The state is otherwise what was read last. */
+	/** Re-read the files and the custody. The state is otherwise what was read last. */
 	reload(): ManagedBindingState;
 	/**
 	 * Who answers an admission right now. The injected authority when
@@ -196,41 +261,160 @@ export interface ManagedBinding {
 	 * authority that answers `unavailable` and names why.
 	 */
 	authority(): HostAuthority;
-	/** Write the record. Refuses without the lock, over an existing record, or over an unreadable one. */
+	/**
+	 * Write the record. Refuses without the lock, over an existing record, over
+	 * an unreadable one, and, with a custody attached, for anything but the
+	 * enrollment the custody holds.
+	 */
 	enroll(input: EnrollInput): Promise<EnrollOutcome>;
-	/** Remove the record, by name. The only way out; nothing implicit leads here. */
+	/**
+	 * Remove the record, by name. The only way out; nothing implicit leads
+	 * here, and with a custody attached nothing local does either: while the
+	 * custody holds the enrollment the mirror stays.
+	 */
 	unenroll(input: { installationId: string }): Promise<UnenrollOutcome>;
+}
+
+/** What the files alone say, before the custody is heard. */
+type MirrorRead =
+	| { kind: 'none' }
+	| { kind: 'ok'; record: ManagedBindingRecord; file: string }
+	| { kind: 'unreadable'; file: string; reason: string };
+
+/** The record the custody's enrollment would be mirrored as, when no file holds it yet. */
+function recordOf(enrollment: EnrollInput & { enrolledAt: string }): ManagedBindingRecord {
+	const base = {
+		contractVersion: MANAGED_CONTRACT_VERSION,
+		installationId: enrollment.installationId,
+		authorityId: enrollment.authorityId,
+		endpointRef: enrollment.endpointRef,
+		enrolledAt: enrollment.enrolledAt,
+		policySources: [...enrollment.policySources],
+		policyRevision: enrollment.policyRevision,
+	};
+	return { ...base, digest: bindingDigest(base) };
 }
 
 export function createManagedBinding(deps: ManagedBindingDeps): ManagedBinding {
 	const files = managedBindingFiles(deps.paths);
 	const ownFile = files[0];
 
-	function read(): ManagedBindingState {
+	function readMirror(): MirrorRead {
 		for (const file of files) {
 			const found = readManagedBindingFile(file);
 			if (found.status === 'none') continue;
-			if (found.status === 'unreadable') return { state: 'unreadable', file, reason: found.reason };
-			const injected = deps.authority;
-			if (!injected) {
-				return {
-					state: 'enrolled-unavailable',
-					record: found.record,
-					file,
-					reason: `Enrolled with ${found.record.authorityId} and no authority is attached.`,
-				};
-			}
-			if (injected.authorityId !== found.record.authorityId) {
-				return {
-					state: 'enrolled-unavailable',
-					record: found.record,
-					file,
-					reason: `Enrolled with ${found.record.authorityId}; the attached authority is ${injected.authorityId}.`,
-				};
-			}
-			return { state: 'enrolled', record: found.record, file };
+			if (found.status === 'unreadable') return { kind: 'unreadable', file, reason: found.reason };
+			return { kind: 'ok', record: found.record, file };
 		}
-		return { state: 'standalone', files };
+		return { kind: 'none' };
+	}
+
+	/** The authority rule over a record that is this installation's: the injected one answers only by id. */
+	function withAuthority(record: ManagedBindingRecord, file: string): ManagedBindingState {
+		const injected = deps.authority;
+		if (!injected) {
+			return {
+				state: 'enrolled-unavailable',
+				record,
+				file,
+				reason: `Enrolled with ${record.authorityId} and no authority is attached.`,
+			};
+		}
+		if (injected.authorityId !== record.authorityId) {
+			return {
+				state: 'enrolled-unavailable',
+				record,
+				file,
+				reason: `Enrolled with ${record.authorityId}; the attached authority is ${injected.authorityId}.`,
+			};
+		}
+		return { state: 'enrolled', record, file };
+	}
+
+	/** The files alone: what every binding read before a custody could be attached. */
+	function fromMirror(mirror: MirrorRead): ManagedBindingState {
+		switch (mirror.kind) {
+			case 'none':
+				return { state: 'standalone', files };
+			case 'unreadable':
+				return { state: 'unreadable', file: mirror.file, reason: mirror.reason };
+			case 'ok':
+				return withAuthority(mirror.record, mirror.file);
+		}
+	}
+
+	/** The custody decides; the mirror is held to it. */
+	function fromCustody(custody: InstallationStanding, mirror: MirrorRead): ManagedBindingState {
+		if (custody.standing === 'standalone') {
+			if (mirror.kind !== 'ok') return fromMirror(mirror);
+			return {
+				state: 'enrolled-unavailable',
+				record: mirror.record,
+				file: mirror.file,
+				reason:
+					`${mirror.file} enrolls installation ${mirror.record.installationId} with ${mirror.record.authorityId}, ` +
+					`and the protected custody holds no enrollment for this installation (${custody.detail}). ` +
+					'A binding file alone supplies no authority; unenroll it by name.',
+			};
+		}
+		if (!custody.enrollment) {
+			// Held and not readable here: managed, and nothing answers. A mirror
+			// that agrees changes nothing; one that is missing or broken is
+			// reported with the custody's own reason.
+			if (mirror.kind === 'ok') {
+				return {
+					state: 'enrolled-unavailable',
+					record: mirror.record,
+					file: mirror.file,
+					reason: custody.detail,
+				};
+			}
+			return {
+				state: 'unreadable',
+				file: mirror.kind === 'unreadable' ? mirror.file : ownFile,
+				reason:
+					mirror.kind === 'unreadable'
+						? `${custody.detail} The binding file is unreadable too: ${mirror.reason}`
+						: custody.detail,
+			};
+		}
+		if (mirror.kind === 'unreadable') return fromMirror(mirror);
+		const expected = recordOf(custody.enrollment);
+		let record = expected;
+		let file = ownFile;
+		if (mirror.kind === 'ok') {
+			if (
+				mirror.record.installationId !== expected.installationId ||
+				mirror.record.authorityId !== expected.authorityId
+			) {
+				return {
+					state: 'enrolled-unavailable',
+					record: expected,
+					file: mirror.file,
+					reason:
+						`${mirror.file} enrolls installation ${mirror.record.installationId} with ${mirror.record.authorityId}; ` +
+						`the protected custody enrolls ${expected.installationId} with ${expected.authorityId}. ` +
+						'The binding file is stale and supplies no authority.',
+				};
+			}
+			record = mirror.record;
+			file = mirror.file;
+		}
+		if (custody.management === 'revoked' || custody.management === 'suspended') {
+			return {
+				state: 'enrolled-unavailable',
+				record,
+				file,
+				reason: `Management of this installation is ${custody.management} (${custody.detail}). It stays managed; nothing runs under it until the endpoint says otherwise.`,
+			};
+		}
+		return withAuthority(record, file);
+	}
+
+	function read(): ManagedBindingState {
+		const mirror = readMirror();
+		const custody = deps.standing?.read();
+		return custody ? fromCustody(custody, mirror) : fromMirror(mirror);
 	}
 
 	let current = read();
@@ -258,16 +442,37 @@ export function createManagedBinding(deps: ManagedBindingDeps): ManagedBinding {
 		async enroll(input) {
 			const verdict = deps.fence();
 			if (!verdict.ok) return { ok: false, reason: 'lock-lost', message: verdict.reason };
-			const existing = read();
-			if (existing.state === 'unreadable') {
-				return { ok: false, reason: 'unreadable', message: existing.reason };
+			const mirror = readMirror();
+			if (mirror.kind === 'unreadable') {
+				return { ok: false, reason: 'unreadable', message: mirror.reason };
 			}
-			if (existing.state !== 'standalone') {
+			if (mirror.kind === 'ok') {
 				return {
 					ok: false,
 					reason: 'already-enrolled',
-					message: `${existing.file} already enrolls installation ${existing.record.installationId} with ${existing.record.authorityId}.`,
+					message: `${mirror.file} already enrolls installation ${mirror.record.installationId} with ${mirror.record.authorityId}.`,
 				};
+			}
+			const custody = deps.standing?.read();
+			if (custody) {
+				// The mirror carries what the custody holds, and nothing else.
+				if (custody.standing !== 'managed' || !custody.enrollment) {
+					return {
+						ok: false,
+						reason: 'custody-mismatch',
+						message: `The protected custody holds no enrollment a binding file may mirror: ${custody.detail}`,
+					};
+				}
+				if (
+					custody.enrollment.installationId !== input.installationId ||
+					custody.enrollment.authorityId !== input.authorityId
+				) {
+					return {
+						ok: false,
+						reason: 'custody-mismatch',
+						message: `The protected custody enrolls installation ${custody.enrollment.installationId} with ${custody.enrollment.authorityId}, not ${input.installationId} with ${input.authorityId}.`,
+					};
+				}
 			}
 			const base = {
 				contractVersion: MANAGED_CONTRACT_VERSION,
@@ -294,33 +499,43 @@ export function createManagedBinding(deps: ManagedBindingDeps): ManagedBinding {
 		async unenroll(input) {
 			const verdict = deps.fence();
 			if (!verdict.ok) return { ok: false, reason: 'lock-lost', message: verdict.reason };
-			const existing = read();
-			if (existing.state === 'standalone') {
+			const mirror = readMirror();
+			if (mirror.kind === 'none') {
 				return { ok: false, reason: 'not-enrolled', message: 'This installation is not enrolled.' };
 			}
-			if (existing.state === 'unreadable') {
+			if (mirror.kind === 'unreadable') {
 				return {
 					ok: false,
 					reason: 'installation-mismatch',
-					message: `${existing.reason}. Repair or remove the file by hand; nothing here guesses.`,
+					message: `${mirror.reason}. Repair or remove the file by hand; nothing here guesses.`,
 				};
 			}
-			if (existing.record.installationId !== input.installationId) {
+			if (mirror.record.installationId !== input.installationId) {
 				return {
 					ok: false,
 					reason: 'installation-mismatch',
-					message: `The record enrolls ${existing.record.installationId}, not ${input.installationId}.`,
+					message: `The record enrolls ${mirror.record.installationId}, not ${input.installationId}.`,
 				};
 			}
-			if (existing.file !== ownFile) {
+			if (mirror.file !== ownFile) {
 				return {
 					ok: false,
 					reason: 'installation-mismatch',
-					message: `The enrollment lives in ${existing.file}; unenroll from that data directory.`,
+					message: `The enrollment lives in ${mirror.file}; unenroll from that data directory.`,
+				};
+			}
+			const custody = deps.standing?.read();
+			if (custody?.standing === 'managed') {
+				return {
+					ok: false,
+					reason: 'management-required',
+					message:
+						`Management of this installation is ${custody.management ?? 'held by the protected custody'} (${custody.detail}). ` +
+						"Release is the endpoint administrator's, through an authenticated retire; the binding file is not where it is switched off.",
 				};
 			}
 			try {
-				fs.unlinkSync(existing.file);
+				fs.unlinkSync(mirror.file);
 			} catch (error) {
 				return {
 					ok: false,
@@ -329,7 +544,7 @@ export function createManagedBinding(deps: ManagedBindingDeps): ManagedBinding {
 				};
 			}
 			current = read();
-			return { ok: true, file: existing.file };
+			return { ok: true, file: mirror.file };
 		},
 	};
 }

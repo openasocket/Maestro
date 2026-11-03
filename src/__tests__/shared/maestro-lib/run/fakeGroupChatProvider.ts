@@ -138,21 +138,15 @@ export function createFakeGroupChatProvider(
 			// A managed turn's lease covers the spec the runtime planned, which is what the authority
 			// admitted; the swapped command is this fake's. So the gate is checked against the planned
 			// spec, and the lease's lifetime (bound, released, revoked) still runs on the real process.
+			// The redirect is made on the gate the runtime minted, not on a copy: the sink reads a
+			// gate's provenance by identity (MCOMP-09-02A), and a copy would be a gate nobody minted.
 			const planned = options.admission;
-			const admission = planned
-				? {
-						attribution: planned.attribution,
-						gate: {
-							...planned.gate,
-							admit: () => planned.gate.admit(buildDispatchSnapshot(spec, planned.attribution)),
-						},
-					}
-				: undefined;
-			return runTurn(
-				fakeSpec,
-				{ ...options, stopGraceMs: 200, ...(admission ? { admission } : {}) },
-				handlers
-			);
+			if (planned) {
+				const gate = planned.gate;
+				const admit = gate.admit.bind(gate);
+				gate.admit = () => admit(buildDispatchSnapshot(spec, planned.attribution));
+			}
+			return runTurn(fakeSpec, { ...options, stopGraceMs: 200 }, handlers);
 		},
 	};
 }
