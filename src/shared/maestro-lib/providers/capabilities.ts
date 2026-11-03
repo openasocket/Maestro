@@ -51,7 +51,7 @@ export const GROK_CAPABILITY_EVIDENCE = Object.freeze({
 	qualifiedVersions: Object.freeze([] as string[]),
 	retained: Object.freeze({
 		supportsReadOnlyMode:
-			'readOnlyArgs plan + deny Bash(*) observed on 1.0.5; containment unqualified (A11-F05). readOnlyCliEnforced stays true because false would keep --always-approve in CLI read-only runs (resolveCliBatchModeArgs); managed read-only refuses Grok',
+			'readOnlyArgs plan + deny Bash(*) observed on 1.0.5; containment unqualified (A11-F05). readOnlyCliEnforced stays true because false would keep --always-approve in CLI read-only runs (resolveCliBatchModeArgs); managed read-only refuses Grok. No --sandbox profile is appended (flagDecisions --sandbox)',
 		supportsCostTracking: 'end.total_cost_usd observed on 1.0.41; unknown cost stays unknown',
 		supportsUsageStats: 'per-call usage and end totals observed on 1.0.41',
 		supportsContextExport:
@@ -68,6 +68,14 @@ export const GROK_CAPABILITY_EVIDENCE = Object.freeze({
 			'same refusal as supportsImageInput; resume image delivery never observed',
 		supportsContextMerge:
 			'PROVISIONAL since GT1-06-01: deterministic only, grooming relies on unqualified read-only enforcement, every phase 11 native case not-run',
+	}),
+	/**
+	 * Decisions on native 1.0.70 flags Maestro could emit but does not, each
+	 * with its offline basis. GT1-13-07 folds these into the decided-flags ledger.
+	 */
+	flagDecisions: Object.freeze({
+		'--sandbox':
+			'GT1-13-05: unused. Offline basis: 1.0.70 writes docs/user-guide/18-sandbox.md into GROK_HOME; built-ins are off, workspace, devbox, read-only, strict, and read-only writes only GROK_HOME and temp dirs; an isolated `grok --sandbox read-only inspect --json` logged ProfileApplied enforced:true on macos/seatbelt. Not appended to readOnlyArgs because the profile is fixed per session: a resume naming another profile is refused ("cannot resume this session under sandbox profile"), every saved session records sandbox_profile "off", so a read-only turn on an existing tab would fail and a later full turn on a read-only session would stay write-confined. Also fails open (a built-in profile that cannot apply warns and runs unenforced) and child-network blocking is a no-op on macOS. Settling probe: a live resume of an "off" session with --sandbox read-only, and a per-session profile record in Maestro before any wiring',
 	}),
 });
 

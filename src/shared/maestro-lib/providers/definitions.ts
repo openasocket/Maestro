@@ -916,6 +916,11 @@ export const AGENT_DEFINITIONS: AgentDefinition[] = [
 		// grep/list_dir. Deny rules take precedence over plan mode's read-only
 		// auto-allow, so read-only shell commands are lost too - the cost of a
 		// turn that always survives (verified live on grok 1.0.5).
+		// None of this is a filesystem sandbox. 1.0.70's built-in `--sandbox
+		// read-only` is one, but is deliberately absent: a session keeps the
+		// profile it started with and grok refuses a resume that names another,
+		// so it would break switching a tab between read-only and the other
+		// modes (GROK_CAPABILITY_EVIDENCE.flagDecisions, GT1-13-05).
 		readOnlyArgs: ['--permission-mode', 'plan', '--deny', 'Bash(*)'],
 		readOnlyCliEnforced: true, // CLI enforces read-only via --permission-mode plan + --deny
 		// No noToolsArgs (tab naming falls back to the same graceful path as
