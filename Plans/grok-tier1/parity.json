@@ -23012,9 +23012,16 @@
 				"src/shared/maestro-lib/launch/prompt-delivery.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-02-09", "GT1-02-10", "GT1-02-11", "GT1-11-14A", "GT1-02-11C"],
-				"test": ["GT1-02-12", "GT1-11-14B", "GT1-02-11D"],
-				"verification": ["GT1-02-13", "GT1-02-14", "GT1-11-14C"],
+				"implementation": [
+					"GT1-02-09",
+					"GT1-02-10",
+					"GT1-02-11",
+					"GT1-11-14A",
+					"GT1-02-11C",
+					"GT1-13-06"
+				],
+				"test": ["GT1-02-12", "GT1-11-14B", "GT1-02-11D", "GT1-13-07"],
+				"verification": ["GT1-02-13", "GT1-02-14", "GT1-11-14C", "GT1-13-15"],
 				"live": ["GT1-11-11"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
@@ -23023,7 +23030,8 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Native append/rules remain disabled. Canonical first-turn embedding/resume skipping and tab-naming artifact handoff have scoped deterministic evidence. Native prompt compliance and cross-attempt utility retries remain phase11 and GT1-08-14E/14F/21 respectively."
+				"Native append/rules remain disabled. Canonical first-turn embedding/resume skipping and tab-naming artifact handoff have scoped deterministic evidence. Native prompt compliance and cross-attempt utility retries remain phase11 and GT1-08-14E/14F/21 respectively.",
+				"GT1-13-06 (995700bdb1c2085263f7b40d2a7c4d055e950773): --rules decided unused, so supportsAppendSystemPrompt stays false and the embed-then-skip-on-resume delivery is unchanged. Its semantics match the planner (grok 1.0.70 user guide 12-project-rules.md: appended in a human_rules block, never replacing; prompt_context.json stores no rules). The planner does not match: it emits the literal --append-system-prompt and, on a local Windows host, --append-system-prompt-file, which grok has no form of; grok agent stdio (the ACP route of Standard turns) takes no --rules; and the capability is per provider, not per route. --json-schema is unused and a utility-turn candidate only (it implies --output-format json; candidate sites generateTabName and the Quick Chat route question through groomContext). --system-prompt-override is unused on purpose (it replaces grok's prompt verbatim). Recorded in GROK_CAPABILITY_EVIDENCE.flagDecisions; not promoted."
 			],
 			"implementation": "pending",
 			"static": "not-run",
