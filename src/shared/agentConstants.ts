@@ -117,8 +117,11 @@ export const COMBINED_CONTEXT_AGENTS: ReadonlySet<AgentId> = new Set<AgentId>([
  * Resolve the context window size for an agent, preferring a runtime
  * capability snapshot when available and falling back to the static
  * `DEFAULT_CONTEXT_WINDOWS` table (and finally `FALLBACK_CONTEXT_WINDOW`).
- * Grok snapshots are provider/host-scoped, not selected account/model-scoped,
- * so their window is ignored until acknowledged metadata can carry that identity.
+ * Grok snapshots are provider/host-scoped, so their provider-wide window is
+ * never used. A Grok window comes only from `accountModelContextWindows`, and
+ * only when `selection` names the agent's account and the model is the agent's
+ * configured model (or, with none configured, the default an owned observation
+ * reported for that account); anything else stays `0`, unknown.
  * Explicit user overrides and qualified turn metadata resolve at the caller.
  *
  * Use this anywhere the previous hard-coded `DEFAULT_CONTEXT_WINDOWS[agentId]`
@@ -130,13 +133,21 @@ export const COMBINED_CONTEXT_AGENTS: ReadonlySet<AgentId> = new Set<AgentId>([
  */
 export function getContextWindowForAgent(
 	agentId: AgentId | string,
-	snapshot?: AgentCapabilitiesSnapshot
+	snapshot?: AgentCapabilitiesSnapshot,
+	selection?: { model?: string | null; accountKey?: string | null }
 ): number {
-	if (
-		agentId !== 'grok' &&
-		typeof snapshot?.contextWindow === 'number' &&
-		snapshot.contextWindow > 0
-	) {
+	if (agentId === 'grok') {
+		const accountKey = selection?.accountKey;
+		const scope =
+			accountKey && snapshot?.accountModelContextWindows
+				? ownValue(snapshot.accountModelContextWindows, accountKey)
+				: undefined;
+		const model = selection?.model?.trim() || scope?.defaultModel;
+		const window = scope && model ? ownValue(scope.windows, model) : undefined;
+		if (typeof window === 'number' && Number.isSafeInteger(window) && window > 0) {
+			return window;
+		}
+	} else if (typeof snapshot?.contextWindow === 'number' && snapshot.contextWindow > 0) {
 		return snapshot.contextWindow;
 	}
 	const fromTable = DEFAULT_CONTEXT_WINDOWS[agentId as AgentId];
@@ -144,4 +155,9 @@ export function getContextWindowForAgent(
 		return fromTable;
 	}
 	return FALLBACK_CONTEXT_WINDOW;
+}
+
+/** A record's own entry, never one inherited from `Object.prototype`. */
+function ownValue<T>(record: Record<string, T>, key: string): T | undefined {
+	return Object.prototype.hasOwnProperty.call(record, key) ? record[key] : undefined;
 }

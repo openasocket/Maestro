@@ -1234,7 +1234,10 @@ describe('agent-detector', () => {
 
 		afterEach(() => {
 			expect(probe).not.toHaveBeenCalled();
-			expect(_readFileSync).not.toHaveBeenCalled();
+			// The one file discovery may read is the account's own models_cache.json (GT1-13-03).
+			for (const [file] of _readFileSync.mock.calls) {
+				expect(path.basename(String(file))).toBe('models_cache.json');
+			}
 			expect(_fsAccess).not.toHaveBeenCalled();
 			expect(mockExecFileNoThrow).not.toHaveBeenCalled();
 		});

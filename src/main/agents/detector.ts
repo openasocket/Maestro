@@ -44,6 +44,7 @@ import {
 } from './omp-model-catalog';
 import { isBlankEnvValue } from '../../shared/agentEnvironment';
 import { resolveAgentAccountDir } from '../../shared/agentAccountDir';
+import { resolveAgentAccountKey } from '../../shared/providerProfiles';
 import { canonicalJson } from '../../shared/canonicalJson';
 import type { AgentDiscoveryResult } from '../../shared/types';
 import type { GrokAcpConfigurationObservation } from '../../shared/maestro-lib/grok/acp-turn';
@@ -72,6 +73,67 @@ function readCopilotConfiguredModel(): string | null {
 		// Config may not exist or be malformed - fall through to null.
 	}
 	return null;
+}
+
+/** A record's own entry, never one inherited from `Object.prototype`. */
+function ownEntry<T>(record: Record<string, T>, key: string): T | undefined {
+	return Object.prototype.hasOwnProperty.call(record, key) ? record[key] : undefined;
+}
+
+/** What Maestro takes from Grok's own `$GROK_HOME/models_cache.json`. */
+export interface GrokModelsCacheRead {
+	/** Visible model ids, in the order the cache lists them. */
+	models: string[];
+	/** Context window in tokens by model id, for models that report one. */
+	contextWindows: Record<string, number>;
+	/** Reasoning-effort values by model id, for models that support effort. */
+	efforts: Record<string, string[]>;
+}
+
+/**
+ * Read the model catalog the Grok binary maintains in its account directory.
+ * Only model ids, `info.context_window` and `info.reasoning_efforts[].value`
+ * are taken: the file also carries `identity`, `auth_method`, `origin`, and a
+ * per-model `api_key`, `env_key` and `api_base_url`, none of which may leave it.
+ * Returns null when the file is absent, malformed, or lists no visible model.
+ */
+export function readGrokModelsCache(accountDir: string): GrokModelsCacheRead | null {
+	try {
+		const cache = parseJsonWithBom<{ models?: unknown }>(
+			fs.readFileSync(path.join(accountDir, 'models_cache.json'), 'utf8')
+		);
+		const entries = cache?.models;
+		if (!entries || typeof entries !== 'object' || Array.isArray(entries)) {
+			throw new Error('models_cache.json has no models map');
+		}
+		const models: string[] = [];
+		const windows: Array<[string, number]> = [];
+		const efforts: Array<[string, string[]]> = [];
+		for (const [id, entry] of Object.entries(entries as Record<string, unknown>)) {
+			const info = (entry as { info?: Record<string, unknown> } | null)?.info;
+			if (!id.trim() || !info || typeof info !== 'object' || info.hidden === true) continue;
+			models.push(id);
+			const window = info.context_window;
+			if (typeof window === 'number' && Number.isSafeInteger(window) && window > 0) {
+				windows.push([id, window]);
+			}
+			if (info.supports_reasoning_effort !== false && Array.isArray(info.reasoning_efforts)) {
+				const values = info.reasoning_efforts
+					.map((effort) => (effort as { value?: unknown } | null)?.value)
+					.filter((value): value is string => typeof value === 'string' && value.trim() !== '');
+				if (values.length > 0) efforts.push([id, [...new Set(values)]]);
+			}
+		}
+		if (models.length === 0) throw new Error('models_cache.json lists no visible model');
+		return {
+			models,
+			contextWindows: Object.fromEntries(windows),
+			efforts: Object.fromEntries(efforts),
+		};
+	} catch {
+		logger.debug('Grok models_cache.json unavailable or malformed', LOG_CONTEXT);
+		return null;
+	}
 }
 
 /**
@@ -815,7 +877,8 @@ export class AgentDetector {
 			const readObservation = this.deps.grokAcpObservation;
 			// Pre-turn discovery has no contained probe route. Even --version remains
 			// refused by runProviderProbe; do not create a second admission/spawn path.
-			if (!readObservation) return fallback('discovery-unavailable');
+			// Without an owned observation the account's models_cache.json, which the
+			// binary itself maintains, is the only menu and window source.
 			context = { ...context, environment: structuredClone(context.environment) };
 			const customPath = context.customPath?.trim() || this.customPaths.grok?.trim();
 			const binary = customPath
@@ -831,10 +894,37 @@ export class AgentDetector {
 				...context.environment,
 				extraPathDirs: [path.dirname(command), ...(context.environment.extraPathDirs ?? [])],
 			});
-			env.GROK_HOME = resolveAgentAccountDir({ toolType: 'grok' }, { env, homeDir: os.homedir() });
+			const accountDir = resolveAgentAccountDir(
+				{ toolType: 'grok' },
+				{ env, homeDir: os.homedir() }
+			) as string;
+			env.GROK_HOME = accountDir;
+			const accountKey = resolveAgentAccountKey('grok', { GROK_HOME: accountDir }, os.homedir());
+			const cacheRead = readGrokModelsCache(accountDir);
+			this.recordGrokContextWindows(accountKey, cacheRead, context.model);
+			const discovered = (values: string[]): AgentDiscoveryResult => {
+				const stale = configuredValue && !values.includes(configuredValue);
+				return {
+					status: stale ? 'configured-fallback' : 'discovered',
+					options: [...new Set([...values, ...(configuredValue ? [configuredValue] : [])])],
+					configuredValue: configuredValue || undefined,
+					...(stale ? { reason: 'metadata-unavailable' as const } : {}),
+				};
+			};
+			const fromCache = (
+				reason: AgentDiscoveryResult['reason'] = 'discovery-unavailable'
+			): AgentDiscoveryResult => {
+				const values = isModel
+					? cacheRead?.models
+					: context?.model && cacheRead
+						? ownEntry(cacheRead.efforts, context.model)
+						: undefined;
+				return values ? discovered(values) : fallback(reason);
+			};
 			const launch = { command, env, cwd: context.cwd };
-			const owned = readObservation(structuredClone({ ...launch, model: context.model }));
-			if (!owned || context.signal?.aborted) return fallback('discovery-unavailable');
+			const owned = readObservation?.(structuredClone({ ...launch, model: context.model }));
+			if (context.signal?.aborted) return fallback('discovery-unavailable');
+			if (!owned) return fromCache();
 			const {
 				observation,
 				agentVersion,
@@ -857,7 +947,11 @@ export class AgentDetector {
 				observedAt > Date.now() ||
 				Date.now() - observedAt >= this.modelCacheTtlMs
 			)
-				return fallback('discovery-unavailable');
+				return fromCache();
+			// The observation names the account's current model; with none configured
+			// it is the default whose cached window the gauge may use.
+			if (!context.model?.trim() && configuration.model?.trim())
+				this.recordGrokContextWindows(accountKey, cacheRead, undefined, configuration.model);
 			// Only hashes/menus enter the existing ephemeral caches. Each read still
 			// requires a current host receipt, even when a matching cache entry exists.
 			const key = `grok:${createHash('sha256')
@@ -891,19 +985,43 @@ export class AgentDetector {
 			if (efforts !== undefined)
 				this.configOptionCache.set(key, { options: efforts, timestamp: observedAt });
 			const values = !forceRefresh && cached !== undefined ? cached : isModel ? models : efforts;
-			if (values === undefined) return fallback('metadata-unavailable');
-			const stale = configuredValue && !values.includes(configuredValue);
-			return {
-				status: stale ? 'configured-fallback' : 'discovered',
-				options: [...new Set([...values, ...(configuredValue ? [configuredValue] : [])])],
-				configuredValue: configuredValue || undefined,
-				...(stale ? { reason: 'metadata-unavailable' as const } : {}),
-			};
+			if (values === undefined) return fromCache('metadata-unavailable');
+			return discovered(values);
 		} catch {
 			// Never expose native diagnostics, receipt keys or credential-bearing contexts.
 			logger.debug('Grok discovery unavailable: owned observation unavailable', LOG_CONTEXT);
 			return fallback('discovery-unavailable');
 		}
+	}
+
+	/**
+	 * Keep the Grok snapshot's per-account windows in step with the account's
+	 * models_cache.json: replace that account's entry, or drop it when the cache
+	 * is absent, malformed or reports no window, so the gauge goes unknown rather
+	 * than keeping a stale size. Only a snapshot already marked ok is patched;
+	 * detection owns the readiness status.
+	 */
+	private recordGrokContextWindows(
+		accountKey: string | null,
+		read: GrokModelsCacheRead | null,
+		selectedModel: string | undefined,
+		observedDefaultModel?: string
+	): void {
+		const previous = capabilitySnapshots.get('grok');
+		if (!accountKey || previous?.status !== 'ok') return;
+		const all = { ...previous.accountModelContextWindows };
+		const before = ownEntry(all, accountKey);
+		const defaultModel =
+			observedDefaultModel?.trim() || (selectedModel?.trim() ? before?.defaultModel : undefined);
+		if (read && Object.keys(read.contextWindows).length > 0) {
+			all[accountKey] = { windows: read.contextWindows, ...(defaultModel ? { defaultModel } : {}) };
+		} else {
+			delete all[accountKey];
+		}
+		if (canonicalJson(before ?? null) === canonicalJson(ownEntry(all, accountKey) ?? null)) return;
+		capabilitySnapshots.markOk('grok', {
+			accountModelContextWindows: Object.keys(all).length > 0 ? all : undefined,
+		});
 	}
 
 	/**

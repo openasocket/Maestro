@@ -146,9 +146,13 @@ export const AGENT_ARTIFACTS: Partial<Record<ToolType, string[]>> = {
 		'Grok',
 		'Grok CLI',
 		'xAI',
-		// Model references: only the ids `grok models` listed in the capability notes
+		// Model references: the ids grok 1.0.70 lists in its account models_cache.json
+		// (readGrokModelsCache in src/main/agents/detector.ts). This list is static
+		// renderer data, so it cannot read discovery; refresh it with the cache.
+		'grok-4.7',
+		'grok-4.7-build-fast',
+		'grok-4.6',
 		'grok-4.5',
-		'grok-composer-2.5-fast',
 		// Session and headless-turn terms (provider definition, GrokSessionStorage).
 		// No slash commands: supportsSlashCommands is false and the native catalog is
 		// discovered per session, so there is no fixed list to scrub.
