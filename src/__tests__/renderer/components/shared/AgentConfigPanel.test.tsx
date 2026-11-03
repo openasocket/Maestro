@@ -476,7 +476,7 @@ describe('AgentConfigPanel', () => {
 			}
 		});
 
-		it('explains the unavailable approval route and disables model selection with the capability off', () => {
+		it('explains the local ACP approval route and disables model selection with the capability off', () => {
 			const props = createDefaultProps({
 				agent: {
 					...agent,
@@ -489,9 +489,11 @@ describe('AgentConfigPanel', () => {
 				onEnableMaestroPChange: vi.fn(),
 			});
 			render(<AgentConfigPanel {...props} />);
-			expect(
-				screen.getByText(/ACP and Standard permission prompts are unavailable/)
-			).toHaveTextContent(/Read-Only/);
+			const note = screen.getByText(/Full Access uses headless streaming/);
+			expect(note).toHaveTextContent(/Standard: Grok runs over its local ACP route/);
+			expect(note).toHaveTextContent(/Not available on SSH remotes/);
+			expect(note).toHaveTextContent(/Read-Only/);
+			expect(note).not.toHaveTextContent(/unavailable for Grok/);
 			expect(
 				screen.getByText('Model selection is unavailable for this provider.')
 			).toBeInTheDocument();

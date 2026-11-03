@@ -136,9 +136,11 @@ describe('ComposerOptionsSheet', () => {
 		expect(screen.getByRole('button', { name: 'Full Access' })).toBeInTheDocument();
 	});
 
-	it.each(['full', 'readonly'] as const)(
-		'offers only Grok full/read-only choices from %s and dispatches the selected mode',
+	it.each(['full', 'standard', 'readonly'] as const)(
+		'offers Grok full/standard/read-only choices from %s and dispatches the selected mode',
 		(permissionMode) => {
+			// GT1-13-01: Standard runs on the local ACP route, so the sheet offers it.
+			expect(AGENT_CAPABILITIES.grok.supportsStandardPermissionMode).toBe(true);
 			const { onPermissionModeChange } = renderSheet({
 				agentId: 'grok',
 				permissionMode,
@@ -148,17 +150,21 @@ describe('ComposerOptionsSheet', () => {
 			fireEvent.click(screen.getByTestId('composer-options-access'));
 
 			const full = screen.getByRole('button', { name: 'Full Access' });
+			const standard = screen.getByRole('button', { name: 'Standard' });
 			const readonly = screen.getByRole('button', { name: 'Read-Only' });
 			expect(full).toHaveAttribute('aria-pressed', String(permissionMode === 'full'));
+			expect(standard).toHaveAttribute('aria-pressed', String(permissionMode === 'standard'));
 			expect(readonly).toHaveAttribute('aria-pressed', String(permissionMode === 'readonly'));
-			expect(screen.queryByRole('button', { name: /Standard|ACP|Plan/i })).not.toBeInTheDocument();
+			expect(screen.queryByRole('button', { name: /ACP|Plan/i })).not.toBeInTheDocument();
 			expect(onPermissionModeChange).not.toHaveBeenCalled();
 
+			fireEvent.click(standard);
 			fireEvent.click(readonly);
 			fireEvent.click(full);
-			expect(onPermissionModeChange).toHaveBeenCalledTimes(2);
-			expect(onPermissionModeChange).toHaveBeenNthCalledWith(1, 'readonly');
-			expect(onPermissionModeChange).toHaveBeenNthCalledWith(2, 'full');
+			expect(onPermissionModeChange).toHaveBeenCalledTimes(3);
+			expect(onPermissionModeChange).toHaveBeenNthCalledWith(1, 'standard');
+			expect(onPermissionModeChange).toHaveBeenNthCalledWith(2, 'readonly');
+			expect(onPermissionModeChange).toHaveBeenNthCalledWith(3, 'full');
 		}
 	);
 

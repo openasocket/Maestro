@@ -930,7 +930,10 @@ describe('useSessionCrud', () => {
 				{
 					mode: 'standard' as const,
 					readOnly: true,
-					capabilities: getAgentCapabilities('grok'),
+					capabilities: {
+						...getAgentCapabilities('grok'),
+						supportsStandardPermissionMode: false,
+					},
 					label: 'Standard',
 				},
 				{
@@ -985,6 +988,31 @@ describe('useSessionCrud', () => {
 					expect(idCounter).toBe(0);
 				}
 			);
+
+			it('accepts a Standard Grok agent now that the ACP route is declared (GT1-13-01)', async () => {
+				mockMaestro.agents.get.mockResolvedValueOnce({
+					...getAgentDefinition('grok'),
+					capabilities: getAgentCapabilities('grok'),
+				});
+				const { result } = renderHook(() => useSessionCrud(createDeps()));
+				const args: Parameters<typeof result.current.createNewSession> = [
+					'grok',
+					'/test/project',
+					'Standard Grok',
+				];
+				args[22] = 'standard';
+				await act(async () => {
+					await result.current.createNewSession(...args);
+					vi.runAllTimers();
+				});
+				expect(notifyToast).not.toHaveBeenCalled();
+				expect(useSessionStore.getState().sessions).toHaveLength(1);
+				expect(useSessionStore.getState().sessions[0].toolType).toBe('grok');
+				expect(useSessionStore.getState().sessions[0].aiTabs[0]).toMatchObject({
+					permissionMode: 'standard',
+					readOnlyMode: false,
+				});
+			});
 
 			it('retains Standard permissions for a capable comparator', async () => {
 				mockMaestro.agents.get.mockResolvedValueOnce({

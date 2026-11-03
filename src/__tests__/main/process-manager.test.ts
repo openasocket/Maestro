@@ -553,6 +553,37 @@ describe('process-manager.ts', () => {
 				vi.restoreAllMocks();
 			});
 
+			it('routes a local standard Grok spawn to GrokAcpSpawner, never headless streaming', async () => {
+				const acpSpawn = vi.fn((config: ProcessConfig) => {
+					processes.set(config.sessionId, {
+						sessionId: config.sessionId,
+						toolType: config.toolType,
+						cwd: config.cwd,
+						pid: 4343,
+						isTerminal: false,
+						startTime: 1,
+						spawnGeneration: nextSpawnGeneration(config.sessionId),
+					});
+					return { pid: 4343, success: true };
+				});
+				(
+					processManager as unknown as { grokAcpSpawner: { spawn: typeof acpSpawn } }
+				).grokAcpSpawner = { spawn: acpSpawn };
+				const standard: ProcessConfig = {
+					...request,
+					args: [],
+					agentSessionId: undefined,
+					nativeSessionBinding: undefined,
+					permission: { requested: 'standard' },
+				} as ProcessConfig;
+				expect(await processManager.spawnAdmitted(standard, { peer: 'in-process' })).toMatchObject({
+					success: true,
+				});
+				expect(acpSpawn).toHaveBeenCalledTimes(1);
+				expect(acpSpawn.mock.calls[0][0].permission).toEqual({ requested: 'standard' });
+				expect(spawn).not.toHaveBeenCalled();
+			});
+
 			it.each(['a', 'attempt_1-A', 'Z'.repeat(128)])(
 				'echoes valid token %s without changing admission or launch',
 				async (token) => {

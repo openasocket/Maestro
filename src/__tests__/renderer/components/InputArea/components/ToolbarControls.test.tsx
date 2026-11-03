@@ -132,13 +132,52 @@ describe('ToolbarControls', () => {
 	});
 
 	describe('Grok permission interactions', () => {
+		it.each(['desktop', 'phone'] as const)(
+			'offers Standard for Grok on %s and dispatches standard for only the selected tab',
+			(layout) => {
+				// GT1-13-01: a local Grok tab reaches the ACP route through Standard.
+				expect(AGENT_CAPABILITIES.grok.supportsStandardPermissionMode).toBe(true);
+				mockedUsePhoneLayout.mockReturnValue(layout === 'phone');
+				const session = createInputAreaSession({ id: 'grok-selected', toolType: 'grok' });
+				const otherTab = session.aiTabs[0];
+				const selectedTab = {
+					...otherTab,
+					id: 'grok-tab',
+					permissionMode: 'full' as const,
+					readOnlyMode: false,
+				};
+				session.aiTabs = [otherTab, selectedTab];
+				session.activeTabId = selectedTab.id;
+				renderToolbar({
+					session,
+					hasReadOnlyCapability: AGENT_CAPABILITIES.grok.supportsReadOnlyMode,
+					hasStandardCapability: AGENT_CAPABILITIES.grok.supportsStandardPermissionMode ?? false,
+				});
+				if (layout === 'phone') {
+					fireEvent.click(screen.getByRole('button', { name: 'More options' }));
+					fireEvent.click(screen.getByTestId('composer-options-access'));
+					fireEvent.click(screen.getByRole('button', { name: 'Standard' }));
+				} else {
+					// The desktop pill cycles full -> standard.
+					fireEvent.click(screen.getByRole('button', { name: 'Full Access' }));
+				}
+				expect(mockUpdateSessionWith).toHaveBeenCalledTimes(1);
+				const updated = mockUpdateSessionWith.mock.calls[0][1](session);
+				expect(updated.aiTabs).toEqual([
+					otherTab,
+					{ ...selectedTab, permissionMode: 'standard', readOnlyMode: false },
+				]);
+				expect(updated.aiTabs[0]).toBe(otherTab);
+			}
+		);
+
 		it.each([
 			['desktop', 'full'],
 			['desktop', 'standard'],
 			['phone', 'full'],
 			['phone', 'standard'],
 		] as const)(
-			'cycles full/readonly on %s from stored %s for only the selected tab',
+			'still normalizes a stale Standard value for a Grok build without the capability on %s from %s',
 			(layout, mode) => {
 				mockedUsePhoneLayout.mockReturnValue(layout === 'phone');
 				const session = createInputAreaSession({ id: 'grok-selected', toolType: 'grok' });
@@ -151,10 +190,12 @@ describe('ToolbarControls', () => {
 				};
 				session.aiTabs = [otherTab, selectedTab];
 				session.activeTabId = selectedTab.id;
+				// The capability is forced off here: this pins the normalization for any agent
+				// that lacks it, not Grok's current declaration (offered above).
 				const { rerenderToolbar } = renderToolbar({
 					session,
 					hasReadOnlyCapability: AGENT_CAPABILITIES.grok.supportsReadOnlyMode,
-					hasStandardCapability: AGENT_CAPABILITIES.grok.supportsStandardPermissionMode ?? false,
+					hasStandardCapability: false,
 				});
 				if (layout === 'phone') {
 					fireEvent.click(screen.getByRole('button', { name: 'More options' }));

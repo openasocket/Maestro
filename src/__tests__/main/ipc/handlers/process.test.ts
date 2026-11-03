@@ -5445,6 +5445,27 @@ describe('process IPC handlers', () => {
 			});
 		});
 
+		it('refuses a Standard turn on an SSH remote before any probe or spawn (acp-remote-route)', async () => {
+			// GT1-13-01: the ACP consent port has no remote transport.
+			expect(await launch('/remote/project', undefined, { permissionMode: 'standard' })).toEqual({
+				success: false,
+				pid: 0,
+			});
+			expect(observePathRemote).not.toHaveBeenCalled();
+			expect(mockProcessManager.spawnAdmitted).not.toHaveBeenCalled();
+			expect(mockProcessManager.spawn).not.toHaveBeenCalled();
+			const window = deps.getMainWindow() as unknown as {
+				webContents: { send: ReturnType<typeof vi.fn> };
+			};
+			expect(window.webContents.send).toHaveBeenCalledWith(
+				'process:data',
+				'session-1-ai-tab1',
+				expect.stringMatching(
+					/Standard permission mode is not available for Grok over SSH \(acp-remote-route\).*Nothing was started\./
+				)
+			);
+		});
+
 		it.each(['launchCwd', 'processCwd', 'cwd', 'account', 'inherited', 'effective'] as const)(
 			'refuses changed %s evidence at admission without starting any process',
 			async (field) => {
