@@ -1192,8 +1192,11 @@ export function buildHostCallHandlers(deps: HostHandlerDeps): HostCallHandlers {
 					? { headers: rawInit.headers as RequestInit['headers'] }
 					: {}),
 				redirect: 'error',
+				// `dispatcher` is an undici extension: the Node fetch types carry it,
+				// the DOM `RequestInit` the lint tsconfig resolves does not, so the
+				// spread is typed as a whole rather than through a key the DOM lib lacks.
 				...(deps.egressGuard.dispatcher !== undefined
-					? { dispatcher: deps.egressGuard.dispatcher as unknown as RequestInit['dispatcher'] }
+					? ({ dispatcher: deps.egressGuard.dispatcher } as unknown as RequestInit)
 					: {}),
 			};
 			const response = await fetchWithTimeout(p.url, init, PLUGIN_FETCH_TIMEOUT_MS);
