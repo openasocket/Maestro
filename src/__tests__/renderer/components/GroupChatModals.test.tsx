@@ -855,4 +855,129 @@ describe('GroupChatModal', () => {
 			);
 		});
 	});
+
+	describe('moderator capability (GT1-13-08)', () => {
+		// Literal text, so the case also compiles against a revision that has no
+		// shared refusal helper.
+		const REASON = 'Agent does not support group chat moderation.';
+
+		function grokAgent() {
+			return createMockAgent({
+				id: 'grok',
+				name: 'Grok CLI',
+				capabilities: { supportsModelSelection: false, supportsGroupChatModeration: false },
+			} as Partial<AgentConfig>);
+		}
+
+		async function renderCreate(onCreate = vi.fn()) {
+			render(
+				<GroupChatModal
+					mode="create"
+					theme={createMockTheme()}
+					isOpen={true}
+					onClose={vi.fn()}
+					onCreate={onCreate}
+				/>
+			);
+			await waitFor(
+				() => {
+					expect(screen.getByRole('combobox', { name: /select moderator/i })).toBeInTheDocument();
+				},
+				{ timeout: 3000 }
+			);
+			return onCreate;
+		}
+
+		it('lists a detected Grok agent but does not let it be selected, and says why', async () => {
+			setupDefaultMocks([
+				createMockAgent({
+					id: 'claude-code',
+					name: 'Claude Code',
+					capabilities: { supportsModelSelection: false, supportsGroupChatModeration: true },
+				} as Partial<AgentConfig>),
+				grokAgent(),
+			]);
+			const onCreate = await renderCreate();
+
+			const grok = screen.getByRole('option', { name: /Grok CLI/i }) as HTMLOptionElement;
+			expect(grok).toBeDisabled();
+			expect(grok).toHaveTextContent(/cannot moderate/i);
+			expect(grok).toHaveAttribute('title', REASON);
+			expect(screen.getByTestId('moderator-unavailable-reason')).toHaveTextContent(
+				`Grok CLI is not available as moderator: ${REASON}`
+			);
+
+			// Picking it anyway (a disabled option can still be forced through a
+			// change event) never reaches onCreate with Grok as moderator.
+			const dropdown = screen.getByRole('combobox', { name: /select moderator/i });
+			fireEvent.change(dropdown, { target: { value: 'grok' } });
+			fireEvent.change(screen.getByPlaceholderText(/Auth Feature Implementation/i), {
+				target: { value: 'Grok Chat' },
+			});
+			fireEvent.click(screen.getByRole('button', { name: /^create$/i }));
+			for (const call of onCreate.mock.calls) expect(call[1]).not.toBe('grok');
+		});
+
+		it('never defaults to Grok, and leaves nothing to create when Grok is the only provider', async () => {
+			setupDefaultMocks([grokAgent()]);
+			const onCreate = vi.fn();
+			render(
+				<GroupChatModal
+					mode="create"
+					theme={createMockTheme()}
+					isOpen={true}
+					onClose={vi.fn()}
+					onCreate={onCreate}
+				/>
+			);
+			await waitFor(
+				() => {
+					expect(screen.getByTestId('moderator-unavailable-reason')).toBeInTheDocument();
+				},
+				{ timeout: 3000 }
+			);
+			expect(screen.queryByRole('option', { name: /Grok CLI/i, selected: true })).toBeNull();
+			fireEvent.change(screen.getByPlaceholderText(/Auth Feature Implementation/i), {
+				target: { value: 'Grok Only' },
+			});
+			const create = screen.getByRole('button', { name: /^create$/i });
+			expect(create).toBeDisabled();
+			fireEvent.click(create);
+			expect(onCreate).not.toHaveBeenCalled();
+		});
+
+		it('keeps Claude Code and Codex selectable beside a Grok agent', async () => {
+			setupDefaultMocks([
+				createMockAgent({
+					id: 'claude-code',
+					name: 'Claude Code',
+					capabilities: { supportsModelSelection: false, supportsGroupChatModeration: true },
+				} as Partial<AgentConfig>),
+				createMockAgent({
+					id: 'codex',
+					name: 'Codex',
+					capabilities: { supportsModelSelection: false, supportsGroupChatModeration: true },
+				} as Partial<AgentConfig>),
+				grokAgent(),
+			]);
+			const onCreate = await renderCreate();
+
+			const dropdown = screen.getByRole('combobox', { name: /select moderator/i });
+			// The default moderator is a provider that can moderate.
+			expect(['claude-code', 'codex']).toContain((dropdown as HTMLSelectElement).value);
+			expect(screen.getByRole('option', { name: /^Claude Code$/i })).not.toBeDisabled();
+			expect(screen.getByRole('option', { name: /^Codex$/i })).not.toBeDisabled();
+			expect(screen.getByRole('option', { name: /Grok CLI/i })).toBeDisabled();
+
+			for (const id of ['claude-code', 'codex']) {
+				fireEvent.change(dropdown, { target: { value: id } });
+				expect(dropdown).toHaveValue(id);
+			}
+			fireEvent.change(screen.getByPlaceholderText(/Auth Feature Implementation/i), {
+				target: { value: 'Codex Chat' },
+			});
+			fireEvent.click(screen.getByRole('button', { name: /^create$/i }));
+			expect(onCreate).toHaveBeenCalledWith('Codex Chat', 'codex', undefined, true);
+		});
+	});
 });
