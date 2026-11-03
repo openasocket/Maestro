@@ -22483,7 +22483,10 @@
 			"surfaces": [
 				"src/shared/types.ts",
 				"src/shared/maestro-lib/providers/capabilities.ts",
-				"src/shared/maestro-lib/groupchat/storage.ts"
+				"src/shared/maestro-lib/groupchat/storage.ts",
+				"src/renderer/components/GroupChatModal.tsx",
+				"src/cli/commands/group-chat.ts",
+				"src/shared/group-chat-types.ts"
 			],
 			"routes": ["native-headless", "acp-candidate"],
 			"platforms": [
@@ -22498,12 +22501,15 @@
 			"sourcePaths": [
 				"src/shared/types.ts",
 				"src/shared/maestro-lib/providers/capabilities.ts",
-				"src/shared/maestro-lib/groupchat/storage.ts"
+				"src/shared/maestro-lib/groupchat/storage.ts",
+				"src/renderer/components/GroupChatModal.tsx",
+				"src/cli/commands/group-chat.ts",
+				"src/shared/group-chat-types.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-08-10", "GT1-11-14A"],
-				"test": ["GT1-08-11", "GT1-11-14B"],
-				"verification": ["GT1-08-12", "GT1-11-14C", "GT1-11-11E"],
+				"implementation": ["GT1-08-10", "GT1-11-14A", "GT1-13-08"],
+				"test": ["GT1-08-11", "GT1-11-14B", "GT1-13-09"],
+				"verification": ["GT1-08-12", "GT1-11-14C", "GT1-11-11E", "GT1-13-15"],
 				"live": ["GT1-11-11", "GT1-11-11E"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
@@ -22515,7 +22521,8 @@
 				"Grok moderation currently rejected despite picker visibility. Antigravity own gap does not lower required outcome.",
 				"GT1-08-21 verification: phase 08 packets groupChat, cue; verdicts GT1-08-12 participant/synthesis pass; GT1-08-12 moderation refused-by-capability; GT1-08-12 pass. Parity against the comparator baseline: gap: rejected while Claude Code and Codex are accepted (release blocker). Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-11, GT1-11-11E linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21.",
 				"GT1-11-11E verification at 4abddb11a: native workflow-consumer cases (task/document/headless/goal Auto Run, Cue desktop/headless dispatch, group chat participant/moderator continuation, Symphony, Pianola dispatch/supervision/learning) not-run (run-state live prerequisites absent; case logic missing, A11-F22). Live stays not-run. See Plans/grok-tier1/evidence/11-native-workflows.md.",
-				"GT1-11-14C at dd53218a8: A11-F43, the E08/E09 receipts still carry a candidate override for this flag after the registry was finalized false; no executor reads it (production selection held), retirement owned by GT1-11-14C1/14C2."
+				"GT1-11-14C at dd53218a8: A11-F43, the E08/E09 receipts still carry a candidate override for this flag after the registry was finalized false; no executor reads it (production selection held), retirement owned by GT1-11-14C1/14C2.",
+				"GT1-13-08 (a681137ce1ba74eb28c003a842f153b2c72d01ff): the picker-visibility gap in the first limitation is closed. GroupChatModal lists a detected provider whose capabilities declare supportsGroupChatModeration false (Grok) as a disabled option with the reason and never selects it (auto-select, fallback, submit); maestro-cli group-chat start --moderator grok refuses with exit 1 before the bridge is contacted. Modal, CLI and storage share groupChatModeratorRefusal() in src/shared/group-chat-types.ts. The flag itself stays false; Grok moderation remains unsupported. Pins GT1-13-09; not promoted."
 			],
 			"implementation": "pending",
 			"static": "not-run",
