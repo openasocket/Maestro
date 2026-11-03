@@ -14,7 +14,11 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Settings, ChevronDown, Check, AlertTriangle } from 'lucide-react';
 import { AGENT_AUTOSELECT_ORDER, isBetaAgent } from '../../shared/agentMetadata';
-import { requiresIdleParticipants } from '../../shared/group-chat-types';
+import {
+	GROUP_CHAT_MODERATION_UNSUPPORTED,
+	groupChatModeratorRefusal,
+	requiresIdleParticipants,
+} from '../../shared/group-chat-types';
 import type { Theme, AgentConfig, ModeratorConfig, GroupChat } from '../types';
 import type { AgentDiscoveryRequest } from '../../shared/types';
 import { MODAL_PRIORITIES } from '../constants/modalPriorities';
@@ -108,6 +112,19 @@ export function GroupChatModal(props: GroupChatModalProps): JSX.Element | null {
 			ac.agentConfigRef.current = agentConfig;
 		}
 	}, [ac.selectedAgent, ac.agentConfig, grokConfig, agentConfig]);
+	// Detection reports each provider's capabilities. A provider that declares it
+	// cannot moderate is listed but never selectable; one with no capability
+	// record is left to storage's refusal, which uses the same text.
+	const canModerate = useCallback(
+		(agentId: string) =>
+			!groupChatModeratorRefusal(
+				agentId,
+				ac.detectedAgents.find((a: AgentConfig) => a.id === agentId)?.capabilities
+					?.supportsGroupChatModeration !== false
+			),
+		[ac.detectedAgents]
+	);
+
 	const savedEnvVars =
 		ac.selectedAgent === 'grok' || Object.keys(envVars).length > 0 ? customEnvVars : undefined;
 	const hasCustomization = ac.hasCustomization || savedEnvVars !== undefined;
@@ -176,11 +193,17 @@ export function GroupChatModal(props: GroupChatModalProps): JSX.Element | null {
 		}
 
 		// If current selection is still valid, keep it
-		if (ac.selectedAgent && ac.detectedAgents.some((a) => a.id === ac.selectedAgent)) return;
+		if (
+			ac.selectedAgent &&
+			canModerate(ac.selectedAgent) &&
+			ac.detectedAgents.some((a) => a.id === ac.selectedAgent)
+		)
+			return;
 
 		const isSupportedAndDetected = (agentId: string) =>
 			AGENT_TILES.some((tile) => tile.id === agentId && tile.supported) &&
-			ac.detectedAgents.some((a: AgentConfig) => a.id === agentId);
+			ac.detectedAgents.some((a: AgentConfig) => a.id === agentId) &&
+			canModerate(agentId);
 
 		const preferred =
 			AGENT_AUTOSELECT_ORDER.find(isSupportedAndDetected) ??
@@ -189,9 +212,9 @@ export function GroupChatModal(props: GroupChatModalProps): JSX.Element | null {
 		if (preferred) {
 			ac.setSelectedAgent(preferred);
 		} else {
-			ac.setSelectedAgent(ac.detectedAgents[0].id);
+			ac.setSelectedAgent(ac.detectedAgents.find((a) => canModerate(a.id))?.id ?? null);
 		}
-	}, [mode, ac.isDetecting, ac.detectedAgents, ac.selectedAgent, ac.setSelectedAgent]);
+	}, [mode, ac.isDetecting, ac.detectedAgents, ac.selectedAgent, ac.setSelectedAgent, canModerate]);
 
 	// Reset local state when modal closes
 	useEffect(() => {
@@ -250,7 +273,7 @@ export function GroupChatModal(props: GroupChatModalProps): JSX.Element | null {
 	]);
 
 	const handleSubmit = useCallback(() => {
-		if (!name.trim() || !ac.selectedAgent) return;
+		if (!name.trim() || !ac.selectedAgent || !canModerate(ac.selectedAgent)) return;
 
 		const moderatorConfig = buildModeratorConfig();
 
@@ -264,7 +287,17 @@ export function GroupChatModal(props: GroupChatModalProps): JSX.Element | null {
 		setRequireIdle(true);
 		setConfigWasModified(false);
 		onClose();
-	}, [name, ac.selectedAgent, buildModeratorConfig, mode, props, groupChat, requireIdle, onClose]);
+	}, [
+		name,
+		ac.selectedAgent,
+		canModerate,
+		buildModeratorConfig,
+		mode,
+		props,
+		groupChat,
+		requireIdle,
+		onClose,
+	]);
 
 	// Check if anything has changed (edit mode only)
 	const hasChanges = useCallback((): boolean => {
@@ -330,7 +363,10 @@ export function GroupChatModal(props: GroupChatModalProps): JSX.Element | null {
 	]);
 
 	const canSubmit =
-		name.trim().length > 0 && ac.selectedAgent !== null && (mode === 'create' || hasChanges());
+		name.trim().length > 0 &&
+		ac.selectedAgent !== null &&
+		canModerate(ac.selectedAgent) &&
+		(mode === 'create' || hasChanges());
 
 	if (!isOpen) return null;
 	if (mode === 'edit' && !groupChat) return null;
@@ -340,6 +376,8 @@ export function GroupChatModal(props: GroupChatModalProps): JSX.Element | null {
 		if (!tile.supported) return false;
 		return ac.detectedAgents.some((a: AgentConfig) => a.id === tile.id);
 	});
+	// Listed so the user sees why, but not selectable as moderator.
+	const nonModeratorTiles = availableTiles.filter((tile) => !canModerate(tile.id));
 
 	// Get selected agent info
 	const selectedAgentConfig = ac.detectedAgents.find((a) => a.id === ac.selectedAgent);
@@ -472,7 +510,7 @@ export function GroupChatModal(props: GroupChatModalProps): JSX.Element | null {
 								Detecting agents...
 							</span>
 						</div>
-					) : availableTiles.length === 0 ? (
+					) : availableTiles.length === nonModeratorTiles.length ? (
 						<div className="text-sm py-2" style={{ color: theme.colors.textDim }}>
 							No agents available. Please install Claude Code, OpenCode, Codex, or Factory Droid.
 						</div>
@@ -498,10 +536,17 @@ export function GroupChatModal(props: GroupChatModalProps): JSX.Element | null {
 								>
 									{availableTiles.map((tile) => {
 										const isBeta = isBetaAgent(tile.id);
+										const moderates = canModerate(tile.id);
 										return (
-											<option key={tile.id} value={tile.id}>
+											<option
+												key={tile.id}
+												value={tile.id}
+												disabled={!moderates}
+												title={moderates ? undefined : GROUP_CHAT_MODERATION_UNSUPPORTED}
+											>
 												{tile.name}
 												{isBeta ? ' (Beta)' : ''}
+												{moderates ? '' : ' - cannot moderate'}
 											</option>
 										);
 									})}
@@ -533,6 +578,18 @@ export function GroupChatModal(props: GroupChatModalProps): JSX.Element | null {
 								)}
 							</button>
 						</div>
+					)}
+
+					{!ac.isDetecting && nonModeratorTiles.length > 0 && (
+						<p
+							className="mt-2 text-xs"
+							style={{ color: theme.colors.textDim }}
+							data-testid="moderator-unavailable-reason"
+						>
+							{nonModeratorTiles.map((tile) => tile.name).join(', ')}{' '}
+							{nonModeratorTiles.length === 1 ? 'is' : 'are'} not available as moderator:{' '}
+							{GROUP_CHAT_MODERATION_UNSUPPORTED}
+						</p>
 					)}
 
 					{/* Expandable Configuration Panel */}
