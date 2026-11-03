@@ -14743,7 +14743,8 @@
 					"GT1-09-04",
 					"GT1-09-07",
 					"GT1-09-09",
-					"GT1-03-09A"
+					"GT1-03-09A",
+					"GT1-13-01"
 				],
 				"test": [
 					"GT1-03-02",
@@ -14758,7 +14759,8 @@
 					"GT1-09-05",
 					"GT1-09-08",
 					"GT1-09-10",
-					"GT1-09-12"
+					"GT1-09-12",
+					"GT1-13-02"
 				],
 				"verification": [
 					"GT1-03-13",
@@ -14768,7 +14770,8 @@
 					"GT1-10-05",
 					"GT1-09-01",
 					"GT1-09-06",
-					"GT1-09-13"
+					"GT1-09-13",
+					"GT1-13-15"
 				],
 				"live": ["GT1-11-12"],
 				"finalAcceptance": ["GT1-12-06"]
@@ -14781,7 +14784,8 @@
 				"ManagedRoute lists child-process/codex-app-server/opencode-server/pty/ssh, no Grok ACP. Grok child admission is not effect qualification. Synthetic Node harness explicitly certifies no real provider. Output-only native headless cannot answer approvals. Shared ACP permission decisions are separate from ordinary answers; pinned conversational ask-back/elicitation remains unsupported. Real interaction channels and preventive effect qualification remain phase07/09/10/11 work. No Grok real-provider qualification from synthetic harness. Actual account/model/actor/remote identity and all native internal effects require proof or fail-closed refusal. The standard-permission flag remains omitted. The shared ACP request port has passing fail-closed synthetic coverage, but production consent channels and preventive native effect coverage remain unqualified; output-only headless streams cannot answer approvals.",
 				"GT1-07-11 verification: ACP permission requests route through the desktop consent port and the portable ManagedTurnAuthority.effects; unmanaged portable standard turns refuse consent-port. Preventive effect classification is phase09. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted.",
 				"GT1-10-16 verification at d99faa724: phase 10 groups interaction pass 137/137; cli pass 81/81; web pass 427/427; liteNative not-run. Parity against the comparator baseline: consent relay answers only the owning request on desktop, web-desktop and Lite bridges; gap: positive ask-back answered by a person stays unsupported (acp-question-negotiation) while Claude Code answers its question tool; headless questions settle as an explicit capability gap and only permission:respond is a consent reply. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-12, GT1-11-07, GT1-11-11, GT1-11-11C linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16.",
-				"GT1-11-12 verification at 4ef249699: native negative policy cases (denied writes, outside-root and symlink access, shell, network and in-process egress, MCP/meta-tools/subagents/hooks, read-only/no-tools violations, unknown effects, stale approvals, revocation, prohibited model routes, endpoint substitution, custody/enrollment/attribution) not-run (run-state live prerequisites absent; case logic missing, A11-F29). Live stays not-run. See Plans/grok-tier1/evidence/11-policy-native.md."
+				"GT1-11-12 verification at 4ef249699: native negative policy cases (denied writes, outside-root and symlink access, shell, network and in-process egress, MCP/meta-tools/subagents/hooks, read-only/no-tools violations, unknown effects, stale approvals, revocation, prohibited model routes, endpoint substitution, custody/enrollment/attribution) not-run (run-state live prerequisites absent; case logic missing, A11-F29). Live stays not-run. See Plans/grok-tier1/evidence/11-policy-native.md.",
+				"GT1-13-01 (acaf7fd12c1abd8235f914c6f35049e55c39c689): Standard is reachable from ordinary surfaces (capability declared); permission requests go to the desktop consent session. Positive ask-back stays unsupported and the Grok Standard tooltip says so (evidence/13.md)."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -18675,9 +18679,9 @@
 				"src/shared/maestro-lib/grok/acp-requests.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-03-07", "GT1-09-07", "GT1-11-14A"],
-				"test": ["GT1-03-08", "GT1-09-08", "GT1-11-14B"],
-				"verification": ["GT1-03-13", "GT1-09-11", "GT1-11-14C"],
+				"implementation": ["GT1-03-07", "GT1-09-07", "GT1-11-14A", "GT1-13-01"],
+				"test": ["GT1-03-08", "GT1-09-08", "GT1-11-14B", "GT1-13-02"],
+				"verification": ["GT1-03-13", "GT1-09-11", "GT1-11-14C", "GT1-13-15"],
 				"live": ["GT1-11-12", "GT1-11-14C"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
@@ -18687,9 +18691,10 @@
 			},
 			"limitations": [
 				"The standard-permission flag remains omitted. The shared ACP request port has passing fail-closed synthetic coverage, but production consent channels and preventive native effect coverage remain unqualified; output-only headless streams cannot answer approvals.",
-				"GT1-07-11 verification: Standard mode now reaches ACP with real consent channels on desktop; portable runs need ManagedTurnAuthority.effects. Not qualified natively. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted."
+				"GT1-07-11 verification: Standard mode now reaches ACP with real consent channels on desktop; portable runs need ManagedTurnAuthority.effects. Not qualified natively. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted.",
+				"GT1-13-01 (acaf7fd12c1abd8235f914c6f35049e55c39c689): the flag is now declared true with a GROK_CAPABILITY_EVIDENCE.retained basis, so the composer offers Standard for a local Grok tab and the plan reaches GrokAcpSpawner; a Standard turn on an SSH remote is refused in handle-spawn before the launch-scope probe (acp-remote-route). Deterministic pins are GT1-13-02; native consent proof and live evidence stay not-run, so the row is not promoted (evidence/13.md)."
 			],
-			"implementation": "pending",
+			"implementation": "implemented",
 			"static": "not-run",
 			"deterministic": "not-run",
 			"live": "not-run",
