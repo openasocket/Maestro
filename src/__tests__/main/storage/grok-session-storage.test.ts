@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
 
 // ============================================================================
 // Mocks (must be declared before imports)
@@ -56,7 +56,11 @@ vi.mock('fs/promises', async () => ({
 import path from 'path';
 import os from 'os';
 import fs from 'fs/promises';
-import { GrokSessionStorage, parseGrokUsageFile } from '../../../main/storage/grok-session-storage';
+import {
+	GrokSessionStorage,
+	parseGrokPromptContext,
+	parseGrokUsageFile,
+} from '../../../main/storage/grok-session-storage';
 import * as remoteFs from '../../../main/utils/remote-fs';
 import { captureException } from '../../../main/utils/sentry';
 import { logger } from '../../../main/utils/logger';
@@ -4218,4 +4222,202 @@ describe('GrokSessionStorage - native normalization regressions', () => {
 			expect(captureException).not.toHaveBeenCalled();
 		}
 	);
+});
+
+// GT1-13-13: pin GT1-13-12 (prompt_context.json as native memory facts). The
+// fixture is a sanitized grok 1.0.70 file: {{GROK_HOME}} is the account root
+// the session lives under, {{PROJECT}} the recorded working directory.
+describe('GrokSessionStorage - prompt_context.json native memory', () => {
+	const GROK_HOME = path.dirname(SESSIONS_DIR);
+	const SECOND_ID = '019f0000-aaaa-7000-8000-000000000002';
+	let fixture = '';
+
+	const promptContextPath = (sessionId: string) =>
+		path.join(SESSIONS_DIR, encodeURIComponent(PROJECT), sessionId, 'prompt_context.json');
+	const fixtureRecord = (overrides: Record<string, unknown> = {}) => ({
+		...JSON.parse(
+			fixture.split('{{GROK_HOME}}').join(GROK_HOME).split('{{PROJECT}}').join(PROJECT)
+		),
+		...overrides,
+	});
+	const listOne = async (promptContext: string | undefined) => {
+		const files = sessionFiles(
+			PROJECT,
+			SESSION_ID,
+			summaryJson(SESSION_ID, PROJECT),
+			chatHistoryJsonl()
+		);
+		if (promptContext !== undefined) files[promptContextPath(SESSION_ID)] = promptContext;
+		mockLocalFs(files);
+		const sessions = await new GrokSessionStorage().listSessions(PROJECT);
+		expect(sessions).toHaveLength(1);
+		return sessions[0];
+	};
+
+	beforeAll(async () => {
+		const realFs = await vi.importActual<typeof import('fs')>('fs');
+		fixture = realFs.readFileSync(
+			path.join(__dirname, '../../fixtures/grok/prompt_context-1.0.70.json'),
+			'utf8'
+		);
+	});
+
+	beforeEach(() => {
+		vi.clearAllMocks();
+	});
+
+	it('exposes the memory facts of a well-formed 1.0.70 prompt_context.json', async () => {
+		const session = await listOne(JSON.stringify(fixtureRecord()));
+
+		expect(session.nativeMetadata?.nativeMemory).toEqual({
+			memoryEnabled: true,
+			globalMemoryPath: path.join(GROK_HOME, 'memory-v2', 'global'),
+			workspaceMemoryPath: path.join(GROK_HOME, 'memory-v2', 'workspaces', 'my-project-0a1b2c3d'),
+			agentsMdFiles: [],
+			promptMode: 'extend',
+			nonInteractive: false,
+			droppedPaths: 0,
+		});
+		// Parsed, so never invalid-prompt-context; it carries the same snapshot
+		// reason as every other member, none of which binds to the transcript.
+		expect(session.nativeMetadata?.sources?.['prompt_context.json']).toMatchObject({
+			provider: 'grok',
+			status: 'partial',
+			reason: session.nativeMetadata?.sources?.['summary.json']?.reason,
+		});
+		expect(session.nativeMetadata?.sources?.['prompt_context.json']?.reason).not.toBe(
+			'invalid-prompt-context'
+		);
+		// Facts only: none of the paths the file names is ever opened.
+		const opened = vi.mocked(fs.open).mock.calls.map(([file]) => String(file));
+		expect(opened.some((file) => file.includes('memory-v2'))).toBe(false);
+		expect(captureException).not.toHaveBeenCalled();
+	});
+
+	it('keeps AGENTS.md entries under the project or account root, relative ones against the project', async () => {
+		const session = await listOne(
+			JSON.stringify(
+				fixtureRecord({
+					agents_md_files: [
+						'AGENTS.md',
+						{ path: path.join(PROJECT, 'packages', 'core', 'AGENTS.md') },
+						path.join(GROK_HOME, 'AGENTS.md'),
+						'AGENTS.md',
+					],
+				})
+			)
+		);
+
+		expect(session.nativeMetadata?.nativeMemory).toMatchObject({
+			agentsMdFiles: [
+				path.join(PROJECT, 'AGENTS.md'),
+				path.join(PROJECT, 'packages', 'core', 'AGENTS.md'),
+				path.join(GROK_HOME, 'AGENTS.md'),
+			],
+			droppedPaths: 0,
+		});
+	});
+
+	it('lists a session with no prompt_context.json exactly as before, beside one that has it', async () => {
+		mockLocalFs({
+			...sessionFiles(PROJECT, SESSION_ID, summaryJson(SESSION_ID, PROJECT), chatHistoryJsonl()),
+			...sessionFiles(PROJECT, SECOND_ID, summaryJson(SECOND_ID, PROJECT), chatHistoryJsonl()),
+			[promptContextPath(SECOND_ID)]: JSON.stringify(fixtureRecord()),
+		});
+
+		const sessions = await new GrokSessionStorage().listSessions(PROJECT);
+		const absent = sessions.find((s) => s.sessionId === SESSION_ID);
+		const present = sessions.find((s) => s.sessionId === SECOND_ID);
+
+		expect(absent).toMatchObject({ messageCount: 3, projectPath: PROJECT });
+		expect(absent?.nativeMetadata?.nativeMemory).toBeUndefined();
+		expect(absent?.nativeMetadata?.sources).not.toHaveProperty(['prompt_context.json']);
+		expect(present?.nativeMetadata?.nativeMemory?.memoryEnabled).toBe(true);
+		expect(logger.debug).not.toHaveBeenCalledWith(
+			expect.stringContaining('prompt_context.json'),
+			expect.anything()
+		);
+		expect(captureException).not.toHaveBeenCalled();
+	});
+
+	it.each([
+		['truncated JSON', '{"version": 1, "memory_v2'],
+		['an array', '[]'],
+		['a number', '42'],
+		['null', 'null'],
+		['blank', '   '],
+	])(
+		'logs and marks %s prompt_context.json without throwing or hiding the session',
+		async (_label, content) => {
+			const session = await listOne(content);
+
+			expect(session).toMatchObject({ sessionId: SESSION_ID, messageCount: 3 });
+			expect(session.nativeMetadata?.nativeMemory).toBeUndefined();
+			expect(session.nativeMetadata?.sources?.['prompt_context.json']).toMatchObject({
+				status: 'partial',
+				reason: 'invalid-prompt-context',
+			});
+			expect(logger.debug).toHaveBeenCalledWith(
+				`Grok session ${SESSION_ID} has malformed prompt_context.json`,
+				expect.anything()
+			);
+			expect(captureException).not.toHaveBeenCalled();
+		}
+	);
+
+	it('drops and counts every path that escapes the account or project root', async () => {
+		const session = await listOne(
+			JSON.stringify(
+				fixtureRecord({
+					memory_global_path: '/etc/grok/memory-v2/global',
+					memory_workspace_path: path.join(GROK_HOME, '..', 'elsewhere', 'memory'),
+					agents_md_files: [
+						path.join('..', '..', 'escape', 'AGENTS.md'),
+						'/etc/AGENTS.md',
+						{ path: `${PROJECT}-sibling/AGENTS.md` },
+						'AGENTS.md',
+					],
+				})
+			)
+		);
+
+		expect(session.nativeMetadata?.nativeMemory).toEqual({
+			memoryEnabled: true,
+			agentsMdFiles: [path.join(PROJECT, 'AGENTS.md')],
+			promptMode: 'extend',
+			nonInteractive: false,
+			droppedPaths: 5,
+		});
+		// Parsed, so never invalid-prompt-context; it carries the same snapshot
+		// reason as every other member, none of which binds to the transcript.
+		expect(session.nativeMetadata?.sources?.['prompt_context.json']).toMatchObject({
+			provider: 'grok',
+			status: 'partial',
+			reason: session.nativeMetadata?.sources?.['summary.json']?.reason,
+		});
+		expect(session.nativeMetadata?.sources?.['prompt_context.json']?.reason).not.toBe(
+			'invalid-prompt-context'
+		);
+	});
+
+	it('drops memory paths under a remote ~ account root rather than guessing them', () => {
+		const content = JSON.stringify({
+			memory_v2_enabled: true,
+			memory_global_path: '/home/u/.grok/memory-v2/global',
+			memory_workspace_path: '~/.grok/memory-v2/workspaces/x',
+			agents_md_files: ['AGENTS.md'],
+		});
+
+		expect(
+			parseGrokPromptContext(content, {
+				accountRoot: '~/.grok',
+				projectRoot: '/home/u/project',
+				isRemote: true,
+			})
+		).toEqual({
+			memoryEnabled: true,
+			agentsMdFiles: ['/home/u/project/AGENTS.md'],
+			droppedPaths: 2,
+		});
+	});
 });
