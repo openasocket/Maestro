@@ -1,4 +1,13 @@
-import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest';
+import {
+	describe,
+	it,
+	expect,
+	vi,
+	beforeAll,
+	beforeEach,
+	afterEach,
+	type MockInstance,
+} from 'vitest';
 import {
 	AgentDetector,
 	AgentConfig,
@@ -103,6 +112,10 @@ import { setEgressAuthority } from '../../../main/utils/fetchWithTimeout';
 import { denyingEgressAuthority } from '../../helpers/egressAuthority';
 import { fakeSpawnPort } from '../../helpers/managedSpawnPort';
 import type { AgentDetectorDeps, ModelDiscoveryContext } from '../../../main/agents/detector';
+import { readGrokModelsCache } from '../../../main/agents/detector';
+import { capabilitySnapshots } from '../../../main/agents/capability-snapshot';
+import { getContextWindowForAgent } from '../../../shared/agentConstants';
+import { resolveAgentAccountKey } from '../../../shared/providerProfiles';
 import { buildAgentEnvironment } from '../../../shared/maestro-lib/launch/env';
 import * as providerProbe from '../../../main/agents/provider-probe';
 import * as pathProber from '../../../main/agents/path-prober';
@@ -1258,6 +1271,177 @@ describe('agent-detector', () => {
 			]);
 			expect(pathProber.checkCustomPath).toHaveBeenCalledWith(context.customPath);
 			expect(readObservation).toHaveBeenCalledWith({ ...owned.launch, model: context.model });
+		});
+
+		// GT1-13-03: the account's own models_cache.json supplies per-model windows,
+		// and the menus only when no owned ACP observation answers.
+		describe('account models_cache.json (grok 1.0.70 fixture)', () => {
+			const accountDir = path.join(root, 'account-a');
+			const accountKey = resolveAgentAccountKey('grok', { GROK_HOME: accountDir }, os.homedir())!;
+			let fixture = '';
+			let cacheBytes: string | undefined;
+			const windowFor = (model: string | null, key: string | null = accountKey) =>
+				getContextWindowForAgent('grok', capabilitySnapshots.get('grok'), {
+					model,
+					accountKey: key,
+				});
+
+			beforeAll(async () => {
+				const actualFs = await vi.importActual<typeof import('fs')>('fs');
+				fixture = actualFs.readFileSync(
+					path.join(__dirname, '../../fixtures/grok/models_cache-1.0.70.json'),
+					'utf8'
+				);
+			});
+
+			beforeEach(() => {
+				cacheBytes = fixture;
+				_readFileSync.mockImplementation((file: unknown) => {
+					if (String(file) === path.join(accountDir, 'models_cache.json') && cacheBytes) {
+						return cacheBytes;
+					}
+					throw new Error('ENOENT');
+				});
+				capabilitySnapshots.__resetForTests();
+				capabilitySnapshots.markOk('grok', { path: context.customPath });
+				context.model = 'grok-4.5';
+				context.effort = '';
+				owned.observation.configuration.model = 'grok-4.5';
+				owned.observation.models!.currentModelId = 'grok-4.5';
+				owned.launch.env = buildAgentEnvironment({
+					...context.environment,
+					extraPathDirs: [path.dirname(context.customPath!)],
+				});
+			});
+
+			afterEach(() => capabilitySnapshots.__resetForTests());
+
+			it('reads model ids, windows and effort values and nothing that identifies the account', () => {
+				const read = readGrokModelsCache(accountDir);
+				expect(read).toEqual({
+					models: ['grok-4.7', 'grok-4.7-build-fast', 'grok-4.6', 'grok-4.5'],
+					contextWindows: {
+						'grok-4.7': 256000,
+						'grok-4.7-build-fast': 256000,
+						'grok-4.6': 256000,
+						'grok-4.5': 256000,
+					},
+					efforts: {
+						'grok-4.7': ['xhigh', 'high', 'medium', 'low'],
+						'grok-4.7-build-fast': ['xhigh', 'high', 'medium', 'low'],
+						'grok-4.6': ['xhigh', 'high', 'medium', 'low'],
+						'grok-4.5': ['high', 'medium', 'low'],
+					},
+				});
+				expect(JSON.stringify(read)).not.toMatch(/synthetic\.invalid|bearer|identity|origin/);
+				// The fixture itself carries no account identity, auth method, origin or key.
+				const raw = JSON.parse(fixture);
+				expect([raw.identity, raw.auth_method, raw.origin, raw.etag]).toEqual([
+					null,
+					null,
+					null,
+					null,
+				]);
+				for (const entry of Object.values(raw.models) as Array<Record<string, unknown>>) {
+					expect([entry.api_key, entry.env_key, entry.api_base_url]).toEqual([null, null, null]);
+				}
+			});
+
+			it('serves menus and the window from the cache when no owned observation answers', async () => {
+				readObservation.mockReturnValue(undefined);
+				expect(await detector.discoverGrokOptions(context)).toEqual({
+					status: 'discovered',
+					options: ['grok-4.7', 'grok-4.7-build-fast', 'grok-4.6', 'grok-4.5'],
+					configuredValue: 'grok-4.5',
+				});
+				expect(await detector.discoverGrokOptions(context, 'effort')).toMatchObject({
+					status: 'discovered',
+					options: ['high', 'medium', 'low'],
+				});
+				expect(capabilitySnapshots.get('grok')?.accountModelContextWindows).toEqual({
+					[accountKey]: {
+						windows: {
+							'grok-4.7': 256000,
+							'grok-4.7-build-fast': 256000,
+							'grok-4.6': 256000,
+							'grok-4.5': 256000,
+						},
+					},
+				});
+				expect(windowFor('grok-4.5')).toBe(256000);
+				expect(windowFor('grok-4.5', `${accountKey}-other`)).toBe(0);
+			});
+
+			it('gives no window or effort menu for a model the cache does not list', async () => {
+				readObservation.mockReturnValue(undefined);
+				context.model = 'private/deployment';
+				expect(await detector.discoverGrokOptions(context)).toMatchObject({
+					status: 'configured-fallback',
+					options: [
+						'grok-4.7',
+						'grok-4.7-build-fast',
+						'grok-4.6',
+						'grok-4.5',
+						'private/deployment',
+					],
+					reason: 'metadata-unavailable',
+				});
+				expect(await detector.discoverGrokOptions(context, 'effort')).toMatchObject({
+					status: 'unavailable',
+					options: [],
+				});
+				expect(windowFor('private/deployment')).toBe(0);
+				expect(windowFor(null)).toBe(0);
+			});
+
+			it.each([
+				['missing', undefined],
+				['malformed', '{'],
+				['models-less', '{"grok_version":"1.0.70"}'],
+			])('keeps the window unknown and logs at debug for a %s file', async (_label, bytes) => {
+				readObservation.mockReturnValue(undefined);
+				await detector.discoverGrokOptions(context);
+				expect(windowFor('grok-4.5')).toBe(256000);
+				cacheBytes = bytes;
+				vi.mocked(logger.debug).mockClear();
+				expect(readGrokModelsCache(accountDir)).toBeNull();
+				expect(logger.debug).toHaveBeenCalledWith(
+					'Grok models_cache.json unavailable or malformed',
+					'AgentDetector'
+				);
+				expect(await detector.discoverGrokOptions(context)).toEqual({
+					status: 'configured-fallback',
+					options: ['grok-4.5'],
+					configuredValue: 'grok-4.5',
+					reason: 'discovery-unavailable',
+				});
+				// The account's earlier entry is dropped rather than kept stale.
+				expect(capabilitySnapshots.get('grok')?.accountModelContextWindows).toBeUndefined();
+				expect(windowFor('grok-4.5')).toBe(0);
+			});
+
+			it('lets the owned ACP observation win the menus while the cache keeps the window', async () => {
+				expect(await detector.discoverGrokOptions(context)).toEqual({
+					status: 'configured-fallback',
+					options: ['visible-alias', 'grok-4.5'],
+					configuredValue: 'grok-4.5',
+					reason: 'metadata-unavailable',
+				});
+				expect(await detector.discoverGrokOptions(context, 'effort')).toMatchObject({
+					status: 'discovered',
+					options: ['max'],
+				});
+				expect(windowFor('grok-4.5')).toBe(256000);
+				// With no configured model the observed current model is the account default.
+				context.model = '';
+				owned.observation.configuration.model = 'grok-4.6';
+				await detector.discoverGrokOptions(context);
+				expect(capabilitySnapshots.get('grok')?.accountModelContextWindows?.[accountKey]).toEqual(
+					expect.objectContaining({ defaultModel: 'grok-4.6' })
+				);
+				expect(windowFor(null)).toBe(256000);
+				expect(windowFor('grok-4.5')).toBe(256000);
+			});
 		});
 
 		it('withholds unscoped models and static config options without probing', async () => {
