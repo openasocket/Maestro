@@ -18501,11 +18501,13 @@
 			"sourcePaths": [
 				"src/shared/types.ts",
 				"src/shared/maestro-lib/providers/capabilities.ts",
-				"src/renderer/components/InputArea/InputArea.tsx"
+				"src/renderer/components/InputArea/InputArea.tsx",
+				"src/shared/maestro-lib/providers/definitions.ts",
+				"src/main/agents/grok-inspect-probe.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-09-02", "GT1-09-07", "GT1-11-14A", "GT1-13-05"],
-				"test": ["GT1-09-03", "GT1-09-08", "GT1-11-14B", "GT1-13-07"],
+				"implementation": ["GT1-09-02", "GT1-09-07", "GT1-11-14A", "GT1-13-05", "GT1-13-10"],
+				"test": ["GT1-09-03", "GT1-09-08", "GT1-11-14B", "GT1-13-07", "GT1-13-11"],
 				"verification": ["GT1-09-06", "GT1-09-11", "GT1-11-14C", "GT1-13-15"],
 				"live": ["GT1-11-12"],
 				"finalAcceptance": ["GT1-12-06"]
@@ -18521,7 +18523,8 @@
 				"GT1-11-14A: Grok flag kept true on its production builder and consumers (GROK_CAPABILITY_EVIDENCE.retained: plan + deny Bash(*) observed on 1.0.5; readOnlyCliEnforced stays true because false would keep --always-approve in CLI read-only runs (resolveCliBatchModeArgs); managed read-only refuses Grok; containment stays A11-F05). No version is qualified (qualifiedVersions empty, candidate 1.0.70 not-run); live proof owned by GT1-11-14C.",
 				"GT1-11-14C at dd53218a8: rerun through production registry selection (production digest 068efe87eb60 unchanged, no candidate override on this row's cases); focused capability and consumer suites 20 files 1811/1811; every native case not-run (run-state lacks 17 live prerequisites, 0 admitted, 0 spawned). Live proof moves to GT1-12-06.",
 				"GT1-13-05 (7766a8e437dc77094f3f0c4b1df25c3f94c7123f): --sandbox decided offline and left unwired. grok 1.0.70 writes docs/user-guide/18-sandbox.md into GROK_HOME naming the built-in profiles off, workspace, devbox, read-only, strict (read-only: read everywhere, write only GROK_HOME and temp dirs, child network blocked on Linux only); an isolated `grok --sandbox read-only inspect --json` logged ProfileApplied enforced:true restrict_network:true on macos/seatbelt, an unknown name refuses to start, and inspect itself reports no sandbox field. Not appended to readOnlyArgs: a session's profile is fixed for life and a resume naming another is refused, and saved sessions record sandbox_profile \"off\", so a read-only turn on an existing tab would fail and a full turn on a read-only session would stay write-confined; a built-in profile that cannot apply also fails open. Recorded in GROK_CAPABILITY_EVIDENCE.flagDecisions['--sandbox']; env.ts unchanged (the managed ceiling reads readOnlyArgs). Settling probe: a live `grok --resume <off-session> --sandbox read-only` turn, plus a Maestro per-session profile record before any wiring. The readiness gate external:grok-readonly-cli-enforcement-unqualified stays open; not promoted.",
-				"GT1-13-07 (96ad762caee8e81d90a0a8fcfd829440949aaedf): the read-only argv (--permission-mode plan, --deny) is asserted present in the 1.0.70 help fixture with plan among the --permission-mode values, and GROK_FLAG_LEDGER records --sandbox unused (GT1-13-05). Help presence is not containment; the readiness gate stays open."
+				"GT1-13-07 (96ad762caee8e81d90a0a8fcfd829440949aaedf): the read-only argv (--permission-mode plan, --deny) is asserted present in the 1.0.70 help fixture with plan among the --permission-mode values, and GROK_FLAG_LEDGER records --sandbox unused (GT1-13-05). Help presence is not containment; the readiness gate stays open.",
+				"GT1-13-10 (d5a5f815ca637e023efb398e40b3584b089dd508): inherited vendor configuration. Every Maestro-owned Grok launch now sets grok's ten documented compat overrides false (GROK_COMPAT_ISOLATION_ENV_VARS as defaultEnvVars and readOnlyEnvOverrides), and grok inspect --json then reports those cells off (source env) with Claude skills and hooks disabled. Claude's permission files are NOT isolable on 1.0.70: ~/.claude/settings.local.json stays a permission source with every cell off, and no cell, env var or config key reaches it. grokReadOnlyIsolationProblem() (src/main/agents/grok-inspect-probe.ts) refuses the read-only composition by naming each inherited file on an observed report, but runProviderProbe refuses Grok probes, so no launch consults it yet. The read-only containment claim is unchanged; pins GT1-13-11; not promoted."
 			],
 			"implementation": "pending",
 			"static": "not-run",
