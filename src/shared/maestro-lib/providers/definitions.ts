@@ -897,6 +897,9 @@ export const AGENT_DEFINITIONS: AgentDefinition[] = [
 		// Keep batchModeArgs === yoloModeArgs so the CLI read-only filter strips it.
 		batchModeArgs: ['--always-approve'],
 		jsonOutputArgs: ['--output-format', 'streaming-json'], // JSONL event stream on stdout
+		// --json-schema implies --output-format json, so it is a utility-turn
+		// candidate only; --rules and --system-prompt-override are not emitted
+		// either (GROK_CAPABILITY_EVIDENCE.flagDecisions, GT1-13-06).
 		promptArgs: (prompt: string) => ['-p', prompt], // Single-turn headless prompt
 		// The shared planner selects this ahead of argv/stdin on every host.
 		// Lowercase .json ACP text blocks preserve whitespace; plain files trim it.
