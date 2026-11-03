@@ -22849,9 +22849,24 @@
 				"src/renderer/utils/contextUsage.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-03-05", "GT1-03-11", "GT1-10-08", "GT1-11-14A", "GT1-03-05C"],
-				"test": ["GT1-03-06", "GT1-03-12", "GT1-10-09", "GT1-11-14B", "GT1-03-05D"],
-				"verification": ["GT1-03-13", "GT1-10-12", "GT1-11-14C", "GT1-03-14", "GT1-11-11F"],
+				"implementation": [
+					"GT1-03-05",
+					"GT1-03-11",
+					"GT1-10-08",
+					"GT1-11-14A",
+					"GT1-03-05C",
+					"GT1-13-03",
+					"GT1-13-03A"
+				],
+				"test": ["GT1-03-06", "GT1-03-12", "GT1-10-09", "GT1-11-14B", "GT1-03-05D", "GT1-13-04"],
+				"verification": [
+					"GT1-03-13",
+					"GT1-10-12",
+					"GT1-11-14C",
+					"GT1-03-14",
+					"GT1-11-11F",
+					"GT1-13-15"
+				],
 				"live": ["GT1-11-11", "GT1-11-11F"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
@@ -22862,7 +22877,8 @@
 			"limitations": [
 				"Grok uses false conservatively; ACP/native accounting needs verified semantics and agreement with static set.",
 				"GT1-10-16 verification at d99faa724: phase 10 groups usage pass 91/91; launch pass 276/276; agentRuns pass 139/139; storedHistory pass 441/441; aboutShare pass 66/66; quota pass 21/21; retry pass 158/158; nativePlatformLaunch not-run. Parity against the comparator baseline: context window rows unchanged by phase 10; usage accessors keep input/cache buckets disjoint. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11F, GT1-11-07, GT1-11-10, GT1-11-11A linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16.",
-				"GT1-11-11F verification at 72630fa55: native accounting cases (E06 accounting legs usage-capture, child-usage, fault-retry and consumer legs turn-recorder, desktop-recording, stats-readers, cue-attribution, context-window, quota-unavailable) not-run (run-state live prerequisites absent). Live stays not-run. See Plans/grok-tier1/evidence/11-native-accounting.md."
+				"GT1-11-11F verification at 72630fa55: native accounting cases (E06 accounting legs usage-capture, child-usage, fault-retry and consumer legs turn-recorder, desktop-recording, stats-readers, cue-attribution, context-window, quota-unavailable) not-run (run-state live prerequisites absent). Live stays not-run. See Plans/grok-tier1/evidence/11-native-accounting.md.",
+				"GT1-13-03 (669766008bf386214c010a1efb0df960812d597a): readGrokModelsCache in src/main/agents/detector.ts reads the account's $GROK_HOME/models_cache.json (ids, info.context_window, reasoning_efforts values only; never identity, auth_method, origin or the per-model api_key/env_key/api_base_url) into AgentCapabilitiesSnapshot.accountModelContextWindows keyed by resolveAgentAccountKey, and getContextWindowForAgent returns it for grok only when the selection names that account and the configured (or observed default) model, else 0. No caller passes a selection yet, so the gauge stays unknown until GT1-13-03A; usesCombinedContextWindow stays false and the row is not promoted (evidence/13.md)."
 			],
 			"implementation": "pending",
 			"static": "not-run",
