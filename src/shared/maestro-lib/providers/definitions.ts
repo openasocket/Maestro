@@ -14,6 +14,37 @@ import { isWindows } from '../../platformDetection';
 import { dirsWithAnyAccess, dirsWithWriteAccess, repeatDirFlag } from '../../additionalDirectories';
 export type { AgentCapabilities } from '../../types';
 
+/**
+ * Grok's vendor-compatibility cells, all switched off for a Maestro-owned
+ * launch (GT1-13-10). Out of the box grok 1.0.70 scans Claude's and Cursor's
+ * skills, rules, named instruction files (CLAUDE.md), MCP servers and hooks
+ * even under an isolated GROK_HOME, because those live in ~/.claude and
+ * ~/.cursor, not in the grok home. The names are grok's own documented
+ * overrides (docs/user-guide/26-config-reference.md, `compat.<vendor>.<surface>`,
+ * env > config.toml > default), verified offline: with them `grok inspect
+ * --json` reports every cell `enabled: false, source: "env"` and lists the
+ * Claude skills and hooks as `compatibilityStatus: "disabled"`. The
+ * `sessions` cells stay on: grok documents them as staged and inert.
+ *
+ * What these do NOT reach: Claude's permission files
+ * (~/.claude/settings.json and settings.local.json, plus the project's).
+ * 1.0.70 has no compat cell, environment variable or config key for them;
+ * `grok inspect --json` still lists them under `permissions.sources` with
+ * every cell off. src/main/agents/grok-inspect-probe.ts names that blocker.
+ */
+export const GROK_COMPAT_ISOLATION_ENV_VARS: Readonly<Record<string, string>> = Object.freeze({
+	GROK_CLAUDE_AGENTS_ENABLED: 'false',
+	GROK_CLAUDE_HOOKS_ENABLED: 'false',
+	GROK_CLAUDE_MCPS_ENABLED: 'false',
+	GROK_CLAUDE_RULES_ENABLED: 'false',
+	GROK_CLAUDE_SKILLS_ENABLED: 'false',
+	GROK_CURSOR_AGENTS_ENABLED: 'false',
+	GROK_CURSOR_HOOKS_ENABLED: 'false',
+	GROK_CURSOR_MCPS_ENABLED: 'false',
+	GROK_CURSOR_RULES_ENABLED: 'false',
+	GROK_CURSOR_SKILLS_ENABLED: 'false',
+});
+
 // ============ Configuration Types ============
 
 /**
@@ -925,6 +956,12 @@ export const AGENT_DEFINITIONS: AgentDefinition[] = [
 		// so it would break switching a tab between read-only and the other
 		// modes (GROK_CAPABILITY_EVIDENCE.flagDecisions, GT1-13-05).
 		readOnlyArgs: ['--permission-mode', 'plan', '--deny', 'Bash(*)'],
+		// Inherited vendor configuration off (GT1-13-10): a default, so a user's
+		// own per-agent var can opt a cell back in, and a read-only override, so
+		// a read-only turn never runs with Claude's or Cursor's hooks, MCP
+		// servers or skills whatever the user set.
+		defaultEnvVars: { ...GROK_COMPAT_ISOLATION_ENV_VARS },
+		readOnlyEnvOverrides: { ...GROK_COMPAT_ISOLATION_ENV_VARS },
 		readOnlyCliEnforced: true, // CLI enforces read-only via --permission-mode plan + --deny
 		// No noToolsArgs (tab naming falls back to the same graceful path as
 		// Codex/Copilot: batch mode + readOnlyArgs). Verified live on v0.2.93:

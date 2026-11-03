@@ -15,7 +15,10 @@ import {
 	type AgentLaunchInput,
 	type AgentLaunchPlan,
 } from '../../../../shared/maestro-lib/launch/launch-plan';
-import { getAgentDefinition } from '../../../../shared/maestro-lib/providers/definitions';
+import {
+	getAgentDefinition,
+	GROK_COMPAT_ISOLATION_ENV_VARS,
+} from '../../../../shared/maestro-lib/providers/definitions';
 import { getAgentCapabilities } from '../../../../shared/maestro-lib/providers/capabilities';
 import type { SshRemoteConfig } from '../../../../shared/types';
 import {
@@ -458,7 +461,7 @@ describe('GT1-10-07: Grok secrets and account homes (generated plans)', () => {
 			);
 			expect(p.env?.GITHUB_TOKEN).toBe(SENTINEL);
 			expect(p.env?.GROK_HOME).toBe('/accounts/a');
-			expect(p.envVars).toEqual({ GROK_HOME: '/accounts/a' });
+			expect(p.envVars).toEqual({ ...GROK_COMPAT_ISOLATION_ENV_VARS, GROK_HOME: '/accounts/a' });
 			const { env: _env, ...shown } = p;
 			expect(JSON.stringify(shown)).not.toContain(SENTINEL);
 			if (p.prompt.via !== 'file') throw new Error('expected Grok prompt file');
@@ -483,7 +486,10 @@ describe('GT1-10-07: Grok secrets and account homes (generated plans)', () => {
 		);
 		expect(p.target.kind).toBe('remote');
 		expect(p.env).toBeUndefined();
-		expect(p.envVars).toEqual({ GROK_HOME: '/remote/accounts/b' });
+		expect(p.envVars).toEqual({
+			...GROK_COMPAT_ISOLATION_ENV_VARS,
+			GROK_HOME: '/remote/accounts/b',
+		});
 		expect(p.secrets?.notDeliveredToRemote).toEqual(['GITHUB_TOKEN']);
 		expect(JSON.stringify(p)).not.toContain(SENTINEL);
 		expect(JSON.stringify(p)).not.toContain('/local/shell/home');

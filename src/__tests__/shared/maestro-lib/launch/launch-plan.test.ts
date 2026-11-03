@@ -13,7 +13,10 @@ import {
 	type SshRemoteEndpointIdentity,
 	type SshRemoteExpectation,
 } from '../../../../shared/maestro-lib/launch/ssh-remote-resolver';
-import { getAgentDefinition } from '../../../../shared/maestro-lib/providers/definitions';
+import {
+	getAgentDefinition,
+	GROK_COMPAT_ISOLATION_ENV_VARS,
+} from '../../../../shared/maestro-lib/providers/definitions';
 import {
 	getAgentCapabilities,
 	GROK_DIRECTORY_GRANT_SUPPORT,
@@ -307,7 +310,10 @@ describe('Grok directory-grant planning (native filesystem qualification remains
 				expect(result.plan.target).toEqual(
 					isRemote ? { kind: 'remote', remote: remote() } : { kind: 'local' }
 				);
-				expect(result.plan.envVars).toEqual({ GROK_HOME: account });
+				expect(result.plan.envVars).toEqual({
+					...GROK_COMPAT_ISOLATION_ENV_VARS,
+					GROK_HOME: account,
+				});
 				if (isRemote) expect(result.plan.env).toBeUndefined();
 				else expect(result.plan.env?.GROK_HOME).toBe(account);
 				expect(result.plan.permission).toEqual({ requested: 'standard', ceiling: null });
@@ -717,7 +723,10 @@ describe('Grok final launch model and effort validation', () => {
 				]);
 				expect(result.plan.command).toBe(sshRemoteConfig ? 'grok' : '/opt/grok');
 				expect(result.plan.target.kind).toBe(sshRemoteConfig ? 'remote' : 'local');
-				expect(result.plan.envVars).toEqual({ GROK_HOME: '/account/selected' });
+				expect(result.plan.envVars).toEqual({
+					...GROK_COMPAT_ISOLATION_ENV_VARS,
+					GROK_HOME: '/account/selected',
+				});
 				expect(args).toEqual(original);
 			}
 		}
@@ -1198,6 +1207,7 @@ describe('GT1-10-07: Grok fake-platform launch plans (generated plans, not a nat
 		expect(result.plan.env?.GLOBAL_ONLY).toBe('g');
 		expect(result.plan.env).not.toHaveProperty('GROK_INHERITED_FLAG');
 		expect(result.plan.envVars).toEqual({
+			...GROK_COMPAT_ISOLATION_ENV_VARS,
 			GROK_HOME: '/accounts/selected',
 			GROK_INHERITED_FLAG: '',
 		});
@@ -1230,7 +1240,11 @@ describe('GT1-10-07: Grok fake-platform launch plans (generated plans, not a nat
 		expect(result.plan.command).toBe(agent.binaryName);
 		expect(result.plan.cwd).toBe('/remote/work tree/雪');
 		expect(result.plan.env).toBeUndefined();
-		expect(result.plan.envVars).toEqual({ GROK_HOME: '/remote/accounts/b', STALE_VAR: ' ' });
+		expect(result.plan.envVars).toEqual({
+			...GROK_COMPAT_ISOLATION_ENV_VARS,
+			GROK_HOME: '/remote/accounts/b',
+			STALE_VAR: ' ',
+		});
 	});
 
 	it.each([

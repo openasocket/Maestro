@@ -1562,12 +1562,17 @@ describe('applyAgentConfigOverrides', () => {
 				...(sessionEnv === undefined ? {} : { sessionCustomEnvVars: sessionEnv }),
 			});
 
-			expect(result.effectiveCustomEnvVars).toEqual(
+			const own =
 				expectedValue === undefined
 					? undefined
 					: expectedValue === null
 						? {}
-						: { [accountKey]: expectedValue }
+						: { [accountKey]: expectedValue };
+			// Grok's definition defaults (GROK_COMPAT_ISOLATION_ENV_VARS, GT1-13-10)
+			// sit beneath every user layer; Codex has none.
+			const defaults = agent?.defaultEnvVars;
+			expect(result.effectiveCustomEnvVars).toEqual(
+				defaults ? { ...defaults, ...(own ?? {}) } : own
 			);
 			expect(result.customEnvSource).toBe(source);
 		});

@@ -70,6 +70,19 @@ export const GROK_CAPABILITY_EVIDENCE = Object.freeze({
 			'PROVISIONAL since GT1-06-01: deterministic only, grooming relies on unqualified read-only enforcement, every phase 11 native case not-run',
 	}),
 	/**
+	 * What a Maestro-owned launch inherits from other vendors' configuration
+	 * (GT1-13-10), as `grok inspect --json` 1.0.70 reports it with an empty
+	 * isolated GROK_HOME. Probe and decision: src/main/agents/grok-inspect-probe.ts.
+	 */
+	inheritedConfiguration: Object.freeze({
+		compatCells:
+			'GT1-13-10: switched off for every Maestro-owned launch (GROK_COMPAT_ISOLATION_ENV_VARS, defaultEnvVars plus readOnlyEnvOverrides). Before: all 13 externalCompat cells enabled, source default, 12 Claude skills enabled. After the ten GROK_{CLAUDE,CURSOR}_{AGENTS,HOOKS,MCPS,RULES,SKILLS}_ENABLED=false vars: those ten cells enabled false, source env, every Claude skill and hook compatibilityStatus disabled; the three sessions cells stay on (documented staged and inert). Offline basis: docs/user-guide/05-configuration.md and 26-config-reference.md (env > config.toml > default).',
+		permissionFiles:
+			'GT1-13-10: NOT isolable on 1.0.70. permissions.sources still lists ~/.claude/settings.local.json (settings) with 3 rules loaded after every compat cell is off; no compat cell covers it, the binary carries no env var for it (GROK_CLAUDE_* names are the five surfaces only), CLAUDE_CONFIG_DIR does not move it, and a native [permission] table in GROK_HOME/config.toml is merged beside it rather than replacing it. docs/user-guide/22-permissions-and-safety.md section 3 documents the read as unconditional. grokReadOnlyIsolationProblem() names each such file and refuses the read-only composition on an observed report; the probe itself is refused by runProviderProbe (no proven Grok probe lifetime), so no launch consults it yet.',
+		projectTrust:
+			'GT1-13-10: grok inspect --json reports projectTrusted false for an untrusted folder (the Maestro checkout included); --add-dir is refused there. Maestro grants no trust (no --trust) and records the observed value only.',
+	}),
+	/**
 	 * Decisions on native 1.0.70 flags Maestro could emit but does not, each
 	 * with its offline basis. GT1-13-07 folds these into the decided-flags ledger.
 	 */
