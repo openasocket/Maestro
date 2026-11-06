@@ -25,6 +25,7 @@ import type {
 	GroupChat,
 	GroupChatParticipant,
 } from '../../../../main/group-chat/group-chat-storage';
+import { GroomingAgentError } from '../../../../main/utils/context-groomer';
 import type { GroupChatMessage } from '../../../../main/group-chat/group-chat-log';
 import type { GroupChatHistoryEntry } from '../../../../shared/group-chat-types';
 
@@ -1531,9 +1532,56 @@ describe('isExpectedGroomingFailure', () => {
 		expect(isExpectedGroomingFailure(undefined)).toBe(false);
 	});
 
+	it('treats account and connection errors the parser already classified as expected (MAESTRO-K7)', () => {
+		for (const [type, message] of [
+			['auth_expired', 'Grooming error: Authentication failed. Sign in again to continue.'],
+			['auth_expired', 'Grooming error: Unauthorized access. Please check your API key.'],
+			['rate_limited', 'Grooming error: rate_limit'],
+			[
+				'rate_limited',
+				'Grooming error: Individual quota reached. Please upgrade your subscription to increase your limits.',
+			],
+			['network_error', 'Grooming error: Request timed out. Please try again.'],
+			['token_exhaustion', 'Grooming error: Context window exceeded'],
+			['session_not_found', 'Grooming error: No conversation found'],
+		] as const) {
+			expect(isExpectedGroomingFailure(new GroomingAgentError(message, type))).toBe(true);
+		}
+	});
+
+	it('treats provider wordings of a missing session as expected (MAESTRO-JB)', () => {
+		expect(
+			isExpectedGroomingFailure(
+				new Error(
+					'Grooming error: Oh My Pi exited with code 1: Error: Session "01a0b539-b117-7350-959a-c1111a08f140" not found.'
+				)
+			)
+		).toBe(true);
+		expect(
+			isExpectedGroomingFailure(
+				new Error(
+					'Grooming error: Previous Codex session could not be found. Starting fresh conversation.'
+				)
+			)
+		).toBe(true);
+	});
+
 	it('still reports genuine grooming faults', () => {
 		expect(isExpectedGroomingFailure(new Error('Grooming timed out after 60000ms'))).toBe(false);
+		expect(isExpectedGroomingFailure(new Error('Grooming timed out with no response'))).toBe(false);
 		expect(isExpectedGroomingFailure(new Error('spawn ENOENT'))).toBe(false);
+		// A crashed agent or an unclassified failure is exactly what a real bug looks like.
+		expect(
+			isExpectedGroomingFailure(
+				new GroomingAgentError('Grooming error: Agent exited with code 1', 'agent_crashed')
+			)
+		).toBe(false);
+		expect(
+			isExpectedGroomingFailure(new GroomingAgentError('Grooming error: something odd', 'unknown'))
+		).toBe(false);
+		expect(
+			isExpectedGroomingFailure(new GroomingAgentError('Grooming error: no category', undefined))
+		).toBe(false);
 	});
 });
 

@@ -28,6 +28,7 @@ import { WizardIndicator } from '../SessionList/WizardIndicator';
 import { hasDraft } from '../../utils/tabHelpers';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { useModalStore } from '../../stores/modalStore';
+import { requestBreakApartTabGroup } from '../../services/tabGroupConfirm';
 import { useUIStore } from '../../stores/uiStore';
 import { updateSessionWith, useSessionStore } from '../../stores/sessionStore';
 import {
@@ -61,6 +62,7 @@ import type {
 	Theme,
 	UnifiedTabRef,
 } from '../../types';
+import { elevatedSurfaceStyle } from '../../utils/elevatedSurface';
 
 /**
  * Action handlers a tiled pane's dropdown can invoke, bundled into one prop so a
@@ -379,6 +381,7 @@ function TiledFilePane({
 					htmlRenderMode={fileTab.htmlRenderMode}
 					onHtmlRenderModeChange={(value) => store.setFileTabHtmlRenderMode(fileTabId, value)}
 					sshRemoteId={filePreviewSshRemoteId}
+					sessionId={session.id}
 					// File/wiki links inside the document, resolved against the same tree
 					// and proximity cwd the single view uses.
 					fileTree={actions?.fileTree}
@@ -706,18 +709,13 @@ function PaneActionsMenu({
 			e.stopPropagation();
 			close();
 			const groupId = group.id;
-			useModalStore.getState().openModal('confirm', {
-				title: 'Break apart group?',
-				message: `Break apart "${group.name}"? Its panes return to the tab bar as individual tabs. The tabs are not closed, and you can tile them again later.`,
-				destructive: false,
-				onConfirm: () => {
-					// The whole group is going away; drop any zoom so it doesn't linger.
-					useUIStore.getState().setZoomedPaneId(null);
-					updateSessionWith(session.id, (s) => breakApartGroup(s, groupId));
-				},
+			requestBreakApartTabGroup(group, () => {
+				// The whole group is going away; drop any zoom so it doesn't linger.
+				useUIStore.getState().setZoomedPaneId(null);
+				updateSessionWith(session.id, (s) => breakApartGroup(s, groupId));
 			});
 		},
-		[close, group.id, group.name, session.id]
+		[close, group, session.id]
 	);
 
 	const handleCopyDeepLink = React.useCallback(
@@ -777,12 +775,11 @@ function PaneActionsMenu({
 						{/* Click-away backdrop: any click outside the menu closes it. */}
 						<div className="fixed inset-0 z-[99]" onClick={close} onContextMenu={close} />
 						<div
-							className="fixed z-[100] shadow-xl overflow-hidden whitespace-nowrap"
+							className="fixed z-[100] overflow-hidden whitespace-nowrap"
 							style={{
 								top: pos.top,
 								left: pos.left,
-								backgroundColor: theme.colors.bgSidebar,
-								border: `1px solid ${theme.colors.border}`,
+								...elevatedSurfaceStyle(theme),
 								borderRadius: '8px',
 								minWidth: '12.5rem',
 							}}

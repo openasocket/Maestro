@@ -6,6 +6,7 @@ import { logger } from '../../utils/logger';
 import { isWebContentsAvailable } from '../../utils/safe-send';
 import type { ManagedDelegationContext } from '../../../shared/maestro-lib/managed/delegation';
 import type { TerminalTabInfo, ReadTerminalTabResult, NewAITabWithPromptResult } from '../types';
+import type { MentionRouting } from '../../../shared/crossAgentContext';
 
 /** The managed refusal a desktop terminal write relays (MRC-08-02A), if the renderer sent one. */
 function readManagedRefusal(value: unknown): { state: 'denied'; code: string } | undefined {
@@ -343,6 +344,7 @@ export function registerBrowserTabCallbacks(
 			prompt: string,
 			background?: boolean,
 			hidden?: boolean,
+			mentionRouting?: MentionRouting,
 			delegation?: ManagedDelegationContext,
 			dispatchTicket?: string
 		) => {
@@ -396,6 +398,7 @@ export function registerBrowserTabCallbacks(
 					responseChannel,
 					background,
 					hidden,
+					mentionRouting,
 					delegation,
 					dispatchTicket
 				);

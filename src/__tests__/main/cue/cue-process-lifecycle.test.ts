@@ -265,10 +265,23 @@ describe('cue-process-lifecycle', () => {
 
 			expect(result.status).toBe('failed');
 			expect(onRawStdout).not.toHaveBeenCalled();
+			expect(result.executionStarted).toBe(false);
 		});
 	});
 
 	describe('runProcess', () => {
+		it('retains execution uncertainty if setup throws after spawn returned', async () => {
+			mockSpawn.mockImplementationOnce(() => {
+				mockChild = new MockChildProcess();
+				mockChild.stdin.end.mockImplementationOnce(() => {
+					throw Error('post-spawn setup failed');
+				});
+				return mockChild as unknown as ChildProcess;
+			});
+			const result = await runProcess('uncertain-run', createSpec(), createOptions());
+			expect(result.executionStarted).toBe(true);
+			expect(result.stderr).toContain('post-spawn setup failed');
+		});
 		it('neither spawns nor registers a process for a run already stopped', async () => {
 			const controller = new AbortController();
 			controller.abort();
@@ -279,7 +292,13 @@ describe('cue-process-lifecycle', () => {
 			);
 			expect(mockSpawn).not.toHaveBeenCalled();
 			expect(getActiveProcessMap().has('stopped-run')).toBe(false);
-			expect(result).toMatchObject({ status: 'stopped', exitCode: null, stdout: '', stderr: '' });
+			expect(result).toMatchObject({
+				status: 'stopped',
+				executionStarted: false,
+				exitCode: null,
+				stdout: '',
+				stderr: '',
+			});
 		});
 
 		it('spawns process with correct command, args, and cwd', async () => {
@@ -1390,6 +1409,7 @@ describe('cue-process-lifecycle', () => {
 
 			expect(result.status).toBe('failed');
 			expect(result.stderr).toContain('Spawn error: spawn EPERM');
+			expect(result.executionStarted).toBe(false);
 			expect(mockCaptureException).toHaveBeenCalledWith(
 				expect.objectContaining({ message: 'spawn EPERM' }),
 				expect.objectContaining({ operation: 'cue:spawn', runId: 'run-1' })

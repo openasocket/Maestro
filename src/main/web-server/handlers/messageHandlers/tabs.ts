@@ -10,6 +10,7 @@
 import path from 'path';
 import { readBackgroundField, readSwitchToAgentField } from '../../../../shared/focusPlacement';
 import { isRemoteMediaUrl, type MediaOpenMode } from '../../../../shared/mediaTypes';
+import { parseMentionRoutingField } from '../../../../shared/crossAgentContext';
 import fs from 'fs/promises';
 import { logger } from '../../../utils/logger';
 import { validateCallbackRequest, armDispatchCallback } from './dispatchCallbacks';
@@ -751,6 +752,14 @@ export function handleNewAITabWithPrompt(
 		return;
 	}
 
+	// `dispatch --new-tab --routing`: refuse a routing that is not one before
+	// the tab exists, so a bad flag leaves no orphan tab behind.
+	const routingField = parseMentionRoutingField(message.mentionRouting);
+	if (!routingField.ok) {
+		sendErrorResult(routingField.error);
+		return;
+	}
+
 	// The dispatching operation's context, refused before the tab exists when
 	// it is not one: a refusal after creation would leave an orphaned tab, and
 	// a prompt sent without it would start the child as a fresh turn.
@@ -784,7 +793,15 @@ export function handleNewAITabWithPrompt(
 	});
 
 	ctx.callbacks
-		.newAITabWithPrompt(sessionId, prompt, background, hidden, delegation, dispatchTicket)
+		.newAITabWithPrompt(
+			sessionId,
+			prompt,
+			background,
+			hidden,
+			routingField.routing,
+			delegation,
+			dispatchTicket
+		)
 		.then((result) => {
 			if (!result.success) withdrawDispatchTicket(dispatchTicket);
 			// Arm the callback only once the fresh tab id is known - that id is

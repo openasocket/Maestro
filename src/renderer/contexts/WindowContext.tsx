@@ -736,6 +736,22 @@ export function useWindowContextOptional(): WindowContextValue | null {
 }
 
 /**
+ * Whether this renderer is the ONE that owns app-wide side effects: the
+ * desktop app's primary window. Secondary windows and every web-desktop browser
+ * client run the same App and the same hooks, and a web-desktop page loads with
+ * no `?windowId=` param, so it reads as `isMainWindow` too - `isMainWindow`
+ * alone is not enough.
+ *
+ * Gate anything that must happen exactly once per event on this: a scan that
+ * writes shared state, a leaderboard flush, a Cue time credit. Run in every
+ * renderer, such work is done once per window and per browser tab.
+ */
+export function useIsLifecycleOwner(): boolean {
+	const isMainWindow = useWindowContextOptional()?.isMainWindow ?? true;
+	return isMainWindow && !isWebDesktop();
+}
+
+/**
  * Whether THIS window should surface (render) the given agent. A thin, null-safe
  * convenience over {@link WindowContextValue.ownsSession} for the common case of
  * gating an agent-scoped view on ownership:

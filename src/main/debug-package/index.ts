@@ -33,6 +33,7 @@ import {
 	WindowsDiagnosticsInfo,
 } from './collectors/windows-diagnostics';
 import { createZipPackage, PackageContents } from './packager';
+import type { AutoRunSnapshotResult } from './autorun-snapshots';
 import { logger } from '../utils/logger';
 import { AgentDetector } from '../agents';
 import { ProcessManager } from '../process-manager';
@@ -82,6 +83,13 @@ export interface DebugPackageDependencies {
 	sessionsStore: Store<any>;
 	groupsStore: Store<any>;
 	bootstrapStore?: Store<any>;
+	/**
+	 * Ask the app windows for their Auto Run snapshots. Called only when the
+	 * Auto Run section is on and the caller passed no `autoRunSnapshots`, so a
+	 * package main builds on its own carries the same state the desktop's does.
+	 * The desktop's own path always passes snapshots and leaves this unset.
+	 */
+	requestAutoRunSnapshots?: () => Promise<AutoRunSnapshotResult>;
 }
 
 /**
@@ -265,7 +273,9 @@ export async function generateDebugPackage(
 	// Collect batch state (optional)
 	if (opts.includeBatchState) {
 		try {
-			const batchState = collectBatchState(opts.autoRunSnapshots);
+			const batchState = collectBatchState(
+				opts.autoRunSnapshots ?? (await deps.requestAutoRunSnapshots?.())
+			);
 			contents['batch-state.json'] = batchState;
 			filesIncluded.push('batch-state.json');
 		} catch (error) {

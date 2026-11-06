@@ -291,6 +291,8 @@ const mockMaestro = {
 		}),
 		discardTrace: vi.fn().mockResolvedValue({ success: true }),
 		onProfilingProgress: vi.fn(() => () => {}),
+		onAutoRunSnapshotRequest: vi.fn(() => () => {}),
+		sendAutoRunSnapshotResponse: vi.fn(),
 	},
 	feedback: {
 		checkGhAuth: vi.fn().mockResolvedValue({ authenticated: true }),
@@ -596,6 +598,15 @@ const mockMaestro = {
 		persistCurrentToken: vi.fn().mockResolvedValue({ success: true }),
 		clearPersistentToken: vi.fn().mockResolvedValue({ success: true }),
 		disableAll: vi.fn().mockResolvedValue({ success: true, count: 0 }),
+		getState: vi
+			.fn()
+			.mockResolvedValue({ live: false, url: null, remoteControl: false, revision: 0 }),
+		set: vi.fn().mockResolvedValue({
+			success: true,
+			changed: false,
+			status: { live: false, url: null, remoteControl: false, revision: 0 },
+		}),
+		onStateChanged: vi.fn(() => () => {}),
 	},
 	browserSession: {
 		onRelayRequest: vi.fn(() => () => {}),
@@ -668,6 +679,8 @@ const mockMaestro = {
 	},
 	stats: {
 		recordQuery: vi.fn().mockResolvedValue({ success: true }),
+		getIndexingState: vi.fn().mockResolvedValue({ jobs: [] }),
+		onIndexingUpdate: vi.fn(() => () => {}),
 		getTokenUsage: vi.fn().mockResolvedValue({
 			totals: {
 				inputTokens: 0,
@@ -757,8 +770,8 @@ const mockMaestro = {
 		// mirroring the preload contract so useCrossAgentDispatch's mount effect
 		// (window.maestro.crossAgent.onChunk) doesn't throw under test.
 		send: vi.fn().mockResolvedValue({ requestId: 'test-cross-agent-request' }),
-		// Stop calls this for every interrupt in AI mode, so it has to exist or
-		// handleInterrupt throws before it ever signals a process.
+		// Stop calls this for every interrupt (any input mode), so it has to exist or
+		// interruptTurn throws before it ever signals a process.
 		cancel: vi.fn().mockResolvedValue({ canceled: 0 }),
 		onChunk: vi.fn().mockReturnValue(() => {}),
 	},
@@ -820,6 +833,14 @@ const mockMaestro = {
 		getActiveRuns: vi.fn().mockResolvedValue([]),
 		getActivityLog: vi.fn().mockResolvedValue([]),
 		getEventCount: vi.fn().mockResolvedValue(0),
+		checkReadiness: vi.fn().mockResolvedValue({
+			ready: true,
+			checkedAt: '2026-01-01T00:00:00.000Z',
+			agents: 0,
+			workspaces: 0,
+			subscriptions: 0,
+			gaps: [],
+		}),
 		enable: vi.fn().mockResolvedValue(undefined),
 		disable: vi.fn().mockResolvedValue(undefined),
 		setActive: vi.fn().mockResolvedValue(undefined),
@@ -889,6 +910,22 @@ const mockMaestro = {
 		requestAccess: vi.fn().mockResolvedValue(null),
 		readyPath: vi.fn().mockResolvedValue(null),
 		onStatusChanged: vi.fn(() => () => {}),
+	},
+	// Dataview (Encore Feature, off by default). Queries never resolve on their
+	// own; a test that renders a block sets the answer it needs.
+	dataview: {
+		query: vi.fn(() => new Promise(() => {})),
+		queryInline: vi.fn(() => new Promise(() => {})),
+		status: vi.fn().mockResolvedValue([]),
+		rebuild: vi.fn().mockResolvedValue(null),
+		jsSnapshot: vi.fn(() => new Promise(() => {})),
+		readInRoot: vi.fn(() => new Promise(() => {})),
+		jsRoot: vi.fn(() => new Promise(() => {})),
+		jsRunOnce: vi.fn(() => new Promise(() => {})),
+		trustedRoots: vi.fn().mockResolvedValue([]),
+		trust: vi.fn(() => new Promise(() => {})),
+		untrust: vi.fn(() => new Promise(() => {})),
+		onChanged: vi.fn(() => () => {}),
 	},
 	// Quick Chat (floating window + its engine). Subscriptions return a no-op
 	// unsubscribe so App's engine hook mounts and cleans up in every render test.

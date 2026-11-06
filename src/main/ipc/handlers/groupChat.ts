@@ -90,13 +90,13 @@ import {
 
 // Agent detector import
 import { AgentDetector } from '../../agents';
-import { groomContext } from '../../utils/context-groomer';
+import { groomContext, GroomingAgentError } from '../../utils/context-groomer';
 import { createSshRemoteStoreAdapter } from '../../utils/ssh-remote-resolver';
 import { getSessionsStore, getSettingsStore } from '../../stores';
 import { v4 as uuidv4 } from 'uuid';
 import { captureException } from '../../utils/sentry';
 import { cheapTurnSettings } from '../../../shared/modelTiers';
-import type { ToolType } from '../../../shared/types';
+import type { AgentErrorType, ToolType } from '../../../shared/types';
 import {
 	getClaudeTokenSourceFields,
 	type ClaudeTokenSourceFields,
@@ -182,6 +182,19 @@ function findParticipantSourceSession(participantName: string) {
 export type GroupChatState = 'idle' | 'moderator-thinking' | 'agent-working';
 
 /**
+ * Agent error categories that describe the user's account or connection, not
+ * a fault in Maestro. `agent_crashed`, `permission_denied` and `unknown` are
+ * deliberately absent: those are the shapes a real grooming bug would take.
+ */
+const EXPECTED_GROOMING_AGENT_ERRORS: ReadonlySet<AgentErrorType> = new Set<AgentErrorType>([
+	'auth_expired',
+	'rate_limited',
+	'token_exhaustion',
+	'network_error',
+	'session_not_found',
+]);
+
+/**
  * Grooming failures that are expected, user-environment conditions rather than
  * Maestro bugs. `resetContext` below always recovers from them by starting the
  * participant on a fresh session, so reporting them to Sentry is pure noise.
@@ -196,14 +209,33 @@ export type GroupChatState = 'idle' | 'moderator-thinking' | 'agent-working';
  *   from here (MAESTRO-JS).
  * - Revoked / unrefreshable provider credentials - the user has to sign back
  *   in; grooming just happened to be the call that surfaced it (MAESTRO-K7).
+ * - Any agent-reported error the provider's parser already classified as the
+ *   user's account or connection (`EXPECTED_GROOMING_AGENT_ERRORS`): a login
+ *   that expired, a plan out of quota, a rate limit, a network drop. The
+ *   message wording differs per provider ("Authentication failed. Sign in
+ *   again", "Unauthorized access. Please check your API key.", "Individual
+ *   quota reached"), which is why this reads the parser's category rather than
+ *   another regex (MAESTRO-K7).
+ * - Provider wordings of a missing session that do not say "Session not
+ *   found" verbatim: Oh My Pi's `Session "<id>" not found` and Codex's
+ *   "Previous Codex session could not be found" (MAESTRO-JB).
  *
  * Anything else still reports, so a genuine fault in the grooming path keeps
- * surfacing.
+ * surfacing - including a crashed agent (`agent_crashed`, "Agent exited with
+ * code N") and a summary that timed out with no output.
  */
 export function isExpectedGroomingFailure(error: unknown): boolean {
+	if (
+		error instanceof GroomingAgentError &&
+		error.agentErrorType !== undefined &&
+		EXPECTED_GROOMING_AGENT_ERRORS.has(error.agentErrorType)
+	) {
+		return true;
+	}
 	const message = error instanceof Error ? error.message : String(error);
 	return (
 		/Session not found/i.test(message) ||
+		/\bsession\b(?: "[^"]*")? (?:not found|could not be found)/i.test(message) ||
 		/Agent .* is not available/i.test(message) ||
 		/Failed to spawn grooming process for /i.test(message) ||
 		/(access token could not be refreshed|refresh token was revoked)/i.test(message)

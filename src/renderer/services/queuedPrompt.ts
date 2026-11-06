@@ -32,7 +32,8 @@ import {
 	mergeQueuedItemIntoPrevious,
 } from '../utils/executionQueue';
 import { captureQueuedTurnSettings } from '../utils/providerTabSessions';
-import { planCrossAgentMentions } from './crossAgentMentions';
+import { planCrossAgentMentions, queuedMentionFields } from './crossAgentMentions';
+import type { MentionRouting } from '../../shared/crossAgentContext';
 import { generateId } from '../utils/ids';
 import { logger } from '../utils/logger';
 
@@ -46,6 +47,12 @@ export interface QueuedPromptOptions {
 	images?: string[];
 	/** Resolve a slash command through the command queue when this item drains. */
 	slashCommand?: boolean;
+	/**
+	 * A routing picked for the message's `@mentions` (`dispatch --routing`), the
+	 * way the composer's routing strip picks one. Stamped on the item, because the
+	 * drain re-plans from the text and the text alone would route it by wording.
+	 */
+	mentionRouting?: MentionRouting;
 	/** The dispatching operation's context, when a program queued this prompt
 	 *  (`maestro-cli dispatch`); stored on the item so the drain spawns the turn
 	 *  as that operation's child. Absent for text a person typed. */
@@ -75,12 +82,15 @@ export function buildQueuedMessageItem({
 	text,
 	images,
 	slashCommand,
+	mentionRouting,
 	delegation,
 	dispatchTicket,
 }: QueuedPromptOptions): QueuedItem {
 	const commandText = slashCommand ? text.trim() : undefined;
 	const firstWhitespace = commandText?.search(/\s/) ?? -1;
-	const mentionPlan = slashCommand ? null : planCrossAgentMentions(text, session.id);
+	const mentionPlan = slashCommand
+		? null
+		: planCrossAgentMentions(text, session.id, mentionRouting);
 	return {
 		id: generateId(),
 		timestamp: Date.now(),
@@ -96,10 +106,8 @@ export function buildQueuedMessageItem({
 		tabName: getTabDisplayName(tab, session.agentSessionId),
 		readOnlyMode: tab.readOnlyMode === true || tab.permissionMode === 'readonly',
 		turnSettings: captureQueuedTurnSettings(tab, session),
-		...(mentionPlan && {
-			crossAgentMention: true,
-			crossAgentOnly: mentionPlan.suppressLocal,
-		}),
+		...queuedMentionFields(mentionPlan),
+		...(mentionPlan && { crossAgentOnly: mentionPlan.suppressLocal }),
 		...(delegation && { delegation }),
 		...(dispatchTicket && { dispatchTicket }),
 	};
@@ -150,6 +158,8 @@ export function enqueuePromptForTab(options: {
 	images?: string[];
 	slashCommand?: boolean;
 	expandCommands?: boolean;
+	/** See {@link QueuedPromptOptions.mentionRouting}. */
+	mentionRouting?: MentionRouting;
 	/** See {@link QueuedPromptOptions.delegation}. */
 	delegation?: ManagedDelegationContext;
 	/** See {@link QueuedPromptOptions.dispatchTicket}. */
@@ -162,6 +172,7 @@ export function enqueuePromptForTab(options: {
 		images,
 		slashCommand,
 		expandCommands,
+		mentionRouting,
 		delegation,
 		dispatchTicket,
 	} = options;
@@ -177,6 +188,7 @@ export function enqueuePromptForTab(options: {
 		text,
 		images,
 		slashCommand,
+		mentionRouting,
 		delegation,
 		dispatchTicket,
 	});

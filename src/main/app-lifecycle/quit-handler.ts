@@ -23,6 +23,7 @@ import { isMacOS } from '../../shared/platformDetection';
 import { flushTranscriptMirrorsSync } from '../storage/starred-transcript-mirror';
 import { flushPendingSessionWritesSync } from '../stores';
 import { flushCotConfigStoreSync } from '../cot-export/config-store';
+import { shutdownDataviewService } from '../dataview/dataview-service';
 
 /**
  * Safety timeout for quit confirmation from the renderer.
@@ -99,6 +100,8 @@ export interface QuitHandlerDependencies {
 	tunnelManager: typeof tunnelManagerInstance;
 	/** Function to close the stats database */
 	closeStatsDB: () => void;
+	/** Synchronous permanent authority fence, only after quit is confirmed. */
+	stopPluginToolAuthority?: () => void;
 	/** Function to stop CLI watcher (optional, may not be started yet) */
 	stopCliWatcher?: () => void;
 	/** Function to stop settings file watcher (optional, may not be started yet) */
@@ -176,6 +179,7 @@ export function createQuitHandler(deps: QuitHandlerDependencies): QuitHandler {
 		getHistoryManager,
 		tunnelManager,
 		closeStatsDB,
+		stopPluginToolAuthority,
 		stopCliWatcher,
 		stopSettingsWatcher,
 		releaseDataDirLock,
@@ -342,6 +346,13 @@ export function createQuitHandler(deps: QuitHandlerDependencies): QuitHandler {
 	 * Called synchronously from before-quit, so async operations are fire-and-forget.
 	 */
 	function performCleanup(): void {
+		// Retire before persistence/watch/process callbacks can reenter tool ingress.
+		// A failed private-file cleanup must not prevent the rest of shutdown.
+		try {
+			stopPluginToolAuthority?.();
+		} catch {
+			logger.warn('Plugin tool authority retirement failed', 'Shutdown');
+		}
 		logger.info('Application shutting down', 'Shutdown');
 
 		// Land the last sessions write before anything else. Session persistence is
@@ -376,6 +387,10 @@ export function createQuitHandler(deps: QuitHandlerDependencies): QuitHandler {
 
 		// Stop history manager watcher
 		getHistoryManager().stopWatching();
+
+		// Stop every Dataview watcher, poller, and idle timer. Fire-and-forget: a cache write cut off by
+		// the force-exit is safe to lose, since the next open reconciles the vault against the disk.
+		void shutdownDataviewService();
 
 		// Flush every open starred tab's transcript to Maestro's own mirror. Done
 		// synchronously (not fire-and-forget) because the process is SIGKILLed

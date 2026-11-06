@@ -272,6 +272,33 @@ describe('prepareGroupChatSpawn', () => {
 			expect(prepared.args).toEqual(expect.arrayContaining(['--max-wait', '600', '--print']));
 			expect(prepared.customEnvVars).toMatchObject({ MAESTRO_CLAUDE_BIN: '/usr/local/bin/claude' });
 		});
+
+		it('passes the workspace-trust opt-in to maestro-p only when the turn asks for it (#1872)', async () => {
+			const interactiveDeps = depsOf({
+				resolveClaudeSpawnMode: (input) =>
+					resolveClaudeSpawnModeCore(input, {
+						getMaestroPBinPath: () => '/app/maestro-p.js',
+						isMaestroPBinaryPath: (p) => !!p && p.includes('maestro-p'),
+						resolveConfigDirKey: () => 'default',
+						getUsageSnapshot: () => null,
+						fileExists: () => true,
+						getRemoteMaestroPAvailable: () => undefined,
+						selectMode: () => ({ mode: 'interactive', reason: 'auto' }),
+					}),
+			});
+
+			const trusted = await prepareGroupChatSpawn(
+				spawnOf({ tokenMode: 'interactive', acceptWorkspaceTrust: true }),
+				interactiveDeps
+			);
+			const untrusted = await prepareGroupChatSpawn(
+				spawnOf({ tokenMode: 'interactive' }),
+				interactiveDeps
+			);
+
+			expect(trusted.customEnvVars?.MAESTRO_P_ACCEPT_WORKSPACE_TRUST).toBe('1');
+			expect(untrusted.customEnvVars?.MAESTRO_P_ACCEPT_WORKSPACE_TRUST).toBeUndefined();
+		});
 	});
 
 	describe('the steering socket', () => {

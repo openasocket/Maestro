@@ -584,10 +584,60 @@ describe('persistence IPC handlers', () => {
 				mockSettingsStore.get.mockReturnValue({ maxAgents: 99 });
 
 				const handler = handlers.get('settings:set');
-				await handler!({} as any, 'autoRunStats', { cumulativeTimeMs: 5 });
+				await handler!({} as any, 'onboardingStats', { wizardStartCount: 5 });
+
+				expect(mockSettingsStore.set).toHaveBeenCalledWith('onboardingStats', {
+					wizardStartCount: 5,
+				});
+			});
+		});
+
+		// autoRunStats is lifetime Conductor time, runs and badges. A Cue credit
+		// applied to a zeroed renderer copy once replaced 1,352 hours with 10.
+		describe('autoRunStats totals', () => {
+			const stored = {
+				cumulativeTimeMs: 4_869_514_889,
+				cueTimeMs: 1_655_880_000,
+				longestRunMs: 82_370_665,
+				longestRunTimestamp: 1_783_641_600_000,
+				totalRuns: 326,
+				currentBadgeLevel: 6,
+				lastBadgeUnlockLevel: 6,
+				lastAcknowledgedBadgeLevel: 6,
+				badgeHistory: [{ level: 2, unlockedAt: 1_764_668_373_382 }],
+			};
+
+			it('refuses a write from a caller whose baseline was zeroed', async () => {
+				mockSettingsStore.get.mockReturnValue(stored);
+
+				const handler = handlers.get('settings:set');
+				await handler!({} as any, 'autoRunStats', {
+					cumulativeTimeMs: 60_000,
+					cueTimeMs: 60_000,
+					longestRunMs: 0,
+					longestRunTimestamp: 0,
+					totalRuns: 0,
+					currentBadgeLevel: 0,
+					lastBadgeUnlockLevel: 0,
+					lastAcknowledgedBadgeLevel: 0,
+					badgeHistory: [],
+				});
+
+				expect(mockSettingsStore.set).toHaveBeenCalledWith('autoRunStats', stored);
+			});
+
+			it('takes a genuine increase', async () => {
+				mockSettingsStore.get.mockReturnValue(stored);
+
+				const handler = handlers.get('settings:set');
+				await handler!({} as any, 'autoRunStats', {
+					...stored,
+					cumulativeTimeMs: stored.cumulativeTimeMs + 60_000,
+				});
 
 				expect(mockSettingsStore.set).toHaveBeenCalledWith('autoRunStats', {
-					cumulativeTimeMs: 5,
+					...stored,
+					cumulativeTimeMs: stored.cumulativeTimeMs + 60_000,
 				});
 			});
 		});
@@ -833,6 +883,35 @@ describe('persistence IPC handlers', () => {
 			const result = await handler!({} as any);
 
 			expect(result).toEqual([]);
+		});
+
+		it('heals closed-tab stacks to their stored form and rewrites the store once', async () => {
+			const sessions = [
+				{
+					id: 'session-1',
+					toolType: 'claude-code',
+					closedTabHistory: [
+						{ tab: { id: 'closed', logs: [{ id: 'l1' }] }, index: 0, closedAt: 1 },
+					],
+					unifiedClosedTabHistory: [
+						{
+							type: 'ai',
+							tab: { id: 'closed', agentSessionId: 'provider-1', logs: [{ id: 'l1' }] },
+							unifiedIndex: 0,
+							closedAt: 1,
+						},
+					],
+				},
+				{ id: 'session-2', toolType: 'claude-code', unifiedClosedTabHistory: [] },
+			];
+			mockSessionsStore.get.mockReturnValue(sessions);
+
+			const result = (await handlers.get('sessions:getAll')!({} as any)) as any[];
+
+			expect(result[0]).not.toHaveProperty('closedTabHistory');
+			expect(result[0].unifiedClosedTabHistory[0].tab.logs).toEqual([]);
+			expect(result[1]).not.toHaveProperty('unifiedClosedTabHistory');
+			expect(mockSessionsStore.set).toHaveBeenCalledWith('sessions', result);
 		});
 
 		it('should compact oversized tool output before returning legacy sessions', async () => {
@@ -1720,6 +1799,43 @@ describe('persistence IPC handlers', () => {
 				'sessions',
 				expect.arrayContaining([expect.objectContaining({ id: 's1', name: 'Updated' })])
 			);
+		});
+
+		it('normalizes the closed-tab stack of a raw write with no baseline', async () => {
+			mockSessionsStore.get.mockReturnValue([{ ...baseSession }]);
+
+			await handlers.get('sessions:setMany')!(
+				{} as any,
+				[
+					{
+						...baseSession,
+						toolType: 'claude-code',
+						closedTabHistory: [{ tab: { id: 'closed', logs: [] }, index: 0, closedAt: 1 }],
+						unifiedClosedTabHistory: [
+							{
+								type: 'ai',
+								tab: {
+									id: 'closed',
+									agentSessionId: 'provider-1',
+									logs: [{ id: 'l1' }],
+									state: 'busy',
+								},
+								unifiedIndex: 0,
+								closedAt: 1,
+							},
+						],
+					},
+				],
+				[]
+			);
+
+			const persisted = mockSessionsStore.set.mock.calls[0][1];
+			expect(persisted[0]).not.toHaveProperty('closedTabHistory');
+			expect(persisted[0].unifiedClosedTabHistory[0].tab).toMatchObject({
+				id: 'closed',
+				logs: [],
+				state: 'idle',
+			});
 		});
 
 		it('compacts oversized tool output before writing merged sessions', async () => {

@@ -17,6 +17,7 @@ import {
 	withdrawDispatchTicket,
 } from '../../auth/transport-actor';
 import { LOG_CONTEXT } from './shared';
+import { parseMentionRoutingField } from '../../../../shared/crossAgentContext';
 import type { WebClient, WebClientMessage, MessageHandlerContext } from './types';
 
 /**
@@ -71,6 +72,14 @@ export function handleEnqueueCommand(
 
 	if (!ctx.callbacks.enqueueCommand) {
 		sendErrorResult('Enqueue not configured');
+		return;
+	}
+
+	// `dispatch --queue --routing`: refuse a routing that is not one rather than
+	// queue the prompt on the wording's routing.
+	const routingField = parseMentionRoutingField(message.mentionRouting);
+	if (!routingField.ok) {
+		sendErrorResult(routingField.error);
 		return;
 	}
 
@@ -130,6 +139,7 @@ export function handleEnqueueCommand(
 			images,
 			background,
 			held,
+			routingField.routing,
 			delegation,
 			dispatchTicket
 		)

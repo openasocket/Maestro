@@ -233,6 +233,8 @@ describe('runProcess managed admission', () => {
 		expect(result.status).toBe('failed');
 		expect(result.exitCode).toBeNull();
 		expect(result.managed).toEqual({ state: 'denied', code: 'policy-denied' });
+		// A refusal is a host-proven nonstart: the run manager may retry it.
+		expect(result.executionStarted).toBe(false);
 		expect(result.stderr).toBe('[managed-denied] Cue prompts are not allowed for this agent.');
 		expect(onLog).toHaveBeenCalledWith('warn', expect.stringContaining('(denied, policy-denied)'));
 		// A decision, not a crash: nothing for Sentry.
@@ -248,6 +250,7 @@ describe('runProcess managed admission', () => {
 		expect(mockSpawn).not.toHaveBeenCalled();
 		expect(result.status).toBe('failed');
 		expect(result.managed).toEqual({ state: 'unavailable', code: 'runtime-unavailable' });
+		expect(result.executionStarted).toBe(false);
 		expect(result.stderr).toContain('The endpoint is away.');
 	});
 
@@ -288,8 +291,40 @@ describe('runProcess managed admission', () => {
 		);
 		expect(mockSpawn).not.toHaveBeenCalled();
 		expect(result.status).toBe('stopped');
+		expect(result.executionStarted).toBe(false);
 		expect(leases).toEqual([]);
 		expect(authority.live()).toEqual([]);
+	});
+
+	it('a spawn that throws after the admission releases the lease as spawn-failed', async () => {
+		const { authority } = tableAuthority(() => ({ decision: 'allow', policyRevision: 3 }));
+		const leases: DispatchLease[] = [];
+		mockSpawn.mockImplementationOnce(() => {
+			throw new Error('spawn EINVAL');
+		});
+		const result = await runProcess(
+			'run-1',
+			spec(),
+			options({ managed: managedSpawn(authority, { onLease: (lease) => leases.push(lease) }) })
+		);
+
+		// The native spawn threw, so nothing ran: a host-proven nonstart.
+		expect(result.status).toBe('failed');
+		expect(result.executionStarted).toBe(false);
+		expect(result.stderr).toBe('Spawn error: spawn EINVAL');
+		expect(result.managed).toBeUndefined();
+		// The lease ends here instead of staying live until it expires.
+		expect(leases).toHaveLength(1);
+		expect(leases[0].state()).toBe('released');
+		expect(leases[0].ended().release).toEqual({
+			outcome: 'spawn-failed',
+			message: 'spawn EINVAL',
+		});
+		expect(authority.live()).toEqual([]);
+		expect(mockCaptureException).toHaveBeenCalledWith(
+			expect.objectContaining({ name: 'TurnNotStartedError', message: 'spawn EINVAL' }),
+			expect.objectContaining({ operation: 'cue:spawn', runId: 'run-1' })
+		);
 	});
 
 	it('without an admission the spawn is unchanged', async () => {

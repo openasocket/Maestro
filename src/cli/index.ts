@@ -59,6 +59,7 @@ import {
 	groupChatSteer,
 	groupChatStatus,
 	groupChatStop,
+	groupChatArchive,
 } from './commands/group-chat';
 import { doctor } from './commands/doctor';
 import { completions } from './commands/completions';
@@ -88,6 +89,8 @@ import {
 import { bundleExport, bundleImport, bundleInspect, bundleValidate } from './commands/bundle';
 import { hostStart, hostStatus, hostStop } from './commands/host';
 import { createAgent } from './commands/create-agent';
+import { duplicateAgent } from './commands/duplicate-agent';
+import { liveStatus, liveOn, liveOff, liveTunnel } from './commands/live';
 import { createGroup } from './commands/create-group';
 import { removeGroup } from './commands/remove-group';
 import { createWorktree } from './commands/create-worktree';
@@ -129,6 +132,15 @@ import { notificationInbox } from './commands/notification-inbox';
 import { profilingStart, profilingStop, profilingStatus } from './commands/profiling';
 import { quickChat } from './commands/quick-chat';
 import { maestroRun } from './commands/maestro-run';
+import {
+	dataviewEval,
+	dataviewIndexRebuild,
+	dataviewTrust,
+	dataviewTrusted,
+	dataviewUntrust,
+	dataviewIndexStatus,
+	dataviewQuery,
+} from './commands/dataview';
 import { cadenzaOpen, cadenzaUpdate, cadenzaClose } from './commands/cadenza';
 import {
 	movementBegin,
@@ -152,7 +164,7 @@ import {
 	feedbackSubmit,
 	feedbackSubscribe,
 } from './commands/feedback';
-import { stats, statsQuery, statsTokens } from './commands/stats';
+import { stats, statsIndexing, statsQuery, statsTokens } from './commands/stats';
 import { renameAgent } from './commands/rename-agent';
 import { renameGroup } from './commands/rename-group';
 import { updateGroup } from './commands/update-group';
@@ -168,6 +180,7 @@ import {
 import { steerAutoRunCancel, steerAutoRunList, steerAutoRunSend } from './commands/steer-auto-run';
 import { removePlaybook } from './commands/remove-playbook';
 import { focusAgent, switchMode } from './commands/agent-control';
+import { interrupt } from './commands/interrupt';
 import {
 	tabNew,
 	tabClose,
@@ -182,6 +195,11 @@ import {
 	tabEffort,
 	tabEnterToSend,
 	tabShow,
+	tabClosed,
+	tabReopen,
+	tabCompact,
+	tabMerge,
+	tabTransfer,
 } from './commands/tab';
 import { setBookmark } from './commands/bookmark';
 import { setTheme } from './commands/set-theme';
@@ -580,6 +598,10 @@ program
 	)
 	.option('--wait', 'Alias for --queue')
 	.option(
+		'--routing <mode>',
+		"How the message's @mentions run, like the composer's routing strip: parallel (both answer, this agent waits for the reply), consult-first (the mentioned agent answers first), handoff (this agent's answer is sent on), or only (just the mentioned agents answer). Overrides what the wording implies. Requires an @mention of another agent in the message; read it back with `queue list`."
+	)
+	.option(
 		'--held',
 		"Queue the prompt PAUSED, even when the agent is idle, like the Send menu's Queue Held. It keeps its place until `queue resume <item-id>`. Implies --queue; returns the item id."
 	)
@@ -589,7 +611,7 @@ program
 	)
 	.option(
 		'--callback-tab <id>',
-		'Specific tab of the --notify-on-complete agent to wake (default: its active AI tab)'
+		'Specific tab of the --notify-on-complete agent to wake (default: the calling tab when an agent notifies itself, else its active AI tab)'
 	)
 	.option(
 		'--callback-prompt <text>',
@@ -922,6 +944,15 @@ groupChat
 	.description("Stop a group chat's moderator and participants")
 	.option('--json', 'Output as JSON (for scripting)')
 	.action(groupChatStop);
+
+groupChat
+	.command('archive <chat>')
+	.description(
+		'Archive a group chat (stops its moderator and participants); --restore brings it back'
+	)
+	.option('--restore', 'Unarchive the chat instead')
+	.option('--json', 'Output as JSON (for scripting)')
+	.action(groupChatArchive);
 
 // Open file command - open a file in the Maestro desktop app.
 //
@@ -1591,6 +1622,11 @@ bundle
 		'--no-claude-memory',
 		'Leave out CLAUDE.md and Claude auto memory (exported with secret-looking tokens redacted)'
 	)
+	.option('--no-cue', "Leave out the agent's Cue subscriptions (--agent only)")
+	.option(
+		'--exact',
+		'Exact copy: also carry secret values, binary paths, SSH and other providers settings, and local folders, so an import on this machine restores the agent as it was. Do not share the file'
+	)
 	.option('--json', 'Output as JSON (for scripting)')
 	.action((options) => bundleExport(cliVersion, options));
 
@@ -1632,6 +1668,11 @@ bundle
 	.option('--data-dir <path>', 'Import into this Maestro data directory instead of the default')
 	.option('--dry-run', 'Report everything the import would do, including conflicts; write nothing')
 	.option('--force', 'Overwrite conflicting agents, subscriptions, playbooks, files, and paths')
+	.option('-g, --group <id>', 'Put the agents the import creates in this Left Bar group')
+	.option(
+		'--no-local',
+		"Ignore an exact copy's machine data (secret values, binary paths, SSH, folders)"
+	)
 	.option(
 		'--reject-shell-commands',
 		'Refuse the import, before anything is written, if any subscription runs a shell command'
@@ -1785,6 +1826,23 @@ program
 	.option('--json', 'Output as JSON (for scripting)')
 	.action(createAgent);
 
+// Duplicate agent command - the Left Bar's "Duplicate...", with the same carry-over rules
+program
+	.command('duplicate-agent <agent>')
+	.description(
+		'Duplicate an agent with the same settings the Left Bar "Duplicate..." copies (read back with show-agent)'
+	)
+	.option('-n, --name <name>', 'Name for the copy (default: "<source name> (Copy)")')
+	.option('-g, --group <id>', "Group ID or prefix for the copy (default: the source agent's group)")
+	.option(
+		'-d, --cwd <path>',
+		"Working directory for the copy (default: the source agent's; a remote path for an SSH agent)"
+	)
+	.option('--background', 'Create the copy without selecting it (Left Bar selection stays put)')
+	.option('--focus', 'Select the copy after creating it (default)')
+	.option('--json', 'Output as JSON (for scripting)')
+	.action(duplicateAgent);
+
 // Folders, standard icons and label colors belong to Groups+: their options are
 // left out of --help while it is off, and passing one then is refused.
 const GROUPS_PLUS_OPTION_KEYS = [
@@ -1841,7 +1899,7 @@ program
 program
 	.command('update-group <group-id>')
 	.description(
-		"Update a group's name, icon, color, parent, or Left Bar visibility in the Maestro desktop app"
+		"Update a group's name, icon, color, parent, Left Bar visibility, or collapsed state in the Maestro desktop app"
 	)
 	.option('-n, --name <name>', 'New group name')
 	.option('-e, --emoji <emoji>', 'Emoji icon for the group. Mutually exclusive with --icon')
@@ -1862,6 +1920,8 @@ program
 		'Park the group out of the Left Bar. Its agents stay reachable through search and the switcher'
 	)
 	.option('--show', 'Bring a hidden group back into the Left Bar')
+	.option('--collapse', 'Fold the group in the Left Bar so its agents are tucked away')
+	.option('--expand', 'Unfold a collapsed group in the Left Bar')
 	.option('--json', 'Output as JSON (for scripting)')
 	.hook('preAction', (_command, action) =>
 		requireEncoreForOptions('groupsPlus', action.opts(), GROUPS_PLUS_OPTION_KEYS)
@@ -1956,7 +2016,11 @@ program
 	.option('--bookmark <bool>', 'Bookmark the agent in the Left Bar (true/false)')
 	.option(
 		'--provider <type>',
-		'Translate owned conversations and selected project knowledge to another provider'
+		'Switch to another provider; tabs keep their transcripts and start fresh conversations there'
+	)
+	.option(
+		'--convert',
+		'With --provider: also convert owned conversations and selected project knowledge (opt-in; implied by the translation options below)'
 	)
 	.option('--force', 'Alias for --accept-translation-limitations')
 	.option('--dry-run', 'Plan provider migration without native writes (requires --provider)')
@@ -2019,6 +2083,58 @@ program
 	.option('--focus', 'Switch even when the agent is the one on screen (default)')
 	.option('--json', 'Output as JSON (for scripting)')
 	.action((agentId, mode, options) => switchMode(agentId, mode, options));
+
+// Interrupt command - the Stop pill: stop an agent's running turn, or one tab's
+program
+	.command('interrupt <agent-id>')
+	.description(
+		"Stop an agent's running turn (every busy tab, like the Stop pill), or one tab's with --tab"
+	)
+	.option('--tab <tab-id>', 'Stop only this tab (exact id, unique prefix, or "active")')
+	.option('--json', 'Output as JSON (for scripting)')
+	.action((agentId, options) => interrupt(agentId, options));
+
+// Live mode commands - the Left Bar LIVE pill and its Remote Control row: open
+// the web interface to other devices on the network (and, with the tunnel, to
+// the internet), or close it. Explicit on/off, no toggle.
+const live = program
+	.command('live')
+	.description(
+		'Read or switch Live mode (the web interface other devices on the network can open)'
+	);
+
+live
+	.command('status')
+	.description('Show whether Live mode is on, its web interface URL, and Remote Control')
+	.option('--json', 'Output as JSON (for scripting)')
+	.action((options) => liveStatus(options));
+
+live
+	.command('on')
+	.description(
+		'Turn Live mode on, as the LIVE pill does (no-op when already on; answers with the status)'
+	)
+	.option('--tunnel', 'Also start Remote Control (the Cloudflare tunnel; needs cloudflared)')
+	.option('--background', 'Accepted for uniformity; Live mode moves no view')
+	.option('--json', 'Output as JSON (for scripting)')
+	.action((options) => liveOn(options));
+
+live
+	.command('off')
+	.description(
+		'Turn Live mode off and stop Remote Control, as the LIVE pill does (no-op when already off)'
+	)
+	.option('--background', 'Accepted for uniformity; Live mode moves no view')
+	.option('--json', 'Output as JSON (for scripting)')
+	.action((options) => liveOff(options));
+
+live
+	.command('tunnel <state>')
+	.description(
+		'Start (on) or stop (off) Remote Control, the Cloudflare tunnel to the web interface. "on" needs Live mode on.'
+	)
+	.option('--json', 'Output as JSON (for scripting)')
+	.action((state, options) => liveTunnel(state, options));
 
 // Tab commands - manage an agent's AI tabs in the desktop app. Every verb that
 // takes <tab-id> also accepts the literal "active" (with -a to say whose).
@@ -2128,6 +2244,54 @@ tabTargetOptions(tab.command('enter-to-send <tab-id> <bool>'))
 tabTargetOptions(tab.command('move <tab-id> <position>'))
 	.description('Move a tab to a position in its agent\'s tab bar (0-based, or "first"/"last")')
 	.action((tabId, position, options) => tabMove(tabId, position, options));
+
+tab
+	.command('closed')
+	.description('List the closed tabs an agent can reopen, newest first (index 0 = Cmd+Shift+T)')
+	.option('-a, --agent <id>', 'Whose closed tabs (default: the agent selected in the desktop)')
+	.option('--json', 'Output as JSON (for scripting)')
+	.action((options) => tabClosed(options));
+
+tab
+	.command('reopen')
+	.description('Reopen a closed tab (default: the newest, as Cmd+Shift+T) and print its tab id')
+	.option('-a, --agent <id>', 'Whose closed tabs (default: the agent selected in the desktop)')
+	.option('--index <n>', 'Position from "tab closed" (0 = newest)')
+	.option('--tab <tab-id>', 'The id the tab had when it was closed (exact or unique prefix)')
+	.option('--background', 'Restore the tab without moving the view (agent and tab stay put)')
+	.option('--focus', 'Switch to the restored tab (default)')
+	.option('--json', 'Output as JSON (for scripting)')
+	.action((options) => tabReopen(options));
+
+tabTargetOptions(tab.command('compact [tab-id]'))
+	.description(
+		'Context: Compact - summarize a tab into a new tab beside it (default: the active tab) and print its id'
+	)
+	.option('--background', 'Keep the source tab selected (no view change, no toast)')
+	.option('--focus', 'Switch to the compacted tab (default)')
+	.action((tabId, options) => tabCompact(tabId, options));
+
+tabTargetOptions(tab.command('merge [tab-id]'))
+	.description(
+		"Context: Merge Into - send a tab's transcript, verbatim, into another agent's tab (default: the active tab)"
+	)
+	.requiredOption('--into <agent>', 'The agent whose tab receives the context')
+	.option('--target-tab <tab-id>', "The tab that receives it (default: that agent's active tab)")
+	.option(
+		'--background',
+		'Stay put; the context waits on the target tab and sends when that tab is opened'
+	)
+	.option('--focus', 'Jump to the target tab, which sends the context (default)')
+	.action((tabId, options) => tabMerge(tabId, options));
+
+tabTargetOptions(tab.command('transfer [tab-id]'))
+	.description(
+		"Context: Send to Agent - open a new tab in another agent carrying this tab's transcript, verbatim"
+	)
+	.requiredOption('--to <agent>', 'The agent that gets the new tab')
+	.option('--background', 'Add the tab without selecting it or the agent')
+	.option('--focus', 'Jump to the new tab (default)')
+	.action((tabId, options) => tabTransfer(tabId, options));
 
 // Create SSH remote command - add a new SSH remote configuration
 program
@@ -3117,6 +3281,72 @@ maestroRunCmd
 	.option('--json', 'Output as JSON (for scripting)')
 	.action((options) => maestroRun('grant', options));
 
+// Dataview commands - run the Dataview queries of a note the way File Preview
+// renders them. Every verb reaches the running app's DataviewService, the same
+// one the preview queries. Hidden and refused while the Dataview Encore Feature
+// is off.
+const dataviewCmd = encoreCommand(program, 'dataview', 'dataview', encoreFlags).description(
+	"Dataview: run a note's Dataview queries, manage the vault index, and choose the vaults DataviewJS trusts"
+);
+
+dataviewCmd
+	.command('query <file>')
+	.description(
+		"Run a note's dataview blocks with `this` bound to the note (DataviewJS blocks are desktop-only)"
+	)
+	.option(
+		'--block <n>',
+		'Run only the n-th dataview block (1-based; dataviewjs fences not counted)'
+	)
+	.option('--agent <id>', 'Agent the note belongs to (default: the agent whose folder holds it)')
+	.option('--json', 'Output as JSON (for scripting)')
+	.action((file, options) => dataviewQuery(file, options));
+
+dataviewCmd
+	.command('eval <file> <dql>')
+	.description(
+		'Run an ad-hoc DQL query with `this` bound to the note; start with = for an inline expression'
+	)
+	.option('--agent <id>', 'Agent the note belongs to (default: the agent whose folder holds it)')
+	.option('--json', 'Output as JSON (for scripting)')
+	.action((file, dql, options) => dataviewEval(file, dql, options));
+
+const dataviewIndexCmd = dataviewCmd
+	.command('index')
+	.description('Inspect or rebuild the Dataview index of a vault');
+
+dataviewIndexCmd
+	.command('status [root]')
+	.description('Show the open vault indexes, or one vault root (pages, revision, watcher, cache)')
+	.option('--agent <id>', 'Agent whose SSH remote holds the root (default: a local root)')
+	.option('--json', 'Output as JSON (for scripting)')
+	.action((root, options) => dataviewIndexStatus(root, options));
+
+dataviewIndexCmd
+	.command('rebuild <root>')
+	.description("Drop a vault root's index cache and index it again from scratch")
+	.option('--agent <id>', 'Agent whose SSH remote holds the root (default: a local root)')
+	.option('--json', 'Output as JSON (for scripting)')
+	.action((root, options) => dataviewIndexRebuild(root, options));
+
+dataviewCmd
+	.command('trust <root>')
+	.description('Trust a vault root: its DataviewJS blocks run in the sandbox without asking')
+	.option('--json', 'Output as JSON (for scripting)')
+	.action((root, options) => dataviewTrust(root, options));
+
+dataviewCmd
+	.command('untrust <root>')
+	.description('Stop trusting a vault root: its DataviewJS blocks ask before they run')
+	.option('--json', 'Output as JSON (for scripting)')
+	.action((root, options) => dataviewUntrust(root, options));
+
+dataviewCmd
+	.command('trusted')
+	.description('List the vault roots whose DataviewJS blocks run without asking')
+	.option('--json', 'Output as JSON (for scripting)')
+	.action((options) => dataviewTrusted(options));
+
 // Quick Chat commands - the hotkey-summoned floating chat window. Each verb is
 // the same action as the matching button in the window.
 const quickChatCmd = encoreCommand(program, 'quick-chat', 'quickChat', encoreFlags).description(
@@ -3227,6 +3457,14 @@ quickChatCmd
 	)
 	.option('--json', 'Output as JSON (for scripting)')
 	.action((messageId: string | undefined, options) => quickChat('new-tab', { messageId }, options));
+
+quickChatCmd
+	.command('steer [message-id]')
+	.description(
+		'Steer a queued message into the reply already running in its tab, so the agent changes course now instead of answering it afterwards (default: the latest steerable one)'
+	)
+	.option('--json', 'Output as JSON (for scripting)')
+	.action((messageId: string | undefined, options) => quickChat('steer', { messageId }, options));
 
 quickChatCmd
 	.command('history')
@@ -3542,6 +3780,16 @@ encoreCommand(program, 'stats-tokens', 'usageStats', encoreFlags)
 	.option('--refresh', "Re-read changed transcripts instead of the app's cached result")
 	.option('--json', 'Output the full token usage object as JSON')
 	.action(statsTokens);
+
+program
+	.command('stats-indexing')
+	.description(
+		'Show progress of a usage-data scan (a one-time re-read after an upgrade, or a first index)'
+	)
+	.option('--wait', 'Block until no scan is running, printing progress each second')
+	.option('--timeout <seconds>', 'With --wait, give up after this many seconds (exit code 1)')
+	.option('--json', 'Output as JSON')
+	.action(statsIndexing);
 
 encoreCommand(program, 'stats-query <sql>', 'usageStats', encoreFlags)
 	.description('Run a read-only SQL query against the stats database (SELECT / read PRAGMA only)')

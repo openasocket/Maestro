@@ -63,7 +63,9 @@ import { buildAgentSwitcherCommands } from './commands/agentSwitcherCommands';
 import { buildMediaPlayerCommands } from './commands/mediaPlayerCommands';
 import { buildQuickChatCommands } from './commands/quickChatCommands';
 import { isWebDesktop } from '../../utils/runtimeContext';
+import { buildStatsIndexingCommands } from './commands/statsIndexingCommands';
 import { selectCanOpenMediaPlayer, useMediaPlaybackStore } from '../../stores/mediaPlaybackStore';
+import { selectStatsIndexingActive, useStatsIndexingStore } from '../../stores/statsIndexingStore';
 import { buildActiveTabContextCommands } from './commands/contextCommands';
 import { buildDebugCommands } from './commands/debugCommands';
 import { buildFeatureCommands } from './commands/featureCommands';
@@ -86,11 +88,13 @@ import {
 	buildSessionJumpCommands,
 	buildSessionManagementCommands,
 } from './commands/sessionCommands';
+import { buildStarredSessionCommands } from './commands/starredSessionCommands';
 import { buildSupportCommands } from './commands/supportCommands';
 import { buildNewTabCommands, buildTabCommands } from './commands/tabCommands';
 import { buildTabGroupCommands } from './commands/tabGroupCommands';
 import { buildTileCommands } from './commands/tileCommands';
 import { buildWindowCommands } from './commands/windowCommands';
+import { withAgentInGroup } from '../../../shared/maestro-lib/agents/rules';
 import {
 	buildGroupWindowMoveTargets,
 	buildWindowMoveTargets,
@@ -182,6 +186,7 @@ export const QuickActionsModal = memo(function QuickActionsModal(props: QuickAct
 		onCloseOtherTabs,
 		onCloseTabsLeft,
 		onCloseTabsRight,
+		onCloseTabGroup,
 		onCloseCurrentTab,
 		onMoveTabToFirst,
 		onMoveTabToLast,
@@ -310,6 +315,8 @@ export const QuickActionsModal = memo(function QuickActionsModal(props: QuickAct
 	// sit open while a queued file advances, and landing on a stale id would open
 	// the player on something the user already finished.
 	const openMediaPlayer = useCallback(() => useMediaPlaybackStore.getState().openPlayer(), []);
+	const statsIndexingActive = useStatsIndexingStore(selectStatsIndexingActive);
+	const showStatsIndexingProgress = useStatsIndexingStore((s) => s.bringToFront);
 	const visibleToastCount = useNotificationStore((s) => s.toasts.length);
 	const clearToasts = useNotificationStore((s) => s.clearToasts);
 	const unreadNotificationCount = useNotificationStore(selectUnreadNotificationCount);
@@ -527,14 +534,7 @@ export const QuickActionsModal = memo(function QuickActionsModal(props: QuickAct
 	};
 
 	const handleMoveToGroup = (groupId: string) => {
-		const normalizedGroupId = groupId || undefined;
-		const updatedSessions = sessions.map((s) => {
-			if (s.id === activeSessionId) return { ...s, groupId: normalizedGroupId };
-			// Also update worktree children to keep groupId in sync
-			if (s.parentSessionId === activeSessionId) return { ...s, groupId: normalizedGroupId };
-			return s;
-		});
-		setSessions(updatedSessions);
+		setSessions(withAgentInGroup(sessions, activeSessionId, groupId));
 		setQuickActionOpen(false);
 	};
 
@@ -565,6 +565,12 @@ export const QuickActionsModal = memo(function QuickActionsModal(props: QuickAct
 		jumpSlots,
 	});
 
+	// Starred Sessions: the Left Bar's list (open tabs + closed starred sessions),
+	// published to sidebarNavStore and activated exactly like clicking the row.
+	const starredItems = useSidebarNavStore((s) => s.starredItems);
+	const activateStarredItem = useSidebarNavStore((s) => s.activateStarredItem);
+	const starredActions = buildStarredSessionCommands({ starredItems, activateStarredItem });
+
 	const groupChatActions = buildGroupChatJumpCommands({
 		groupChats,
 		onOpenGroupChat,
@@ -573,6 +579,7 @@ export const QuickActionsModal = memo(function QuickActionsModal(props: QuickAct
 
 	const mainActions: QuickAction[] = [
 		...sessionActions,
+		...starredActions,
 		...groupChatActions,
 		...buildMediaPlayerCommands({
 			canOpenMediaPlayer,
@@ -584,6 +591,11 @@ export const QuickActionsModal = memo(function QuickActionsModal(props: QuickAct
 			quickChatAvailable,
 			hotkey: quickChatHotkey,
 			openQuickChat: () => void window.maestro.quickChat.window('show'),
+			setQuickActionOpen,
+		}),
+		...buildStatsIndexingCommands({
+			scanActive: statsIndexingActive,
+			showScanProgress: showStatsIndexingProgress,
 			setQuickActionOpen,
 		}),
 		...buildConcertoCommands({
@@ -783,6 +795,8 @@ export const QuickActionsModal = memo(function QuickActionsModal(props: QuickAct
 		...buildTabGroupCommands({
 			activeSession,
 			setQuickActionOpen,
+			renameTabGroupShortcut: tabShortcuts?.renameTabGroup,
+			onCloseTabGroup,
 		}),
 		...buildTileCommands({
 			activeSession,

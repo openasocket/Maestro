@@ -62,7 +62,7 @@ Open the Cue modal to monitor and manage all automation activity.
 
 - Press `Cmd+K` / `Ctrl+K` and search for "Maestro Cue"
 
-The modal has six tabs - **Dashboard**, **Scheduled Tasks**, **Pipeline Graph**, **Pipeline List**, **Activity Log**, and **Backup** - plus a **Help** button and an **Enabled** master toggle in the header that starts and stops the engine globally.
+The modal has eight tabs - **Dashboard**, **Scheduled Tasks**, **Pipeline Graph**, **Pipeline List**, **Activity Log**, **Backup**, **Bundles** (see [Cue Bundles](./maestro-cue-bundles)), and **Readiness** - plus a **Help** button and an **Enabled** master toggle in the header that starts and stops the engine globally.
 
 **From an agent:** ask any Maestro agent to open it and it will run `maestro-cli open cue`, optionally on a tab (`maestro-cli open cue --tab scheduled`). See [Opening a surface from the CLI](./cli-reference#maestro-cli-open).
 
@@ -100,15 +100,17 @@ An agent "owns" a pipeline in either of two senses, and both count for the
 
 **View in Graph** then does one of three things:
 
-| The agent owns... | What you get                                                                                                    |
-| ----------------- | --------------------------------------------------------------------------------------------------------------- |
-| One pipeline      | That pipeline, selected and fitted                                                                              |
-| Several           | The All Pipelines view narrowed to just that agent's, with a chip in the toolbar naming the agent and the count |
-| None              | The unfiltered All Pipelines view                                                                               |
+| The agent owns... | What you get                                                                                           |
+| ----------------- | ------------------------------------------------------------------------------------------------------ |
+| One pipeline      | That pipeline, selected and fitted                                                                     |
+| Several           | The All Pipelines view narrowed to just that agent's, with the selector naming the agent and the count |
+| None              | The unfiltered All Pipelines view                                                                      |
 
-Click the `x` on the chip, or pick any pipeline from the selector, to widen back
-out to every pipeline. The scope only changes what the canvas draws - it never
-edits a pipeline, and the All Pipelines view stays read-only either way.
+Click the `x` beside the selector, or pick **All Pipelines** from it, to widen
+back out to every pipeline. Opening one of the agent's pipelines keeps a back
+button to the agent's view; picking a pipeline that is not the agent's drops the
+scope. The scope only changes what the canvas draws - it never edits a pipeline,
+and the narrowed view is read-only like All Pipelines.
 
 Below the sessions table, the **Active Runs** section lists subscriptions that are currently executing, with a **Stop** button for each.
 
@@ -159,11 +161,22 @@ The Pipeline Graph tab visualizes your Cue subscriptions as a node graph - trigg
 
 Each pipeline is color-coded and labeled. Trigger nodes show the event type and configuration (glob patterns, schedule times, etc.), while agent nodes show the provider type. Pipelines from all agents are displayed together so you can see cross-agent relationships at a glance.
 
+In the **All Pipelines** view, pipelines are grouped by the agent that owns them, with a labeled box around each agent's group. A pipeline can involve several agents but sits in only one place on the map: its home is the agent whose `cue.yaml` declares it (or, for an unsaved pipeline, its first agent).
+
+### Picking What to Show
+
+The selector in the top bar is one filterable list with two sections. Type to narrow both at once:
+
+- **Pipelines** - opens that one pipeline for editing.
+- **Agents** - narrows All Pipelines to every pipeline that agent belongs to, including ones that live in another agent's group. The narrowed view packs those pipelines together, in the same grouping and order they have in All Pipelines, so nothing floats in empty space where the hidden pipelines were.
+
+Press <kbd>Enter</kbd> to take the first match, <kbd>Esc</kbd> once to clear the filter and again to close the list.
+
 A pipeline can contain **multiple trigger lines** - for example, a daily scan and a weekly review grouped under a single "Monitoring" pipeline. Use the `# Pipeline:` comment and `-chain-N` naming convention in your YAML to group subscriptions. See [Pipelines](./maestro-cue-configuration#pipelines) in the Configuration Reference for details.
 
 ### Inspecting a Pipeline
 
-Pick a pipeline from the **All Pipelines** dropdown in the top bar, or click any node, to drill into a single pipeline. The **Triggers** drawer (left) and **Agents** drawer (right) toggle from the toolbar and show full configuration details. Selecting a node reveals its details inline at the bottom - including the prompt text for an agent node.
+Pick a pipeline from the selector in the top bar, or click its name in the legend, to drill into a single pipeline. The **Triggers** drawer (left) and **Agents** drawer (right) toggle from the toolbar and show full configuration details. Selecting a node reveals its details inline at the bottom - including the prompt text for an agent node.
 
 ![Pipeline Detail](./screenshots/cue-pipeline.png)
 
@@ -176,7 +189,7 @@ Two layout buttons in the top-right corner clean up a messy canvas. Both snap no
 - **Tidy** keeps each column's current top-to-bottom order, so it only aligns what you already have and leaves any crossing edges as-is.
 - **Arrange** additionally reorders nodes within each column to untangle crossing edges. Reach for it after importing a pipeline or whenever the wiring looks tangled.
 
-In the **All Pipelines** view there are no edges between pipeline cards to cross, so only **Arrange** appears there and it packs the cards into a balanced grid. Either button previews as a confirmation first, and the result can be undone with **Discard** before you save.
+In the **All Pipelines** view there are no edges between pipeline cards to cross, so only **Arrange** appears there: it groups the cards by agent and packs each group, then the groups, into a balanced grid. An agent-narrowed view is laid out on the fly and never saved, so it shows neither button and nothing done there changes the All Pipelines layout. Either button previews as a confirmation first, and the result can be undone with **Discard** before you save.
 
 ### Sending a Slash Command to a New Agent Tab
 
@@ -275,6 +288,12 @@ Click any row - or use **Expand all** - to reveal the full event data: payload f
 ![Activity Log Detail](./screenshots/cue-activity-log-detail.png)
 
 For `file.changed` events the payload includes the path, filename, directory, extension, and change type. For GitHub triggers it includes the PR/issue number, title, author, URL, and body.
+
+## Readiness
+
+The Readiness tab answers one question: could Cue run your enabled subscriptions unattended right now? It checks every agent those subscriptions use (its provider binary, working directory, declared secrets, and SSH remote), every `cue.yaml`, webhook secrets, and `gh` plus a `repo:` on each GitHub trigger. It then shows **Ready**, or **Not ready** with every gap listed, each tagged with its kind and saying what to fix. Press **Refresh** after you fix something.
+
+It is the same report as `maestro-cli cue engine check` (see [Running Cue on a Server](./maestro-cue-server)), and `maestro-cli open cue --tab readiness` opens it.
 
 ## YAML Editor
 

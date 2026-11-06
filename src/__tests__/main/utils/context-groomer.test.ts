@@ -8,7 +8,11 @@
 
 import * as path from 'path';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { groomContext, type GroomingProcessManager } from '../../../main/utils/context-groomer';
+import {
+	groomContext,
+	GroomingAgentError,
+	type GroomingProcessManager,
+} from '../../../main/utils/context-groomer';
 import type { AgentDetector } from '../../../main/agents';
 import type { AgentConfig } from '../../../main/agents';
 import type { SshRemoteSettingsStore } from '../../../main/utils/ssh-remote-resolver';
@@ -761,6 +765,37 @@ describe('groomContext', () => {
 				detector
 			)
 		).rejects.toThrow('Grooming error: agent crashed');
+	});
+
+	it('carries the AgentError category on the rejection so callers can classify it', async () => {
+		const detector = createMockAgentDetector(agent);
+
+		// `agent-error` emits a plain AgentError object, not an Error.
+		mockPM.spawn = vi.fn((config: Record<string, unknown>) => {
+			(mockPM as any)._lastSpawnConfig = config;
+			const sessionId = config.sessionId as string;
+			setTimeout(() => {
+				mockPM._emitError(sessionId, {
+					type: 'auth_expired',
+					message: 'Authentication failed. Sign in again to continue.',
+				});
+			}, 10);
+			return { pid: 12345, success: true };
+		});
+
+		const rejection = await groomContext(
+			{ projectRoot: '/project', agentType: 'claude-code', prompt: 'summarize' },
+			mockPM,
+			detector
+		).catch((err: unknown) => err);
+
+		expect(rejection).toBeInstanceOf(GroomingAgentError);
+		expect((rejection as GroomingAgentError).agentErrorType).toBe('auth_expired');
+		expect((rejection as Error).message).toBe(
+			'Grooming error: Authentication failed. Sign in again to continue.'
+		);
+		// Same exception type Sentry already groups grooming failures under.
+		expect((rejection as Error).name).toBe('Error');
 	});
 
 	it('uses custom timeout when provided', async () => {

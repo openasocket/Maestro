@@ -626,6 +626,10 @@ describe('where a message went', () => {
 			snapshot({ busy: true, messages: [sentMessage('m7', 'one more', { status: 'queued' })] })
 		);
 		expect(screen.getByTestId('quick-chat-route-queued')).toHaveTextContent('Queued');
+		// Drawn as the same tinted pill as Steer, not an underlined link.
+		const newTab = screen.getByTestId('quick-chat-route-new-tab');
+		expect(newTab).toHaveClass('rounded-full');
+		expect(newTab).toHaveAccessibleName('Send to a new tab instead of waiting');
 
 		await act(async () =>
 			fireEvent.click(screen.getByRole('button', { name: /Send to a new tab/ }))
@@ -634,6 +638,35 @@ describe('where a message went', () => {
 			type: 'moveToNewTab',
 			messageId: 'm7',
 		});
+	});
+
+	it('offers Steer on a queued message the running reply can take', async () => {
+		vi.mocked(window.maestro.quickChat.command).mockResolvedValue({
+			ok: true,
+			snapshot: snapshot(),
+		});
+		await renderWith(
+			snapshot({
+				busy: true,
+				messages: [sentMessage('m8', 'change course', { status: 'queued', canSteer: true })],
+			})
+		);
+		await act(async () => fireEvent.click(screen.getByTestId('quick-chat-route-steer')));
+		expect(window.maestro.quickChat.command).toHaveBeenCalledWith({
+			type: 'steer',
+			messageId: 'm8',
+		});
+	});
+
+	it('offers no Steer when the running reply cannot take input', async () => {
+		await renderWith(
+			snapshot({
+				busy: true,
+				messages: [sentMessage('m9', 'later', { status: 'queued', canSteer: false })],
+			})
+		);
+		expect(screen.getByTestId('quick-chat-route-queued')).toBeTruthy();
+		expect(screen.queryByTestId('quick-chat-route-steer')).toBeNull();
 	});
 
 	it('offers no way out for a message that is not waiting', async () => {

@@ -27,6 +27,7 @@ import {
 	resolveClaudeSpawnMode,
 	applyClaudeSpawnDecision,
 	buildRemoteInteractiveSpawn,
+	isAgentOwnWorkingDirectory,
 } from '../agents/resolveClaudeSpawnMode';
 import { getClaudeTokenMode } from '../../shared/claudeTokenMode';
 import { logger } from '../utils/logger';
@@ -276,6 +277,10 @@ export async function buildSpawnSpec(
 		now: new Date(),
 	});
 
+	// A Cue run is the agent working in its own project root, so a TUI run may
+	// accept claude's folder-trust prompt there (#1872).
+	const acceptWorkspaceTrust = isAgentOwnWorkingDirectory(projectRoot, session);
+
 	if (remoteTarget && sshRemoteConfig && sshStore) {
 		// 5. Remote: hand the plan to the SSH wrapper, which owns the ssh command
 		// and places the prompt (inline or through its stdin script). Claude
@@ -288,6 +293,7 @@ export async function buildSpawnSpec(
 			interactiveModeArgs: agentDef.interactiveModeArgs,
 			remoteClaudeBin: claudeSpawnDecision.claudeRealBinPath,
 			maxWaitSeconds: Math.ceil(config.timeoutMs / 1000),
+			acceptWorkspaceTrust,
 		});
 		const sshWrapConfig: SshSpawnWrapConfig = {
 			command: plan.command,
@@ -346,6 +352,7 @@ export async function buildSpawnSpec(
 			// prompt dispatch through maestro-p was capped at 300s regardless of
 			// `timeout_minutes`, killing every long-running background turn.
 			maxWaitSeconds: Math.ceil(config.timeoutMs / 1000),
+			acceptWorkspaceTrust,
 		});
 		command = applied.command;
 		spawnArgs = applied.args;

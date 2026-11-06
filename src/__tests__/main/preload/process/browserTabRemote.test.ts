@@ -28,6 +28,7 @@ vi.mock('electron', () => ({
 }));
 
 import { createBrowserTabRemoteApi } from '../../../../main/preload/process/browserTabRemote';
+import type { ManagedDelegationContext } from '../../../../shared/maestro-lib/managed/delegation';
 
 /** Pull the handler the API registered for a channel, so we can drive it. */
 function registeredHandler(channel: string): (...args: unknown[]) => void {
@@ -171,6 +172,86 @@ describe('Process BrowserTabRemote Preload API', () => {
 				})
 			).toThrow('renderer blew up');
 			expect(mockSend).toHaveBeenCalledWith('chan-1', false);
+		});
+	});
+
+	describe('onRemoteNewAITabWithPrompt - the dispatch slots after hidden (MCOMP-01-03J wire)', () => {
+		const delegation = {
+			identity: { requestId: 'req-1' },
+			traceId: 'trace-1',
+		} as unknown as ManagedDelegationContext;
+
+		it('forwards mentionRouting, delegation and the dispatch ticket in order', () => {
+			const callback = vi.fn();
+			api.onRemoteNewAITabWithPrompt(callback);
+
+			// Exactly what browserTabCallbacks.ts sends over the wire.
+			registeredHandler('remote:newAITabWithPrompt')(
+				null,
+				'session-1',
+				'prompt',
+				'resp-1',
+				true,
+				false,
+				'consult-first',
+				delegation,
+				'tkt-2'
+			);
+
+			expect(callback).toHaveBeenCalledTimes(1);
+			expect(callback).toHaveBeenCalledWith(
+				'session-1',
+				'prompt',
+				'resp-1',
+				true,
+				false,
+				'consult-first',
+				delegation,
+				'tkt-2'
+			);
+		});
+
+		it('leaves the three slots undefined for a plain new tab', () => {
+			const callback = vi.fn();
+			api.onRemoteNewAITabWithPrompt(callback);
+
+			registeredHandler('remote:newAITabWithPrompt')(null, 'session-1', 'prompt', 'resp-1', false);
+
+			expect(callback).toHaveBeenCalledWith(
+				'session-1',
+				'prompt',
+				'resp-1',
+				false,
+				undefined,
+				undefined,
+				undefined,
+				undefined
+			);
+		});
+
+		it('acks false on the response channel before rethrowing a callback error', () => {
+			api.onRemoteNewAITabWithPrompt(() => {
+				throw new Error('boom');
+			});
+
+			expect(() =>
+				registeredHandler('remote:newAITabWithPrompt')(
+					null,
+					'session-1',
+					'prompt',
+					'resp-1',
+					false,
+					false
+				)
+			).toThrow('boom');
+			expect(mockSend).toHaveBeenCalledWith('resp-1', false);
+		});
+
+		it('unsubscribes the listener it registered', () => {
+			const off = api.onRemoteNewAITabWithPrompt(vi.fn());
+			const handler = registeredHandler('remote:newAITabWithPrompt');
+			off();
+			expect(mockRemoveListener).toHaveBeenCalledWith('remote:newAITabWithPrompt', handler);
 		});
 	});
 

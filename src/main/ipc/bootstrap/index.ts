@@ -42,6 +42,7 @@ import {
 	registerEnterpriseHandlers,
 	registerComputerHistoryHandlers,
 	registerMaestroRunHandlers,
+	registerDataviewHandlers,
 	registerLeaderboardHandlers,
 	registerNotificationsHandlers,
 	registerNotificationHistoryHandlers,
@@ -118,6 +119,7 @@ export function setupIpcHandlers(deps: IpcBootstrapDependencies): void {
 		setWebServer: deps.setWebServer,
 		createWebServer: deps.createWebServer,
 		settingsStore: deps.settingsStore,
+		tunnelManager,
 	});
 
 	// Web Login account management - desktop-only, the bridge refuses every
@@ -142,6 +144,10 @@ export function setupIpcHandlers(deps: IpcBootstrapDependencies): void {
 	// MaestroRun - install, grant walkthrough, and the readiness that gates its
 	// system-prompt section. See src/main/ipc/handlers/maestroRun.ts.
 	registerMaestroRunHandlers();
+
+	// Dataview - DQL queries, index status and rebuild, and the `dataview:changed`
+	// push to every window. See src/main/ipc/handlers/dataview.ts.
+	registerDataviewHandlers({ safeSend: deps.safeSend });
 
 	// Git operations - extracted to src/main/ipc/handlers/git.ts
 	registerGitHandlers({
@@ -304,8 +310,6 @@ export function setupIpcHandlers(deps: IpcBootstrapDependencies): void {
 		getMainWindow: deps.getMainWindow,
 		app: deps.app,
 		settingsStore: deps.settingsStore,
-		tunnelManager,
-		getWebServer: deps.getWebServer,
 		bootstrapStore: deps.bootstrapStore, // For iCloud/sync settings
 		localEffects: deps.getLocalEffectAuthority,
 	});
@@ -356,13 +360,8 @@ export function setupIpcHandlers(deps: IpcBootstrapDependencies): void {
 	// Register Core Prompts handlers (no dependencies needed)
 	registerPromptsHandlers();
 
-	// Register project Memory handlers (Claude Code per-project memory viewer)
-	registerMemoryHandlers({
-		sessionsStore: deps.sessionsStore,
-		settingsStore: deps.settingsStore,
-		agentConfigsStore: deps.agentConfigsStore,
-		getAgentDetector: deps.getAgentDetector,
-	});
+	// Register agent Memory handlers (Claude Code per project, Codex per account)
+	registerMemoryHandlers();
 
 	// Register tab lifecycle handlers (renderer -> main tab-close notification)
 	registerTabsHandlers();

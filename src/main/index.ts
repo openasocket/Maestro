@@ -1,3 +1,22 @@
+import { canonicalJson } from '../shared/canonicalJson';
+import { realpathSync, lstatSync } from 'fs';
+import { PluginAuthorityError } from './plugins/plugin-authority';
+import { PluginPrivateState } from './plugins/plugin-private-state';
+import { PluginTlsHost } from './plugins/plugin-tls';
+import { PluginCueEvents } from './plugins/plugin-cue-events';
+import { CueReceiptStore } from './cue/cue-receipt-store';
+import { PluginPrimitives } from './plugins/plugin-primitives';
+import { PluginConfirmationWindows } from './plugins/plugin-confirmation-window';
+import { configurePluginCueHost } from './cue/triggers/cue-plugin-trigger-source';
+import {
+	authenticatedPluginReceiptBaseline,
+	checkpointPluginEventReceipts,
+	purgePluginEventReceipts,
+} from './cue/cue-db';
+import {
+	getPluginRunProofProtectedPaths,
+	pluginToolRunIdentity,
+} from './plugins/plugin-tool-run-identity';
 import {
 	app,
 	BrowserWindow,
@@ -43,7 +62,11 @@ import {
 import { createComputerHistoryForApp } from './computer-history/bootstrap';
 import { getMaestroRunService } from './maestro-run';
 import { createMaestroRunForApp } from './maestro-run/bootstrap';
+import { createDataviewSupervisorHooks } from './dataview/dataview-service';
 import { PluginManager } from './plugins/plugin-manager';
+import { PluginToolRunProofFiles } from './plugins/plugin-tool-run-proof-file';
+import { getRecord, type PluginRecord } from '../shared/plugins/plugin-registry';
+import { isValidAgentId } from '../shared/agentIds';
 import { RELAY_PLUGIN_ID } from '../shared/plugins/relay-identity';
 import { resolveTrustedKeys } from '../shared/plugins/publisher-keys';
 import { seedBundledPlugins } from './plugins/bundled-plugins';
@@ -89,7 +112,9 @@ import { PluginSandboxHost } from './plugins/plugin-sandbox-host';
 import { PluginBackgroundSupervisor } from './plugins/plugin-background-supervisor';
 import { PluginGroupingRegistry } from './plugins/plugin-grouping-registry';
 import {
+	getActivePluginManager,
 	setActivePluginManager,
+	stopActivePluginManager,
 	setHeadlessAgentRunner,
 	type HeadlessAgentRunner,
 } from './plugins/plugin-manager-singleton';
@@ -117,6 +142,7 @@ import { createEgressGuard } from './plugins/net-egress-guard';
 import { createRunUiCommand } from './plugins/run-ui-command';
 import {
 	isPermitted,
+	type PluginCapability,
 	isPermittedUnattended,
 	describeCapability,
 	capabilityRisk,
@@ -142,7 +168,7 @@ import {
 	setFirstPartyBridges,
 } from './plugins/first-party-bridge';
 import { FIRST_PARTY_PLUGINS, type FirstPartyEncoreFlag } from '../shared/plugins/first-party';
-import { pluginIdentity } from './plugins/plugin-identity';
+import { scanPluginFiles } from './plugins/plugin-scan';
 import { PLUGIN_ID_PATTERN } from '../shared/plugins/plugin-manifest';
 import { ConsentNonceRegistry, ConsentMinter } from './plugins/consent-minter';
 import {
@@ -158,7 +184,6 @@ import { executeCueShell } from './cue/cue-shell-executor';
 import { executeCueCli, resolveMaestroCliScriptPath } from './cue/cue-cli-executor';
 import { spawnAgent } from '../cli/services/agent-spawner';
 import { prepareMaestroSystemPromptCli } from '../cli/services/system-prompt';
-import { pluginToolRunIdentity } from './plugins/plugin-tool-run-identity';
 import { getSessionIdsBusyWithCli } from '../shared/cli-activity';
 import { isAgentBusy } from './utils/agent-busy';
 import {
@@ -254,6 +279,7 @@ import { createWebServerFactory } from './web-server/web-server-factory';
 import { registerBrowserRelayHandlers } from './browser/browser-relay';
 import { isHostBrowserPageWindow } from './browser/browser-pages';
 import type { DebugPackageDependencies } from './debug-package';
+import { requestAutoRunSnapshots } from './debug-package/autorun-snapshots';
 // Phase 4 refactoring - app lifecycle
 import {
 	setupGlobalErrorHandlers,
@@ -268,6 +294,17 @@ import {
 // Multi-window registry (single source of truth for window<->session ownership)
 import { WindowRegistry } from './window-registry';
 import { createQuickChatController, closeQuickChatWindow } from './quick-chat';
+import {
+	createFloatingWidgetWindow,
+	type FloatingWidgetController,
+} from './floating-widgets/floating-widget-window';
+import { createFloatingWidgetRelay } from './floating-widgets/floating-widget-relay';
+import { restoreMediaWindowAtLaunch } from './floating-widgets/media-window-launch';
+import {
+	FLOATING_WIDGET_IDS,
+	FLOATING_WIDGET_SPECS,
+	type FloatingWidgetId,
+} from '../shared/floatingWidgets';
 // Multi-window startup restore: turn the persisted MultiWindowState back into
 // window-creation specs (pruning agents that no longer exist).
 import { planWindowRestore, pickFocusWindowSpec } from './window-state-persistence';
@@ -554,6 +591,7 @@ let cueEngine: CueEngine | null = null;
 let pianolaSupervisor: PianolaSupervisor | null = null;
 let pianolaRelearnScheduler: PianolaRelearnScheduler | null = null;
 let pluginManager: PluginManager | null = null;
+let pluginStartupToken: object = {};
 let pluginScheduler: PluginSchedulerHost | null = null;
 let pluginSandboxHost: PluginSandboxHost | null = null;
 let pluginGroupingRegistry: PluginGroupingRegistry | null = null;
@@ -717,6 +755,10 @@ registerCadenzaIpcHandlers({ getMainWindow: () => mainWindow, settingsStore: sto
 // plugins hook of the Encore lifecycle below.)
 store.onDidChange('encoreFeatures', (encoreFeatures) => {
 	if (!resolveEncoreFeatures(encoreFeatures).concerto) closeCadenzaHudWindow();
+	// A switched-off Throughput Gauge leaves no widget window behind.
+	if (!resolveEncoreFeatures(encoreFeatures).throughputGauge) {
+		floatingWidgetControllers['throughput-gauge'].close();
+	}
 	// Feature changes also invalidate cached settings guests, including changes
 	// made outside this renderer. Reads remain pure; do not refresh discovery.
 	try {
@@ -754,6 +796,7 @@ store.onDidChange('encoreFeatures', (value) => encoreLifecycle.apply(value));
 // Collectors for a support (debug) package. One object shared by the debug and
 // feedback IPC handlers and the CLI bridge, so every path builds the same zip.
 // Getters resolve the live instances at package time, not whatever existed here.
+// The Auto Run section asks every app window, since each holds its own runs.
 const debugPackageDeps: DebugPackageDependencies = {
 	getAgentDetector: () => agentDetector,
 	getProcessManager: () => processManager,
@@ -762,6 +805,10 @@ const debugPackageDeps: DebugPackageDependencies = {
 	sessionsStore,
 	groupsStore,
 	bootstrapStore,
+	requestAutoRunSnapshots: () =>
+		requestAutoRunSnapshots(windowRegistry.getAppWindows(), {
+			ownerOf: (sessionId) => windowRegistry.getWindowForSession(sessionId),
+		}),
 };
 
 // The app window that owns an agent, falling back to the primary window.
@@ -790,6 +837,53 @@ const quickChatController = createQuickChatController({
 	getMainWindow: () => mainWindow,
 	getWindowForSession: resolveWindowForSession,
 });
+
+// Floating widgets: always-on-top desktop windows for the throughput gauge and
+// the media player (see Plans/floating-widgets.md). One controller per widget,
+// with the same window deps as Quick Chat; the relay carries state and commands
+// between each widget and the window that owns it. IPC registers at app-ready
+// (see floatingWidgetRelay.init below).
+const floatingWidgetControllers = Object.fromEntries(
+	FLOATING_WIDGET_IDS.map((id) => [
+		id,
+		createFloatingWidgetWindow(FLOATING_WIDGET_SPECS[id], {
+			isDevelopment,
+			preloadPath,
+			rendererProductionUrl,
+			devServerUrl,
+			windowRegistry,
+			// Per-device, like every other window's bounds.
+			boundsStore: {
+				get: () => windowStateStore.get('floatingWidgets')?.[id],
+				set: (bounds) =>
+					windowStateStore.set('floatingWidgets', {
+						...windowStateStore.get('floatingWidgets'),
+						[id]: bounds,
+					}),
+			},
+			// The gauge is an Encore Feature: while it is off, its window never exists.
+			isEnabled:
+				id === 'throughput-gauge'
+					? () => resolveEncoreFeatures(store.get('encoreFeatures')).throughputGauge
+					: undefined,
+		}),
+	])
+) as Record<FloatingWidgetId, FloatingWidgetController>;
+
+const floatingWidgetRelay = createFloatingWidgetRelay({
+	controllers: floatingWidgetControllers,
+	// The gauge's rate engine runs in the primary app window; the media player
+	// owns its media element in its own window.
+	getAuthorityWindow: (id) =>
+		id === 'throughput-gauge'
+			? (windowRegistry.getPrimary()?.browserWindow ?? mainWindow)
+			: floatingWidgetControllers[id].getWindow(),
+	getAllWindows: () => BrowserWindow.getAllWindows(),
+});
+
+function closeFloatingWidgetWindows(): void {
+	for (const controller of Object.values(floatingWidgetControllers)) controller.close();
+}
 
 // What a CLI or web caller is told when it asks a switched-off Cue to act.
 const CUE_DISABLED_MESSAGE =
@@ -852,6 +946,7 @@ function createWindow(options?: { sessionIds?: string[]; bounds?: Partial<Shared
 		closeCadenzaHudWindow();
 		// Same for Quick Chat: it is a feature window, not a reason to keep running.
 		closeQuickChatWindow();
+		closeFloatingWidgetWindows();
 
 		// The primary window is the app's anchor: it owns the auto-updater, the
 		// global hotkey, the deep-link target, and the quit-confirmation surface.
@@ -861,9 +956,10 @@ function createWindow(options?: { sessionIds?: string[]; bounds?: Partial<Shared
 		// flow. When the primary is the LAST window, we defer to
 		// 'window-all-closed' instead (macOS stays alive for dock relaunch), and
 		// we skip if a quit is already in flight to avoid re-entrancy.
-		// Offscreen browser pages are workloads, not secondary application windows.
+		// Offscreen browser pages are workloads, not secondary application windows,
+		// and feature windows (HUD, Quick Chat, floating widgets) are not either.
 		const otherWindowsOpen = BrowserWindow.getAllWindows().some(
-			(window) => !isHostBrowserPageWindow(window)
+			(window) => !isHostBrowserPageWindow(window) && !windowRegistry.isFeatureWindow(window)
 		);
 		if (otherWindowsOpen && !quitHandler?.isQuitConfirmed()) {
 			logger.info('Primary window closed with secondary windows open, quitting app', 'Window');
@@ -1681,6 +1777,10 @@ app
 		// Initialize Cue Engine for event-driven automation
 		const cueHealthToastAt = new Map<string, number>();
 		cueEngine = new CueEngine({
+			hasStoredSession: (id) => {
+				const stored = getSessionsStore().get('sessions', []);
+				return !Array.isArray(stored) || stored.some((session) => session.id === id);
+			},
 			getSessions: () => {
 				// Live agents only: a dormant Pianola (flag off) is never watched.
 				const stored = getLiveSessions();
@@ -1867,6 +1967,113 @@ app
 				wakatimeManager.ensureCliInstalled();
 			}
 		});
+
+		// Generic tool identity must survive unavailable optional proof-file storage.
+		// Manager ingress, existing run issuance and sandbox handles share this registry.
+		const toolIdentity = pluginToolRunIdentity;
+		let toolProofFiles: PluginToolRunProofFiles | undefined;
+		const toolProofBase = app.getPath('userData');
+		const assertToolProofLocation = (): void => {
+			if (
+				DEMO_MODE ||
+				!['linux', 'darwin'].includes(process.platform) ||
+				app.getPath('userData') !== toolProofBase ||
+				realpathSync(toolProofBase) !== toolProofBase
+			)
+				throw new PluginAuthorityError('PLUGIN_UNAVAILABLE');
+			// userData is broker-protected, but custom locations must also be outside
+			// every registered local project and any containing Git/Obsidian root.
+			const sessions = sessionsStore.get('sessions', []);
+			if (!Array.isArray(sessions)) throw new PluginAuthorityError('PLUGIN_DENIED');
+			for (const session of sessions) {
+				if (!session || typeof session !== 'object')
+					throw new PluginAuthorityError('PLUGIN_DENIED');
+				if (session.sessionSshRemoteConfig?.enabled || session.sshRemoteConfig?.enabled) continue;
+				if (typeof session.cwd !== 'string' || typeof session.projectRoot !== 'string')
+					throw new PluginAuthorityError('PLUGIN_UNAVAILABLE');
+				for (const project of [session.cwd, session.projectRoot, session.fullPath]) {
+					if (project === undefined) continue;
+					if (typeof project !== 'string' || !path.isAbsolute(project))
+						throw new PluginAuthorityError('PLUGIN_UNAVAILABLE');
+					let canonical: string;
+					try {
+						canonical = realpathSync(project);
+					} catch (error) {
+						if ((error as NodeJS.ErrnoException)?.code !== 'ENOENT')
+							throw new PluginAuthorityError('PLUGIN_UNAVAILABLE');
+						canonical = path.resolve(project);
+					}
+					if (
+						[path.relative(canonical, toolProofBase), path.relative(toolProofBase, canonical)].some(
+							(relative) =>
+								relative === '' || (relative !== '..' && !relative.startsWith(`..${path.sep}`))
+						)
+					)
+						throw new PluginAuthorityError('PLUGIN_UNAVAILABLE');
+				}
+			}
+			let ancestor = toolProofBase;
+			for (let count = 0; ; count++) {
+				if (count >= 64) throw new PluginAuthorityError('PLUGIN_UNAVAILABLE');
+				for (const marker of ['.git', '.obsidian']) {
+					try {
+						lstatSync(path.join(ancestor, marker));
+					} catch (error) {
+						if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') continue;
+						throw error;
+					}
+					throw new PluginAuthorityError('PLUGIN_UNAVAILABLE');
+				}
+				const next = path.dirname(ancestor);
+				if (next === ancestor) break;
+				ancestor = next;
+			}
+		};
+		const assertToolOwnerActive = (): void => {
+			if (
+				!toolOwner ||
+				pluginManager !== toolOwner ||
+				getActivePluginManager() !== toolOwner ||
+				resolveEncoreFeatures(store.get('encoreFeatures')).plugins !== true
+			)
+				throw new PluginAuthorityError('PLUGIN_DENIED');
+		};
+		toolIdentity.setAgentActiveAssertion((agentId) => {
+			assertToolOwnerActive();
+			const sessions = sessionsStore.get('sessions', []);
+			if (!Array.isArray(sessions)) throw new PluginAuthorityError('PLUGIN_DENIED');
+			const matches = sessions.filter((session) => session?.id === agentId);
+			if (
+				matches.length !== 1 ||
+				!isValidAgentId(matches[0].toolType) ||
+				matches[0].toolType === 'terminal' ||
+				matches[0].sessionSshRemoteConfig?.enabled ||
+				matches[0].sshRemoteConfig?.enabled
+			)
+				throw new PluginAuthorityError('PLUGIN_DENIED');
+			assertToolOwnerActive();
+		});
+		try {
+			assertToolProofLocation();
+			toolProofFiles = PluginToolRunProofFiles.provision(toolIdentity, toolProofBase);
+			assertToolProofLocation();
+		} catch {
+			// Keep optional hardened delivery closed without stopping unrelated tools.
+			try {
+				toolProofFiles?.stop();
+			} catch {
+				// Construction has no run resources. Never log a native path/cause.
+			}
+			toolProofFiles = undefined;
+			logger.warn('Hardened plugin tool proof storage unavailable', 'Plugins');
+		}
+		const assertToolProofStorageActive = (): void => {
+			assertToolOwnerActive();
+			assertToolProofLocation();
+			if (!toolProofFiles) throw new PluginAuthorityError('PLUGIN_DENIED');
+			toolProofFiles.assertIdentity(toolIdentity);
+			assertToolOwnerActive();
+		};
 		const trustedKeysFor = (): string[] => {
 			const keys = store.get('pluginTrustedKeys', []) as unknown;
 			const userKeys = Array.isArray(keys)
@@ -1879,6 +2086,29 @@ app
 		// The live grant source every enforcement seam now reads (sealed, identity-
 		// bound, anti-rollback) instead of the forgeable on-disk store.
 		const grantsOf = (pluginId: string) => authStore.readGrants(pluginId);
+		const assertToolRecordActive = (record: PluginRecord): void => {
+			try {
+				assertToolOwnerActive();
+				toolOwner!.assertToolRecordCurrent(record);
+				const identity = authStore.entryIdentity(record.id);
+				if (
+					!identity ||
+					identity.signatureStatus !== 'trusted' ||
+					!authStore.verify(
+						record.id,
+						identity,
+						(record.manifest?.permissions ?? []).map((permission) => permission.capability)
+					).authorized
+				)
+					throw new PluginAuthorityError('PLUGIN_DENIED');
+				// Ordinary verified tools use live consent even when sealed mail state is unavailable.
+				// Secret/record/Cue operations independently require anchored persistence.
+				assertToolOwnerActive();
+				toolOwner!.assertToolRecordCurrent(record);
+			} catch {
+				throw new PluginAuthorityError('PLUGIN_DENIED');
+			}
+		};
 
 		// First-party plugin bridges (encore-lifts L0): one host-owned lifecycle
 		// bridge per Encore feature definition. Enable mints the definition's
@@ -1924,6 +2154,9 @@ app
 			// Computer History: `computerHistory.observer` - the accessibility
 			// helper plus the segment writer. Disable/revoke stops both.
 			computerHistory: createComputerHistorySupervisorHooks(() => getComputerHistoryService()),
+			// Dataview: `dataview.index` - every open vault index with its watcher
+			// or poller and idle timer. Indexes open on demand; off disposes them.
+			dataview: createDataviewSupervisorHooks(),
 			// MaestroRun: no long-running service, only the bounded poll that
 			// watches for the Full Disk Access grant. Disable/revoke stops it.
 			maestroRun: {
@@ -1954,19 +2187,53 @@ app
 			// trigger scheduler, and every running sandbox. Lifecycle-only.
 			plugins: {
 				reconcile: () => {
+					const startupToken = {};
+					pluginStartupToken = startupToken;
 					if (!pluginManager) return;
-					// Copy trusted bundled first-party plugins into the plugins dir
-					// before discovery. Trust-gated + idempotent.
-					seedBundledPlugins({
-						trustedKeys: trustedKeysFor,
-						onLog: (message) => logger.info(message, 'Plugins'),
-						onError: (error) => void captureException(error),
-					});
-					pluginManager.refresh();
-					pluginManager.startWatching();
-					pluginScheduler?.start();
+					const manager = pluginManager;
+					void manager
+						.retireBundledAgentFlow(authStore)
+						.then(({ recoveryPath, preserved }) => {
+							if (preserved) {
+								logger.info(`Agent Flow preserved: ${preserved}`, 'Plugins');
+								return;
+							}
+							if (recoveryPath) logger.info(`Agent Flow retired to ${recoveryPath}`, 'Plugins');
+							if (authStore.isSessionOnly()) {
+								logger.warn(
+									'Agent Flow authorization cleanup is session-only; retirement retries next launch',
+									'Plugins'
+								);
+							}
+						})
+						.catch((error) => {
+							logger.error(`Agent Flow retirement incomplete: ${error}`, 'Plugins');
+							void captureException(error, { operation: 'plugins:retire-agent-flow' });
+						})
+						.then(async () => {
+							// A feature toggle may have switched off while the sandbox drained.
+							const ef = store.get('encoreFeatures', {}) as Record<string, boolean>;
+							if (ef.plugins !== true) return;
+							const startupCurrent = () =>
+								pluginStartupToken === startupToken &&
+								pluginManager === manager &&
+								(store.get('encoreFeatures', {}) as Record<string, boolean>).plugins === true;
+							await seedBundledPlugins({
+								isActive: startupCurrent,
+								trustedKeys: trustedKeysFor,
+								onLog: (message) => logger.info(message, 'Plugins'),
+								onError: (error) => void captureException(error),
+							});
+							if (!startupCurrent()) return;
+							await manager.refresh();
+							if (!startupCurrent()) return;
+							manager.startWatching();
+							pluginScheduler?.start();
+						})
+						.catch((error) => void captureException(error, { operation: 'plugins:startup' }));
 				},
 				stopAll: () => {
+					pluginStartupToken = {};
 					pluginManager?.stopWatching();
 					pluginScheduler?.stop();
 					pluginManager?.stopAllSandboxes();
@@ -2022,7 +2289,7 @@ app
 			// cli-server.json token, the plugins dir, plugin KV, supervisor targets,
 			// transcripts) from fs:read AND fs:write, enforced on the symlink-resolved
 			// real path so no plugin fs scope can ever reach it.
-			protectedPaths: () => [app.getPath('userData')],
+			protectedPaths: () => [app.getPath('userData'), ...getPluginRunProofProtectedPaths()],
 			onDecision: (pluginId, method, decision) => {
 				if (decision.allowed) return;
 				logger.warn(
@@ -2719,9 +2986,150 @@ app
 			safeSend('process:headlessActivity', getHeadlessAgentActivity());
 		});
 		setHeadlessAgentRunner(runHeadlessAgent);
+		const primitiveIdentityFor = (id: string, allowStopped = false) => {
+			if (
+				!resolveEncoreFeatures(store.get('encoreFeatures')).plugins ||
+				(!allowStopped && !pluginSandboxHost?.isAcceptingServiceCalls(id))
+			)
+				throw new PluginAuthorityError('PLUGIN_DENIED');
+			const record = pluginManager
+				?.getActiveRecords()
+				.find((r) => r.id === id && r.signature?.status === 'trusted');
+			if (!record) throw new PluginAuthorityError('PLUGIN_DENIED');
+			const identity = authStore.entryIdentity(record.id);
+			if (
+				!identity ||
+				!authStore.verify(
+					id,
+					identity,
+					(record.manifest?.permissions ?? []).map((p) => p.capability)
+				).authorized
+			)
+				throw new PluginAuthorityError('PLUGIN_DENIED');
+			return identity;
+		};
+		const preparePrimitive = async (id: string, allowStopped = false) => {
+			const prior = primitiveIdentityFor(id, allowStopped);
+			const record = pluginManager?.getActiveRecords().find((r) => r.id === id);
+			if (!record) throw new PluginAuthorityError('PLUGIN_DENIED');
+			const identity = await pluginManager!.prepareToolRecordCurrent(record);
+			const current = primitiveIdentityFor(id, allowStopped);
+			if (
+				!identity ||
+				canonicalJson(identity) !== canonicalJson(current) ||
+				canonicalJson(prior) !== canonicalJson(current)
+			)
+				throw new PluginAuthorityError('PLUGIN_DENIED');
+			return identity;
+		};
+		const capturePrimitive = (id: string) => {
+			const identity = primitiveIdentityFor(id);
+			const lifetime = pluginSandboxHost!.capturePrimitiveLifetime(id);
+			return {
+				...lifetime,
+				prepare: async () => {
+					lifetime.assertActive();
+					const fresh = await preparePrimitive(id);
+					if (canonicalJson(fresh) !== canonicalJson(identity))
+						throw new PluginAuthorityError('PLUGIN_DENIED');
+					lifetime.assertActive();
+				},
+				assertActive: () => {
+					lifetime.assertActive();
+					const current = primitiveIdentityFor(id);
+					if (
+						current.contentHash !== identity.contentHash ||
+						current.signerKey !== identity.signerKey ||
+						current.signatureStatus !== identity.signatureStatus
+					)
+						throw new PluginAuthorityError('PLUGIN_DENIED');
+					lifetime.assertActive();
+				},
+			};
+		};
+		const assertPrimitiveAllowed = (
+			id: string,
+			capability: PluginCapability,
+			target: string,
+			allowStopped = false
+		) => {
+			primitiveIdentityFor(id, allowStopped);
+			if (!isPermitted(grantsOf(id), capability, target))
+				throw new PluginAuthorityError('PLUGIN_DENIED');
+		};
+		const primitiveState: PluginPrivateState = new PluginPrivateState({
+			store: authStore,
+			identity: pluginToolRunIdentity,
+			confirmation: new PluginConfirmationWindows(__dirname),
+			identityFor: primitiveIdentityFor,
+			capture: capturePrimitive,
+			assertAllowed: assertPrimitiveAllowed,
+			assertDeclared: (id, cap) => {
+				if (!pluginManager?.getRequestedPermissions(id)?.some((p) => p.capability === cap))
+					throw new PluginAuthorityError('PLUGIN_DENIED');
+			},
+			stopTls: (id) => primitiveTls.stopPlugin(id),
+		});
+		const primitiveTls: PluginTlsHost = new PluginTlsHost({
+			generation: (id) => pluginSandboxHost!.getToolGeneration(id),
+			identity: pluginToolRunIdentity,
+			egress: pluginEgressGuard,
+			capture: capturePrimitive,
+			assertEndpoint: (id, scope) => assertPrimitiveAllowed(id, 'net:tls', scope),
+			encodeSecret: (id, endpoint, ref, check) =>
+				primitiveState.encodeSecret(id, endpoint, ref, check),
+		});
+		const primitiveEvents = new PluginCueEvents({
+			store: authStore,
+			identity: pluginToolRunIdentity,
+			identityFor: primitiveIdentityFor,
+			prepareIdentityFor: preparePrimitive,
+			capture: capturePrimitive,
+			generation: (id) => pluginSandboxHost!.getToolGeneration(id),
+			assertAllowed: (id, topic, queued) =>
+				assertPrimitiveAllowed(id, 'events:publish', topic, queued),
+			receipts: new CueReceiptStore(
+				path.join(app.getPath('userData'), 'cue-plugin-receipts'),
+				path.join(app.getPath('userData'), 'cue.db'),
+				authStore,
+				(id) => authenticatedPluginReceiptBaseline(id, authStore)
+			),
+		});
+		configurePluginCueHost(primitiveEvents);
+		authStore.onPluginAuthorizationChange((id) => {
+			// Preserve authenticated history before revoke/reconsent removes its identity.
+			// Failure can never prevent authority reduction; unknown rows stay fail-closed.
+			try {
+				checkpointPluginEventReceipts(id, authStore);
+			} catch {
+				logger.warn('Plugin receipt checkpoint unavailable; history retained', 'Plugins');
+			}
+			pluginToolRunIdentity.revokePlugin(id);
+			primitiveEvents.stopPlugin(id);
+			void primitiveTls.stopPlugin(id).catch(() => {});
+		});
+		const pluginPrimitives = new PluginPrimitives({
+			identity: pluginToolRunIdentity,
+			state: primitiveState,
+			tls: primitiveTls,
+			events: primitiveEvents,
+			capture: capturePrimitive,
+		});
+
 		const sandboxHost = new PluginSandboxHost({
+			toolIdentity,
+			prepareToolPluginActive: async (id) => {
+				await preparePrimitive(id);
+			},
+			assertToolPluginActive: (pluginId) => {
+				assertToolOwnerActive();
+				const record = getRecord(toolOwner!.getRegistry(), pluginId);
+				if (!record) throw new PluginAuthorityError('PLUGIN_DENIED');
+				assertToolRecordActive(record);
+			},
 			broker: pluginBroker,
 			handlers: buildHostCallHandlers({
+				primitives: pluginPrimitives,
 				serviceManifest: (id) =>
 					pluginManager
 						?.getActiveRecords()
@@ -2761,6 +3169,7 @@ app
 					queueMicrotask(() => {
 						serviceReconcileQueued = false;
 						pluginManager?.reconcileServiceDependencies();
+						cueEngine?.retryPendingPluginEvents();
 					});
 				},
 				broker: pluginBroker,
@@ -2866,6 +3275,7 @@ app
 						name?: string;
 						cwd?: string;
 						toolType?: string;
+						parentSessionId?: string;
 					}>;
 					return sessions
 						.filter((s) => typeof s?.id === 'string')
@@ -2874,6 +3284,9 @@ app
 							name: s.name ?? '',
 							...(s.cwd ? { cwd: s.cwd } : {}),
 							...(s.toolType ? { toolType: s.toolType } : {}),
+							...(typeof s.parentSessionId === 'string' && s.parentSessionId
+								? { parentSessionId: s.parentSessionId }
+								: {}),
 						}));
 				},
 				// agents.dispatch + process.spawn (FC2, Plans/feature-complete-workplan.md):
@@ -2992,6 +3405,18 @@ app
 		});
 		pluginSandboxHost = sandboxHost;
 		pluginManager = new PluginManager({
+			toolIdentity,
+			toolProofFiles,
+			assertToolProofStorageActive,
+			assertToolRecordActive,
+			prepareToolRecordActive: async (record) => {
+				assertToolRecordActive(record);
+				const identity = await toolOwner.prepareToolRecordCurrent(record);
+				assertToolRecordActive(record);
+				const expected = authStore.entryIdentity(record.id);
+				if (!expected || canonicalJson(identity) !== canonicalJson(expected))
+					throw new PluginAuthorityError('PLUGIN_DENIED');
+			},
 			serviceAvailable: (id, requirement) => serviceAvailable?.(id, requirement) === true,
 			isEnabled: () => {
 				const ef = store.get('encoreFeatures', {}) as Record<string, boolean>;
@@ -3005,8 +3430,7 @@ app
 			// Refresh-time verifier: force-disable an enabled code-tier plugin whose
 			// consented identity no longer matches the bytes on disk (tamper), or that
 			// was removed, by checking it against the sealed ledger.
-			verifyRecord: (record) => {
-				const identity = pluginIdentity(record.source, trustedKeysFor());
+			verifyRecord: (record, identity) => {
 				if (!identity) return { disable: true };
 				const requested = (record.manifest?.permissions ?? []).map((p) => p.capability);
 				const result = authStore.verify(record.id, identity, requested);
@@ -3017,19 +3441,26 @@ app
 			// Complete uninstall (invariant #8): purge the plugin's KV store, its
 			// plugins.<id>.* settings, and its event subscriptions.
 			purgePluginData: (id) => {
-				pluginProviderSessions.purge(id);
-				purgePluginData(id, {
-					kvStore: pluginKvStore,
-					settingsDeleteNamespace: pluginSettingsDeleteNamespace,
-					eventBus,
-					hostViews: pluginHostViews,
-				});
-				groupingRegistry.removePlugin(id);
-				backgroundSupervisor.teardown(id);
+				authStore.uninstall(id);
+				try {
+					primitiveState.purgePlugin(id);
+				} finally {
+					pluginProviderSessions.purge(id);
+					purgePluginData(id, {
+						kvStore: pluginKvStore,
+						settingsDeleteNamespace: pluginSettingsDeleteNamespace,
+						eventBus,
+						hostViews: pluginHostViews,
+					});
+					groupingRegistry.removePlugin(id);
+					backgroundSupervisor.teardown(id);
+					purgePluginEventReceipts(id);
+				}
 			},
 			onChange: (registry) => {
 				serviceReconcile?.();
 				pluginManager?.reconcileServiceDependencies();
+				cueEngine?.retryPendingPluginEvents();
 				pluginHostViews.sync();
 				try {
 					mainWindow?.webContents.send(
@@ -3042,6 +3473,7 @@ app
 				}
 			},
 		});
+		const toolOwner = pluginManager;
 
 		let consentWindowRef: OpenedConsentWindow | null = null;
 		const closeConsentWindow = (): void => {
@@ -3059,9 +3491,28 @@ app
 			registry: new ConsentNonceRegistry(),
 			store: authStore,
 			requested: (pluginId) => pluginManager?.getRequestedPermissions(pluginId) ?? [],
-			identityOf: (pluginId) => {
+			senderStillCurrent: (sender) => {
+				const contents = consentWindowRef?.window.webContents;
+				return (
+					!!contents &&
+					!contents.isDestroyed() &&
+					contents.id === sender.webContentsId &&
+					contents.mainFrame.routingId === sender.frameId &&
+					contents.mainFrame.url === sender.url
+				);
+			},
+			identityOf: async (pluginId) => {
+				checkpointPluginEventReceipts(pluginId, authStore);
 				const record = pluginManager?.getRegistry().records.find((r) => r.id === pluginId);
-				return record ? pluginIdentity(record.source, trustedKeysFor()) : null;
+				if (!record) return null;
+				const keys = trustedKeysFor();
+				const identity = (await scanPluginFiles(record.source, keys)).identity;
+				if (
+					pluginManager?.getRegistry().records.find((r) => r.id === pluginId) !== record ||
+					canonicalJson(keys) !== canonicalJson(trustedKeysFor())
+				)
+					return null;
+				return identity;
 			},
 			openPrompt: async ({ pluginId, offered, requested, nonce }) => {
 				const record = pluginManager?.getRegistry().records.find((r) => r.id === pluginId);
@@ -3129,7 +3580,7 @@ app
 		});
 		// Confirm from the consent window: the minter validates the sender frame +
 		// one-time nonce before minting. The window is closed either way.
-		ipcMain.handle('plugins:confirm-consent', (event, payload: unknown) => {
+		ipcMain.handle('plugins:confirm-consent', async (event, payload: unknown) => {
 			const p = (payload ?? {}) as {
 				pluginId?: unknown;
 				nonce?: unknown;
@@ -3147,7 +3598,7 @@ app
 				? p.approvedHighRisk.filter(isPluginCapability)
 				: [];
 			const unattended = Array.isArray(p.unattended) ? p.unattended.filter(isPluginCapability) : [];
-			const outcome = consentMinter.confirm(senderTokenOf(event), {
+			const outcome = await consentMinter.confirm(senderTokenOf(event), {
 				pluginId,
 				nonce,
 				approved,
@@ -3164,7 +3615,7 @@ app
 					// Minting IS consent: flip the enable toggle + reconcile the sandbox now
 					// that the plugin holds sealed ledger grants. setEnabled fires onChange
 					// -> plugins:changed for the renderer.
-					pluginManager?.setEnabled(pluginId, true);
+					await pluginManager?.setEnabled(pluginId, true);
 				} catch {
 					// Best-effort; the grant is already minted.
 				}
@@ -3609,6 +4060,13 @@ app
 		});
 		// Quick Chat registers its own hotkey through the same manager.
 		quickChatController.init();
+		floatingWidgetRelay.init();
+		// The media window owns the saved play queue: create it (hidden) now when
+		// there is one, or no window would show it until the next open-file.
+		restoreMediaWindowAtLaunch(
+			store.get('mediaPlayerQueue'),
+			floatingWidgetControllers['media-player']
+		);
 		// Electron auto-unregisters globalShortcuts on quit, but be explicit so the
 		// behavior survives any future change to that policy.
 		app.on('will-quit', disposeGlobalHotkey);
@@ -3654,7 +4112,12 @@ app
 		timeZoneWatcher.start();
 
 		app.on('activate', () => {
-			if (BrowserWindow.getAllWindows().length === 0) {
+			// A floating widget left on screen is not an app window: the dock click
+			// must still bring the main window back.
+			const appWindowOpen = BrowserWindow.getAllWindows().some(
+				(window) => !windowRegistry.isFeatureWindow(window)
+			);
+			if (!appWindowOpen) {
 				createWindow();
 			}
 		});
@@ -3737,6 +4200,17 @@ app.on('window-all-closed', () => {
 
 // Create and setup quit handler with dependency injection (Phase 4 refactoring)
 quitHandler = createQuitHandler({
+	stopPluginToolAuthority: () => {
+		const manager = pluginManager;
+		const activeManager = getActivePluginManager();
+		try {
+			// Permanently detach ingress before any retirement callback can reenter.
+			stopActivePluginManager();
+		} finally {
+			// Also retire a constructed manager that has not yet reached registration.
+			if (manager && manager !== activeManager) manager.stopToolAuthority();
+		}
+	},
 	getMainWindow: () => mainWindow,
 	getProcessManager: () => processManager,
 	getWebServer: () => webServer,

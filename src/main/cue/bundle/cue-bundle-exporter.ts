@@ -41,6 +41,8 @@ import { isSecretEnvKey } from '../../../shared/agentEnvironment';
 import { LITE_PAIRING_STORE_FILE_PATTERN } from '../../../shared/litePairingCredential';
 import {
 	CUE_BUNDLE_LAYOUT_PATH,
+	CUE_BUNDLE_LOCAL_AGENT_FIELDS,
+	CUE_BUNDLE_LOCAL_PATH,
 	CUE_BUNDLE_MANIFEST_PATH,
 	CUE_BUNDLE_MIN_ENGINE_VERSION,
 	CUE_BUNDLE_README_PATH,
@@ -50,6 +52,8 @@ import {
 	type CueBundleClaudeAssetSelection,
 	type CueBundleFileEntry,
 	type CueBundleKind,
+	type CueBundleLocalAgent,
+	type CueBundleLocalData,
 	type CueBundleManifest,
 	type CueBundleRequirements,
 	type CueBundleWorkspace,
@@ -99,6 +103,19 @@ export interface CueBundleExportOptions {
 	sessions?: SessionInfo[];
 	/** Folder of `maestro-agent-configs.json`, when it is not the data directory. */
 	agentConfigsDir?: string;
+	/**
+	 * Agent exports only: carry the agent's Cue subscriptions. Defaults to on;
+	 * off when Cue is disabled, so the bundle holds no cue.yaml at all.
+	 */
+	includeCue?: boolean;
+	/**
+	 * Make an EXACT COPY: also write `local.json` with the agents' secret
+	 * values, binary paths, SSH settings, other providers' settings and the
+	 * folders they lived in, so an import on this machine restores them as
+	 * they were. The bundle then names local paths and holds secrets: it is a
+	 * backup, not something to share.
+	 */
+	includeLocal?: boolean;
 }
 
 export interface CueBundleExportResult {
@@ -460,10 +477,57 @@ export function isForbiddenBundleEntry(archivePath: string): boolean {
 	return segments.slice(0, -1).some((dir) => FORBIDDEN_BUNDLE_DIRECTORIES.some((p) => p.test(dir)));
 }
 
-/** Env var names that are authority-shaped: never exported, not even by name. */
-function isManagedAuthorityEnvKey(key: string): boolean {
+/** Env var names that are authority-shaped: never exported, not even by name. Exported for the importer. */
+export function isManagedAuthorityEnvKey(key: string): boolean {
 	const upper = key.toUpperCase();
 	return upper.startsWith('MAESTRO_MANAGED_') || /(^|_)(GRANT|LEASE|ENROLL)/.test(upper);
+}
+
+/**
+ * A machine-bound agent field with its authority-shaped env vars removed. An
+ * exact copy carries the agent's own env verbatim (`customEnvVars`,
+ * `customEnvVarsDisabled`, and every provider's under `providerOverrides`); a
+ * grant, a lease or an enrollment token stays on the host all the same, the
+ * way the portable settings drop it. Any other field, and any value that is
+ * not a record, comes back as it was. `dropped` names what was left out, a
+ * provider's as `provider.NAME`. Exported for the importer, which holds a
+ * foreign `local.json` to the same rule.
+ */
+export function withoutManagedAuthorityEnv(
+	field: string,
+	value: unknown
+): { value: unknown; dropped: string[] } {
+	if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+		return { value, dropped: [] };
+	}
+	const record = value as Record<string, unknown>;
+	if (field === 'customEnvVars' || field === 'customEnvVarsDisabled') {
+		const dropped = Object.keys(record).filter(isManagedAuthorityEnvKey).sort();
+		if (dropped.length === 0) return { value, dropped };
+		const kept = Object.fromEntries(
+			Object.entries(record).filter(([key]) => !isManagedAuthorityEnvKey(key))
+		);
+		return { value: kept, dropped };
+	}
+	if (field === 'providerOverrides') {
+		const dropped: string[] = [];
+		const kept: Record<string, unknown> = {};
+		for (const [provider, override] of Object.entries(record)) {
+			if (typeof override !== 'object' || override === null || Array.isArray(override)) {
+				kept[provider] = override;
+				continue;
+			}
+			const next: Record<string, unknown> = {};
+			for (const [key, inner] of Object.entries(override as Record<string, unknown>)) {
+				const result = withoutManagedAuthorityEnv(key, inner);
+				next[key] = result.value;
+				dropped.push(...result.dropped.map((name) => `${provider}.${name}`));
+			}
+			kept[provider] = next;
+		}
+		return { value: dropped.length > 0 ? kept : value, dropped: dropped.sort() };
+	}
+	return { value, dropped: [] };
 }
 
 // ─── The exporter ────────────────────────────────────────────────────────────
@@ -630,7 +694,9 @@ function buildAgentSettings(
 	root: string,
 	autoRun: CueBundleAgentSettings['autoRun'],
 	builder: BundleBuilder,
-	mcpSecrets: readonly string[]
+	mcpSecrets: readonly string[],
+	/** An exact copy carries what the portable settings leave out; skip the "set it again" warnings. */
+	exact: boolean
 ): CueBundleAgentSettings {
 	const settings: CueBundleAgentSettings = {
 		id: session.id,
@@ -641,7 +707,7 @@ function buildAgentSettings(
 	if (session.cwd) {
 		const cwd = path.resolve(session.cwd);
 		if (isWithin(root, cwd)) settings.cwd = toPosix(path.relative(root, cwd));
-		else
+		else if (!exact)
 			builder.warnings.add(
 				`Agent "${session.name}" works outside its project root; its working directory was not exported.`
 			);
@@ -657,6 +723,24 @@ function buildAgentSettings(
 	if (session.nudgeMessage) settings.nudgeMessage = session.nudgeMessage;
 	if (typeof session.enableMaestroP === 'boolean') settings.enableMaestroP = session.enableMaestroP;
 	if (session.maestroPMode) settings.maestroPMode = session.maestroPMode;
+	const record = session as SessionInfo & {
+		contextWindowSource?: 'user-edited';
+		fileTreeAutoRefreshInterval?: number;
+		documentGraphLayout?: string;
+	};
+	if (record.contextWindowSource) settings.contextWindowSource = record.contextWindowSource;
+	for (const flag of [
+		'retryOnAvailabilityErrors',
+		'retryOnTokenExhaustion',
+		'codexAutoResetOnExhaustion',
+	] as const) {
+		if (typeof session[flag] === 'boolean') settings[flag] = session[flag];
+	}
+	if (session.codexTransport) settings.codexTransport = session.codexTransport;
+	if (typeof record.fileTreeAutoRefreshInterval === 'number') {
+		settings.fileTreeAutoRefreshInterval = record.fileTreeAutoRefreshInterval;
+	}
+	if (record.documentGraphLayout) settings.documentGraphLayout = record.documentGraphLayout;
 
 	// The effective env is the agent's own record OR the provider's, never a
 	// merge (`effectiveAgentCustomEnvVars`). Parked vars live in a separate
@@ -708,12 +792,12 @@ function buildAgentSettings(
 		(session.managedCredentialRefs ?? []).filter((ref) => typeof ref === 'string' && ref !== '')
 	);
 	if (credentialRefs.length > 0) settings.managed = { credentialRefs };
-	if (secretByValue.length > 0) {
+	if (secretByValue.length > 0 && !exact) {
 		builder.warnings.add(
 			`Agent "${session.name}" sets ${secretByValue.join(', ')} to a value that looks like a credential; ${secretByValue.length === 1 ? 'it was' : 'they were'} exported by name only. Set ${secretByValue.length === 1 ? 'it' : 'them'} again after import.`
 		);
 	}
-	if (machineSpecific.length > 0) {
+	if (machineSpecific.length > 0 && !exact) {
 		builder.warnings.add(
 			`Agent "${session.name}" sets ${machineSpecific.join(', ')} to a local path; set ${machineSpecific.length === 1 ? 'it' : 'them'} again after import.`
 		);
@@ -726,6 +810,42 @@ function buildAgentSettings(
 		};
 	}
 	return settings;
+}
+
+/**
+ * An exact copy's machine-bound fields for one agent (`local.json`): the
+ * {@link CUE_BUNDLE_LOCAL_AGENT_FIELDS} it has, verbatim, plus its working
+ * directory and Auto Run folder when either sat outside the project root,
+ * where the portable settings cannot name them. Verbatim with one exception:
+ * authority-shaped env vars stay on the host (`withoutManagedAuthorityEnv`),
+ * the way the portable settings drop them; the copy warns about each.
+ */
+function buildLocalAgent(
+	session: SessionInfo,
+	root: string,
+	builder: BundleBuilder
+): CueBundleLocalAgent {
+	const record = session as unknown as Record<string, unknown>;
+	const local: CueBundleLocalAgent = {};
+	const authorityDropped: string[] = [];
+	for (const field of CUE_BUNDLE_LOCAL_AGENT_FIELDS) {
+		if (record[field] === undefined) continue;
+		const { value, dropped } = withoutManagedAuthorityEnv(field, record[field]);
+		local[field] = value;
+		authorityDropped.push(...dropped);
+	}
+	if (authorityDropped.length > 0) {
+		builder.warnings.add(
+			`Agent "${session.name}" sets ${sortedUnique(authorityDropped).join(', ')}, which look like managed grants or enrollment; the exact copy leaves them out.`
+		);
+	}
+	if (session.cwd && !isWithin(root, path.resolve(session.cwd))) {
+		local.cwd = path.resolve(session.cwd);
+	}
+	if (session.autoRunFolderPath && !isWithin(root, path.resolve(session.autoRunFolderPath))) {
+		local.autoRunFolderPath = path.resolve(session.autoRunFolderPath);
+	}
+	return local;
 }
 
 /** Every `.md` under a folder, as folder-relative POSIX paths, sorted. */
@@ -805,7 +925,14 @@ function buildReadme(manifest: Omit<CueBundleManifest, 'files'>): string {
 		`- Secrets: ${manifest.requirements.secrets.length ? manifest.requirements.secrets.map((s) => `\`${s}\``).join(', ') : 'none'}`,
 		'',
 	];
-	if (manifest.requirements.secrets.length > 0) {
+	if (manifest.local) {
+		lines.push(
+			'## Exact copy',
+			'',
+			`This bundle also holds \`${manifest.local}\`: secret values, binary paths and the folders the agents lived in on the machine that exported it. It is a backup for that machine. Do not share it.`,
+			''
+		);
+	} else if (manifest.requirements.secrets.length > 0) {
 		lines.push(
 			'Secret values are never included. Set each secret above as an environment variable on the machine that imports this bundle.',
 			''
@@ -909,6 +1036,11 @@ export async function exportCueBundle(
 	const sessionById = new Map(sessions.map((s) => [s.id, s]));
 	const builder = new BundleBuilder();
 	const createdAt = resolveCreatedAt(options);
+	const includeCue = options.includeCue !== false;
+	const exact = options.includeLocal === true;
+	if (options.pipeline && !includeCue) {
+		throw new Error('A pipeline export always carries its Cue subscriptions');
+	}
 
 	let kind: CueBundleKind;
 	let bundleName: string;
@@ -952,21 +1084,29 @@ export async function exportCueBundle(
 		bundleName = agent.name;
 		agentIds.add(agent.id);
 		const root = agentRoot(agent);
-		const doc = readCueDocument(root);
-		const unownedTarget = resolveUnownedTarget(doc, root, sessions, rawSubscriptions(doc), builder);
-		const subs = rawSubscriptions(doc).filter((s) =>
-			typeof s.agent_id === 'string' && s.agent_id
-				? s.agent_id === agent.id
-				: unownedTarget === agent.id
-		);
-		if (doc) configByRoot.set(root, { subs, settings: doc.settings });
-		const foreign = sortedUnique(referencedAgentIds(subs, sessions, unownedTarget)).filter(
-			(id) => id !== agent.id
-		);
-		if (foreign.length > 0) {
-			builder.warnings.add(
-				`Subscriptions reference other agents that are not in this bundle: ${foreign.map((id) => sessionById.get(id)?.name ?? id).join(', ')}.`
+		const doc = includeCue ? readCueDocument(root) : undefined;
+		if (doc) {
+			const unownedTarget = resolveUnownedTarget(
+				doc,
+				root,
+				sessions,
+				rawSubscriptions(doc),
+				builder
 			);
+			const subs = rawSubscriptions(doc).filter((s) =>
+				typeof s.agent_id === 'string' && s.agent_id
+					? s.agent_id === agent.id
+					: unownedTarget === agent.id
+			);
+			configByRoot.set(root, { subs, settings: doc.settings });
+			const foreign = sortedUnique(referencedAgentIds(subs, sessions, unownedTarget)).filter(
+				(id) => id !== agent.id
+			);
+			if (foreign.length > 0) {
+				builder.warnings.add(
+					`Subscriptions reference other agents that are not in this bundle: ${foreign.map((id) => sessionById.get(id)?.name ?? id).join(', ')}.`
+				);
+			}
 		}
 	}
 
@@ -1102,7 +1242,7 @@ export async function exportCueBundle(
 	for (const session of includedAgents) {
 		const root = agentRoot(session);
 		const wsKey = keyByRoot.get(root)!;
-		if (session.sessionSshRemoteConfig?.enabled) {
+		if (session.sessionSshRemoteConfig?.enabled && !exact) {
 			builder.warnings.add(
 				`Agent "${session.name}" runs over SSH on the exporting machine; its remote configuration was not exported.`
 			);
@@ -1157,7 +1297,8 @@ export async function exportCueBundle(
 			root,
 			autoRun,
 			builder,
-			session.toolType === 'claude-code' ? (mcpSecretsByKey.get(wsKey) ?? []) : []
+			session.toolType === 'claude-code' ? (mcpSecretsByKey.get(wsKey) ?? []) : [],
+			exact
 		);
 		for (const key of settings.env?.required ?? []) secrets.add(key);
 		for (const ref of settings.managed?.credentialRefs ?? []) managedCredentialRefs.add(ref);
@@ -1180,6 +1321,17 @@ export async function exportCueBundle(
 
 	if (pipeline) {
 		addGenerated(CUE_BUNDLE_LAYOUT_PATH, JSON.stringify(pipeline, null, '\t') + '\n');
+	}
+
+	// The one file allowed to name local paths, so it is added outside
+	// `generated` and the path guard below never scans it.
+	if (exact) {
+		const local: CueBundleLocalData = { workspaces: {}, agents: {} };
+		for (const ws of byKey) local.workspaces[ws.key] = ws.root;
+		for (const session of includedAgents) {
+			local.agents[session.id] = buildLocalAgent(session, agentRoot(session), builder);
+		}
+		builder.addJson(CUE_BUNDLE_LOCAL_PATH, local);
 	}
 
 	const tools = new Set<string>();
@@ -1205,6 +1357,7 @@ export async function exportCueBundle(
 		agents: manifestAgents,
 		requirements,
 		...(warnings.length ? { warnings } : {}),
+		...(exact ? { local: CUE_BUNDLE_LOCAL_PATH } : {}),
 		...(createdAt ? { createdAt } : {}),
 	};
 	addGenerated(CUE_BUNDLE_README_PATH, buildReadme(head));

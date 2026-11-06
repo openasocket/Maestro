@@ -10,6 +10,7 @@
  * - subscribe: Subscribe to session updates
  * - send_command: Execute command in session (AI or terminal)
  * - switch_mode: Switch between AI and terminal mode
+ * - interrupt_turn: Stop an agent's running turn, or one tab's (CLI: `interrupt`)
  * - select_session: Select/switch to a session in desktop
  * - get_sessions: Request updated sessions list
  * - select_tab: Select a tab within a session
@@ -27,6 +28,7 @@
  * - get_session_history: Return tab conversation history with --since/--tail filters (CLI: `session show`)
  * - computer_history_command: Computer History writes, CLI clients only (CLI: `computer-history`)
  * - throughput_gauge_command: Show, hide, configure, or read the Throughput Gauge (CLI: `throughput-gauge`)
+ * - live_command: Read or switch Live mode and Remote Control, CLI clients only (CLI: `live`)
  * - managed_status / managed_inventory / managed_support_matrix / managed_locks / managed_inbox_list /
  *   managed_inbox_act / managed_command_status: the managed standing and inbox (CLI: `managed ...`)
  * - managed_enroll_request / managed_policy_refresh / managed_command: the managed writes, CLI clients only
@@ -53,6 +55,7 @@ import {
 	handleSwitchMode,
 	handleSelectSession,
 	handleCrossAgentAsk,
+	handleInterruptTurn,
 } from './commands';
 import {
 	handleGetSessions,
@@ -116,8 +119,11 @@ import {
 	handleAbortAutoRunError,
 } from './autoRun';
 import { handleSnoozeCommand } from './snooze';
+import { handleClosedTabCommand } from './closedTabs';
 import { handleComputerHistoryCommand } from './computerHistory';
+import { handleLiveCommand } from './live';
 import { handleMaestroRunCommand } from './maestroRun';
+import { handleDataviewCommand } from './dataview';
 import { handleAutoRunSteeringCommand } from './autoRunSteering';
 import { handleWindowCommand } from './windows';
 import { handleThroughputGaugeCommand } from './throughputGauge';
@@ -163,6 +169,7 @@ import {
 	handleSendGroupChatMessage,
 	handleSteerGroupChat,
 	handleStopGroupChat,
+	handleArchiveGroupChat,
 } from './groupChat';
 import {
 	handleMergeContext,
@@ -200,6 +207,7 @@ import {
 	handleGetUsageDashboard,
 	handleGetStatsAggregation,
 	handleGetTokenUsage,
+	handleGetStatsIndexing,
 	handleStatsQuery,
 	handleGetAchievements,
 	handleGenerateDirectorNotesSynopsis,
@@ -222,11 +230,24 @@ export class WebSocketMessageHandler {
 	}
 
 	/**
-	 * Helper to send a JSON message to a client with timestamp
+	 * Helper to send a JSON message to a client with timestamp. `onSent` runs
+	 * once the frame is handed to the socket, for a handler whose next step
+	 * closes that socket (a Live switch replaces the server).
 	 */
-	private send(client: WebClient, data: Record<string, unknown>): void {
+	private send(client: WebClient, data: Record<string, unknown>, onSent?: () => void): void {
 		if (client.isAuthorized?.() === false) return;
-		client.socket.send(JSON.stringify({ ...data, timestamp: Date.now() }));
+		const frame = JSON.stringify({ ...data, timestamp: Date.now() });
+		if (!onSent) {
+			client.socket.send(frame);
+			return;
+		}
+		client.socket.send(frame, (error?: Error) => {
+			if (error) {
+				logger.warn(`[Web] Reply to ${client.id} failed: ${error.message}`, LOG_CONTEXT);
+				return;
+			}
+			onSent();
+		});
 	}
 
 	/**
@@ -323,6 +344,10 @@ export class WebSocketMessageHandler {
 				handleSwitchMode(this.ctx, client, message);
 				break;
 
+			case 'interrupt_turn':
+				handleInterruptTurn(this.ctx, client, message);
+				break;
+
 			case 'select_session':
 				handleSelectSession(this.ctx, client, message);
 				break;
@@ -359,12 +384,24 @@ export class WebSocketMessageHandler {
 				handleSnoozeCommand(this.ctx, client, message);
 				break;
 
+			case 'closed_tab_command':
+				handleClosedTabCommand(this.ctx, client, message);
+				break;
+
 			case 'computer_history_command':
 				void handleComputerHistoryCommand(this.ctx, client, message);
 				break;
 
+			case 'live_command':
+				handleLiveCommand(this.ctx, client, message);
+				break;
+
 			case 'maestro_run_command':
 				void handleMaestroRunCommand(this.ctx, client, message);
+				break;
+
+			case 'dataview_command':
+				void handleDataviewCommand(this.ctx, client, message);
 				break;
 
 			case 'auto_run_steering_command':
@@ -639,6 +676,10 @@ export class WebSocketMessageHandler {
 				handleStopGroupChat(this.ctx, client, message);
 				break;
 
+			case 'archive_group_chat':
+				handleArchiveGroupChat(this.ctx, client, message);
+				break;
+
 			case 'merge_context':
 				handleMergeContext(this.ctx, client, message);
 				break;
@@ -709,6 +750,10 @@ export class WebSocketMessageHandler {
 
 			case 'get_token_usage':
 				handleGetTokenUsage(this.ctx, client, message);
+				break;
+
+			case 'get_stats_indexing':
+				handleGetStatsIndexing(this.ctx, client, message);
 				break;
 
 			case 'stats_query':

@@ -12,7 +12,9 @@ import path from 'node:path';
 import {
 	applyWindowsShellRules,
 	DispatchRefusedError,
+	leaseAdmission,
 	startTurn,
+	TurnNotStartedError,
 	turnProcessSpecFromPlan,
 	type DispatchAdmission,
 	type TurnProcessSpec,
@@ -947,6 +949,37 @@ describe('managed admission at the spawn', () => {
 		const exit = await turn.done;
 		expect(exit.interrupted).toBe(true);
 		expect(exit.stoppedBy).toBe('caller');
+	});
+
+	it('releases the lease as spawn-failed and throws TurnNotStartedError when the spawn itself throws', async () => {
+		const { auth } = authority();
+		// A NUL byte in an argument makes the native spawn throw synchronously,
+		// after the gate admitted the spec: the one host-proven nonstart.
+		const base = fakeAgentSpec(scratch.dir, OPENCODE_TURN);
+		const spec: TurnProcessSpec = {
+			...base,
+			args: [...base.args, `bad${String.fromCharCode(0)}arg`],
+		};
+		const outcome = await auth.admit({
+			context: context(),
+			snapshot: buildDispatchSnapshot(spec, ATTRIBUTION),
+			policy: { sources: [], policyRevision: 1 },
+		});
+		if (outcome.state !== 'admitted') throw new Error(`not admitted: ${outcome.state}`);
+		const gate = leaseAdmission(auth, outcome.lease);
+
+		let thrown: unknown;
+		try {
+			startTurn(spec, {}, { ...OPTIONS, admission: { gate, attribution: ATTRIBUTION } });
+		} catch (error) {
+			thrown = error;
+		}
+
+		expect(thrown).toBeInstanceOf(TurnNotStartedError);
+		expect((thrown as TurnNotStartedError).cause).toMatchObject({ code: 'ERR_INVALID_ARG_VALUE' });
+		expect(outcome.lease.state()).toBe('released');
+		expect(outcome.lease.ended().release).toMatchObject({ outcome: 'spawn-failed' });
+		expect(auth.live()).toEqual([]);
 	});
 
 	it('runs unmanaged when no admission is given, exactly as before', async () => {

@@ -167,8 +167,10 @@ function isUnderProtectedPath(target: string, prefixes: readonly string[]): bool
 }
 
 /** Release ownership and status of an own declared requirement are checked in
- * the handlers. Revocation (local or central) must not block cancellation. */
+ * the handlers. Revocation (local or central) must not block cancellation or
+ * denied status. */
 const RELEASE_METHODS: ReadonlySet<HostMethod> = new Set<HostMethod>([
+	'net.tlsClose',
 	'media.close',
 	'services.cancel',
 	'services.status',
