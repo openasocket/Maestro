@@ -1023,6 +1023,22 @@
           "id": "MCOMP-01-05A"
         },
         {
+          "label": "Type the plugin net.fetch pinned dispatcher for every lint leg (continuation of MCOMP-01-05)",
+          "kind": "IMPLEMENT",
+          "targets": [
+            "src/main/plugins/plugin-host-handlers.ts",
+            "src/__tests__/main/plugins/plugin-host-handlers.test.ts"
+          ],
+          "outcome": "MCOMP-01-05 found tsc -p tsconfig.lint.json (the first npm run lint leg) failing with TS2339 at the plugin net.fetch handler in src/main/plugins/plugin-host-handlers.ts: RequestInit['dispatcher'] does not exist on the DOM RequestInit that config resolves (the main config's undici RequestInit has it); the same line is upstream/rc's, and MCOMP-03-05 recorded it as a standing failure left for MCOMP-01. Carry the pinned dispatcher as { dispatcher?: unknown } and assert the whole init once as RequestInit, with no change to runtime behavior, the lint configs or any ambient declaration; the existing 'proceeds to fetch when a dispatcher is present' case asserts the dispatcher and redirect: 'error' on the fetch init (dropping the dispatcher must fail it). All three tsc legs must read 0 errors and the plugin suites stay green; src/ is in the implementation tree, so re-pin after the commit before the VERIFY retries. Keep 2 authored files and fewer than 40 changed lines.",
+          "backlog": [
+            "BASE-01",
+            "BASE-02"
+          ],
+          "requires": [],
+          "produces": [],
+          "id": "MCOMP-01-05B"
+        },
+        {
           "label": "Verify and publish implementation inputs",
           "kind": "VERIFY",
           "targets": [
@@ -1046,7 +1062,7 @@
       ],
       "id": "MCOMP-01",
       "path": ".maestro/playbooks/2026-10-29-Maestro-Integration-Completion/MCOMP-01.md",
-      "taskCount": 29,
+      "taskCount": 30,
       "stage": "S02"
     },
     {
@@ -7239,7 +7255,7 @@
       ],
       "requires": [],
       "nativeInputs": false,
-      "taskCount": 39
+      "taskCount": 40
     },
     {
       "id": "S03",
@@ -7630,9 +7646,9 @@
       "taskCount": 1
     }
   ],
-  "taskCount": 313,
+  "taskCount": 314,
   "taskCounts": {
-    "IMPLEMENT": 212,
+    "IMPLEMENT": 213,
     "TEST": 41,
     "VERIFY": 60
   },
@@ -8039,6 +8055,7 @@
       "MCOMP-01-02B",
       "MCOMP-01-04",
       "MCOMP-01-05A",
+      "MCOMP-01-05B",
       "MCOMP-01-05",
       "MCOMP-02-01",
       "MCOMP-03-01",
@@ -8469,6 +8486,7 @@
       "MCOMP-01-03",
       "MCOMP-01-04",
       "MCOMP-01-05A",
+      "MCOMP-01-05B",
       "MCOMP-01-05",
       "MCOMP-02-01",
       "MCOMP-03-02",
