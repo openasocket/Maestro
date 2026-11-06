@@ -4,9 +4,7 @@
 	"record": "upstream-merge",
 	"standing": "plan and progress record of one upstream integration; it grants nothing and proves nothing beyond the git readings it names, and MAESTRO-SOURCE-BASELINE-BUILD stays the receipt the merged tree is exported under",
 	"task": "MCOMP-01-03",
-	"backlog": [
-		"BASE-02"
-	],
+	"backlog": ["BASE-02"],
 	"recordedAt": "2026-10-30T00:15:10.061Z",
 	"node": "v26.13.0",
 	"selection": {
@@ -400,10 +398,7 @@
 		"MCOMP-01-03G": {
 			"resolvedAt": "2026-10-29",
 			"resolvedBy": "Maestro-Claude",
-			"files": [
-				"src/cli/commands/dispatch.ts",
-				"src/__tests__/cli/commands/dispatch.test.ts"
-			],
+			"files": ["src/cli/commands/dispatch.ts", "src/__tests__/cli/commands/dispatch.test.ts"],
 			"hunks": {
 				"src/cli/commands/dispatch.ts": [
 					"16-30 (the imports): the integration side (4048746b2) imports MANAGED_DELEGATION_ENV_VAR and readDelegationContextEnv from managed/delegation beside the caller helpers; upstream (c8913d2d8, 6013016a3) imports the CallerIdentity type beside them, parseMentionRoutingField and MentionRouting from crossAgentContext and resolveMentionedTargetSessionIds from the mention roster; resolved as every name of both sides, upstream agentDelegation import (the superset) first, then crossAgentContext, the integration managed/delegation import, the roster",
@@ -1137,15 +1132,11 @@
 				"tsc": "throwaway tsconfig extending tsconfig.main.json over the three files + src/types/dns-packet.d.ts: 2 errors, both pre-existing in start-turn.test.ts (TS2322 LocalLaunchPlan literals of the turnProcessSpecFromPlan cases, HEAD lines 565 and 634, shifted by the two new import names); 0 in new code",
 				"mutations": {
 					"export-guard": {
-						"failed": [
-							"leaves authority-shaped env out of local.json and the whole archive"
-						],
+						"failed": ["leaves authority-shaped env out of local.json and the whole archive"],
 						"caught": true
 					},
 					"import-guard": {
-						"failed": [
-							"drops authority-shaped env from a tampered local.json on import"
-						],
+						"failed": ["drops authority-shaped env from a tampered local.json on import"],
 						"caught": true
 					},
 					"refusal-claim": {
@@ -1156,9 +1147,7 @@
 						"caught": true
 					},
 					"stop-claim": {
-						"failed": [
-							"a stop while the authority is deciding releases the lease unused"
-						],
+						"failed": ["a stop while the authority is deciding releases the lease unused"],
 						"caught": true
 					},
 					"nonstart-error": {
