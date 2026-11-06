@@ -5,6 +5,7 @@ import { randomBytes } from 'node:crypto';
 import { pluginEndpointScope, type PluginEndpoint } from '../../shared/plugins/primitives';
 import { PluginAuthorityError, pluginRequest, assertPluginAuthority } from './plugin-authority';
 import type { EgressGuard } from './net-egress-guard';
+import { isEgressDeniedError } from '../utils/fetchWithTimeout';
 import type {
 	PluginToolRunIdentity,
 	PluginToolInvocationContext,
@@ -33,6 +34,14 @@ export interface PluginTlsDeps {
 	/** Exact current child ownership, available for release after consent revocation. */
 	generation(pluginId: string): string;
 	assertEndpoint(pluginId: string, scope: string): void;
+	/**
+	 * The host's managed admission of one open, before DNS resolves and before a
+	 * socket exists: the desktop egress ceiling (`holdEgress(..., 'plugin')`) and
+	 * the managed plugin binding `net.connect` also requires. Synchronous; it
+	 * throws to refuse. An `EgressDeniedError` is reported as is, any other
+	 * refusal as PLUGIN_DENIED. Absent (an offline fixture), nothing is held.
+	 */
+	admit?(pluginId: string, scope: string): void;
 	encodeSecret(pluginId: string, endpoint: PluginEndpoint, ref: string, check: () => void): Buffer;
 	/** Host-only transport injection for offline fixtures. */
 	connect?: typeof tls.connect;
@@ -170,6 +179,14 @@ export class PluginTlsHost {
 		try {
 			await s.lifetime.prepare();
 			this.check(s);
+			// The managed hold comes first: a refused endpoint resolves no name
+			// and opens no socket (MCOMP-01-03SA).
+			try {
+				this.deps.admit?.(pluginId, s.scope);
+			} catch (error) {
+				if (isEgressDeniedError(error)) throw error;
+				throw new PluginAuthorityError('PLUGIN_DENIED');
+			}
 			await this.deps.egress.assertUrlAllowed(`https://${s.scope}/`);
 			await s.lifetime.prepare();
 			this.check(s);
@@ -253,6 +270,8 @@ export class PluginTlsHost {
 			s.connecting = false;
 			if (!s.socket) s.onClosed?.();
 			await this.closeStream(s);
+			// A managed refusal keeps its code and receipt: nothing was opened.
+			if (isEgressDeniedError(error)) throw error;
 			throw error instanceof PluginAuthorityError
 				? error
 				: new PluginAuthorityError('PLUGIN_UNAVAILABLE');

@@ -6,7 +6,21 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import type { connect, TLSSocket, ConnectionOptions } from 'node:tls';
 import { PluginToolRunIdentity } from '../../../main/plugins/plugin-tool-run-identity';
-import { PluginTlsHost, PLUGIN_TLS_LIMITS } from '../../../main/plugins/plugin-tls';
+import {
+	PluginTlsHost,
+	PLUGIN_TLS_LIMITS,
+	type PluginTlsDeps,
+} from '../../../main/plugins/plugin-tls';
+import {
+	EgressDeniedError,
+	heldEgress,
+	holdEgress,
+	setEgressAuthority,
+} from '../../../main/utils/fetchWithTimeout';
+import type { EgressAuthority, EgressRequest } from '../../../main/enterprise/egress-policy';
+import { pluginActBinding, requirePluginBinding } from '../../../main/plugins/plugin-host-handlers';
+import type { BrokerDecision } from '../../../main/plugins/permission-broker';
+import { fakeSpawnPort, type FakeSpawnPort } from '../../helpers/managedSpawnPort';
 import { PluginPrivateState } from '../../../main/plugins/plugin-private-state';
 import { PluginCueEvents } from '../../../main/plugins/plugin-cue-events';
 import {
@@ -99,7 +113,7 @@ class FixtureSocket extends EventEmitter {
 		return this;
 	}
 }
-function transport() {
+function transport(opts: { admit?: PluginTlsDeps['admit'] } = {}) {
 	const identity = new PluginToolRunIdentity();
 	const pluginLifetime = new AbortController(),
 		runLifetime = new AbortController();
@@ -127,12 +141,14 @@ function transport() {
 		if (ready) queueMicrotask(() => socket.emit('secureConnect'));
 		return socket as unknown as TLSSocket;
 	}) as typeof connect;
+	const resolve = vi.fn(async () => ['93.184.216.34']);
 	const egress = createEgressGuard({
-		resolve: async () => ['93.184.216.34'],
+		resolve,
 		makeDispatcher: () => ({}),
 	});
 	const encodeSecret = vi.fn(() => Buffer.from('"dummy"'));
 	const host = new PluginTlsHost({
+		...(opts.admit ? { admit: opts.admit } : {}),
 		generation: () => generation,
 		identity,
 		egress,
@@ -155,6 +171,7 @@ function transport() {
 		sockets,
 		options,
 		egress,
+		resolve,
 		encodeSecret,
 		pluginLifetime,
 		runLifetime,
@@ -425,6 +442,111 @@ describe('bounded TLS transport', () => {
 			t.host.read(plugin, { streamId, invocationId: t.handle, maxBytes: 1 })
 		).rejects.toThrow();
 		await t.host.stopPlugin(plugin);
+		t.identity.stop();
+	});
+});
+
+describe('managed admission of a TLS open (MCOMP-01-03SA)', () => {
+	const receipt = {
+		policyRevision: 3,
+		outcome: 'within-ceiling' as const,
+		contentHash: 'a'.repeat(64),
+		signerKey: 'key',
+		consentEpoch: 1,
+	};
+	/** A table egress authority: the plugin class is refused or allowed, every request recorded. */
+	function egressCeiling(pluginClass: 'allow' | 'deny') {
+		const asked: EgressRequest[] = [];
+		const authority: EgressAuthority = {
+			evaluateEgress: (request) => {
+				asked.push(request);
+				const managed = {
+					policyRevision: 3,
+					class: request.class,
+					actor: 'operator',
+					origin: new URL(request.url).origin,
+				};
+				return request.class === 'plugin' && pluginClass === 'deny'
+					? {
+							allowed: false,
+							code: 'class-denied',
+							message: 'plugin egress is off under the policy',
+							managed: { ...managed, outcome: 'class-denied' },
+						}
+					: { allowed: true, managed: { ...managed, outcome: 'within-ceiling' } };
+			},
+		};
+		return { authority, asked };
+	}
+	/** The admission src/main/index.ts composes, over a port and the broker answer for the scope. */
+	function admitOver(
+		port: FakeSpawnPort | null,
+		decide: () => Pick<BrokerDecision, 'allowed' | 'managed'>
+	) {
+		return (id: string, scope: string) => {
+			holdEgress(`https://${scope}/`, 'plugin');
+			requirePluginBinding(port, 'net.tlsOpen', id, pluginActBinding(id, decide()));
+		};
+	}
+	afterEach(() => setEgressAuthority(null));
+
+	it('opens as before on a standalone host: nothing is consulted', async () => {
+		const t = transport({ admit: admitOver(null, () => ({ allowed: true })) });
+		const { streamId } = await t.open();
+		expect(t.sockets).toHaveLength(1);
+		expect(t.resolve).toHaveBeenCalled();
+		await t.host.close(plugin, { streamId });
+		t.identity.stop();
+	});
+
+	it('refuses at the egress ceiling before DNS: no socket, the EgressDeniedError reported', async () => {
+		const ceiling = egressCeiling('deny');
+		setEgressAuthority(ceiling.authority);
+		const t = transport({
+			admit: admitOver(fakeSpawnPort(), () => ({ allowed: true, managed: receipt })),
+		});
+		const refused = await t.open().catch((error: unknown) => error);
+		expect(refused).toBeInstanceOf(EgressDeniedError);
+		expect(refused).toMatchObject({
+			code: 'class-denied',
+			class: 'plugin',
+			url: 'https://fixture.example:993/',
+		});
+		expect(t.sockets).toHaveLength(0);
+		expect(t.resolve).not.toHaveBeenCalled();
+		expect(ceiling.asked).toEqual([{ url: 'https://fixture.example:993/', class: 'plugin' }]);
+		expect(heldEgress()).toEqual([
+			expect.objectContaining({ class: 'plugin', code: 'class-denied', count: 1 }),
+		]);
+		// The refused open holds no quota slot: the plugin can still open four.
+		setEgressAuthority(egressCeiling('allow').authority);
+		for (let i = 0; i < PLUGIN_TLS_LIMITS.streams; i++) await t.open();
+		expect(t.sockets).toHaveLength(PLUGIN_TLS_LIMITS.streams);
+		await t.host.stopPlugin(plugin);
+		t.identity.stop();
+	});
+
+	it('refuses a managed open with no ceiling receipt as PLUGIN_DENIED, before DNS', async () => {
+		setEgressAuthority(egressCeiling('allow').authority);
+		const t = transport({ admit: admitOver(fakeSpawnPort(), () => ({ allowed: false })) });
+		await expect(t.open()).rejects.toMatchObject({ code: 'PLUGIN_DENIED' });
+		expect(t.sockets).toHaveLength(0);
+		expect(t.resolve).not.toHaveBeenCalled();
+		t.identity.stop();
+	});
+
+	it('connects on an admitted managed host', async () => {
+		const ceiling = egressCeiling('allow');
+		setEgressAuthority(ceiling.authority);
+		const t = transport({
+			admit: admitOver(fakeSpawnPort(), () => ({ allowed: true, managed: receipt })),
+		});
+		const { streamId } = await t.open();
+		expect(t.sockets).toHaveLength(1);
+		expect(t.options[0]).toMatchObject({ host: 'fixture.example', port: 993 });
+		expect(ceiling.asked).toHaveLength(1);
+		expect(heldEgress()).toEqual([]);
+		await t.host.close(plugin, { streamId });
 		t.identity.stop();
 	});
 });

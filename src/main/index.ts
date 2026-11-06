@@ -89,7 +89,7 @@ import {
 	setCredentialCustodyAuthority,
 } from './enterprise/credential-custody';
 import { createEgressPolicySource } from './enterprise/egress-policy';
-import { setEgressAuthority } from './utils/fetchWithTimeout';
+import { holdEgress, setEgressAuthority } from './utils/fetchWithTimeout';
 import { createUpdatePolicySource } from './enterprise/update-policy';
 import { setUpdateAuthority } from './update-checker';
 import { createListenerPolicySource } from './enterprise/listener-policy';
@@ -124,6 +124,7 @@ import {
 	createPluginEffectSinks,
 	pluginActBinding,
 	purgePluginData,
+	requirePluginBinding,
 	type PluginActBinding,
 	type PluginSessionMetadata,
 	type PluginTabMetadata,
@@ -3076,6 +3077,19 @@ app
 			egress: pluginEgressGuard,
 			capture: capturePrimitive,
 			assertEndpoint: (id, scope) => assertPrimitiveAllowed(id, 'net:tls', scope),
+			// Managed admission of each open (MCOMP-01-03SA): the desktop egress
+			// ceiling holds the endpoint as `plugin`, then the open needs the
+			// broker's ceiling receipt for this plugin and scope, the binding
+			// `net.connect` requires. A standalone host is held by neither.
+			admit: (id, scope) => {
+				holdEgress(`https://${scope}/`, 'plugin');
+				requirePluginBinding(
+					enterpriseService?.spawnAuthority ?? null,
+					'net.tlsOpen',
+					id,
+					pluginActBinding(id, pluginBroker.holds(id, 'net:tls', scope, { audit: false }))
+				);
+			},
 			encodeSecret: (id, endpoint, ref, check) =>
 				primitiveState.encodeSecret(id, endpoint, ref, check),
 		});
