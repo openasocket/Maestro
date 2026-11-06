@@ -138,9 +138,9 @@
 	],
 	"tool": ".maestro/playbooks/Working/mcomp-01-03/merge-tool.mjs (verbs start, status, show, log, stage, link-modules; not in git)",
 	"status": {
-		"state": "committed: the merge is 7c7e13ecb (parents 03a65a9a6 3c8569162) on integrate/upstream-rc-3c85691, with the semantic-conflict repair 553a7d4e5 on top; the tree type-checks to the two known errors once the Dataview packages are installed (progress.MCOMP-01-03Q.tsc); R tests (install the merged dependencies first: luxon, papaparse, parsimmon, remove-markdown and their @types; add the remote:newAITabWithPrompt relay case and the browserTabRemote / queueRemote positional cases; the onRemoteCrossAgentAsk request type drift, see progress.MCOMP-01-03P.followUpsForR), S lands, T re-pins and closes",
-		"updatedAt": "2026-11-06T05:58:08.148Z",
-		"updatedBy": "MCOMP-01-03Q"
+		"state": "tested: the merge 7c7e13ecb with the repairs 553a7d4e5 (type-check) and 26fd422fd (two suites) on integrate/upstream-rc-3c85691 passes eslint, docs:verify, the 340 touched suites and the full suite except the contracts pin case MCOMP-01-03T re-pins (progress.MCOMP-01-03R); the lockfile reads up to date; RA and RB add the recorded permanent cases, S lands, T re-pins and closes",
+		"updatedAt": "2026-11-06T06:16:21.562Z",
+		"updatedBy": "MCOMP-01-03R"
 	},
 	"progress": {
 		"MCOMP-01-03A": {
@@ -996,6 +996,76 @@
 				"failed": 0
 			},
 			"notes": "the merge commit itself was written by an earlier run on 2026-10-30 (commit-03q-merge.mjs, message commit-03q-merge.txt) which stopped before the record; this run verified its parents, re-ran the three tsc configs, repaired and recorded. upstream/rc has since moved past 3c8569162, so merge-tool.mjs status refuses to run; the selection stays fixed at 3c8569162"
+		},
+		"MCOMP-01-03R": {
+			"doneAt": "2026-11-06",
+			"doneBy": "Maestro-Claude",
+			"worktree": "/Users/dr3/dev-shit/worktrees/integrate/upstream-rc-3c85691",
+			"testedHead": "26fd422fd9eab1c006ab47a448c9ef0184ac1e9f",
+			"environment": {
+				"node": "v26.13.0",
+				"install": "npm install --ignore-scripts --no-audit --no-fund in the worktree: npm replaced the node_modules symlink with a real install of the merged lockfile (1454 packages), so the main checkout node_modules is untouched and still at the pre-merge lockfile; Electron 41.10.7 dist and path.txt are linked from the main checkout and better-sqlite3 12.11.1 build/ copied from it (both identical versions, skipped by --ignore-scripts)",
+				"lockfileBeforeInstall": "npm install --dry-run against the main checkout node_modules: +9 added, ~3 changed: luxon 3.7.2, papaparse 5.7.0, parsimmon 1.18.1, remove-markdown 0.5.5, @types/luxon 3.7.6, @types/papaparse 5.5.2, @types/parsimmon 1.10.9, and emoji-regex 8.0.0 nested under string-width and string-width-cjs; changed @napi-rs/keyring 1.3.0 -> 2.0.0 with @napi-rs/keyring-darwin-arm64, and the hoisted emoji-regex 8.0.0 -> 10.6.0 (all from upstream package.json)",
+				"lockfileAfterInstall": "npm install --ignore-scripts --no-audit --no-fund --dry-run: up to date (nothing to add or remove); the install rewrote package-lock.json only by key order (libc moved ahead of license in the five @napi-rs/keyring-linux-* entries, +20 -20, no version, integrity or resolved change), restored with git checkout, so the auto-merged lockfile is recorded as consistent with the merged package.json"
+			},
+			"commands": {
+				"eslint": {
+					"command": "npm run lint:eslint",
+					"exit": 0,
+					"findings": 0
+				},
+				"docsVerify": {
+					"command": "npm run docs:verify",
+					"exit": 0,
+					"result": "checked 1287 asserted paths and 423 index entries against 423 full entries, 0 finding(s)"
+				},
+				"touchedSuites": {
+					"command": "node node_modules/vitest/vitest.mjs run <340 files> --reporter=json",
+					"selection": "every test file the merge and the 03Q repair added or modified (git diff --name-only --diff-filter=AMR 03a65a9a6 553a7d4e5) plus every test file named for one of the 44 resolved files",
+					"files": 339,
+					"tests": 11869,
+					"passed": 11853,
+					"failed": 1,
+					"skipped": 15,
+					"failures": [
+						"src/__tests__/main/ipc/handlers/system.managed.test.ts: standalone moves the folder and starts the tunnel as before"
+					],
+					"afterRepair": "system.managed.test.ts 10/10, system.test.ts 123/123"
+				},
+				"fullSuite": {
+					"command": "node node_modules/vitest/vitest.mjs run --reporter=json",
+					"files": 2700,
+					"tests": 59751,
+					"passed": 59636,
+					"failed": 10,
+					"skipped": 105,
+					"failures": [
+						"src/__tests__/main/ipc/handlers/symphony.test.ts: 9 cases, merge-introduced (249/249 on the pre-merge main checkout), repaired",
+						"src/__tests__/shared/maestro-lib/managed/contracts.test.ts: the committed runtime pin names this source: the pin reads app 1.1.0-RC and library 0.32.0 while the merged package.json is 1.1.1-RC; not a merge defect, the re-pin of MCOMP-01-03T cures it"
+					],
+					"flakes": "none of the README-flakes suites failed",
+					"afterRepair": "symphony.test.ts 249/249; contracts.test.ts stays 1 failed until MCOMP-01-03T"
+				}
+			},
+			"repairCommit": "26fd422fd9eab1c006ab47a448c9ef0184ac1e9f",
+			"repairDiffStat": "2 files changed, 39 insertions(+), 14 deletions(-)",
+			"repairs": [
+				"src/__tests__/main/ipc/handlers/system.managed.test.ts (the 03C semantic note): upstream routes tunnel:start through getLiveModeController().startRemoteControl() and SystemHandlerDependencies no longer declares tunnelManager or getWebServer; the suite mocks web-server/live-mode as upstream system.test.ts does, drops the undeclared deps from both register helpers (TS2353), asserts startRemoteControl once standalone and neither the controller nor startRemoteControl under the web.tunnel lock; a mutation removing the hold fails the locked case",
+				"src/__tests__/main/ipc/handlers/symphony.test.ts: upstream atomicWriteFile (MAESTRO-15K) writes <path>.<pid>.<seq>.tmp, not the fixed <path>.tmp the MCOMP-01-02C storeWrites/storePublishes helpers read; they now match the unique temp name of the store"
+			],
+			"productDefects": [],
+			"observations": [
+				"the two repaired suites type-check clean under a throwaway config extending tsconfig.main.json, except three TS6133 unused parameters in symphony.test.ts (2991, 4965, 5186) outside the repaired helpers; the suite is outside every committed tsconfig",
+				"the main checkout node_modules lacks the merged dependencies; MCOMP-01-03S must run npm install --ignore-scripts --no-audit --no-fund in the main checkout after landing (it brings @napi-rs/keyring 2.0.0), and the worktree node_modules is a real directory now, not a symlink: remove it (it holds a dist symlink into the main checkout Electron) before git worktree remove",
+				"the 03P note on window.maestro.process.onRemoteCrossAgentAsk lacking dispatchTicket in global.d.ts stays open as an optional declaration fix; the suite runs green as committed"
+			],
+			"followUpsClosed": [
+				"03I, 03J, 03K, 03L, 03M, 03P reruns: WebServer 15, WebServer.listenerPolicy 6, web-server-factory 120, messageHandlers 417 and dataviewHandler 8 without the mock, useRemoteIntegration 145, every luxon-blocked handler suite green in the full run"
+			],
+			"continuationsInserted": {
+				"MCOMP-01-03RA": "permanent positional cases of the 03J wire: browserTabRemote.test.ts onRemoteNewAITabWithPrompt, a new queueRemote.test.ts, and the main-side remote:newAITabWithPrompt relay case (03M); the two preload files are written and proved (17/17) as Working/mcomp-01-03r/*.test.ts.txt, moved out of 03R to keep it at three authored files",
+				"MCOMP-01-03RB": "permanent managed cases recorded by 03E and 03F: the exact-copy authority guard of the Cue bundle exporter/importer, and the execution claim of cue-process-lifecycle.managed and start-turn"
+			}
 		}
 	}
 }
