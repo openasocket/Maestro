@@ -82,6 +82,7 @@ import { formatJsonLogLine } from '../../shared/jsonLogLine';
 import * as os from 'os';
 import {
 	createManagedBinding,
+	type InstallationStandingSource,
 	type ManagedBindingState,
 } from '../../shared/maestro-lib/managed/binding';
 import {
@@ -108,6 +109,7 @@ import {
 	readSettings,
 } from './storage';
 import { prepareMaestroSystemPromptCli } from './system-prompt';
+import { createHostInstallationStanding, resolveHostCustody } from './host-managed';
 
 /** Lazily import every executor module once, cached for the process lifetime - see the module doc above for why these are dynamic rather than top-level imports. */
 let executorsPromise: ReturnType<typeof loadExecutorsUncached> | undefined;
@@ -458,11 +460,19 @@ export type StandaloneCueManagedHost = Pick<
  * read: the fence guards enroll / unenroll and the binding's own
  * `authority()`, none of which the engine calls (the port takes the attached
  * host's authority directly, matched by id).
+ *
+ * The binding is held to the installation standing (MCOMP-09-04B): the
+ * caller's source, else `createHostInstallationStanding` over these
+ * directories with this process's custody (`resolveHostCustody` with no seal,
+ * refused by name), so a sealed record or its anchor keeps the engine managed
+ * when the binding file is deleted, and a file the custody does not hold
+ * supplies no authority.
  */
 function readStandaloneCueStanding(
 	host: StandaloneCueManagedHost | null,
 	now: () => number,
-	startedAt: string
+	startedAt: string,
+	source?: InstallationStandingSource
 ): {
 	userDataDir: string;
 	binding: ManagedBindingState;
@@ -470,10 +480,19 @@ function readStandaloneCueStanding(
 } {
 	const userDataDir = resolveUserDataDir();
 	const productionDataDir = resolveProductionDataDir(userDataDir);
+	const standing =
+		source ??
+		createHostInstallationStanding({
+			userDataDir,
+			productionDataDir,
+			custody: resolveHostCustody({ userDataDir }),
+			now,
+		});
 	const binding = createManagedBinding({
 		paths: { userDataDir, productionDataDir },
 		fence: () => ({ ok: true as const }),
 		...(host ? { authority: host.authority } : {}),
+		standing,
 		now,
 	}).state();
 	const installation = installationIdentity({
@@ -498,13 +517,20 @@ function readStandaloneCueStanding(
  */
 export function buildStandaloneCueSpawnPort(options: {
 	managedHost: StandaloneCueManagedHost | null;
+	/** The installation standing the binding is held to. Default: this process's own read. */
+	standing?: InstallationStandingSource;
 	now?: () => number;
 }): () => HeadlessSpawnAuthority {
 	const startedAt = new Date().toISOString();
 	const now = options.now ?? (() => Date.now());
 	return () => {
 		const host = options.managedHost;
-		const { binding, installation } = readStandaloneCueStanding(host, now, startedAt);
+		const { binding, installation } = readStandaloneCueStanding(
+			host,
+			now,
+			startedAt,
+			options.standing
+		);
 		return createHeadlessSpawnAuthority({
 			installation,
 			binding,
@@ -537,6 +563,8 @@ export function buildStandaloneCueSpawnPort(options: {
  */
 export function buildStandaloneCueWorkflowFence(options: {
 	managedHost: StandaloneCueManagedHost | null;
+	/** The installation standing the binding is held to. Default: this process's own read. */
+	standing?: InstallationStandingSource;
 	now?: () => number;
 }): NonNullable<CueManagedDeps['workflowFence']> {
 	const startedAt = new Date().toISOString();
@@ -546,7 +574,12 @@ export function buildStandaloneCueWorkflowFence(options: {
 		file: `${resolveUserDataDir()}/${MANAGED_WORKFLOWS_FILE_NAME}`,
 		port: () => host?.workflows ?? null,
 		owner: () => {
-			const { binding, installation } = readStandaloneCueStanding(host, now, startedAt);
+			const { binding, installation } = readStandaloneCueStanding(
+				host,
+				now,
+				startedAt,
+				options.standing
+			);
 			if (binding.state !== 'enrolled') return null;
 			return {
 				ownerId: installation.installationId,
@@ -576,6 +609,11 @@ export interface StandaloneCueEngineOptions {
 	 * prompt run (see `buildStandaloneCueSpawnPort`).
 	 */
 	managedHost?: StandaloneCueManagedHost | null;
+	/**
+	 * The installation standing the binding is held to (MCOMP-09-04B). Default:
+	 * `createHostInstallationStanding` over this data directory with no seal.
+	 */
+	standing?: InstallationStandingSource;
 	/**
 	 * The workflow owner fence claimed per firing. Default: this engine's own
 	 * ownership over the host's port (`buildStandaloneCueWorkflowFence`). A
@@ -612,9 +650,15 @@ export function buildStandaloneCueEngineDeps(
 			options.onExternalNotification,
 			options.runAutoRun,
 			autoRunStops,
-			buildStandaloneCueSpawnPort({ managedHost: options.managedHost ?? null }),
+			buildStandaloneCueSpawnPort({
+				managedHost: options.managedHost ?? null,
+				...(options.standing ? { standing: options.standing } : {}),
+			}),
 			options.workflowFence ??
-				buildStandaloneCueWorkflowFence({ managedHost: options.managedHost ?? null })
+				buildStandaloneCueWorkflowFence({
+					managedHost: options.managedHost ?? null,
+					...(options.standing ? { standing: options.standing } : {}),
+				})
 		),
 		onStopCueRun: (runId) => {
 			const autoRunStop = autoRunStops.get(runId);

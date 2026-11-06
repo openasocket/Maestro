@@ -161,11 +161,14 @@ export type HostManagedComposition =
 			reason: string;
 			standing: InstallationStandingSource;
 			/**
-			 * Present when a sealed record exists that this process cannot open (MCOMP-09-03): the
-			 * held adapter (`createHeldHostAdapter`), so the runtime is handed a host that answers
-			 * `unavailable` by name rather than no host at all. Absent when no record is present.
+			 * `createMaestroRuntime`'s `managed`, always present (MCOMP-09-04B): `standing` is the
+			 * installation standing above, so the runtime binding is held to it with no adapter, and
+			 * a deleted binding file releases nothing. `host` is the held adapter
+			 * (`createHeldHostAdapter`, MCOMP-09-03) when a sealed record exists that this process
+			 * cannot open, so the runtime is handed a host that answers `unavailable` by name; it is
+			 * absent when no record is present.
 			 */
-			managed?: NonNullable<MaestroRuntimeOptions['managed']>;
+			managed: NonNullable<MaestroRuntimeOptions['managed']>;
 	  };
 
 function recordFileExists(file: string): boolean {
@@ -408,13 +411,15 @@ export function composeHostManaged(deps: HostManagedDeps): HostManagedCompositio
 		const sealed = standingDirectories(deps.userDataDir, deps.productionDataDir).some((dir) =>
 			recordFileExists(path.join(dir, ENTERPRISE_IDENTITY_FILE_NAME))
 		);
-		if (!sealed) return { composed: false, reason, standing };
+		// The standing goes to the runtime either way (MCOMP-09-04B), so its binding is held to it.
+		if (!sealed) return { composed: false, reason, standing, managed: { standing } };
 		const custodyReason = custody.reason;
 		return {
 			composed: false,
 			reason,
 			standing,
 			managed: {
+				standing,
 				host: (installation) =>
 					createHeldHostAdapter({ installation, custodyReason, standing, now }),
 			},
@@ -435,7 +440,7 @@ export function composeHostManaged(deps: HostManagedDeps): HostManagedCompositio
 	let lifecycle: EnrollmentLifecycle | null = null;
 
 	const host = (installation: ManagedInstallationIdentity) => {
-		const standing = createEnrollmentLifecycle({
+		const enrollment = createEnrollmentLifecycle({
 			identity,
 			openPort: (socketPath) => {
 				port = openPort(socketPath);
@@ -449,21 +454,22 @@ export function composeHostManaged(deps: HostManagedDeps): HostManagedCompositio
 			capabilities: { supported: ENTERPRISE_SUPPORTED_CAPABILITIES, required: [] },
 			now,
 		});
-		lifecycle = standing;
+		lifecycle = enrollment;
 		return createManagedHostAdapter({
 			installation,
-			identity: { read: () => standing.status().identity },
+			identity: { read: () => enrollment.status().identity },
 			get endpoint() {
 				return port;
 			},
-			status: () => standing.status(),
+			status: () => enrollment.status(),
 			now,
 		});
 	};
 
 	return {
 		composed: true,
-		managed: { host },
+		// The adapter, and the standing the binding is held to (MCOMP-09-04B).
+		managed: { host, standing },
 		identity,
 		standing,
 		status: () => lifecycle?.status() ?? null,

@@ -22,7 +22,12 @@ import {
 import { createEnterpriseIdentityStore } from '../../../main/enterprise/identity-store';
 import { obscuringSeal } from '../../../main/utils/safe-storage-seal';
 import type { Anchor } from '../../../main/utils/keyring-anchor';
-import { installationIdentity, type InstallationStanding } from '../../../shared/maestro-lib';
+import {
+	createManagedBinding,
+	installationIdentity,
+	type InstallationStanding,
+	type InstallationStandingSource,
+} from '../../../shared/maestro-lib';
 import {
 	buildDispatchSnapshot,
 	createContextVerifier,
@@ -151,14 +156,17 @@ describe('composeHostManaged', () => {
 		const anchorFor = vi.fn(() => fakeAnchor({ value: null }));
 		const absent = composeHostManaged({ userDataDir: dir, version: '1.1.0', anchorFor });
 		if (absent.composed) throw new Error('unreachable');
-		expect(absent.managed).toBeUndefined();
+		expect(absent.managed.host).toBeUndefined();
+		// The standing is handed over all the same (MCOMP-09-04B), unread until the runtime asks.
+		expect(absent.managed.standing).toBe(absent.standing);
 		expect(anchorFor).not.toHaveBeenCalled();
 
 		await enroll('/tmp/endpoint.sock');
 		const present = composeHostManaged({ userDataDir: dir, version: '1.1.0', anchorFor });
 		if (present.composed) throw new Error('unreachable');
-		expect(present.managed?.host).toBeTypeOf('function');
-		const adapter = present.managed!.host!(installation);
+		expect(present.managed.host).toBeTypeOf('function');
+		expect(present.managed.standing).toBe(present.standing);
+		const adapter = present.managed.host!(installation);
 		expect(adapter.installation).toBe(installation);
 		// Never `ok`, never a record: the seal stays the desktop's, nothing is unsealed here.
 		const view = adapter.identity.read();
@@ -255,6 +263,41 @@ describe('composeHostManaged', () => {
 		} finally {
 			fs.rmSync(prod, { recursive: true, force: true });
 		}
+	});
+
+	it('hands the runtime binding the standing in both branches: a deleted binding file or an unopenable record stays managed (MCOMP-09-04B)', async () => {
+		const anchorFor = () => fakeAnchor({ value: null });
+		const bindingOver = (standing: InstallationStandingSource) =>
+			createManagedBinding({
+				paths: { userDataDir: dir, productionDataDir: dir },
+				fence: () => ({ ok: true as const }),
+				standing,
+				now: () => NOW,
+			});
+		// Never enrolled: the standing reads standalone and the runtime runs as before.
+		const plain = composeHostManaged({ userDataDir: dir, version: '1.1.0', anchorFor });
+		if (plain.composed) throw new Error('unreachable');
+		expect(bindingOver(plain.managed.standing!).state().state).toBe('standalone');
+
+		// A sealed record this process cannot open, no binding file: managed, no authority.
+		await enroll('/tmp/endpoint.sock');
+		const held = composeHostManaged({ userDataDir: dir, version: '1.1.0', anchorFor });
+		if (held.composed) throw new Error('unreachable');
+		const unopened = bindingOver(held.managed.standing!);
+		expect(unopened.state().state).toBe('unreadable');
+		expect(unopened.authority().authorityId).toBe('unavailable');
+
+		// Over protected custody the composed branch carries the same standing beside the adapter,
+		// and the binding reads the custody's own record with no binding file at all (unavailable
+		// here only because no authority is attached to this bare binding).
+		const composed = composeHostManaged({ userDataDir: dir, version: '1.1.0', custody: custody() });
+		if (!composed.composed) throw new Error('unreachable');
+		expect(composed.managed.standing).toBe(composed.standing);
+		const enrolled = bindingOver(composed.managed.standing!).state();
+		expect(enrolled.state).toBe('enrolled-unavailable');
+		if (enrolled.state !== 'enrolled-unavailable') throw new Error('unreachable');
+		expect(enrolled.record.installationId).toBe(installation.installationId);
+		expect(fs.existsSync(path.join(dir, 'maestro-managed-binding.json'))).toBe(false);
 	});
 
 	it('the held adapter follows the standing per call: a released installation reads none', () => {

@@ -385,6 +385,7 @@ async function runForeground(
 	// sealed record when this process has protected custody for it, or refused by name, once, here.
 	const standing = composeHostManaged({
 		userDataDir: paths.userDataDir,
+		productionDataDir: paths.productionDataDir,
 		version: cliVersion ?? 'unknown',
 	});
 	if (!standing.composed) console.log(`Managed standing: none composed (${standing.reason})`);
@@ -400,8 +401,9 @@ async function runForeground(
 				? { managed: standing.managed, managedLifecycle: standing.lifecycle }
 				: {
 						managedUnavailable: standing.reason,
-						// A sealed record this process cannot open still hands over the held adapter (MCOMP-09-03).
-						...(standing.managed ? { managed: standing.managed } : {}),
+						// Uncomposed still hands the runtime the installation standing (MCOMP-09-04B), and
+						// the held adapter when a sealed record this process cannot open exists (MCOMP-09-03).
+						managed: standing.managed,
 					}),
 			log: (line) => console.log(line),
 		});

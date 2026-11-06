@@ -13,7 +13,10 @@ import * as path from 'path';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { CueEvent, CueRunResult } from '../../../shared/cue/contracts';
 import { createLocalHostAuthority } from '../../../shared/maestro-lib/managed/authority';
-import { createManagedBinding } from '../../../shared/maestro-lib/managed/binding';
+import {
+	createManagedBinding,
+	type InstallationStanding,
+} from '../../../shared/maestro-lib/managed/binding';
 import type { EndpointInvokeOutcome } from '../../../shared/maestro-lib/managed/endpoint-port';
 import type {
 	WorkflowOwnerPort,
@@ -66,6 +69,22 @@ vi.mock('../../../cli/services/storage', () => ({
 	readSettings: () => ({}),
 }));
 vi.mock('../../../cli/services/system-prompt', () => ({ prepareMaestroSystemPromptCli }));
+// The installation standing the engine holds its binding to (MCOMP-09-04B): a fake custody whose
+// word a test sets, and the inputs the engine built it from. Never the developer's keyring.
+const custody = vi.hoisted(() => ({
+	standing: null as InstallationStanding | null,
+	inputs: [] as Array<{ userDataDir: string; custody: { ok: boolean } }>,
+}));
+vi.mock('../../../cli/services/host-managed', () => ({
+	resolveHostCustody: () => ({ ok: false, reason: 'no seal in this test' }),
+	createHostInstallationStanding: (input: { userDataDir: string; custody: { ok: boolean } }) => {
+		custody.inputs.push(input);
+		return {
+			read: () =>
+				custody.standing ?? { standing: 'standalone', detail: 'The test custody holds nothing.' },
+		};
+	},
+}));
 
 import {
 	AUTO_RUN_NEEDS_HOST,
@@ -493,6 +512,8 @@ describe('managed admission (MRC-07-02A)', () => {
 		process.env.MAESTRO_USER_DATA = dir;
 		executeCuePrompt.mockReset();
 		executeCuePrompt.mockResolvedValue({ status: 'completed' } as CueRunResult);
+		custody.standing = null;
+		custody.inputs.length = 0;
 	});
 	afterEach(() => {
 		if (savedUserData === undefined) delete process.env.MAESTRO_USER_DATA;
@@ -500,8 +521,30 @@ describe('managed admission (MRC-07-02A)', () => {
 		fs.rmSync(dir, { recursive: true, force: true });
 	});
 
-	/** The binding file the desktop would have written at enrollment, through the real writer. */
-	async function enroll(authorityId = 'endpoint-test') {
+	/**
+	 * The enrollment the desktop would have left: the custody's word (the sealed record) and the
+	 * binding file mirroring it, through the real writer. `mirror: false` leaves the file out.
+	 */
+	async function enroll(authorityId = 'endpoint-test', options: { mirror?: boolean } = {}) {
+		const enrollment = {
+			installationId: 'inst-test',
+			authorityId,
+			endpointRef: '/tmp/endpoint.sock',
+			policySources: [{ id: authorityId, kind: 'endpoint' as const, revision: 7 }],
+			policyRevision: 7,
+		};
+		custody.standing = {
+			standing: 'managed',
+			enrollment: { ...enrollment, enrolledAt: new Date(1_700_000_000_000).toISOString() },
+			management: 'enrolled',
+			detail: 'The test custody holds the sealed record.',
+		};
+		if (options.mirror === false) return;
+		await plantMirror(authorityId);
+	}
+
+	/** A binding file written through the real writer, with no custody behind it. */
+	async function plantMirror(authorityId = 'endpoint-test') {
 		const outcome = await createManagedBinding({
 			paths: { userDataDir: dir, productionDataDir: dir },
 			fence: () => ({ ok: true as const }),
@@ -575,6 +618,8 @@ describe('managed admission (MRC-07-02A)', () => {
 	it('is standalone with no binding file, and the run is unmanaged as before', async () => {
 		const port = buildStandaloneCueSpawnPort({ managedHost: null })();
 		expect(port.standing()).toBe('standalone');
+		// Read over this data directory with this process's custody, refused (no seal).
+		expect(custody.inputs[0]).toMatchObject({ userDataDir: dir, custody: { ok: false } });
 
 		await promptRun(buildStandaloneCueEngineDeps({ onLog: vi.fn() }), 'run-plain');
 		expect(executeCuePrompt).toHaveBeenCalledTimes(1);
@@ -631,6 +676,49 @@ describe('managed admission (MRC-07-02A)', () => {
 		expect(verified.ok).toBe(true);
 		if (!verified.ok) return;
 		expect(verified.context.actor).toEqual({ kind: 'human', id: 'actor-registered' });
+	});
+
+	it('stays managed and unavailable when the binding file is deleted under a custody that holds the record (MCOMP-09-04B)', async () => {
+		await enroll('endpoint-test', { mirror: false });
+		expect(fs.existsSync(path.join(dir, 'maestro-managed-binding.json'))).toBe(false);
+		const port = buildStandaloneCueSpawnPort({ managedHost: null })();
+		expect(port.standing()).toBe('managed');
+		expect(port.unavailableReason).not.toBeNull();
+
+		// A record held but not openable here: managed with no enrollment, unavailable even with a host.
+		custody.standing = {
+			standing: 'managed',
+			enrollment: null,
+			management: null,
+			detail: 'A sealed record is present and cannot be opened in this process.',
+		};
+		const held = buildStandaloneCueSpawnPort({ managedHost: attachedHost() })();
+		expect(held.standing()).toBe('managed');
+		expect(held.authority.authorityId).toBe('unavailable');
+		const result = await promptRun(buildStandaloneCueEngineDeps({ onLog: vi.fn() }), 'run-held');
+		expect(result).toMatchObject({ status: 'failed', managed: { state: 'unavailable' } });
+		expect(executeCuePrompt).not.toHaveBeenCalled();
+	});
+
+	it('gives a binding file the custody does not hold no authority, even with a matching host attached (MCOMP-09-04B)', async () => {
+		await plantMirror();
+		const port = buildStandaloneCueSpawnPort({ managedHost: attachedHost() })();
+		expect(port.standing()).toBe('managed');
+		expect(port.authority.authorityId).toBe('unavailable');
+		expect(port.unavailableReason).not.toBeNull();
+	});
+
+	it('holds the binding to a standing the caller hands in, over the default read', async () => {
+		await plantMirror();
+		const standing = { read: vi.fn(() => custody.standing!) };
+		await enroll('endpoint-test', { mirror: false });
+		const viaCustody = custody.standing;
+		custody.standing = null; // the default read would now say standalone
+		standing.read.mockImplementation(() => viaCustody!);
+		const port = buildStandaloneCueSpawnPort({ managedHost: attachedHost(), standing })();
+		expect(standing.read).toHaveBeenCalled();
+		expect(port.unavailableReason).toBeNull();
+		expect(custody.inputs).toHaveLength(0);
 	});
 
 	it("stays unavailable when the attached host answers for another authority than the binding's", async () => {
