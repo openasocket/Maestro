@@ -100,7 +100,7 @@ of authoring. Source branches are not pushed and no production enrollment occurs
 ## Amendment 2026-11-05
 
 Maestro's desktop host is Electron. The original program assumed a Tauri host for
-Maestro; that assumption was wrong (Tauri is SLOP, a different application) and has
+Maestro; that assumption was wrong (Tauri is the framework chosen for Mega-Maestro and must never be introduced into Maestro) and has
 been removed. `MCOMP-05`, `MCOMP-06`, `MCOMP-11` and `MCOMP-12` are retired, the
 Tauri receipts no longer gate any task, and the `src-tauri` targets now name the
 Electron modules that own each boundary. The counts above are historical: the

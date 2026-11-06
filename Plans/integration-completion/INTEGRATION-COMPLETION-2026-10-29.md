@@ -227,8 +227,8 @@ policy, remove endpoint management, enroll other devices or read other users'
 content in order to do ordinary work.
 
 Maestro's desktop host is Electron and stays Electron. An earlier revision of this
-document named Tauri as the target; that was an error (the Tauri playbook belongs
-to SLOP, a different application) and was corrected on 2026-11-05.
+document named Tauri as the target; that was an error (Tauri is the framework chosen
+for Mega-Maestro, never for Maestro) and was corrected on 2026-11-05.
 The following source findings describe the integration boundaries the Electron
 main process already owns and must keep enforcing.
 

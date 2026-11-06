@@ -132,7 +132,7 @@
 		"no automatic merge toward upstream main; the only landing target is feature/mega-maestro-v1.1.0-rc, by a merge commit, and the push is to origin alone",
 		"enterprise guards survive every resolution: the managed seams the CLAUDE.md canonical index names (admission, authority, lease, custody, egress, listener, redaction, the policy sources) stay bound after the merge",
 		"standalone semantics survive: a build with no managed binding behaves as upstream does",
-		"Tauri target: neither side carries a Tauri scaffold; the Electron paths stay the migration anchors and nothing here commits to one",
+		"Desktop host: Electron on both sides, and it stays Electron; neither side carries a Tauri scaffold and none is to be introduced",
 		"generated-file changes are recorded, not assumed: package.json and package-lock.json auto-merged and MCOMP-01-03R reads the lockfile back through npm",
 		"src/, package-lock.json and the library inputs move with the landing, so MCOMP-01-03T rebuilds the library and re-pins MAESTRO-M0-RUNTIME"
 	],

@@ -3,7 +3,7 @@
   "created": "2026-10-29",
   "profile": "integration-completion",
   "sourceDocument": "docs/design/maestro-rc/INTEGRATION-COMPLETION-2026-10-29.md",
-  "sourceSha256": "6c657d6daf9a295d24f3ce0edc0ae8f0f31298a1d4def21ddcb74b3786b2278d",
+  "sourceSha256": "d4968ce642fe0bb17a6e3e1dfc1bce54d095922f38e666f544ee887ab551c984",
   "executionMode": "task-based",
   "loopEnabled": false,
   "resetOnCompletion": false,

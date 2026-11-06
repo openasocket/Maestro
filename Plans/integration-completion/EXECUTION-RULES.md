@@ -33,7 +33,7 @@ Search for an existing service, helper or equivalent module before adding one.
 Proposed filenames identify the intended boundary; reuse a current equivalent and
 record the mapping rather than create a second implementation. Recheck migration
 numbers at execution time. Maestro's desktop host is Electron and stays Electron:
-no Tauri scaffold is created or assumed. Tauri is SLOP's application, not Maestro's.
+no Tauri scaffold is created or assumed. Tauri is the framework chosen for Mega-Maestro and must never be introduced here.
 
 IMPLEMENT changes application behavior. TEST authors focused unit or harness
 cases. VERIFY executes checks and records results; keep these separate. Each task
