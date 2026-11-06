@@ -753,7 +753,8 @@ describe('net.fetch fail-closed (connection pinning)', () => {
 	});
 
 	it('proceeds to fetch when a dispatcher is present', async () => {
-		const fetchMock = vi.fn(async () => ({
+		const dispatcher = { pinned: true };
+		const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => ({
 			status: 200,
 			statusText: 'OK',
 			body: null,
@@ -766,12 +767,14 @@ describe('net.fetch fail-closed (connection pinning)', () => {
 					egressGuard: {
 						assertUrlAllowed: async () => {},
 						lookup: (() => {}) as never,
-						dispatcher: {},
+						dispatcher,
 					},
 				})
 			);
 			const res = await h['net.fetch']!('p', { url: 'https://example.com' });
 			expect(fetchMock).toHaveBeenCalledTimes(1);
+			// The pinned dispatcher reaches Node's fetch, with redirects refused.
+			expect(fetchMock.mock.calls[0][1]).toMatchObject({ dispatcher, redirect: 'error' });
 			expect(res).toEqual({ status: 200, statusText: 'OK', headers: {}, body: '' });
 		} finally {
 			vi.unstubAllGlobals();

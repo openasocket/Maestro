@@ -1194,17 +1194,22 @@ export function buildHostCallHandlers(deps: HostHandlerDeps): HostCallHandlers {
 				throw new Error('egress blocked: connection pinning is unavailable');
 			}
 			const rawInit = asObject(p.init);
-			const init: RequestInit = {
+			// `dispatcher` is the undici extension Node's fetch reads; the DOM RequestInit the
+			// renderer-facing lint config resolves has no such key, so the pinned dispatcher is
+			// carried as unknown and the whole init asserted once.
+			const pinned: { dispatcher?: unknown } =
+				deps.egressGuard.dispatcher !== undefined
+					? { dispatcher: deps.egressGuard.dispatcher }
+					: {};
+			const init = {
 				method: typeof rawInit.method === 'string' ? rawInit.method : 'GET',
 				...(rawInit.body !== undefined ? { body: rawInit.body as RequestInit['body'] } : {}),
 				...(typeof rawInit.headers === 'object' && rawInit.headers !== null
 					? { headers: rawInit.headers as RequestInit['headers'] }
 					: {}),
 				redirect: 'error',
-				...(deps.egressGuard.dispatcher !== undefined
-					? { dispatcher: deps.egressGuard.dispatcher as unknown as RequestInit['dispatcher'] }
-					: {}),
-			};
+				...pinned,
+			} as RequestInit;
 			const response = await fetchWithTimeout(p.url, init, PLUGIN_FETCH_TIMEOUT_MS);
 			const reader = response.body?.getReader();
 			let received = 0;
