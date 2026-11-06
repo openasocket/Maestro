@@ -151,15 +151,29 @@ vi.mock('../../../cli/services/storage', () => ({
 	readSshRemotes: () => mockReadSshRemotes(),
 }));
 
-// The managed binding beside the data-dir lock: this suite's `fs` mock answers
-// every path, which would read as a corrupt enrollment (and fail closed), so
-// the binding is read as absent here. The managed CLI path is exercised by
-// injecting a `HeadlessSpawnAuthority` through `SpawnAgentOptions.managed`.
-vi.mock('../../../shared/maestro-lib/managed/binding', async (importOriginal) => {
-	const actual =
-		await importOriginal<typeof import('../../../shared/maestro-lib/managed/binding')>();
-	return { ...actual, readManagedBindingFile: () => ({ status: 'none' as const }) };
-});
+// The managed binding beside the data-dir lock and the installation standing it is
+// held to (MCOMP-09-04C): this suite's `fs` mock answers every path, which would read
+// as a corrupt enrollment (and fail closed), so the binding reads no file and answers
+// from a fake standing (standalone unless a case says otherwise), and no developer
+// keychain is read. The managed CLI path is otherwise exercised by injecting a
+// `HeadlessSpawnAuthority` through `SpawnAgentOptions.managed`.
+const hostStanding = vi.hoisted(() => ({
+	read: vi.fn<() => import('../../../shared/maestro-lib/managed/binding').InstallationStanding>(
+		() => ({ standing: 'standalone', detail: 'test' })
+	),
+	created: [] as unknown[],
+}));
+vi.mock('../../../shared/maestro-lib/managed/binding', async (importOriginal) =>
+	(await import('../../helpers/cliManagedStandingMock')).fileFreeBindingModule(
+		await importOriginal()
+	)
+);
+vi.mock('../../../cli/services/host-managed', async () =>
+	(await import('../../helpers/cliManagedStandingMock')).standaloneHostManagedModule(
+		() => hostStanding.read(),
+		hostStanding.created
+	)
+);
 
 // Mock SSH wrapper so SSH tests don't need real ssh/bash on the test machine
 const mockWrapSpawnWithSsh = vi.fn();
@@ -179,6 +193,9 @@ import {
 	resolveCliBatchModeArgs,
 	spawnAgent,
 	AgentResult,
+	cliSpawnAuthority,
+	readCliManagedBinding,
+	resetCliSpawnAuthority,
 } from '../../../cli/services/agent-spawner';
 import { getAgentDefinition } from '../../../main/agents/definitions';
 import { isolateAgentEnv } from '../../helpers/agentEnvIsolation';
@@ -4586,6 +4603,51 @@ Some text with [x] in it that's not a checkbox
 				managed: { state: 'unavailable', code: 'runtime-unavailable' },
 			});
 			expect(mockSpawn).not.toHaveBeenCalled();
+		});
+
+		describe('the bare CLI binding is held to the installation standing (MCOMP-09-04C)', () => {
+			afterEach(() => {
+				hostStanding.read.mockImplementation(() => ({ standing: 'standalone', detail: 'test' }));
+				hostStanding.created.length = 0;
+				resetCliSpawnAuthority();
+			});
+
+			it('reads the default standing over this data directory with refused custody', () => {
+				resetCliSpawnAuthority();
+				hostStanding.created.length = 0;
+				expect(cliSpawnAuthority().standing()).toBe('standalone');
+				expect(hostStanding.created).toHaveLength(1);
+				const input = hostStanding.created[0] as {
+					userDataDir: string;
+					productionDataDir: string;
+					custody: { ok: boolean; reason: string };
+				};
+				expect(input.custody).toEqual({
+					ok: false,
+					reason: `refused for ${input.userDataDir}`,
+				});
+				expect(typeof input.productionDataDir).toBe('string');
+			});
+
+			it('stays managed with the binding file deleted while the sealed record or its anchor remains', async () => {
+				// No binding file here (the suite reads every one as absent); the custody
+				// still holds a record it cannot open, or an anchor whose record is gone.
+				hostStanding.read.mockImplementation(() => ({
+					standing: 'managed',
+					enrollment: null,
+					management: null,
+					detail: 'the record was removed without the authenticated release',
+				}));
+				expect(readCliManagedBinding()).toMatchObject({ state: 'unreadable' });
+				resetCliSpawnAuthority();
+				const authority = cliSpawnAuthority();
+				expect(authority.standing()).toBe('managed');
+				expect(authority.unavailableReason).not.toBeNull();
+
+				const result = await spawnAgent('claude-code', '/p', 'hi');
+				expect(result).toMatchObject({ success: false, managed: { state: 'unavailable' } });
+				expect(mockSpawn).not.toHaveBeenCalled();
+			});
 		});
 
 		it('refuses a forged actor before the authority is asked, and a forged lease at the spawn', async () => {

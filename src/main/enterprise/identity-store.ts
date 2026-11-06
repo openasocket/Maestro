@@ -49,7 +49,7 @@ import type {
 	ManagedIdentityRegistration,
 	ManagedIdentityView,
 } from '../../shared/maestro-lib/managed/endpoint-port';
-import type { AnchorStore } from '../utils/keyring-anchor';
+import type { Anchor, AnchorStore } from '../utils/keyring-anchor';
 import { sealProtectionProblem, type SealProvider } from '../utils/safe-storage-seal';
 
 export const ENTERPRISE_IDENTITY_VERSION = 1 as const;
@@ -90,6 +90,8 @@ export type IdentityCustodyState =
 
 export type IdentityUntrustedReason =
 	| 'anchor-missing'
+	/** No record is present and the credential store still holds its anchor: removed without the release. */
+	| 'anchor-without-record'
 	| 'foreign'
 	| 'rollback'
 	| 'unsealable'
@@ -246,6 +248,13 @@ export function createEnterpriseIdentityStore(
 	const now = deps.now ?? (() => Date.now());
 	const newSecret = deps.newSecret ?? (() => randomBytes(32).toString('base64url'));
 	const queue = createKeyedWriteQueue();
+	/**
+	 * The anchor as read while no record is present, or undefined until it is
+	 * read. Only this store writes or clears the anchor, so one read answers
+	 * until `persist` or `clear` drops it: an unenrolled desktop that reads
+	 * its standing on every status asks the credential store once.
+	 */
+	let anchorWithoutRecord: Anchor | null | undefined;
 
 	function custody(): IdentityCustodyState {
 		const sealProblem = sealProtectionProblem(deps.seal, deps.platform);
@@ -289,7 +298,18 @@ export function createEnterpriseIdentityStore(
 			blob = fs.readFileSync(deps.file);
 		} catch (error) {
 			const code = (error as NodeJS.ErrnoException).code;
-			if (code === 'ENOENT' || code === 'ENOTDIR') return { status: 'none' };
+			if (code === 'ENOENT' || code === 'ENOTDIR') {
+				// The anchor outlives the file only when the file was removed by
+				// hand (clear removes both), so that is not "never enrolled".
+				if (anchorWithoutRecord === undefined) anchorWithoutRecord = deps.anchor.read();
+				const orphan = anchorWithoutRecord;
+				if (!orphan) return { status: 'none' };
+				return {
+					status: 'untrusted',
+					reason: 'anchor-without-record',
+					message: `${deps.file} is gone and the credential store still holds its anchor (epoch ${orphan.epoch}): the record was removed without the authenticated release.`,
+				};
+			}
 			return {
 				status: 'untrusted',
 				reason: 'unsealable',
@@ -346,13 +366,23 @@ export function createEnterpriseIdentityStore(
 	}
 
 	function persist(sealed: SealedIdentityFile): void {
+		anchorWithoutRecord = undefined;
 		// Anchor first: a locked credential store throws here, before a file the
 		// anchor cannot vouch for exists.
 		deps.anchor.write({ installSecret: sealed.installSecret, epoch: sealed.epoch });
-		fs.mkdirSync(path.dirname(deps.file), { recursive: true });
-		const tmp = `${deps.file}.tmp`;
-		fs.writeFileSync(tmp, deps.seal.seal(JSON.stringify(sealed)), { mode: 0o600 });
-		fs.renameSync(tmp, deps.file);
+		try {
+			fs.mkdirSync(path.dirname(deps.file), { recursive: true });
+			const tmp = `${deps.file}.tmp`;
+			fs.writeFileSync(tmp, deps.seal.seal(JSON.stringify(sealed)), { mode: 0o600 });
+			fs.renameSync(tmp, deps.file);
+		} catch (error) {
+			// A first record that never landed must not leave its anchor behind,
+			// or the next read would call this machine's own failed enroll an
+			// orphan (anchor-without-record). A later epoch keeps the anchor:
+			// the older file it now outruns reads as the rollback it is.
+			if (sealed.epoch === 0) deps.anchor.clear();
+			throw error;
+		}
 	}
 
 	async function write(input: IdentityWriteInput): Promise<EnterpriseIdentityRecord> {
@@ -402,6 +432,7 @@ export function createEnterpriseIdentityStore(
 				};
 			case 'none':
 				return { ok: true, removed: false };
+			// An orphan anchor (anchor-without-record) is removed by the same acknowledgement.
 			case 'untrusted':
 				if (!input.acknowledgeUntrusted) {
 					return {
@@ -422,6 +453,7 @@ export function createEnterpriseIdentityStore(
 				break;
 		}
 		try {
+			anchorWithoutRecord = undefined;
 			fs.rmSync(deps.file, { force: true });
 			deps.anchor.clear();
 		} catch (error) {
@@ -472,8 +504,8 @@ export type IdentityStanding = 'standalone' | 'managed';
  * custody cannot be used on this machine (Linux `basic_text`, no keyring),
  * but there is no record it could be hiding, so a desktop that never enrolled
  * is the same standalone desktop under either custody and refuses nothing.
- * `ok` is managed. `untrusted`, or `unprotected` with a file present, stays
- * managed: a record an enrolled run wrote is there and cannot be read or
+ * `ok` is managed. `untrusted` (an anchor whose record is gone included,
+ * MCOMP-09-04C), or `unprotected` with a file present, stays managed: a record an enrolled run wrote is there and cannot be read or
  * trusted here, so a sink refuses by the custody's reason and never falls
  * back to standalone. The Lite composition (`lite/listener-authority.ts`)
  * spells the same rule with the file it looked for.

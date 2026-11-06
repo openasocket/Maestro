@@ -133,6 +133,65 @@ describe('enterprise identity store', () => {
 		expect(s.read()).toEqual({ status: 'none' });
 	});
 
+	it('reads an anchor whose record is gone as untrusted and managed until the acknowledged clear (MCOMP-09-04C)', async () => {
+		const s = store();
+		await s.write(input());
+		fs.rmSync(file);
+		const orphan = s.read();
+		expect(orphan).toMatchObject({ status: 'untrusted', reason: 'anchor-without-record' });
+		expect(identityStandingOf(orphan)).toBe('managed');
+		expect(publicEnterpriseIdentity(orphan)).toMatchObject({
+			status: 'untrusted',
+			reason: 'anchor-without-record',
+			record: null,
+		});
+		// Nothing is written over it by guessing, and nothing is cleared unacknowledged.
+		await expect(s.write(input())).rejects.toThrow(/untrusted record \(anchor-without-record\)/);
+		expect(await s.clear({ installationId: 'inst-1' })).toMatchObject({
+			ok: false,
+			reason: 'untrusted',
+		});
+		expect(holder.value).toEqual({ installSecret: 'install-secret-1', epoch: 0 });
+		// A fresh store (another process start) over the same custody reads it the same way.
+		expect(store().read()).toMatchObject({ status: 'untrusted', reason: 'anchor-without-record' });
+
+		expect(await s.clear({ installationId: 'inst-1', acknowledgeUntrusted: true })).toEqual({
+			ok: true,
+			removed: true,
+		});
+		expect(holder.value).toBeNull();
+		expect(s.read()).toEqual({ status: 'none' });
+		expect(identityStandingOf(s.read())).toBe('standalone');
+		await s.write(input());
+		expect(s.read()).toMatchObject({ status: 'ok', epoch: 0 });
+	});
+
+	it('reads the anchor once while no record is present, and again after its own write', async () => {
+		const anchor = fakeAnchor(holder);
+		const s = store({ anchor });
+		let count = 0;
+		const real = anchor.read.bind(anchor);
+		anchor.read = () => {
+			count += 1;
+			return real();
+		};
+		expect(s.read()).toEqual({ status: 'none' });
+		expect(s.read()).toEqual({ status: 'none' });
+		expect(count).toBe(1);
+		await s.write(input());
+		fs.rmSync(file);
+		expect(s.read()).toMatchObject({ status: 'untrusted', reason: 'anchor-without-record' });
+	});
+
+	it('takes the anchor back when a first record never lands, so a failed enroll leaves no orphan', async () => {
+		const blocker = path.join(dir, 'not-a-dir');
+		fs.writeFileSync(blocker, 'x');
+		const s = store({ file: path.join(blocker, ENTERPRISE_IDENTITY_FILE_NAME) });
+		await expect(s.write(input())).rejects.toThrow();
+		expect(holder.value).toBeNull();
+		expect(s.read()).toEqual({ status: 'none' });
+	});
+
 	it('calls a foreign, edited, oversized, malformed or unanchored file untrusted and names which', async () => {
 		const s = store();
 		await s.write(input());

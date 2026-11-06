@@ -140,9 +140,10 @@ describe('enterprise service', () => {
 		});
 		expect(await service.inbox.refresh()).toMatchObject({ outcome: 'no-standing', listed: 0 });
 		// `identity.read()` ran once for the start check and once per status; the file
-		// does not exist, so custody was consulted but the anchor was never read.
+		// does not exist, so the anchor was read ONCE (an anchor whose record is gone is
+		// managed, MCOMP-09-04C) and that answer held for every later read.
 		expect(available).toHaveBeenCalled();
-		expect(read).not.toHaveBeenCalled();
+		expect(read).toHaveBeenCalledTimes(1);
 	});
 
 	it('re-attaches an enrolled installation at start and reaches registered authority after the actor approves', async () => {

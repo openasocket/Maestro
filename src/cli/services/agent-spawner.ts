@@ -56,10 +56,11 @@ import {
 	type HeadlessSpawnAuthority,
 } from '../../shared/maestro-lib/managed/host-adapter';
 import {
-	managedBindingFiles,
-	readManagedBindingFile,
+	createManagedBinding,
+	type InstallationStandingSource,
 	type ManagedBindingState,
 } from '../../shared/maestro-lib/managed/binding';
+import { createHostInstallationStanding, resolveHostCustody } from './host-managed';
 import type { ManagedDenialCode } from '../../shared/maestro-lib/managed/types';
 import { resolveUserDataDir } from '../../shared/userDataDir';
 import { resolveProductionDataDir } from '../../shared/maestro-lib/paths/userDataDir';
@@ -836,35 +837,46 @@ function cliTurnOptions(
 // Managed admission for a CLI launch (MRC-06-05)
 // ============================================================================
 
+const CLI_NO_HOST_REASON =
+	'maestro-cli holds no attached host authority; an enrolled installation launches through the desktop or a maestro-cli host.';
+
 /**
  * The managed binding of the installation this CLI runs in, read from the
- * same files the desktop writes beside the data-dir lock: this data directory
+ * same files the desktop writes beside the data-dir lock (this data directory
  * first, then the production one, so an alternate `MAESTRO_USER_DATA` under
- * an enrolled installation is still enrolled. A present file that cannot be
- * read is `unreadable`, which fails closed. Read once per process: the
- * binding changes only through an explicit enroll or unenroll, and a long
- * CLI run should not flip standing between two tasks.
+ * an enrolled installation is still enrolled) and held to the installation
+ * standing (MCOMP-09-04C): `createHostInstallationStanding` over the same
+ * directories with this process's custody (`resolveHostCustody` with no
+ * seal, refused by name), so a binding file deleted while the sealed record
+ * or its anchor remains is still managed, and a file the custody does not
+ * hold supplies no authority. No authority is attached, so anything but
+ * standalone is unavailable or unreadable, and fails closed. Read once per
+ * process (`cliSpawnAuthority`): a long CLI run should not flip standing
+ * between two tasks. `standing` is the test seam.
  */
-function readCliManagedBinding(): ManagedBindingState {
+export function readCliManagedBinding(standing?: InstallationStandingSource): ManagedBindingState {
 	const userDataDir = resolveUserDataDir();
-	const files = managedBindingFiles({
-		userDataDir,
-		productionDataDir: resolveProductionDataDir(userDataDir),
-	});
-	for (const file of files) {
-		if (!fs.existsSync(file)) continue;
-		const read = readManagedBindingFile(file);
-		if (read.status === 'none') continue;
-		if (read.status === 'unreadable') return { state: 'unreadable', file, reason: read.reason };
-		return {
-			state: 'enrolled-unavailable',
-			record: read.record,
-			file,
-			reason:
-				'maestro-cli holds no attached host authority; an enrolled installation launches through the desktop or a maestro-cli host.',
-		};
+	const productionDataDir = resolveProductionDataDir(userDataDir);
+	const state = createManagedBinding({
+		paths: { userDataDir, productionDataDir },
+		fence: () => ({ ok: true as const }),
+		standing:
+			standing ??
+			createHostInstallationStanding({
+				userDataDir,
+				productionDataDir,
+				custody: resolveHostCustody({ userDataDir }),
+			}),
+		now: () => Date.now(),
+	}).state();
+	if (state.state === 'enrolled-unavailable') {
+		return { ...state, reason: `${state.reason} ${CLI_NO_HOST_REASON}` };
 	}
-	return { state: 'standalone', files };
+	if (state.state === 'enrolled') {
+		// Unreachable with no authority attached; never let it read as admitted.
+		return { ...state, state: 'enrolled-unavailable', reason: CLI_NO_HOST_REASON };
+	}
+	return state;
 }
 
 let cliAuthority: HeadlessSpawnAuthority | null = null;

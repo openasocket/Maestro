@@ -61,6 +61,17 @@ vi.mock('fs', async () => {
 	return { ...mocked, default: mocked };
 });
 
+// The bare CLI's managed binding and installation standing (MCOMP-09-04C): no file
+// read through the `fs` mock above, no developer keychain; standalone.
+vi.mock('../../../shared/maestro-lib/managed/binding', async (importOriginal) =>
+	(await import('../../helpers/cliManagedStandingMock')).fileFreeBindingModule(
+		await importOriginal()
+	)
+);
+vi.mock('../../../cli/services/host-managed', async () =>
+	(await import('../../helpers/cliManagedStandingMock')).standaloneHostManagedModule()
+);
+
 vi.mock('../../../cli/services/storage', () => ({
 	// Resolves the agent binary from settings so detection never spawns a lookup.
 	getAgentCustomPath: vi.fn(() => '/custom/path/to/claude'),
