@@ -138,9 +138,9 @@
 	],
 	"tool": ".maestro/playbooks/Working/mcomp-01-03/merge-tool.mjs (verbs start, status, show, log, stage, link-modules; not in git)",
 	"status": {
-		"state": "landed: the integration branch merged into feature/mega-maestro-v1.1.0-rc at e97ebd3ca; the one plugin TLS egress bypass the rescan found is held at 8cc56bfcc (MCOMP-01-03SA); T re-pins and closes",
-		"updatedAt": "2026-11-06T06:40:06.396Z",
-		"updatedBy": "MCOMP-01-03SA"
+		"state": "pinned: the integration branch landed on feature/mega-maestro-v1.1.0-rc at e97ebd3ca, the plugin TLS hold at 8cc56bfcc, library 0.36.0 at b84fe2f37, and MAESTRO-M0-RUNTIME re-pinned at d503fa916 over archive sha256 5e31a9f80eca5d7f179cda6ba379d2d16d778ffd077c645d033d6d4c340a0780 (2,505,738 bytes, implementation digest 51901a35ff2fda052660bfee0821d34f118a7da746fb6abf098cf7b8b587b10c), reading ready with drift 0; MCOMP-01-03 closed",
+		"updatedAt": "2026-11-06T06:44:18.352Z",
+		"updatedBy": "MCOMP-01-03T"
 	},
 	"progress": {
 		"MCOMP-01-03A": {
@@ -1309,6 +1309,32 @@
 				"At the RPC boundary the PLUGIN_PRIMITIVE_METHODS handler flattens any non-PluginAuthorityError, the EgressDeniedError included, to PLUGIN_UNAVAILABLE for the sandbox; the main-process caller of PluginTlsHost.open sees the refusal itself. Outside this task's manifest."
 			],
 			"repin": "src/ moved: MCOMP-01-03T re-pins MAESTRO-M0-RUNTIME over this commit."
+		},
+		"MCOMP-01-03T": {
+			"doneAt": "2026-11-06",
+			"doneBy": "Maestro-Claude",
+			"libraryCommit": "b84fe2f3755eec965a86b3a0d080f9e8a7661ac7",
+			"pinCommit": "d503fa916",
+			"library": {
+				"from": "0.35.0",
+				"to": "0.36.0",
+				"reason": "additions through export-star modules: withAgentInGroup, isAgentOwnWorkingDirectory, MAESTRO_P_ACCEPT_WORKSPACE_TRUST_ENV, MAESTRO_P_WORKSPACE_UNTRUSTED_EXIT_CODE, acceptWorkspaceTrust, TurnNotStartedError, providerTranslationTabInventory"
+			},
+			"archive": {
+				"sha256": "5e31a9f80eca5d7f179cda6ba379d2d16d778ffd077c645d033d6d4c340a0780",
+				"bytes": 2505738,
+				"manifestSha256": "c3db453d2aeae083a064c8782b5e9da3263a14377d24a32a8e056e260325d7cc",
+				"payloadDigest": "253c4394690f0edaa5aa7467b5e911050e86e3f0d20e844dd0e580e88f3cb9ac"
+			},
+			"implementation": {
+				"digest": "51901a35ff2fda052660bfee0821d34f118a7da746fb6abf098cf7b8b587b10c",
+				"commit": "b84fe2f3755eec965a86b3a0d080f9e8a7661ac7",
+				"fileCount": 6915
+			},
+			"previousArchive": "d8a40b8fb028 (library 0.35.0, packaged from 8404df9d3)",
+			"verify": "package-mega-maestro-runtime.mjs --runtime DIR --json: status ready, drift 0, no reasons",
+			"suites": "package-mega-maestro-runtime, mega-maestro-handoff, managed contracts, standalone, built-entry: 5 files, 56 passed",
+			"closes": "MCOMP-01-03"
 		}
 	}
 }
