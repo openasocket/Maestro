@@ -157,8 +157,14 @@ import { MANAGED_CONTRACT_VERSION } from './managed/types';
  * from the custody: the custody's enrollment is written when no file carries it (a mirror already there is not a
  * warning) and a stale mirror under a standalone custody is removed by name. A runtime with no source reads the
  * files alone, as before.
+ * 0.36.0: the upstream/rc merge (MCOMP-01-03S, landing e97ebd3ca) adds to the surface: `withAgentInGroup`
+ * (`./agents/rules`), `isAgentOwnWorkingDirectory`, `MAESTRO_P_ACCEPT_WORKSPACE_TRUST_ENV` and
+ * `MAESTRO_P_WORKSPACE_UNTRUSTED_EXIT_CODE` with `acceptWorkspaceTrust` on the spawn decision and the agent turn
+ * (`./launch/interactive-mode`, `./turns/run-agent-turn`), `TurnNotStartedError` (`./run/start-turn`: a spawn
+ * that throws before the process exists), `providerTranslationTabInventory` on `ProviderSwitchAgent`, and
+ * `MAX_CLOSED_TAB_ARCHIVE` now follows the shared closed-tab history cap. Additions only; nothing is removed.
  */
-export const MAESTRO_LIB_VERSION = '0.35.0';
+export const MAESTRO_LIB_VERSION = '0.36.0';
 
 /** The Node range the built library runs on; `engines.node` of the built package. */
 export const MAESTRO_LIB_NODE_RANGE = '>=20';
