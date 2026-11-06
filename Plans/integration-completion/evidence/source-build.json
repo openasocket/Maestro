@@ -1,0 +1,431 @@
+{
+	"schemaVersion": 1,
+	"schema": "maestro-build-receipt/1",
+	"artifactId": "MAESTRO-SOURCE-BASELINE-BUILD",
+	"owner": "maestro",
+	"proofClass": "implementation-input",
+	"producerDocument": "MCOMP-01",
+	"task": "MCOMP-01-05",
+	"stage": "S02",
+	"backlog": ["BASE-01", "BASE-02"],
+	"recordedAt": "2026-11-06T07:28:16.731Z",
+	"recordedWith": { "node": "v26.13.0", "platform": "darwin-arm64" },
+	"standing": "a BUILD receipt: the real compiled, unit-tested implementation snapshot of the preserved integration branch after the reviewed upstream/rc merge, exported as the public runtime archive. It supplies compiled inputs for MCOMP-02-01 (MAESTRO-SOURCE-BASELINE) and the counterpart; it grants no lease or policy authority, enables no provider support and proves no paired, native or provider outcome; every paired, native and real-provider requirement stays in its own qualification task",
+	"grants": { "authority": "none", "lease": "none", "policy": "none" },
+	"qualifies": { "paired": false, "provider": false, "native": false },
+	"consumers": ["MCOMP-02-01"],
+	"revisions": {
+		"branch": "feature/mega-maestro-v1.1.0-rc",
+		"implementation": {
+			"commit": "701032f52aeedab83098b62cdf4cf06b7fb16474",
+			"committedAt": "2026-11-06T02:17:28-05:00",
+			"digest": "16dda142e4b8934f8a64fd42d13987417da6d9aad7094e3d1fbcb80d0c570538",
+			"rules": "maestro-implementation-tree/1",
+			"fileCount": 6916,
+			"deleted": 0,
+			"dirty": false,
+			"dirtyEntries": 0,
+			"map": "source/implementation.json inside the archive"
+		},
+		"observed": {
+			"head": "9b42c6e74c27bfd444cdd49e00274ab3e6e3c057",
+			"headCommittedAt": "2026-11-06T02:18:03-05:00",
+			"headTree": "94a37cea068cf94551b20e76c5c67d05ba65ba08",
+			"treeDirty": false,
+			"trackedChanges": 0,
+			"untrackedOutsideInputSet": [".sloptimize/", "rustygraphify-out/"],
+			"untrackedInsideInputSet": [],
+			"coordinationCommitsSinceImplementation": [
+				"9b42c6e74c27bfd444cdd49e00274ab3e6e3c057 2026-11-06T02:18:03-05:00 MAESTRO: MCOMP-01-05 re-pin MAESTRO-M0-RUNTIME over the MCOMP-01-05B repair",
+				"3c542bfa8654c6a3dfd03d3bd07a35996a65af6a 2026-11-06T02:17:51-05:00 MAESTRO: MCOMP-01-05 insert the continuation MCOMP-01-05B into program.json"
+			],
+			"filesMovedSinceImplementation": [
+				"Plans/integration-completion/program.json",
+				"Plans/integration-completion/runtime-conformance.json"
+			],
+			"filesMovedInsideInputSet": [],
+			"rule": "HEAD sits ahead of the implementation commit only by commits outside the input set (the pin, this receipt); the packager reads that as coordinationOnly and the archive stays current"
+		},
+		"upstream": {
+			"selection": "upstream/rc 3c85691621acc55aa55309b6676dfb0e759841bd (v1.1.0-RC-223-g3c8569162, 2026-10-25T09:59:36+01:00)",
+			"selectionIsAncestor": true,
+			"landing": "e97ebd3cabc62c5bab19f96a172f821eb922b350 (feature parent 6ac3a4694e632064b1716a6f36223480772a9468, integration parent 57f42978b1d98fdc092c1e5477a88fd9f92c7115)",
+			"landingIsAncestor": true,
+			"conflicts": "44 content conflicts resolved in 16 bounded groups (MCOMP-01-03A..03P), committed in the worktree (03Q), suites (03R, 03RA, 03RB), landed by merge commit (03S), plugin TLS hold (03SA), re-pinned (03T)",
+			"record": "Plans/integration-completion/upstream-merge.json sha256 ae79cafdd87d64067f9b509e271b7df4da13602113e71bfab48bde6c1bb47f83, status pinned",
+			"rules": [
+				"no forced reset, checkout loss, history rewrite or signing change on either checkout",
+				"no automatic merge toward upstream main; the only landing target is feature/mega-maestro-v1.1.0-rc, by a merge commit, and the push is to origin alone",
+				"enterprise guards survive every resolution: the managed seams the CLAUDE.md canonical index names (admission, authority, lease, custody, egress, listener, redaction, the policy sources) stay bound after the merge",
+				"standalone semantics survive: a build with no managed binding behaves as upstream does",
+				"Desktop host: Electron on both sides, and it stays Electron; neither side carries a Tauri scaffold and none is to be introduced",
+				"generated-file changes are recorded, not assumed: package.json and package-lock.json auto-merged and MCOMP-01-03R reads the lockfile back through npm",
+				"src/, package-lock.json and the library inputs move with the landing, so MCOMP-01-03T rebuilds the library and re-pins MAESTRO-M0-RUNTIME"
+			]
+		},
+		"rcBase": {
+			"ref": "v1.1.0-RC",
+			"commit": "6400a6da0cfbae97bd90c4b361eea163fc3a1223",
+			"isAncestor": true,
+			"role": "comparison point only, never a build or reset target"
+		},
+		"checkpoint": "Plans/integration-completion/source-baseline.json (MCOMP-01-01) sha256 b7e960346ff7612d6cb20ad81044ff02e6fd5c1c80fd46e9be12a2daa73a0a5a, naming the pre-merge head fdc98ff32156c6a466a927ae0ed8367bd9b74296"
+	},
+	"inputs": {
+		"implementationDigest": "16dda142e4b8934f8a64fd42d13987417da6d9aad7094e3d1fbcb80d0c570538",
+		"lockfile": "package-lock.json sha256 a2cb6ed66bbc926cff693b9f068966b084fb7d908b4cbc6db656752c25af469a",
+		"packageJson": "package.json sha256 1e0b24ea706be05169af75178b4e079e7d0b6fdb32839fc4078588a995d23f7b",
+		"library": {
+			"version": "0.36.0",
+			"sourceRevision": "b84fe2f3755eec965a86b3a0d080f9e8a7661ac7",
+			"inputSha256": "c934475364e4b0b570873c86eddbf8514bf7a117229c7056df742a632d089be4",
+			"inputFiles": 327,
+			"entrySha256": "50d29536c61c1bc3e4d9ff958c4c9e7d733306a77e7479d83e5c1c8d24e89a3f",
+			"builtWithNode": "26.13.0",
+			"rule": "the library was not rebuilt for this receipt: its inputs are unchanged since the build at sourceRevision, which scratch-build reproduces"
+		},
+		"versions": {
+			"app": "1.1.1-RC",
+			"library": "0.36.0",
+			"managedContract": "maestro-managed/1",
+			"endpointProtocol": 1
+		},
+		"contractsComponent": "absent: no clean Mega-Maestro contracts artifact is pinned in this checkout (CP-01, owner mega-maestro)",
+		"components": { "library": 302, "contracts": 0, "conformance": 1, "source": 2 },
+		"excluded": "provider profiles; credentials and ledgers; the sibling Mega-Maestro checkout; the imported contracts package (pinned by digest only)"
+	},
+	"archive": {
+		"artifactId": "MAESTRO-M0-RUNTIME",
+		"kind": "maestro-runtime",
+		"formatVersion": 2,
+		"pin": {
+			"file": "Plans/integration-completion/runtime-conformance.json",
+			"status": "pinned",
+			"committed": true,
+			"sha256": "ff9cef2352a00aaf356c40c203acd8cd67f212dda0b543a0aaac5d59391f2936",
+			"rule": "a counterpart adapter records qualifiedAgainst.maestroRuntimeSha256 = archive.sha256 in its own pin, read by scripts/mega-maestro-pair.mjs; nothing an adapter records is written here, so qualification cannot change the archive it names"
+		},
+		"location": {
+			"directory": "dist/mega-maestro-runtime/0.36.0/9d4b5d781b3f8dd413340b04514be0d59d49478ef0d99fb3235ec1d40266ba92",
+			"rule": "obtain the archive by archive.sha256 and verify the sidecar and sha512; the directory is where the packager lands it"
+		},
+		"file": "runtime.tgz",
+		"sha256": "9d4b5d781b3f8dd413340b04514be0d59d49478ef0d99fb3235ec1d40266ba92",
+		"sha512": "0850f76c95d183366b2b210d8cad1e209e64665c0817d2969b05dddc6c73491228c8053453f3d62df65c1119bae7202e2b677a63a5554c3ceeb35c98d4a9e3af",
+		"bytes": 2505803,
+		"sidecar": {
+			"file": "runtime.tgz.sha256",
+			"content": "9d4b5d781b3f8dd413340b04514be0d59d49478ef0d99fb3235ec1d40266ba92  runtime.tgz"
+		},
+		"beside": {
+			"artifact.json": "901cfadd5ea8228abc41f67b83974e6db6b420e0538c939a0fb1a9eaae034d7d",
+			"acceptance.json": "39f970c8b27b25ed6b8463c4b98140ad072847878193929fd3c7377dc75f6010"
+		},
+		"manifestSha256": "2f2846eef99a6fb36e7b5cd2af4adef3a6e0fa50cc8c2218df6961f80f2a2ee4",
+		"payloadDigest": "c31a7ea058ffadab70cd3c28f04456b641cba385645742eecb15ec20f067188e",
+		"payloadFiles": 305,
+		"payload": {
+			"entry": {
+				"path": "library/index.js",
+				"sha256": "50d29536c61c1bc3e4d9ff958c4c9e7d733306a77e7479d83e5c1c8d24e89a3f"
+			},
+			"named": {
+				"library/README.md": "32c7948e434d8604e033863c6528867044763b30c35acca6aecfc02280012ead",
+				"library/index.d.ts": "b74a2430c659e8bda6f00155a1932874cf7ac0f2039e8f9f242cfa70cf1e75ea",
+				"library/index.js": "50d29536c61c1bc3e4d9ff958c4c9e7d733306a77e7479d83e5c1c8d24e89a3f",
+				"library/index.js.map": "834649ce0fab362358ec9d4aa7757e6abb160d3a532aceb8a8139eab328c3e80",
+				"library/package.json": "932e2e10fc0a4f831ca39bd156a33e8d953e574865c9c56ffb81679ef603f6b0",
+				"library/provenance.json": "10b7b63ba8dbb7e6b507d9d9bc6a7b333a6012c5679fde462547893a3791bb54",
+				"conformance/capabilities.json": "9f49acbd56c785eeb02cf98bc660ff4a345a74446e8ae367220ebcec477a1e6a",
+				"source/implementation.json": "157cea7d50e00404808053504ba45a526db59be90ea479ba6c09af0c0a30e049",
+				"source/library-inputs.json": "93e5b1f1912b1c18628b4bd049f5e3cf120cf6ec929ac45d1f4e4fe637d6cfd4"
+			},
+			"typeDeclarations": 296,
+			"managedDeclarations": 6,
+			"map": "payloadSha256 in artifact.json beside the archive, equal to manifest.json inside it; every entry checked file by file by load-archive"
+		},
+		"bootstrap": {
+			"statement": "compiled inputs for the counterpart adapter: this archive grants no lease or policy authority, enables no provider support and proves no paired, native or provider qualification",
+			"routes": "55 total, 11 managed implemented, 44 unavailable",
+			"qualification": { "paired": false, "provider": false, "native": false }
+		},
+		"observedAtPackaging": {
+			"head": "3c542bfa8654c6a3dfd03d3bd07a35996a65af6a",
+			"treeDirty": false,
+			"packagedAt": "2026-11-06T07:17:53.454Z",
+			"certifiable": true,
+			"reasons": []
+		}
+	},
+	"dependencies": [
+		{
+			"artifactId": "MAESTRO-M0-RUNTIME-BUILD",
+			"owner": "maestro",
+			"role": "MCOMP-03-05, the earlier runtime BUILD receipt over the pre-merge tree",
+			"file": "Plans/integration-completion/evidence/m0-build.json",
+			"sha256": "796a9c0ac01581efb96ad616ba08df51f56d473562856b67a7183033008a952c",
+			"names": "759b947aaf546631e573642e5a9c8450adafa74a239e42741766cc1acef05a3e",
+			"effect": "not consumed; the archive above supersedes the one it names, through the same packager and the same committed pin file"
+		},
+		{
+			"artifactId": "MEGA-CONTRACTS-FOUNDATION",
+			"owner": "mega-maestro",
+			"role": "CP-01, the contracts package the importer pins",
+			"status": "absent",
+			"file": "vendor/mega-maestro/contracts.pin.json",
+			"sha256": null,
+			"effect": "not an input of this build (components.contracts 0); the pair check names it as a blocker of the pair, not of this receipt"
+		}
+	],
+	"checks": [
+		{
+			"step": "verify-runtime",
+			"purpose": "the packager verifies the pinned artifact: archive bound to sidecar, manifest and directory by sha256 and sha512, archived implementation map equal to the tree now, library inputs unchanged, named by the committed pin",
+			"command": "node scripts/package-mega-maestro-runtime.mjs --runtime dist/mega-maestro-runtime/0.36.0/9d4b5d781b3f8dd413340b04514be0d59d49478ef0d99fb3235ec1d40266ba92 --json",
+			"exit": "0 (expected 0, as expected)",
+			"exitCode": 0,
+			"asExpected": true,
+			"startedAt": "2026-11-06T07:18:04.265Z",
+			"durationMs": 748,
+			"logs": ".maestro/playbooks/Working/mcomp-01-05/results/verify-runtime.stdout.log, .maestro/playbooks/Working/mcomp-01-05/results/verify-runtime.stderr.log",
+			"result": {
+				"status": "ready",
+				"archiveSha256": "9d4b5d781b3f8dd413340b04514be0d59d49478ef0d99fb3235ec1d40266ba92",
+				"pinCommitted": true,
+				"implementationCommit": "701032f52aeedab83098b62cdf4cf06b7fb16474",
+				"headMoved": true,
+				"coordinationOnly": true,
+				"treeDirtyAtPackaging": false,
+				"drift": 0,
+				"libraryInputsMoved": 0,
+				"certifiable": true,
+				"problems": []
+			}
+		},
+		{
+			"step": "load-archive",
+			"purpose": "the pinned archive loaded as a consumer loads it: bytes against the pin, entries under package/ only, every payload digest, library/index.js in a plain Node with no node_modules above it and no Electron, versions, managed port, negotiate and routes against the manifest",
+			"command": "node .maestro/playbooks/Working/mcomp-01-05/load-pinned-archive.mjs",
+			"exit": "0 (expected 0, as expected)",
+			"exitCode": 0,
+			"asExpected": true,
+			"startedAt": "2026-11-06T07:18:05.128Z",
+			"durationMs": 519,
+			"logs": ".maestro/playbooks/Working/mcomp-01-05/results/load-archive.stdout.log, .maestro/playbooks/Working/mcomp-01-05/results/load-archive.stderr.log",
+			"result": {
+				"status": "agrees",
+				"archive": "sha256 equals pin true, sha512 true, bytes true, sidecar names archive true, directory is sha256 true",
+				"manifest": "inside equals beside true; implementation digest, commit, library input digest and entry digest equal the pin true",
+				"payload": "305 files checked, 0 mismatched, 0 extra, 0 missing, 338 tar entries all under package/; implementation map 6916 entries, library inputs 327",
+				"loaded": "library/index.js in Node v26.13.0, Electron absent, versions agree true, 22 managed port exports functions (0 missing)",
+				"negotiate": "capabilities.negotiate activated; 8 other capabilities refused by name true",
+				"routes": "55 total, 11 managed implemented, 44 unavailable, agree with the manifest true",
+				"problems": []
+			}
+		},
+		{
+			"step": "scratch-build",
+			"purpose": "the library built again from this tree into a scratch folder and compared file by file with the archived library payload",
+			"command": "node .maestro/playbooks/Working/mcomp-01-05/scratch-build.mjs",
+			"exit": "0 (expected 0, as expected)",
+			"exitCode": 0,
+			"asExpected": true,
+			"startedAt": "2026-11-06T07:18:05.761Z",
+			"durationMs": 2715,
+			"logs": ".maestro/playbooks/Working/mcomp-01-05/results/scratch-build.stdout.log, .maestro/playbooks/Working/mcomp-01-05/results/scratch-build.stderr.log",
+			"result": {
+				"status": "reproduced",
+				"build": "exit 0, 302 files written, 300 identical to the archived library payload, differing: index.js.map, provenance.json",
+				"reproduced": "entry true (50d29536c61c1bc3e4d9ff958c4c9e7d733306a77e7479d83e5c1c8d24e89a3f), declarations true (297 files), library inputs true (c934475364e4b0b570873c86eddbf8514bf7a117229c7056df742a632d089be4)",
+				"sourceMap": "only the relative source prefix differs true",
+				"provenance": "fields differing sourceRevision, payloadSha256: sourceRevision 9b42c6e74c27bfd444cdd49e00274ab3e6e3c057 now against b84fe2f3755eec965a86b3a0d080f9e8a7661ac7 archived",
+				"problems": []
+			}
+		},
+		{
+			"step": "vitest-source",
+			"purpose": "the source snapshot and drift suite (MCOMP-01-04), the mega-maestro integration folder, the packager and handoff script suites, the managed contracts and the built public entry",
+			"command": "node --max-old-space-size=8192 node_modules/vitest/vitest.mjs run src/__tests__/integration/mega-maestro src/__tests__/scripts/package-mega-maestro-runtime.test.ts src/__tests__/scripts/mega-maestro-handoff.test.ts src/__tests__/shared/maestro-lib/managed src/shared/maestro-lib/__tests__/built-entry.test.ts --reporter=default --reporter=json --outputFile.json=.maestro/playbooks/Working/mcomp-01-05/results/vitest-source.report.json",
+			"exit": "0 (expected 0, as expected)",
+			"exitCode": 0,
+			"asExpected": true,
+			"startedAt": "2026-11-06T07:18:08.587Z",
+			"durationMs": 22759,
+			"logs": ".maestro/playbooks/Working/mcomp-01-05/results/vitest-source.stdout.log, .maestro/playbooks/Working/mcomp-01-05/results/vitest-source.stderr.log",
+			"result": {
+				"tests": { "total": 362, "passed": 360, "failed": 0, "skipped": 2 },
+				"fileCount": 23,
+				"files": [
+					"src/__tests__/scripts/mega-maestro-handoff.test.ts: 6 passed, 0 failed, 0 skipped",
+					"src/__tests__/scripts/package-mega-maestro-runtime.test.ts: 6 passed, 0 failed, 0 skipped",
+					"src/__tests__/integration/mega-maestro/conformance.test.ts: 7 passed, 0 failed, 0 skipped",
+					"src/__tests__/integration/mega-maestro/early-pair.test.ts: 8 passed, 0 failed, 1 skipped",
+					"src/__tests__/integration/mega-maestro/full-pair.test.ts: 10 passed, 0 failed, 1 skipped",
+					"src/__tests__/integration/mega-maestro/offline-recovery.test.ts: 5 passed, 0 failed, 0 skipped",
+					"src/__tests__/integration/mega-maestro/source-snapshot.test.ts: 6 passed, 0 failed, 0 skipped",
+					"src/__tests__/integration/mega-maestro/standalone.test.ts: 8 passed, 0 failed, 0 skipped",
+					"src/shared/maestro-lib/__tests__/built-entry.test.ts: 7 passed, 0 failed, 0 skipped",
+					"src/__tests__/shared/maestro-lib/managed/authority.test.ts: 21 passed, 0 failed, 0 skipped",
+					"src/__tests__/shared/maestro-lib/managed/commands.published.test.ts: 4 passed, 0 failed, 0 skipped",
+					"src/__tests__/shared/maestro-lib/managed/commands.test.ts: 22 passed, 0 failed, 0 skipped",
+					"src/__tests__/shared/maestro-lib/managed/compatibility.counterpart.test.ts: 9 passed, 0 failed, 0 skipped",
+					"src/__tests__/shared/maestro-lib/managed/contract-vectors.test.ts: 6 passed, 0 failed, 0 skipped",
+					"src/__tests__/shared/maestro-lib/managed/contracts.test.ts: 29 passed, 0 failed, 0 skipped",
+					"src/__tests__/shared/maestro-lib/managed/credentials.test.ts: 21 passed, 0 failed, 0 skipped",
+					"src/__tests__/shared/maestro-lib/managed/delegation.test.ts: 18 passed, 0 failed, 0 skipped",
+					"src/__tests__/shared/maestro-lib/managed/event-journal.test.ts: 18 passed, 0 failed, 0 skipped",
+					"src/__tests__/shared/maestro-lib/managed/events.test.ts: 28 passed, 0 failed, 0 skipped",
+					"src/__tests__/shared/maestro-lib/managed/host-adapter.test.ts: 28 passed, 0 failed, 0 skipped",
+					"src/__tests__/shared/maestro-lib/managed/permission-ceiling.test.ts: 66 passed, 0 failed, 0 skipped",
+					"src/__tests__/shared/maestro-lib/managed/provider-route.test.ts: 4 passed, 0 failed, 0 skipped",
+					"src/__tests__/shared/maestro-lib/managed/workflows.test.ts: 23 passed, 0 failed, 0 skipped"
+				],
+				"failed": [],
+				"skippedCount": 2
+			}
+		},
+		{
+			"step": "vitest-full",
+			"purpose": "the whole unit suite (vitest run, the npm test configuration) over the merged tree",
+			"command": "node --max-old-space-size=8192 node_modules/vitest/vitest.mjs run --reporter=default --reporter=json --outputFile.json=.maestro/playbooks/Working/mcomp-01-05/results/vitest-full.report.json",
+			"exit": "0 (expected 0, as expected)",
+			"exitCode": 0,
+			"asExpected": true,
+			"startedAt": "2026-11-06T07:18:31.464Z",
+			"durationMs": 481063,
+			"logs": ".maestro/playbooks/Working/mcomp-01-05/results/vitest-full.stdout.log, .maestro/playbooks/Working/mcomp-01-05/results/vitest-full.stderr.log",
+			"result": {
+				"tests": { "total": 59772, "passed": 59667, "failed": 0, "skipped": 105 },
+				"fileCount": 2702,
+				"files": [],
+				"failed": [],
+				"skippedCount": 105
+			}
+		},
+		{
+			"step": "tsc-lint",
+			"purpose": "npm run lint, first leg (renderer, shared, web, types)",
+			"command": "node node_modules/typescript/bin/tsc -p tsconfig.lint.json",
+			"exit": "0 (expected 0, as expected)",
+			"exitCode": 0,
+			"asExpected": true,
+			"startedAt": "2026-11-06T07:26:32.672Z",
+			"durationMs": 16110,
+			"logs": ".maestro/playbooks/Working/mcomp-01-05/results/tsc-lint.stdout.log, .maestro/playbooks/Working/mcomp-01-05/results/tsc-lint.stderr.log",
+			"result": { "errors": 0, "byFile": [] }
+		},
+		{
+			"step": "tsc-main",
+			"purpose": "npm run lint, second leg (main, shared, types)",
+			"command": "node node_modules/typescript/bin/tsc -p tsconfig.main.json --noEmit",
+			"exit": "0 (expected 0, as expected)",
+			"exitCode": 0,
+			"asExpected": true,
+			"startedAt": "2026-11-06T07:26:48.869Z",
+			"durationMs": 4694,
+			"logs": ".maestro/playbooks/Working/mcomp-01-05/results/tsc-main.stdout.log, .maestro/playbooks/Working/mcomp-01-05/results/tsc-main.stderr.log",
+			"result": { "errors": 0, "byFile": [] }
+		},
+		{
+			"step": "tsc-cli",
+			"purpose": "npm run lint, third leg (cli, maestro-p, shared, prompts, types)",
+			"command": "node node_modules/typescript/bin/tsc -p tsconfig.cli.json --noEmit",
+			"exit": "0 (expected 0, as expected)",
+			"exitCode": 0,
+			"asExpected": true,
+			"startedAt": "2026-11-06T07:26:53.650Z",
+			"durationMs": 4026,
+			"logs": ".maestro/playbooks/Working/mcomp-01-05/results/tsc-cli.stdout.log, .maestro/playbooks/Working/mcomp-01-05/results/tsc-cli.stderr.log",
+			"result": { "errors": 0, "byFile": [] }
+		},
+		{
+			"step": "eslint-library",
+			"purpose": "eslint over src/shared/maestro-lib",
+			"command": "node node_modules/eslint/bin/eslint.js src/shared/maestro-lib",
+			"exit": "0 (expected 0, as expected)",
+			"exitCode": 0,
+			"asExpected": true,
+			"startedAt": "2026-11-06T07:26:57.764Z",
+			"durationMs": 4010,
+			"logs": ".maestro/playbooks/Working/mcomp-01-05/results/eslint-library.stdout.log, .maestro/playbooks/Working/mcomp-01-05/results/eslint-library.stderr.log",
+			"result": { "problems": 0, "errors": 0, "warnings": 0 }
+		},
+		{
+			"step": "eslint-scripts-tests",
+			"purpose": "eslint (dashes config) over scripts and the mega-maestro, scripts and maestro-lib test folders",
+			"command": "node node_modules/eslint/bin/eslint.js -c eslint.dashes.config.mjs scripts src/__tests__/integration/mega-maestro src/__tests__/scripts src/__tests__/shared/maestro-lib",
+			"exit": "0 (expected 0, as expected)",
+			"exitCode": 0,
+			"asExpected": true,
+			"startedAt": "2026-11-06T07:27:01.858Z",
+			"durationMs": 1050,
+			"logs": ".maestro/playbooks/Working/mcomp-01-05/results/eslint-scripts-tests.stdout.log, .maestro/playbooks/Working/mcomp-01-05/results/eslint-scripts-tests.stderr.log",
+			"result": { "problems": 0, "errors": 0, "warnings": 0 }
+		},
+		{
+			"step": "docs-verify",
+			"purpose": "npm run docs:verify path check (the canonical index and its full entries)",
+			"command": "node scripts/verify-docs-paths.mjs",
+			"exit": "0 (expected 0, as expected)",
+			"exitCode": 0,
+			"asExpected": true,
+			"startedAt": "2026-11-06T07:27:02.994Z",
+			"durationMs": 94,
+			"logs": ".maestro/playbooks/Working/mcomp-01-05/results/docs-verify.stdout.log, .maestro/playbooks/Working/mcomp-01-05/results/docs-verify.stderr.log",
+			"result": null
+		},
+		{
+			"step": "pair-check",
+			"purpose": "the real-pair harness inspecting every input of a pair with this runtime; exit 2 is the expected answer while the counterpart producers are absent",
+			"command": "node scripts/mega-maestro-pair.mjs check --runtime dist/mega-maestro-runtime/0.36.0/9d4b5d781b3f8dd413340b04514be0d59d49478ef0d99fb3235ec1d40266ba92 --json",
+			"exit": "2 (expected 2, as expected)",
+			"exitCode": 2,
+			"asExpected": true,
+			"startedAt": "2026-11-06T07:27:03.175Z",
+			"durationMs": 972,
+			"logs": ".maestro/playbooks/Working/mcomp-01-05/results/pair-check.stdout.log, .maestro/playbooks/Working/mcomp-01-05/results/pair-check.stderr.log",
+			"result": {
+				"runtime": "ready (9d4b5d781b3f8dd413340b04514be0d59d49478ef0d99fb3235ec1d40266ba92); dist/maestro-lib ready, stale false",
+				"contractsPin": "absent",
+				"producers": "CP-01 not fresh; CP-02 not fresh; CP-03 not fresh; registration-approval not fresh",
+				"linuxHost": "docker true, pinned image present true",
+				"assessment": "{\"ready\":false,\"dependencies\":[{\"id\":\"CP-01\",\"owner\":\"mega-maestro\",\"status\":\"open\",\"detail\":\"no clean contracts artifact is pinned (vendor/mega-maestro/contracts.pin.json)\"},{\"id\":\"CP-01\",\"owner\":\"mega-maestro\",\"status\":\"open\",\"detail\":\"no clean Linux application artifact (4 dirty-source packaged artifact(s); development checkout is never certifiable)\"},{\"id\":\"CP-02\",\"owner\":\"mega-maestro\",\"status\":\"open\",\"detail\":\"runtime adapter pin absent, declared unsupported; needs a supported createMaestroAdapter from endpoint source 8b0e6da536ca5c7e14cda1af368aca67e60fb150 (dirty or absent) qualified against runtime 9d4b5d781b3f8dd413340b04514be0d59d49478ef0d99fb3235ec1d40266ba92\"},{\"id\":\"CP-03\",\"owner\":\"mega-maestro\",\"status\":\"open\",\"detail\":\"workflow authority pin absent; needs the delegation/workflow owner producer from endpoint source 8b0e6da536ca5c7e14cda1af368aca67e60fb150 (dirty or absent)\"},{\"id\":\"registration-approval\",\"owner\":\"mega-maestro\",\"status\":\"open\",\"detail\":\"no API/console producer to approve the actor registration (--approve-command)\"}]}"
+			}
+		}
+	],
+	"cases": {
+		"tests": {
+			"source": { "total": 362, "passed": 360, "failed": 0, "skipped": 2 },
+			"full": { "total": 59772, "passed": 59667, "failed": 0, "skipped": 105 }
+		},
+		"archive-integrity": "bytes equal the pin sha256, sha512 and byte count; sidecar and directory name the sha256 (true)",
+		"payload-digests": "305 files, 0 mismatched, 0 extra, 0 missing",
+		"plain-node-load": "library/index.js loaded in Node v26.13.0, Electron absent; versions agree (true); 22 managed port exports, 0 missing",
+		"reproducible-build": "reproduced: entry true, declarations true, library inputs true; 300 of 302 files identical",
+		"implementation-bound": "archived implementation map equals the tree now (drift 0); library inputs moved 0; coordinationOnly true; pin committed true",
+		"type-checks": "tsc main 0 errors, cli 0, lint 0 (none)",
+		"lint": "eslint 0 problems; docs:verify exit 0",
+		"pair": "not run: the pair check names its absent counterpart inputs and exits 2; a pair qualifies in its own task, never here"
+	},
+	"repairs": [
+		"MCOMP-01-02: three missing packages installed (@serenity-kit/opaque, dns-packet, smol-toml); 01-02A AutoRun RightPanel suite, 01-02B Symphony suite, 01-02C Symphony state written whole under a keyed queue",
+		"MCOMP-01-03A..03T: the upstream/rc merge resolved, tested, landed and re-pinned (record above); 03SA held the plugin TLS primitive at the egress ceiling",
+		"MCOMP-01-04: the source snapshot and drift suite; its commit moved the implementation digest, so this task re-pinned first (pin commit in coordinationCommitsSinceImplementation)"
+	],
+	"limitations": [
+		"the archive library/provenance.json records sourceRevision b84fe2f37 (the 0.36.0 build); the library inputs are unchanged since, so it was not rebuilt, and the scratch build from this tree reproduces the entry, the declarations and the library input digest (index.js.map differs only in its relative source prefixes, provenance in sourceRevision)",
+		"the full unit suite skipped 105 cases: platform-gated (Windows-only and similar) cases and the two guarded real-pair cases (early-pair, full-pair) whose readiness names CP-01, CP-02, CP-03 and registration approval; skips are recorded, not counted as passes",
+		"the pair check exits 2 by design: the contracts pin (vendor/mega-maestro/contracts.pin.json, untracked here), the runtime adapter, the workflow authority and registration approval are all absent counterpart inputs; no pair, provider or native outcome is claimed",
+		"every check ran locally on one OS (darwin-arm64, Node 26.13.0); the CI matrix legs test (ubuntu-latest) and test (windows-latest) were not run for this receipt, and RUNNER-MACOS / RUNNER-WINDOWS remain declared external inputs of the native qualification stages",
+		"dist/ is not tracked: the archive lives at the pinned directory under dist/mega-maestro-runtime and is named by sha256, sha512 and byte count in the committed pin and here; a consumer verifies those hashes before loading",
+		"two repairs were found by this VERIFY and landed as bounded continuations before the retry: MCOMP-01-05A (the source snapshot suite scanned its own positive controls once committed) and MCOMP-01-05B (the standing plugin net.fetch dispatcher TS2339 on the first lint leg, also present on upstream/rc); each moved src/, so the runtime was re-pinned after each and every check above ran on the final tree"
+	],
+	"evidence": {
+		"directory": ".maestro/playbooks/Working/mcomp-01-05/results",
+		"inGit": false,
+		"note": "the Working folder is ignored by git; each step keeps its stdout and stderr log and its record there, repository-relative paths only",
+		"files": "12 step records with their logs and the vitest JSON reports: 38 files",
+		"redaction": "no credentials, cookies, key material or user content; paths are repository-relative; scanned with findCanaries, findAbsolutePaths and for home paths before writing",
+		"scan": { "canaries": 0, "absolutePaths": 0 }
+	}
+}
