@@ -347,8 +347,13 @@ describe('this checkout', () => {
 
 	it('imports nothing from the private sibling checkout or from outside the repository', () => {
 		const tree = sourceTreeDigest();
+		// This suite carries the scanner's positive controls as string literals (below), so it
+		// is the one tracked file left out of the scan; the controls prove the scanner instead.
+		const self = path.relative(REPO_ROOT, __filename).split(path.sep).join('/');
+		expect(tree.files[self]).toBeDefined();
 		const sources = Object.entries(tree.files)
 			.filter(([file, digest]) => digest !== 'deleted' && /\.[cm]?[jt]sx?$/.test(file))
+			.filter(([file]) => file !== self)
 			.map(([file]) => file);
 		expect(sources.length).toBeGreaterThan(1000);
 		const found = sources.flatMap((file) =>
