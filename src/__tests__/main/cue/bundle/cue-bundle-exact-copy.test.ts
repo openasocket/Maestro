@@ -342,6 +342,123 @@ describe('exact copy import', () => {
 	});
 });
 
+describe('exact copy managed authority', () => {
+	const AUTHORITY_VALUES = [
+		'lease-value-1',
+		'grant-value-2',
+		'enroll-value-3',
+		'codex-lease-value-4',
+	];
+
+	it('leaves authority-shaped env out of local.json and the whole archive', async () => {
+		seed();
+		const lead = leadAgent();
+		writeSessions([
+			{
+				...lead,
+				customEnvVars: {
+					...(lead.customEnvVars as Record<string, string>),
+					MAESTRO_MANAGED_LEASE: 'lease-value-1',
+					TEAM_GRANT_TOKEN: 'grant-value-2',
+				},
+				customEnvVarsDisabled: { OLD_FLAG: '1', ENROLLMENT_GRANT: 'enroll-value-3' },
+				providerOverrides: {
+					codex: {
+						customModel: 'gpt-5',
+						customEnvVars: { MAESTRO_MANAGED_LEASE: 'codex-lease-value-4', DEBUG: '1' },
+					},
+				},
+			},
+		]);
+
+		const files = entries(await exportLead({ includeLocal: true }));
+		const local = JSON.parse(files.get('local.json')!) as CueBundleLocalData;
+		const agent = local.agents['agent-lead'];
+		expect(agent.customEnvVars).toEqual({
+			LOG_LEVEL: 'debug',
+			API_TOKEN: 'sk-live-123',
+			TOOLS_DIR: '/opt/tools',
+		});
+		expect(agent.customEnvVarsDisabled).toEqual({ OLD_FLAG: '1' });
+		expect(agent.providerOverrides).toEqual({
+			codex: { customModel: 'gpt-5', customEnvVars: { DEBUG: '1' } },
+		});
+		for (const [name, text] of files) {
+			for (const value of AUTHORITY_VALUES) {
+				expect(text.includes(value), `${name} carries ${value}`).toBe(false);
+			}
+		}
+
+		const manifest = JSON.parse(files.get('manifest.json')!) as CueBundleManifest;
+		const warnings = (manifest.warnings ?? []).filter((w) => /exact copy leaves them out/.test(w));
+		expect(warnings).toHaveLength(1);
+		for (const name of [
+			'ENROLLMENT_GRANT',
+			'MAESTRO_MANAGED_LEASE',
+			'TEAM_GRANT_TOKEN',
+			'codex.MAESTRO_MANAGED_LEASE',
+		]) {
+			expect(warnings[0]).toContain(name);
+		}
+		// The copy carries the agent's own values, so "set it again" stays silent.
+		expect((manifest.warnings ?? []).join('\n')).not.toMatch(/API_TOKEN|TOOLS_DIR/);
+	});
+
+	it('drops authority-shaped env from a tampered local.json on import', async () => {
+		const zip = writeCueBundle(path.join(tmp, 'tampered-authority.zip'), {
+			files: (files) =>
+				files.set(
+					'local.json',
+					JSON.stringify({
+						workspaces: {},
+						agents: {
+							'agent-a': {
+								customEnvVars: {
+									REGION_NAME: 'eu',
+									MAESTRO_MANAGED_LEASE: 'lease-value-1',
+									TEAM_GRANT_TOKEN: 'grant-value-2',
+								},
+								customEnvVarsDisabled: { ENROLLMENT_GRANT: 'enroll-value-3' },
+								providerOverrides: {
+									codex: { customEnvVars: { MAESTRO_MANAGED_LEASE: 'codex-lease-value-4' } },
+								},
+							},
+						},
+					})
+				),
+			manifest: (manifest) => {
+				manifest.local = 'local.json';
+			},
+		});
+		fs.mkdirSync(webRoot, { recursive: true });
+
+		const result = await importCueBundle(
+			importOptions(zip, {
+				workspaces: { proj: webRoot },
+				env: { API_KEY: 'k', HOOK_SECRET: 'h' },
+			})
+		);
+		const authorityWarnings = result.plan.warnings.filter((w) =>
+			/the exact copy sets .* managed grants or enrollment; left out\./.test(w)
+		);
+		expect(authorityWarnings).toEqual([
+			'Agent "Alpha": the exact copy sets MAESTRO_MANAGED_LEASE, TEAM_GRANT_TOKEN, which look like managed grants or enrollment; left out.',
+			'Agent "Alpha": the exact copy sets ENROLLMENT_GRANT, which look like managed grants or enrollment; left out.',
+			'Agent "Alpha": the exact copy sets codex.MAESTRO_MANAGED_LEASE, which look like managed grants or enrollment; left out.',
+		]);
+
+		const stored = readSessionsStoreFile(dataDir).sessions.find((s) => s.name === 'Alpha');
+		expect(stored).toBeDefined();
+		const text = JSON.stringify(stored);
+		for (const value of AUTHORITY_VALUES) {
+			expect(text.includes(value), `the stored agent carries ${value}`).toBe(false);
+		}
+		expect((stored as unknown as Record<string, unknown>).customEnvVars).toMatchObject({
+			REGION_NAME: 'eu',
+		});
+	});
+});
+
 describe('group placement', () => {
 	it('puts only created agents in the group', async () => {
 		seed();
