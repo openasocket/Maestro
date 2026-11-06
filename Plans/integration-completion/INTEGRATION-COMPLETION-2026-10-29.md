@@ -16,7 +16,7 @@ followed by one constrained managed execution through the real Maestro client,
 endpoint and API. Another Maestro-only hardening pass cannot deliver that result.
 Mega-Maestro needs real producers and current artifacts, while Maestro still needs
 mandatory headless authorization and several consumer composition fixes. The
-required end-user product is the full Tauri desktop: users build and use
+required end-user product is the full Maestro desktop: users build and use
 agents within endpoint policy. A headless pilot is an integration diagnostic,
 not a substitute for that desktop experience.
 
@@ -219,18 +219,18 @@ release follow-up, not a checkbox that stalls unattended code implementation.
 
 ## Full desktop authoring and interactive use
 
-The Tauri desktop GUI remains the primary end-user interface. Users must be able to
+The Maestro desktop GUI (the existing Electron application) remains the primary end-user interface. Users must be able to
 create agents, choose permitted workspaces/providers/models/credential references
 and tools, edit permitted settings, use tabs and interactive chat, and run the
 automation their policy allows. They do not need permission to change enterprise
 policy, remove endpoint management, enroll other devices or read other users'
 content in order to do ordinary work.
 
-The reviewed Maestro source uses Electron; the user-selected target is Tauri.
-The Tauri playbook was not present in the two repository trees reviewed here.
-Its existing migration design must be reused before assigning new host paths.
-The following source findings describe legacy integration boundaries that the
-Tauri host must preserve or replace, not a requirement to retain Electron.
+Maestro's desktop host is Electron and stays Electron. An earlier revision of this
+document named Tauri as the target; that was an error (the Tauri playbook belongs
+to SLOP, a different application) and was corrected on 2026-11-05.
+The following source findings describe the integration boundaries the Electron
+main process already owns and must keep enforcing.
 
 The reviewed GUI is not yet this product. `NewInstanceModal` does not read live
 managed choices. `useSessionCrud.ts` creates a local Session record with custom
@@ -242,7 +242,7 @@ and inbox components are useful scaffolding, not proof of a usable managed GUI.
 
 Two required work items close this gap. **G-09**, owned by Mega-Maestro, delivers
 a signed, versioned, principal-scoped authoring/settings projection through the
-real endpoint. **M-06**, owned by Maestro, consumes those choices in the Tauri
+real endpoint. **M-06**, owned by Maestro, consumes those choices in the desktop
 GUI and uses one protected host mutation service for create, edit, clone, wizard,
 import and session persistence. Client-side disabling is feedback; the host must
 reject forbidden changes even when a caller bypasses the form.
@@ -258,7 +258,7 @@ unrestricted edits or by permanently disabling normal agent authoring. Endpoint
 enrollment and desktop-user actor registration remain distinct responsibilities.
 
 The manifest adds six mandatory desktop journeys: ordinary-user creation, shared
-edit/clone/import validation, actual Tauri desktop interactive execution, live policy
+edit/clone/import validation, actual desktop interactive execution, live policy
 changes/revocation, offline/restart continuity, and user/content isolation with
 accessible feedback. Run these against actual endpoint-delivered policy, with
 positive allowed work and negative forbidden work. Product readiness also needs
@@ -266,8 +266,8 @@ a qualified real provider/transport on each declared supported desktop platform;
 a headless test or synthetic provider cannot establish that claim. Replacing
 the GUI shell does not supply the missing runtime adapter, signed policy and
 identity composition, prepared execution leases or provider confinement. Legacy
-IPC, custody and process-control code needs a trusted Tauri host/service
-equivalent; frontend controls alone cannot enforce those boundaries.
+IPC, custody and process-control enforcement stays in the trusted Electron main
+process; frontend controls alone cannot enforce those boundaries.
 
 ## Proposed implementation queues
 

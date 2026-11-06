@@ -3,7 +3,7 @@ type: autorun-program
 title: Mega-Maestro and Maestro integration completion Auto Run
 created: 2026-10-29
 status: authored-not-executed
-tags: [maestro, mega-maestro, autorun, tauri, integration]
+tags: [maestro, mega-maestro, autorun, integration]
 ---
 
 # Integration completion Auto Run
@@ -27,7 +27,7 @@ task content; `scripts/build-integration-completion-playbook.py` renders it.
 | Owner | Auto Run documents | Resulting implementation |
 | --- | --- | --- |
 | Mega-Maestro | `.maestro/playbooks/2026-10-29-Mega-Maestro-Integration-Completion/GCOMP-01.md` through `GCOMP-30.md` | Clean public contracts/service artifacts, scoped actor approval/policy transport, real runtime adapter, protected prepared execution, desktop choices/settings policy, workflow fences, real commands, usage/content/detections, offline budgets, native endpoints and provider routes |
-| Maestro | Staged here under `.maestro/playbooks/2026-10-29-Maestro-Integration-Completion/MCOMP-01.md` through `MCOMP-34.md`; install from its agent | Preserved/upstream-aligned integration branch, mandatory admission/custody, Tauri host/service parity, real authority consumers, governed agent GUI, headless/effect/custody repairs, commands/telemetry and route consumers |
+| Maestro | Staged here under `.maestro/playbooks/2026-10-29-Maestro-Integration-Completion/MCOMP-01.md` through `MCOMP-34.md`; install from its agent | Preserved/upstream-aligned integration branch, mandatory admission/custody, real authority consumers, governed agent GUI, headless/effect/custody repairs, commands/telemetry and route consumers |
 
 ## Execution and handoffs
 
@@ -74,7 +74,7 @@ Run engine; a headless `playbook` runner is not the desktop launch path.
 
 The code work covers the 23 agent-owned source backlog outcomes. REVIEW-01 is
 independent human security review and remains release follow-up. All original
-13 acceptance journeys plus the six full Tauri desktop journeys remain mandatory.
+13 acceptance journeys plus the six full desktop journeys remain mandatory.
 Final receipts must bind the final immutable source/artifact cohort and rerun
 affected earlier checks; intermediate archive pins are insufficient.
 
@@ -85,7 +85,7 @@ machines are available. Their absence cannot be turned into a passing native row
 An actual provider executable against a deterministic local model fixture avoids
 paid-account gates while still exercising real provider effects and containment.
 
-No real pair, provider, Tauri GUI or native-platform qualification has run as part
+No real pair, provider, desktop GUI or native-platform qualification has run as part
 of authoring. Source branches are not pushed and no production enrollment occurs.
 
 ## Release follow-up
@@ -96,3 +96,15 @@ of authoring. Source branches are not pushed and no production enrollment occurs
   optional paid-model/customer validation after agent-owned integration passes.
 - Review optional feature proposals separately; do not expand core completion
   into a new CI/CD project or defer required desktop behavior as an optional feature.
+
+## Amendment 2026-11-05
+
+Maestro's desktop host is Electron. The original program assumed a Tauri host for
+Maestro; that assumption was wrong (Tauri is SLOP, a different application) and has
+been removed. `MCOMP-05`, `MCOMP-06`, `MCOMP-11` and `MCOMP-12` are retired, the
+Tauri receipts no longer gate any task, and the `src-tauri` targets now name the
+Electron modules that own each boundary. The counts above are historical: the
+program now holds 172 Mega-Maestro tasks in 30 documents and 140 Maestro tasks in
+30 documents (312 tasks, 20 stages). `program.json` is the source of truth;
+`authoring-inputs.json` and the builder script describe the superseded first render.
+See [[RUN-ORDER]] for the current stage order.

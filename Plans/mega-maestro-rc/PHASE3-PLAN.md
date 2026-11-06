@@ -2,7 +2,9 @@
 type: phase-plan
 title: Maestro managed integration, Phase 3 (completion plan consumer)
 created: 2026-10-29
-status: authored
+status: superseded
+superseded_on: 2026-11-05
+superseded_by: Plans/integration-completion/program.json
 maestro_branch: feature/mega-maestro-v1.1.0-rc
 maestro_head: 0f31023a8
 source_document: /Users/dr3/dev-shit/mega-maestro/docs/design/maestro-rc/INTEGRATION-COMPLETION-2026-10-29.md
@@ -12,6 +14,15 @@ tags: [mega-maestro, maestro, integration, autorun, phase3, security]
 ---
 
 # Phase 3: the Maestro half of the integration completion plan
+
+**Superseded on 2026-11-05.** The joint Integration Completion program
+(`Plans/integration-completion/program.json`, documents `MCOMP-01` to `MCOMP-34`,
+stage order in `Plans/integration-completion/RUN-ORDER.md`) carries the same backlog
+items with the handoff receipts the Mega-Maestro side consumes. The eight Phase 3
+Auto Run documents are retired: MRC3-01-01 and MRC3-01-02 are done and their code is
+on the branch, and the 50 tasks that were still open are kept as a record with their
+checkboxes removed. The analysis below is still an accurate reading of the branch on
+2026-10-29 and is kept for that.
 
 Related: [[EXECUTION-RULES]], [[PHASE2-GAPS]], [[counterpart-requests]],
 [[p2-final]]. The Auto Run documents are

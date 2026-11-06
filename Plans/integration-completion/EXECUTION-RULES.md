@@ -32,8 +32,8 @@ these rules, its `program.json` entry, source contracts and required receipts.
 Search for an existing service, helper or equivalent module before adding one.
 Proposed filenames identify the intended boundary; reuse a current equivalent and
 record the mapping rather than create a second implementation. Recheck migration
-numbers at execution time. Adapt Tauri paths once if an actual Maestro scaffold
-already exists; SLOP's Tauri playbook belongs to another application.
+numbers at execution time. Maestro's desktop host is Electron and stays Electron:
+no Tauri scaffold is created or assumed. Tauri is SLOP's application, not Maestro's.
 
 IMPLEMENT changes application behavior. TEST authors focused unit or harness
 cases. VERIFY executes checks and records results; keep these separate. Each task
@@ -141,13 +141,12 @@ never strip delegation fields to make a request fit. Reuse signed pause/resume/
 cancel and durable command journals; prove effects on an actual owned process.
 Notices are private inbox actions, never an implicit instruction channel to agents.
 
-The product target is the full Maestro **Tauri** desktop. Existing Electron paths
-are migration anchors. Reuse the current React UI and public runtime in a trusted
-native host/packaged authenticated sidecar instead of duplicating the backend.
-[Tauri IPC](https://v2.tauri.app/concept/inter-process-communication/),
-[capabilities](https://v2.tauri.app/security/capabilities/) and
-[sidecars](https://v2.tauri.app/develop/sidecar/) define the host boundaries;
-webview capability permissions do not replace enterprise policy authorization.
+The product target is the existing Maestro **Electron** desktop. Its main process
+is the trusted host: the preload bridge and the IPC handlers (`src/main/preload/`,
+`src/main/ipc/handlers/`) are the boundary, and the modules under
+`src/main/enterprise/` hold the policy. Reuse the current React UI and public
+runtime and do not introduce a second desktop shell. Renderer-side checks are
+feedback; they do not replace enterprise policy authorization in the main process.
 
 Ordinary users create/edit/clone/import agents, choose approved providers/models/
 workspaces/credential references/tools and run interactive work. One host mutation
@@ -180,8 +179,8 @@ qualification stages declare RUNNER-MACOS/RUNNER-WINDOWS; these are execution
 inputs, not established infrastructure or optional waivers. Do not block unrelated
 implementation on their absence or claim full unattended native completion.
 
-Automate the actual Tauri binary through its trusted commands and supported native
-driver. Follow [current native WebDriver guidance](https://v2.tauri.app/develop/tests/webdriver/).
+Automate the actual Maestro Electron application through its real IPC handlers with
+the existing Playwright harness (`e2e/fixtures/electron-app.ts`).
 A browser-only render, IPC double or screenshot cannot close desktop acceptance.
 Require all original 13 acceptance rows plus GUI-01 through GUI-06 in the manifest,
 with positive, negative and recovery observations against the final pinned pair.

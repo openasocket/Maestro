@@ -3,7 +3,7 @@
   "created": "2026-10-29",
   "profile": "integration-completion",
   "sourceDocument": "docs/design/maestro-rc/INTEGRATION-COMPLETION-2026-10-29.md",
-  "sourceSha256": "bd386d43b40d3a0cfcfd8eed7158679ddd64219c199b599cd7d108ebafd2e3cc",
+  "sourceSha256": "6c657d6daf9a295d24f3ce0edc0ae8f0f31298a1d4def21ddcb74b3786b2278d",
   "executionMode": "task-based",
   "loopEnabled": false,
   "resetOnCompletion": false,
@@ -26,7 +26,7 @@
       "phase": "G01",
       "owner": "mega-maestro",
       "mode": "implementation",
-      "title": "Versioned public contracts and reproducible producer delivery \u2014 implementation",
+      "title": "Versioned public contracts and reproducible producer delivery — implementation",
       "tasks": [
         {
           "label": "Record immutable implementation input authority",
@@ -67,7 +67,7 @@
             "packages/contracts/src/desktop-policy.ts",
             "packages/contracts/package.json"
           ],
-          "outcome": "Publish a bounded desktop policy projection contract for verified principal/installation/policy digest, create/edit/clone/import operations, allowed provider/model/account/workspace/tool/automation/credential references and locked/constrained/user-editable field states. Map the existing public Maestro managed settings schema through the early runtime artifact; secrets and host paths are not choices or identity authority.",
+          "outcome": "Publish a bounded desktop policy projection contract for verified principal/installation/policy digest, create/edit/clone/import operations, allowed provider/model/account/workspace/tool/automation/credential references and locked/constrained/user-editable field states. Define this versioned enterprise projection independently of Maestro private settings. Secrets and host paths are not choices or identity authority. Concrete Maestro settings vocabulary mapping belongs to MCOMP-07-02 and GCOMP-13-02/GCOMP-13-08 after MAESTRO-DESKTOP-CONTRACT-BUILD is published; it is not a prerequisite for this foundation contract. Preserve an explicit mapping_unavailable result until the authenticated runtime mapping exists. Review the existing three-file draft and its focused tests, finish only this foundation contract and its delivery, then allow subsequent packaging tasks to proceed.",
           "backlog": [
             "BASE-01",
             "G-01"
@@ -93,6 +93,21 @@
           "id": "GCOMP-01-04"
         },
         {
+          "label": "Repair archive fixtures for committed source validation",
+          "kind": "TEST",
+          "targets": [
+            "packages/contracts/test/distribution.test.ts"
+          ],
+          "outcome": "Replace the obsolete Git command double with disposable committed fixture repositories. Exercise the real shared snapshot authority while retaining the explicitly labeled pnpm JSON-pack double; verify immutable input identity, required exports, dirty input refusal and preserved digest-directory behavior. These unit fixtures do not qualify a real archive.",
+          "backlog": [
+            "BASE-01",
+            "G-01"
+          ],
+          "requires": [],
+          "produces": [],
+          "id": "GCOMP-01-04A"
+        },
+        {
           "label": "Correct application component metadata",
           "kind": "IMPLEMENT",
           "targets": [
@@ -107,6 +122,21 @@
           "requires": [],
           "produces": [],
           "id": "GCOMP-01-05"
+        },
+        {
+          "label": "Repair application archive fixtures and assert component metadata",
+          "kind": "TEST",
+          "targets": [
+            "packages/testing/test/application-package.test.ts"
+          ],
+          "outcome": "Reuse the existing production archive harness with real committed fixture inputs and the shared snapshot authority. Keep child producers explicitly synthetic, verify component entries/versions/hashes, native ABI and absent-native status, contract digest/integrity and unchanged fail-closed cleanup. No fixture outcome qualifies a real producer or platform.",
+          "backlog": [
+            "BASE-01",
+            "G-01"
+          ],
+          "requires": [],
+          "produces": [],
+          "id": "GCOMP-01-05A"
         },
         {
           "label": "Produce bounded integration artifact receipts",
@@ -142,6 +172,360 @@
           "id": "GCOMP-01-07"
         },
         {
+          "label": "Deliver the existing fail-closed adapter public export",
+          "kind": "IMPLEMENT",
+          "targets": [
+            "packages/runtime-adapter/src/port.ts",
+            "packages/runtime-adapter/src/maestro.ts"
+          ],
+          "outcome": "Preserve and deliver the existing unsupported adapter facade and public export so committed archive consumers can load the declared API. Keep unsupported results and never load caller-supplied artifact paths; this is not the real Maestro mapping, which remains in GCOMP-03. Repair only the observed clean-snapshot missing export.",
+          "id": "GCOMP-01-08R1",
+          "backlog": [
+            "BASE-01",
+            "G-01"
+          ],
+          "requires": [],
+          "produces": []
+        },
+        {
+          "label": "Deliver adapter refusal and non-execution regressions",
+          "kind": "TEST",
+          "targets": [
+            "packages/runtime-adapter/test/maestro.test.ts"
+          ],
+          "outcome": "Review and retain the existing seventeen adapter refusal cases, including every runtime-port operation, request correlation and supplied artifact paths/URLs/retries producing no effect. Run the complete runtime-adapter suite and public-export smoke with the pinned toolchain. This verifies the unavailable facade, not counterpart runtime support.",
+          "id": "GCOMP-01-08R2",
+          "backlog": [
+            "BASE-01",
+            "G-01"
+          ],
+          "requires": [],
+          "produces": []
+        },
+        {
+          "label": "Deliver draft application closure group 01 of 19 (contracts)",
+          "kind": "IMPLEMENT",
+          "targets": [
+            "packages/contracts/src/assurance.ts",
+            "packages/contracts/src/governance.ts",
+            "packages/contracts/src/trace.ts"
+          ],
+          "outcome": "Added 2026-11-05 (continuation of GCOMP-01-08, inserted ahead of it). GCOMP-01-08 cannot pass because the committed route registry imports modules that exist only as working-tree drafts; the 42-file closure and each file’s recorded working sha256 are in `docs/evidence/integration-completion/g01-build-attempt.json` (`blocker.existingDraftDependencyClosure`). Deliver these 3 existing draft files (475 lines) to the committed implementation exactly as they stand. Where a file’s current sha256 differs from the record, deliver the current content and record the new digest in `docs/evidence/integration-completion/g01-closure-delivery.json`. Stage only these paths and preserve every other staged and working entry. Do not edit behavior, remove a guard or add a stub so that an intermediate commit compiles: the archive-mode API projection is checked once, after the last group, by GCOMP-01-08E.",
+          "backlog": [
+            "BASE-01",
+            "G-01"
+          ],
+          "requires": [],
+          "produces": [],
+          "id": "GCOMP-01-08D01"
+        },
+        {
+          "label": "Deliver draft application closure group 02 of 19 (activity)",
+          "kind": "IMPLEMENT",
+          "targets": [
+            "apps/api/src/activity/routes.ts",
+            "apps/api/src/activity/search.ts"
+          ],
+          "outcome": "Added 2026-11-05 (continuation of GCOMP-01-08, inserted ahead of it). GCOMP-01-08 cannot pass because the committed route registry imports modules that exist only as working-tree drafts; the 42-file closure and each file’s recorded working sha256 are in `docs/evidence/integration-completion/g01-build-attempt.json` (`blocker.existingDraftDependencyClosure`). Deliver these 2 existing draft files (164 lines) to the committed implementation exactly as they stand. Where a file’s current sha256 differs from the record, deliver the current content and record the new digest in `docs/evidence/integration-completion/g01-closure-delivery.json`. Stage only these paths and preserve every other staged and working entry. Do not edit behavior, remove a guard or add a stub so that an intermediate commit compiles: the archive-mode API projection is checked once, after the last group, by GCOMP-01-08E.",
+          "backlog": [
+            "BASE-01",
+            "G-01"
+          ],
+          "requires": [],
+          "produces": [],
+          "id": "GCOMP-01-08D02"
+        },
+        {
+          "label": "Deliver draft application closure group 03 of 19 (admin)",
+          "kind": "IMPLEMENT",
+          "targets": [
+            "apps/api/src/admin/health.ts",
+            "apps/api/src/admin/integration-health.ts",
+            "apps/api/src/admin/standards-health.ts"
+          ],
+          "outcome": "Added 2026-11-05 (continuation of GCOMP-01-08, inserted ahead of it). GCOMP-01-08 cannot pass because the committed route registry imports modules that exist only as working-tree drafts; the 42-file closure and each file’s recorded working sha256 are in `docs/evidence/integration-completion/g01-build-attempt.json` (`blocker.existingDraftDependencyClosure`). Deliver these 3 existing draft files (310 lines) to the committed implementation exactly as they stand. Where a file’s current sha256 differs from the record, deliver the current content and record the new digest in `docs/evidence/integration-completion/g01-closure-delivery.json`. Stage only these paths and preserve every other staged and working entry. Do not edit behavior, remove a guard or add a stub so that an intermediate commit compiles: the archive-mode API projection is checked once, after the last group, by GCOMP-01-08E.",
+          "backlog": [
+            "BASE-01",
+            "G-01"
+          ],
+          "requires": [],
+          "produces": [],
+          "id": "GCOMP-01-08D03"
+        },
+        {
+          "label": "Deliver draft application closure group 04 of 19 (admin)",
+          "kind": "IMPLEMENT",
+          "targets": [
+            "apps/api/src/admin/trace-settings.ts"
+          ],
+          "outcome": "Added 2026-11-05 (continuation of GCOMP-01-08, inserted ahead of it). GCOMP-01-08 cannot pass because the committed route registry imports modules that exist only as working-tree drafts; the 42-file closure and each file’s recorded working sha256 are in `docs/evidence/integration-completion/g01-build-attempt.json` (`blocker.existingDraftDependencyClosure`). Deliver these 1 existing draft file (75 lines) to the committed implementation exactly as they stand. Where a file’s current sha256 differs from the record, deliver the current content and record the new digest in `docs/evidence/integration-completion/g01-closure-delivery.json`. Stage only these paths and preserve every other staged and working entry. Do not edit behavior, remove a guard or add a stub so that an intermediate commit compiles: the archive-mode API projection is checked once, after the last group, by GCOMP-01-08E.",
+          "backlog": [
+            "BASE-01",
+            "G-01"
+          ],
+          "requires": [],
+          "produces": [],
+          "id": "GCOMP-01-08D04"
+        },
+        {
+          "label": "Deliver draft application closure group 05 of 19 (analytics)",
+          "kind": "IMPLEMENT",
+          "targets": [
+            "apps/api/src/analytics/kpis.ts",
+            "apps/api/src/analytics/overview.ts",
+            "apps/api/src/analytics/routes.ts"
+          ],
+          "outcome": "Added 2026-11-05 (continuation of GCOMP-01-08, inserted ahead of it). GCOMP-01-08 cannot pass because the committed route registry imports modules that exist only as working-tree drafts; the 42-file closure and each file’s recorded working sha256 are in `docs/evidence/integration-completion/g01-build-attempt.json` (`blocker.existingDraftDependencyClosure`). Deliver these 3 existing draft files (289 lines) to the committed implementation exactly as they stand. Where a file’s current sha256 differs from the record, deliver the current content and record the new digest in `docs/evidence/integration-completion/g01-closure-delivery.json`. Stage only these paths and preserve every other staged and working entry. Do not edit behavior, remove a guard or add a stub so that an intermediate commit compiles: the archive-mode API projection is checked once, after the last group, by GCOMP-01-08E.",
+          "backlog": [
+            "BASE-01",
+            "G-01"
+          ],
+          "requires": [],
+          "produces": [],
+          "id": "GCOMP-01-08D05"
+        },
+        {
+          "label": "Deliver draft application closure group 06 of 19 (content)",
+          "kind": "IMPLEMENT",
+          "targets": [
+            "apps/api/src/content/copies.ts",
+            "apps/api/src/content/trust.ts"
+          ],
+          "outcome": "Added 2026-11-05 (continuation of GCOMP-01-08, inserted ahead of it). GCOMP-01-08 cannot pass because the committed route registry imports modules that exist only as working-tree drafts; the 42-file closure and each file’s recorded working sha256 are in `docs/evidence/integration-completion/g01-build-attempt.json` (`blocker.existingDraftDependencyClosure`). Deliver these 2 existing draft files (258 lines) to the committed implementation exactly as they stand. Where a file’s current sha256 differs from the record, deliver the current content and record the new digest in `docs/evidence/integration-completion/g01-closure-delivery.json`. Stage only these paths and preserve every other staged and working entry. Do not edit behavior, remove a guard or add a stub so that an intermediate commit compiles: the archive-mode API projection is checked once, after the last group, by GCOMP-01-08E.",
+          "backlog": [
+            "BASE-01",
+            "G-01"
+          ],
+          "requires": [],
+          "produces": [],
+          "id": "GCOMP-01-08D06"
+        },
+        {
+          "label": "Deliver draft application closure group 07 of 19 (governance)",
+          "kind": "IMPLEMENT",
+          "targets": [
+            "apps/api/src/governance/evidence.ts",
+            "apps/api/src/governance/export-queue.ts"
+          ],
+          "outcome": "Added 2026-11-05 (continuation of GCOMP-01-08, inserted ahead of it). GCOMP-01-08 cannot pass because the committed route registry imports modules that exist only as working-tree drafts; the 42-file closure and each file’s recorded working sha256 are in `docs/evidence/integration-completion/g01-build-attempt.json` (`blocker.existingDraftDependencyClosure`). Deliver these 2 existing draft files (298 lines) to the committed implementation exactly as they stand. Where a file’s current sha256 differs from the record, deliver the current content and record the new digest in `docs/evidence/integration-completion/g01-closure-delivery.json`. Stage only these paths and preserve every other staged and working entry. Do not edit behavior, remove a guard or add a stub so that an intermediate commit compiles: the archive-mode API projection is checked once, after the last group, by GCOMP-01-08E.",
+          "backlog": [
+            "BASE-01",
+            "G-01"
+          ],
+          "requires": [],
+          "produces": [],
+          "id": "GCOMP-01-08D07"
+        },
+        {
+          "label": "Deliver draft application closure group 08 of 19 (governance)",
+          "kind": "IMPLEMENT",
+          "targets": [
+            "apps/api/src/governance/export.ts",
+            "apps/api/src/governance/iam-source.ts",
+            "apps/api/src/governance/pack-schema.ts"
+          ],
+          "outcome": "Added 2026-11-05 (continuation of GCOMP-01-08, inserted ahead of it). GCOMP-01-08 cannot pass because the committed route registry imports modules that exist only as working-tree drafts; the 42-file closure and each file’s recorded working sha256 are in `docs/evidence/integration-completion/g01-build-attempt.json` (`blocker.existingDraftDependencyClosure`). Deliver these 3 existing draft files (376 lines) to the committed implementation exactly as they stand. Where a file’s current sha256 differs from the record, deliver the current content and record the new digest in `docs/evidence/integration-completion/g01-closure-delivery.json`. Stage only these paths and preserve every other staged and working entry. Do not edit behavior, remove a guard or add a stub so that an intermediate commit compiles: the archive-mode API projection is checked once, after the last group, by GCOMP-01-08E.",
+          "backlog": [
+            "BASE-01",
+            "G-01"
+          ],
+          "requires": [],
+          "produces": [],
+          "id": "GCOMP-01-08D08"
+        },
+        {
+          "label": "Deliver draft application closure group 09 of 19 (governance)",
+          "kind": "IMPLEMENT",
+          "targets": [
+            "apps/api/src/governance/policy-source.ts",
+            "apps/api/src/governance/reminders.ts",
+            "apps/api/src/governance/repository.ts"
+          ],
+          "outcome": "Added 2026-11-05 (continuation of GCOMP-01-08, inserted ahead of it). GCOMP-01-08 cannot pass because the committed route registry imports modules that exist only as working-tree drafts; the 42-file closure and each file’s recorded working sha256 are in `docs/evidence/integration-completion/g01-build-attempt.json` (`blocker.existingDraftDependencyClosure`). Deliver these 3 existing draft files (326 lines) to the committed implementation exactly as they stand. Where a file’s current sha256 differs from the record, deliver the current content and record the new digest in `docs/evidence/integration-completion/g01-closure-delivery.json`. Stage only these paths and preserve every other staged and working entry. Do not edit behavior, remove a guard or add a stub so that an intermediate commit compiles: the archive-mode API projection is checked once, after the last group, by GCOMP-01-08E.",
+          "backlog": [
+            "BASE-01",
+            "G-01"
+          ],
+          "requires": [],
+          "produces": [],
+          "id": "GCOMP-01-08D09"
+        },
+        {
+          "label": "Deliver draft application closure group 10 of 19 (governance)",
+          "kind": "IMPLEMENT",
+          "targets": [
+            "apps/api/src/governance/routes.ts",
+            "apps/api/src/governance/runtime.ts"
+          ],
+          "outcome": "Added 2026-11-05 (continuation of GCOMP-01-08, inserted ahead of it). GCOMP-01-08 cannot pass because the committed route registry imports modules that exist only as working-tree drafts; the 42-file closure and each file’s recorded working sha256 are in `docs/evidence/integration-completion/g01-build-attempt.json` (`blocker.existingDraftDependencyClosure`). Deliver these 2 existing draft files (383 lines) to the committed implementation exactly as they stand. Where a file’s current sha256 differs from the record, deliver the current content and record the new digest in `docs/evidence/integration-completion/g01-closure-delivery.json`. Stage only these paths and preserve every other staged and working entry. Do not edit behavior, remove a guard or add a stub so that an intermediate commit compiles: the archive-mode API projection is checked once, after the last group, by GCOMP-01-08E.",
+          "backlog": [
+            "BASE-01",
+            "G-01"
+          ],
+          "requires": [],
+          "produces": [],
+          "id": "GCOMP-01-08D10"
+        },
+        {
+          "label": "Deliver draft application closure group 11 of 19 (governance)",
+          "kind": "IMPLEMENT",
+          "targets": [
+            "apps/api/src/governance/service.ts",
+            "apps/api/src/governance/sources.ts"
+          ],
+          "outcome": "Added 2026-11-05 (continuation of GCOMP-01-08, inserted ahead of it). GCOMP-01-08 cannot pass because the committed route registry imports modules that exist only as working-tree drafts; the 42-file closure and each file’s recorded working sha256 are in `docs/evidence/integration-completion/g01-build-attempt.json` (`blocker.existingDraftDependencyClosure`). Deliver these 2 existing draft files (458 lines) to the committed implementation exactly as they stand. Where a file’s current sha256 differs from the record, deliver the current content and record the new digest in `docs/evidence/integration-completion/g01-closure-delivery.json`. Stage only these paths and preserve every other staged and working entry. Do not edit behavior, remove a guard or add a stub so that an intermediate commit compiles: the archive-mode API projection is checked once, after the last group, by GCOMP-01-08E.",
+          "backlog": [
+            "BASE-01",
+            "G-01"
+          ],
+          "requires": [],
+          "produces": [],
+          "id": "GCOMP-01-08D11"
+        },
+        {
+          "label": "Deliver draft application closure group 12 of 19 (governance)",
+          "kind": "IMPLEMENT",
+          "targets": [
+            "apps/api/src/governance/trace-export.ts",
+            "apps/api/src/governance/vibes-source.ts"
+          ],
+          "outcome": "Added 2026-11-05 (continuation of GCOMP-01-08, inserted ahead of it). GCOMP-01-08 cannot pass because the committed route registry imports modules that exist only as working-tree drafts; the 42-file closure and each file’s recorded working sha256 are in `docs/evidence/integration-completion/g01-build-attempt.json` (`blocker.existingDraftDependencyClosure`). Deliver these 2 existing draft files (207 lines) to the committed implementation exactly as they stand. Where a file’s current sha256 differs from the record, deliver the current content and record the new digest in `docs/evidence/integration-completion/g01-closure-delivery.json`. Stage only these paths and preserve every other staged and working entry. Do not edit behavior, remove a guard or add a stub so that an intermediate commit compiles: the archive-mode API projection is checked once, after the last group, by GCOMP-01-08E.",
+          "backlog": [
+            "BASE-01",
+            "G-01"
+          ],
+          "requires": [],
+          "produces": [],
+          "id": "GCOMP-01-08D12"
+        },
+        {
+          "label": "Deliver draft application closure group 13 of 19 (identity)",
+          "kind": "IMPLEMENT",
+          "targets": [
+            "apps/api/src/identity/administration.ts",
+            "apps/api/src/identity/workloads.ts"
+          ],
+          "outcome": "Added 2026-11-05 (continuation of GCOMP-01-08, inserted ahead of it). GCOMP-01-08 cannot pass because the committed route registry imports modules that exist only as working-tree drafts; the 42-file closure and each file’s recorded working sha256 are in `docs/evidence/integration-completion/g01-build-attempt.json` (`blocker.existingDraftDependencyClosure`). Deliver these 2 existing draft files (279 lines) to the committed implementation exactly as they stand. Where a file’s current sha256 differs from the record, deliver the current content and record the new digest in `docs/evidence/integration-completion/g01-closure-delivery.json`. Stage only these paths and preserve every other staged and working entry. Do not edit behavior, remove a guard or add a stub so that an intermediate commit compiles: the archive-mode API projection is checked once, after the last group, by GCOMP-01-08E.",
+          "backlog": [
+            "BASE-01",
+            "G-01"
+          ],
+          "requires": [],
+          "produces": [],
+          "id": "GCOMP-01-08D13"
+        },
+        {
+          "label": "Deliver draft application closure group 14 of 19 (integrations)",
+          "kind": "IMPLEMENT",
+          "targets": [
+            "apps/api/src/integrations/content-exports.ts",
+            "apps/api/src/integrations/routes.ts",
+            "apps/api/src/integrations/schedules.ts"
+          ],
+          "outcome": "Added 2026-11-05 (continuation of GCOMP-01-08, inserted ahead of it). GCOMP-01-08 cannot pass because the committed route registry imports modules that exist only as working-tree drafts; the 42-file closure and each file’s recorded working sha256 are in `docs/evidence/integration-completion/g01-build-attempt.json` (`blocker.existingDraftDependencyClosure`). Deliver these 3 existing draft files (405 lines) to the committed implementation exactly as they stand. Where a file’s current sha256 differs from the record, deliver the current content and record the new digest in `docs/evidence/integration-completion/g01-closure-delivery.json`. Stage only these paths and preserve every other staged and working entry. Do not edit behavior, remove a guard or add a stub so that an intermediate commit compiles: the archive-mode API projection is checked once, after the last group, by GCOMP-01-08E.",
+          "backlog": [
+            "BASE-01",
+            "G-01"
+          ],
+          "requires": [],
+          "produces": [],
+          "id": "GCOMP-01-08D14"
+        },
+        {
+          "label": "Deliver draft application closure group 15 of 19 (integrations)",
+          "kind": "IMPLEMENT",
+          "targets": [
+            "apps/api/src/integrations/webhooks.ts"
+          ],
+          "outcome": "Added 2026-11-05 (continuation of GCOMP-01-08, inserted ahead of it). GCOMP-01-08 cannot pass because the committed route registry imports modules that exist only as working-tree drafts; the 42-file closure and each file’s recorded working sha256 are in `docs/evidence/integration-completion/g01-build-attempt.json` (`blocker.existingDraftDependencyClosure`). Deliver these 1 existing draft file (129 lines) to the committed implementation exactly as they stand. Where a file’s current sha256 differs from the record, deliver the current content and record the new digest in `docs/evidence/integration-completion/g01-closure-delivery.json`. Stage only these paths and preserve every other staged and working entry. Do not edit behavior, remove a guard or add a stub so that an intermediate commit compiles: the archive-mode API projection is checked once, after the last group, by GCOMP-01-08E.",
+          "backlog": [
+            "BASE-01",
+            "G-01"
+          ],
+          "requires": [],
+          "produces": [],
+          "id": "GCOMP-01-08D15"
+        },
+        {
+          "label": "Deliver draft application closure group 16 of 19 (security)",
+          "kind": "IMPLEMENT",
+          "targets": [
+            "apps/api/src/security/incident-export-custody.ts"
+          ],
+          "outcome": "Added 2026-11-05 (continuation of GCOMP-01-08, inserted ahead of it). GCOMP-01-08 cannot pass because the committed route registry imports modules that exist only as working-tree drafts; the 42-file closure and each file’s recorded working sha256 are in `docs/evidence/integration-completion/g01-build-attempt.json` (`blocker.existingDraftDependencyClosure`). Deliver these 1 existing draft file (334 lines) to the committed implementation exactly as they stand. Where a file’s current sha256 differs from the record, deliver the current content and record the new digest in `docs/evidence/integration-completion/g01-closure-delivery.json`. Stage only these paths and preserve every other staged and working entry. Do not edit behavior, remove a guard or add a stub so that an intermediate commit compiles: the archive-mode API projection is checked once, after the last group, by GCOMP-01-08E.",
+          "backlog": [
+            "BASE-01",
+            "G-01"
+          ],
+          "requires": [],
+          "produces": [],
+          "id": "GCOMP-01-08D16"
+        },
+        {
+          "label": "Deliver draft application closure group 17 of 19 (security)",
+          "kind": "IMPLEMENT",
+          "targets": [
+            "apps/api/src/security/incident-exports.ts",
+            "apps/api/src/security/incident-routes.ts"
+          ],
+          "outcome": "Added 2026-11-05 (continuation of GCOMP-01-08, inserted ahead of it). GCOMP-01-08 cannot pass because the committed route registry imports modules that exist only as working-tree drafts; the 42-file closure and each file’s recorded working sha256 are in `docs/evidence/integration-completion/g01-build-attempt.json` (`blocker.existingDraftDependencyClosure`). Deliver these 2 existing draft files (462 lines) to the committed implementation exactly as they stand. Where a file’s current sha256 differs from the record, deliver the current content and record the new digest in `docs/evidence/integration-completion/g01-closure-delivery.json`. Stage only these paths and preserve every other staged and working entry. Do not edit behavior, remove a guard or add a stub so that an intermediate commit compiles: the archive-mode API projection is checked once, after the last group, by GCOMP-01-08E.",
+          "backlog": [
+            "BASE-01",
+            "G-01"
+          ],
+          "requires": [],
+          "produces": [],
+          "id": "GCOMP-01-08D17"
+        },
+        {
+          "label": "Deliver draft application closure group 18 of 19 (security)",
+          "kind": "IMPLEMENT",
+          "targets": [
+            "apps/api/src/security/incidents.ts",
+            "apps/api/src/security/trace-routes.ts",
+            "apps/api/src/security/trace-runtime.ts"
+          ],
+          "outcome": "Added 2026-11-05 (continuation of GCOMP-01-08, inserted ahead of it). GCOMP-01-08 cannot pass because the committed route registry imports modules that exist only as working-tree drafts; the 42-file closure and each file’s recorded working sha256 are in `docs/evidence/integration-completion/g01-build-attempt.json` (`blocker.existingDraftDependencyClosure`). Deliver these 3 existing draft files (406 lines) to the committed implementation exactly as they stand. Where a file’s current sha256 differs from the record, deliver the current content and record the new digest in `docs/evidence/integration-completion/g01-closure-delivery.json`. Stage only these paths and preserve every other staged and working entry. Do not edit behavior, remove a guard or add a stub so that an intermediate commit compiles: the archive-mode API projection is checked once, after the last group, by GCOMP-01-08E.",
+          "backlog": [
+            "BASE-01",
+            "G-01"
+          ],
+          "requires": [],
+          "produces": [],
+          "id": "GCOMP-01-08D18"
+        },
+        {
+          "label": "Deliver draft application closure group 19 of 19 (security)",
+          "kind": "IMPLEMENT",
+          "targets": [
+            "apps/api/src/security/trace-service.ts",
+            "apps/api/src/security/trace-store.ts"
+          ],
+          "outcome": "Added 2026-11-05 (continuation of GCOMP-01-08, inserted ahead of it). GCOMP-01-08 cannot pass because the committed route registry imports modules that exist only as working-tree drafts; the 42-file closure and each file’s recorded working sha256 are in `docs/evidence/integration-completion/g01-build-attempt.json` (`blocker.existingDraftDependencyClosure`). Deliver these 2 existing draft files (462 lines) to the committed implementation exactly as they stand. Where a file’s current sha256 differs from the record, deliver the current content and record the new digest in `docs/evidence/integration-completion/g01-closure-delivery.json`. Stage only these paths and preserve every other staged and working entry. Do not edit behavior, remove a guard or add a stub so that an intermediate commit compiles: the archive-mode API projection is checked once, after the last group, by GCOMP-01-08E.",
+          "backlog": [
+            "BASE-01",
+            "G-01"
+          ],
+          "requires": [],
+          "produces": [],
+          "id": "GCOMP-01-08D19"
+        },
+        {
+          "label": "Close the remaining archive-mode API diagnostics after the closure is delivered",
+          "kind": "IMPLEMENT",
+          "targets": [
+            "docs/evidence/integration-completion/g01-closure-delivery.json"
+          ],
+          "outcome": "Added 2026-11-05 (continuation of GCOMP-01-08, inserted ahead of it). Precondition: every GCOMP-01-08D task is checked. From a clean worktree of the committed tree, rerun the archive-mode HTTP projection compile that failed with 27 diagnostics on 2026-10-29. For each diagnostic that remains, deliver the existing working-tree type change it needs (existing modified API files), at most three files and fewer than 500 changed lines per continuation, inserting GCOMP-01-08E1 onward ahead of this task when more than one packet is needed. Record the diagnostic count before and after, the delivered paths and their digests. Success is zero diagnostics with all 13 route-registry modules resolving from committed source. Never delete a route, weaken the clean-input guard or add a stub to reach it.",
+          "backlog": [
+            "BASE-01",
+            "G-01"
+          ],
+          "requires": [],
+          "produces": [],
+          "id": "GCOMP-01-08E"
+        },
+        {
           "label": "Verify and publish implementation inputs",
           "kind": "VERIFY",
           "targets": [
@@ -165,7 +549,7 @@
       ],
       "id": "GCOMP-01",
       "path": ".maestro/playbooks/2026-10-29-Mega-Maestro-Integration-Completion/GCOMP-01.md",
-      "taskCount": 8,
+      "taskCount": 32,
       "stage": "S01"
     },
     {
@@ -173,7 +557,7 @@
       "phase": "G01",
       "owner": "mega-maestro",
       "mode": "qualification",
-      "title": "Versioned public contracts and reproducible producer delivery \u2014 qualification",
+      "title": "Versioned public contracts and reproducible producer delivery — qualification",
       "tasks": [
         {
           "label": "Verify versioned public contracts and reproducible producer delivery",
@@ -181,7 +565,7 @@
           "targets": [
             "docs/evidence/integration-completion/01.json"
           ],
-          "outcome": "Run focused contracts/distribution tests, relevant strict compilation and existing isolated archivers on a reviewed committed input snapshot. Load exported schemas from the produced archive in plain Node, verify service entrypoints and native metadata, and emit MEGA-CONTRACTS-FOUNDATION with exact provenance. This is packaging readiness, not a passed pair or execution authority. Where the paired consumer BUILD supersedes the M0 archive, consume its actual new archive, rebuild this owner\u2019s adapter/pins and rerun affected conformance before the pair. Preserve prior immutable archives; never substitute old qualifiedAgainst evidence for changed runtime bytes.",
+          "outcome": "Run focused contracts/distribution tests, relevant strict compilation and existing isolated archivers on a reviewed committed input snapshot. Load exported schemas from the produced archive in plain Node, verify service entrypoints and native metadata, and emit MEGA-CONTRACTS-FOUNDATION with exact provenance. This is packaging readiness, not a passed pair or execution authority. Where the paired consumer BUILD supersedes the M0 archive, consume its actual new archive, rebuild this owner’s adapter/pins and rerun affected conformance before the pair. Preserve prior immutable archives; never substitute old qualifiedAgainst evidence for changed runtime bytes.",
           "backlog": [
             "BASE-01",
             "G-01"
@@ -204,14 +588,14 @@
       "id": "GCOMP-02",
       "path": ".maestro/playbooks/2026-10-29-Mega-Maestro-Integration-Completion/GCOMP-02.md",
       "taskCount": 1,
-      "stage": "S01"
+      "stage": "S01Q"
     },
     {
       "key": "SOURCE-BUILD",
       "phase": "SOURCE",
       "owner": "maestro",
       "mode": "implementation",
-      "title": "Stabilize the current Maestro integration and preserve upstream work \u2014 implementation",
+      "title": "Stabilize the current Maestro integration and preserve upstream work — implementation",
       "tasks": [
         {
           "label": "Checkpoint implementation sources and task state",
@@ -600,7 +984,7 @@
           "targets": [
             "Plans/integration-completion/upstream-merge.json"
           ],
-          "outcome": "Resolve the selected upstream ref against the preserved feature branch. Prepare integration on an isolated owned worktree if needed; insert separate conflict-resolution tasks for at most three authored files and under500lines each before committing the merge. Preserve enterprise guards, Tauri target and standalone semantics; no forced reset, checkout loss or automatic merge to upstream main.",
+          "outcome": "Resolve the selected upstream ref against the preserved feature branch. Prepare integration on an isolated owned worktree if needed; insert separate conflict-resolution tasks for at most three authored files and under500lines each before committing the merge. Preserve enterprise guards, the Electron desktop host and standalone semantics; no forced reset, checkout loss or automatic merge to upstream main.",
           "backlog": [
             "BASE-02"
           ],
@@ -655,7 +1039,7 @@
       "phase": "SOURCE",
       "owner": "maestro",
       "mode": "qualification",
-      "title": "Stabilize the current Maestro integration and preserve upstream work \u2014 qualification",
+      "title": "Stabilize the current Maestro integration and preserve upstream work — qualification",
       "tasks": [
         {
           "label": "VERIFY: reproducible baseline",
@@ -693,7 +1077,7 @@
       "phase": "M0",
       "owner": "maestro",
       "mode": "implementation",
-      "title": "Publish the current public runtime bootstrap before counterpart adapter work \u2014 implementation",
+      "title": "Publish the current public runtime bootstrap before counterpart adapter work — implementation",
       "tasks": [
         {
           "label": "Export source-bound bootstrap manifest",
@@ -842,7 +1226,7 @@
       "phase": "M0",
       "owner": "maestro",
       "mode": "qualification",
-      "title": "Publish the current public runtime bootstrap before counterpart adapter work \u2014 qualification",
+      "title": "Publish the current public runtime bootstrap before counterpart adapter work — qualification",
       "tasks": [
         {
           "label": "Build and record the bootstrap runtime",
@@ -880,7 +1264,7 @@
       "phase": "G02",
       "owner": "mega-maestro",
       "mode": "implementation",
-      "title": "Scoped actor registration and real signed policy consumer \u2014 implementation",
+      "title": "Scoped actor registration and real signed policy consumer — implementation",
       "tasks": [
         {
           "label": "Separate runtime-use permission from fleet administration",
@@ -1088,7 +1472,7 @@
       "phase": "G03",
       "owner": "mega-maestro",
       "mode": "implementation",
-      "title": "Pinned public Maestro runtime adapter \u2014 implementation",
+      "title": "Pinned public Maestro runtime adapter — implementation",
       "tasks": [
         {
           "label": "Verify runtime archive before code import",
@@ -1260,7 +1644,7 @@
       "phase": "G03",
       "owner": "mega-maestro",
       "mode": "qualification",
-      "title": "Pinned public Maestro runtime adapter \u2014 qualification",
+      "title": "Pinned public Maestro runtime adapter — qualification",
       "tasks": [
         {
           "label": "Verify pinned public Maestro runtime adapter",
@@ -1268,7 +1652,7 @@
           "targets": [
             "docs/evidence/integration-completion/03.json"
           ],
-          "outcome": "Run runtime-adapter checks/tests and build. Exercise supported public operations against the actual MAESTRO-M0-RUNTIME artifact under controlled synthetic identities, retaining unknown/cancel semantics and no-secret assertions. Emit MEGA-RUNTIME-ADAPTER. Explicitly state this adapter maps APIs and does not qualify process confinement or all execution leases. Where the paired consumer BUILD supersedes the M0 archive, consume its actual new archive, rebuild this owner\u2019s adapter/pins and rerun affected conformance before the pair. Preserve prior immutable archives; never substitute old qualifiedAgainst evidence for changed runtime bytes.",
+          "outcome": "Run runtime-adapter checks/tests and build. Exercise supported public operations against the actual MAESTRO-M0-RUNTIME artifact under controlled synthetic identities, retaining unknown/cancel semantics and no-secret assertions. Emit MEGA-RUNTIME-ADAPTER. Explicitly state this adapter maps APIs and does not qualify process confinement or all execution leases. Where the paired consumer BUILD supersedes the M0 archive, consume its actual new archive, rebuild this owner’s adapter/pins and rerun affected conformance before the pair. Preserve prior immutable archives; never substitute old qualifiedAgainst evidence for changed runtime bytes.",
           "backlog": [
             "G-01",
             "G-04"
@@ -1302,7 +1686,7 @@
       "phase": "G04",
       "owner": "mega-maestro",
       "mode": "implementation",
-      "title": "Protected Linux endpoint custody and service identity \u2014 implementation",
+      "title": "Protected Linux endpoint custody and service identity — implementation",
       "tasks": [
         {
           "label": "Define protected service custody port",
@@ -1512,7 +1896,7 @@
       "phase": "G05",
       "owner": "mega-maestro",
       "mode": "implementation",
-      "title": "Exact prepared execution and durable authority leases \u2014 implementation",
+      "title": "Exact prepared execution and durable authority leases — implementation",
       "tasks": [
         {
           "label": "Extend execution authority wire bindings",
@@ -1722,7 +2106,7 @@
       "phase": "G06",
       "owner": "mega-maestro",
       "mode": "implementation",
-      "title": "Constrained effect backend and first real managed run \u2014 implementation",
+      "title": "Constrained effect backend and first real managed run — implementation",
       "tasks": [
         {
           "label": "Implement protected Linux effect dispatch",
@@ -1908,203 +2292,11 @@
       "stage": "S03"
     },
     {
-      "key": "HOST-BUILD",
-      "phase": "HOST",
-      "owner": "maestro",
-      "mode": "implementation",
-      "title": "Create or reuse the Maestro Tauri application host \u2014 implementation",
-      "tasks": [
-        {
-          "label": "Resolve Tauri implementation and scaffold the actual application",
-          "kind": "IMPLEMENT",
-          "targets": [
-            "src-tauri/Cargo.toml",
-            "src-tauri/tauri.conf.json",
-            "package.json"
-          ],
-          "outcome": "Search configured Maestro playbooks/source for a Maestro-owned Tauri project and reuse it. The found SLOP Tauri playbook is a different application. If none exists, create the Maestro Tauri2 scaffold with pinned dependencies, existing React/Vite frontend and dev/build entrypoints. Adapt these proposed paths to the discovered project in the manifest once; no permanent discovery-only pause.",
-          "backlog": [
-            "M-06"
-          ],
-          "requires": [
-            "MAESTRO-SOURCE-BASELINE-BUILD"
-          ],
-          "produces": [],
-          "id": "MCOMP-05-01"
-        },
-        {
-          "label": "Implement narrow native command and event contracts",
-          "kind": "IMPLEMENT",
-          "targets": [
-            "src-tauri/src/commands.rs",
-            "src-tauri/src/lib.rs",
-            "src/renderer/services/tauri/contracts.ts"
-          ],
-          "outcome": "Define bounded typed Rust command inputs/results/events for existing GUI operation families. Derive the operation inventory from the existing renderer API, separating reads, settings/agent mutations and execution. Reject unknown operation names, oversized payloads, forged window/actor/tenant fields and unsupported protocol versions.",
-          "backlog": [
-            "M-06"
-          ],
-          "requires": [],
-          "produces": [],
-          "id": "MCOMP-05-02"
-        },
-        {
-          "label": "Constrain webview capabilities and origins",
-          "kind": "IMPLEMENT",
-          "targets": [
-            "src-tauri/capabilities/main.json",
-            "src-tauri/permissions/maestro.toml",
-            "src-tauri/tauri.conf.json"
-          ],
-          "outcome": "Give only trusted application windows the required command permissions; use tight CSP/origin/resource scopes. No arbitrary process shell/filesystem/network plugin authority exposed to the webview. Capability configuration is an upper bound, not enterprise actor/policy authorization.",
-          "backlog": [
-            "M-06"
-          ],
-          "requires": [],
-          "produces": [],
-          "id": "MCOMP-05-03"
-        },
-        {
-          "label": "Implement authenticated native runtime sidecar ownership",
-          "kind": "IMPLEMENT",
-          "targets": [
-            "src-tauri/src/runtime.rs",
-            "src/shared/maestro-lib/desktop-host/server.ts",
-            "scripts/build-tauri-runtime.mjs"
-          ],
-          "outcome": "Reuse the real public Maestro library in a packaged per-platform Node sidecar instead of importing Node/Electron into the webview or rebuilding a second runtime. Native host owns launch/identity/lifetime, fixed binary digest and bounded authenticated private transport; bind messages to the live owning process and deny replacement. Select/pin runtime by actual required feature probes.",
-          "backlog": [
-            "M-02",
-            "M-03",
-            "M-06"
-          ],
-          "requires": [],
-          "produces": [],
-          "id": "MCOMP-05-04"
-        },
-        {
-          "label": "Adapt existing frontend to trusted Tauri bridge",
-          "kind": "IMPLEMENT",
-          "targets": [
-            "src/renderer/services/tauri/adapter.ts",
-            "src/renderer/main.tsx",
-            "vite.config.tauri.mts"
-          ],
-          "outcome": "Reuse current React components/stores and initialize a typed compatibility adapter through the native commands/events. No renderer import of Electron, raw provider credentials, endpoint keys or direct unrestricted Node APIs. Build ordinary application navigation rather than a management-only shell. Split unsupported operation-family ports into bounded continuations.",
-          "backlog": [
-            "M-06"
-          ],
-          "requires": [],
-          "produces": [],
-          "id": "MCOMP-05-05"
-        },
-        {
-          "label": "Implement native lifecycle and single-owner startup",
-          "kind": "IMPLEMENT",
-          "targets": [
-            "src-tauri/src/lifecycle.rs",
-            "src-tauri/src/lib.rs",
-            "src/shared/maestro-lib/desktop-host/server.ts"
-          ],
-          "outcome": "Respect existing data-dir single-writer lock, installation identity and runtime epoch. Drain owned commands/readers on close/restart; UI closure must not clear endpoint management. Use structured redacted status/error handling and private workspace fixtures during development.",
-          "backlog": [
-            "M-02",
-            "M-06"
-          ],
-          "requires": [],
-          "produces": [],
-          "id": "MCOMP-05-06"
-        },
-        {
-          "label": "TEST: native bridge and sidecar isolation",
-          "kind": "TEST",
-          "targets": [
-            "src-tauri/tests/host_boundary.rs",
-            "src/__tests__/integration/tauri/bridge.test.ts"
-          ],
-          "outcome": "Author malformed/forged caller, origin/capability, sidecar loss/replacement, lock conflict and restart cases. Preserve unmanaged launch and no-Electron public library behavior.",
-          "backlog": [
-            "M-02",
-            "M-06"
-          ],
-          "requires": [],
-          "produces": [],
-          "id": "MCOMP-05-07"
-        },
-        {
-          "label": "Verify and publish implementation inputs",
-          "kind": "VERIFY",
-          "targets": [
-            "Plans/integration-completion/evidence/host-build.json"
-          ],
-          "backlog": [
-            "M-02",
-            "M-03",
-            "M-06"
-          ],
-          "requires": [],
-          "produces": [
-            "TAURI-HOST-BASELINE-BUILD"
-          ],
-          "outcome": "Run the changed-module unit suites, type/build checks and public archive load/contract checks relevant to this phase. Fix failures through separate bounded IMPLEMENT/TEST continuations before retrying. Publish the actual clean implementation snapshot, payload/input hashes, public archives and commands/results in the BUILD receipt. This receipt supplies compiled inputs for the other owner; it grants no execution authority and proves no paired/native/provider support. Every paired, native and real-provider requirement remains in its separate qualification task.",
-          "id": "MCOMP-05-08"
-        }
-      ],
-      "dependsOn": [
-        "MCOMP-01",
-        "MCOMP-03"
-      ],
-      "produces": [
-        "TAURI-HOST-BASELINE-BUILD"
-      ],
-      "id": "MCOMP-05",
-      "path": ".maestro/playbooks/2026-10-29-Maestro-Integration-Completion/MCOMP-05.md",
-      "taskCount": 8,
-      "stage": "S04"
-    },
-    {
-      "key": "HOST-QUALIFY",
-      "phase": "HOST",
-      "owner": "maestro",
-      "mode": "qualification",
-      "title": "Create or reuse the Maestro Tauri application host \u2014 qualification",
-      "tasks": [
-        {
-          "label": "VERIFY: actual native host baseline",
-          "kind": "VERIFY",
-          "targets": [
-            "Plans/integration-completion/evidence/tauri-host-baseline.json"
-          ],
-          "outcome": "Build and launch the actual Tauri binary with owned profile. Verify existing application workspace renders, native commands reach the actual library and teardown preserves required endpoint standing. Webview/IPC mocks cannot close this check. Record resolved target paths and emit the host baseline.",
-          "backlog": [
-            "M-06"
-          ],
-          "requires": [
-            "TAURI-HOST-BASELINE-BUILD"
-          ],
-          "produces": [
-            "TAURI-HOST-BASELINE"
-          ],
-          "id": "MCOMP-06-01"
-        }
-      ],
-      "dependsOn": [
-        "MCOMP-05"
-      ],
-      "produces": [
-        "TAURI-HOST-BASELINE"
-      ],
-      "id": "MCOMP-06",
-      "path": ".maestro/playbooks/2026-10-29-Maestro-Integration-Completion/MCOMP-06.md",
-      "taskCount": 1,
-      "stage": "S04"
-    },
-    {
       "key": "EARLY-BUILD",
       "phase": "EARLY",
       "owner": "maestro",
       "mode": "implementation",
-      "title": "Publish early actor, desktop and provider consumer contracts \u2014 implementation",
+      "title": "Publish early actor, desktop and provider consumer contracts — implementation",
       "tasks": [
         {
           "label": "Implement authenticated actor approval bridge",
@@ -2115,8 +2307,7 @@
           ],
           "outcome": "Compose the already existing Mega browser-session/CSRF approval API and endpoint challenge/redemption into a bounded owned bridge. Never treat absent --approve-command as proof API source is absent. No supplied actorId JSON, device bearer as human authority or embedded user cookies. Emit a consumer build input before any paired enrollment verification.",
           "requires": [
-            "MEGA-CONTRACTS-FOUNDATION-BUILD",
-            "TAURI-HOST-BASELINE-BUILD"
+            "MEGA-CONTRACTS-FOUNDATION-BUILD"
           ],
           "produces": [],
           "backlog": [
@@ -2145,7 +2336,7 @@
           "id": "MCOMP-07-02"
         },
         {
-          "label": "Publish provider and native host conformance ports",
+          "label": "Publish provider and desktop host conformance ports",
           "kind": "IMPLEMENT",
           "targets": [
             "src/shared/maestro-lib/managed/provider-contract.ts",
@@ -2209,8 +2400,7 @@
       ],
       "dependsOn": [
         "GCOMP-01",
-        "MCOMP-03",
-        "MCOMP-05"
+        "MCOMP-03"
       ],
       "produces": [
         "MAESTRO-ACTOR-BRIDGE-BUILD",
@@ -2227,7 +2417,7 @@
       "phase": "EARLY",
       "owner": "maestro",
       "mode": "qualification",
-      "title": "Publish early actor, desktop and provider consumer contracts \u2014 qualification",
+      "title": "Publish early actor, desktop and provider consumer contracts — qualification",
       "tasks": [
         {
           "label": "VERIFY: publish early consumer implementation inputs",
@@ -2272,7 +2462,7 @@
       "phase": "P0",
       "owner": "maestro",
       "mode": "implementation",
-      "title": "Close mandatory admission and protected headless standing defects \u2014 implementation",
+      "title": "Close mandatory admission and protected headless standing defects — implementation",
       "tasks": [
         {
           "label": "Make normal turn admission host mandatory",
@@ -2325,15 +2515,13 @@
           "targets": [
             "src/cli/services/host-managed.ts",
             "src/shared/maestro-lib/managed/host-adapter.ts",
-            "src-tauri/src/managed/custody.rs"
+            "src/main/enterprise/credential-custody.ts"
           ],
-          "outcome": "After Tauri host discovery, reuse its protected native credential/custody service or independently protected endpoint-owned host identity. Plain Node must not fall back to no adapter when sealed enrollment exists. Do not copy Electron vault keys, install shared obscuring keys, expose secrets to renderer or claim same-user tamper immunity. These Rust paths are proposed additions, not existing source. Keep the task to these 1-3 authored files and fewer than 500 changed lines; insert a bounded continuation before the dependent check when necessary.",
+          "outcome": "Reuse the Electron host’s protected credential/custody service (the safeStorage seal and keyring anchor) or an independently protected endpoint-owned host identity. Plain Node must not fall back to no adapter when sealed enrollment exists. Do not copy Electron vault keys, install shared obscuring keys, expose secrets to renderer or claim same-user tamper immunity. These Rust paths are proposed additions, not existing source. Keep the task to these 1-3 authored files and fewer than 500 changed lines; insert a bounded continuation before the dependent check when necessary.",
           "backlog": [
             "M-02"
           ],
-          "requires": [
-            "TAURI-HOST-BASELINE-BUILD"
-          ],
+          "requires": [],
           "produces": [],
           "id": "MCOMP-09-03"
         },
@@ -2343,7 +2531,7 @@
           "targets": [
             "src/shared/maestro-lib/managed/binding.ts",
             "src/cli/services/host-managed.ts",
-            "src-tauri/src/managed/custody.rs"
+            "src/main/enterprise/credential-custody.ts"
           ],
           "outcome": "Enrolled, unreadable, missing-but-anchored and revoked installations remain managed across GUI/headless restart and alternate data-dir selection. Use protected installation standing; ordinary JSON digest or caller-selected productionDataDir cannot supply or erase authority. Authenticated retire is the only supported transition to standalone. Keep the task to these 1-3 authored files and fewer than 500 changed lines; insert a bounded continuation before the dependent check when necessary.",
           "backlog": [
@@ -2454,7 +2642,6 @@
       ],
       "dependsOn": [
         "GCOMP-03",
-        "MCOMP-05",
         "MCOMP-07"
       ],
       "produces": [
@@ -2470,7 +2657,7 @@
       "phase": "G02",
       "owner": "mega-maestro",
       "mode": "qualification",
-      "title": "Scoped actor registration and real signed policy consumer \u2014 qualification",
+      "title": "Scoped actor registration and real signed policy consumer — qualification",
       "tasks": [
         {
           "label": "Verify scoped actor registration and real signed policy consumer",
@@ -2478,7 +2665,7 @@
           "targets": [
             "docs/evidence/integration-completion/02.json"
           ],
-          "outcome": "Run relevant API/endpoint/console tests and type/build checks, then use MAESTRO-M0-RUNTIME and MAESTRO-ACTOR-BRIDGE to drive real challenge/browser approval/mTLS redemption/attachment and signed policy delivery/install receipt. Negative signature, revoked actor and peer substitution must deny. Emit MEGA-ACTOR-POLICY only for the actual paired slice; missing consumers leave this verification incomplete without blocking independent artifact implementation. Where the paired consumer BUILD supersedes the M0 archive, consume its actual new archive, rebuild this owner\u2019s adapter/pins and rerun affected conformance before the pair. Preserve prior immutable archives; never substitute old qualifiedAgainst evidence for changed runtime bytes.",
+          "outcome": "Run relevant API/endpoint/console tests and type/build checks, then use MAESTRO-M0-RUNTIME and MAESTRO-ACTOR-BRIDGE to drive real challenge/browser approval/mTLS redemption/attachment and signed policy delivery/install receipt. Negative signature, revoked actor and peer substitution must deny. Emit MEGA-ACTOR-POLICY only for the actual paired slice; missing consumers leave this verification incomplete without blocking independent artifact implementation. Where the paired consumer BUILD supersedes the M0 archive, consume its actual new archive, rebuild this owner’s adapter/pins and rerun affected conformance before the pair. Preserve prior immutable archives; never substitute old qualifiedAgainst evidence for changed runtime bytes.",
           "backlog": [
             "G-02",
             "G-03",
@@ -2520,7 +2707,7 @@
       "phase": "G04",
       "owner": "mega-maestro",
       "mode": "qualification",
-      "title": "Protected Linux endpoint custody and service identity \u2014 qualification",
+      "title": "Protected Linux endpoint custody and service identity — qualification",
       "tasks": [
         {
           "label": "Verify protected Linux endpoint custody and service identity",
@@ -2528,7 +2715,7 @@
           "targets": [
             "docs/evidence/integration-completion/04.json"
           ],
-          "outcome": "Run focused Linux native/custody/endpoint checks in the isolated fixture. Record independent kernel UID/process and denied agent file/key access, actor registration through the real API, restart/revocation and source hashes. Emit MEGA-PROTECTED-LINUX only for the verified service boundary; do not count a container synthetic program or chmod alone as full provider confinement. Where the paired consumer BUILD supersedes the M0 archive, consume its actual new archive, rebuild this owner\u2019s adapter/pins and rerun affected conformance before the pair. Preserve prior immutable archives; never substitute old qualifiedAgainst evidence for changed runtime bytes.",
+          "outcome": "Run focused Linux native/custody/endpoint checks in the isolated fixture. Record independent kernel UID/process and denied agent file/key access, actor registration through the real API, restart/revocation and source hashes. Emit MEGA-PROTECTED-LINUX only for the verified service boundary; do not count a container synthetic program or chmod alone as full provider confinement. Where the paired consumer BUILD supersedes the M0 archive, consume its actual new archive, rebuild this owner’s adapter/pins and rerun affected conformance before the pair. Preserve prior immutable archives; never substitute old qualifiedAgainst evidence for changed runtime bytes.",
           "backlog": [
             "G-03",
             "G-05",
@@ -2564,7 +2751,7 @@
       "phase": "G05",
       "owner": "mega-maestro",
       "mode": "qualification",
-      "title": "Exact prepared execution and durable authority leases \u2014 qualification",
+      "title": "Exact prepared execution and durable authority leases — qualification",
       "tasks": [
         {
           "label": "Verify exact prepared execution and durable authority leases",
@@ -2572,7 +2759,7 @@
           "targets": [
             "docs/evidence/integration-completion/05.json"
           ],
-          "outcome": "Run focused real database authority and endpoint resource/receipt tests and strict builds. Produce an actual authority reservation, grant consumption and settled or honestly unknown receipt under the protected Linux fixture, then record all bound generations/digests. Emit MEGA-PREPARED-AUTHORITY; separate from positive Maestro dispatch until the consumer effect boundary is composed. Where the paired consumer BUILD supersedes the M0 archive, consume its actual new archive, rebuild this owner\u2019s adapter/pins and rerun affected conformance before the pair. Preserve prior immutable archives; never substitute old qualifiedAgainst evidence for changed runtime bytes.",
+          "outcome": "Run focused real database authority and endpoint resource/receipt tests and strict builds. Produce an actual authority reservation, grant consumption and settled or honestly unknown receipt under the protected Linux fixture, then record all bound generations/digests. Emit MEGA-PREPARED-AUTHORITY; separate from positive Maestro dispatch until the consumer effect boundary is composed. Where the paired consumer BUILD supersedes the M0 archive, consume its actual new archive, rebuild this owner’s adapter/pins and rerun affected conformance before the pair. Preserve prior immutable archives; never substitute old qualifiedAgainst evidence for changed runtime bytes.",
           "backlog": [
             "G-05"
           ],
@@ -2607,7 +2794,7 @@
       "phase": "P0",
       "owner": "maestro",
       "mode": "qualification",
-      "title": "Close mandatory admission and protected headless standing defects \u2014 qualification",
+      "title": "Close mandatory admission and protected headless standing defects — qualification",
       "tasks": [
         {
           "label": "Verify P0 closure through actual public runtime",
@@ -2643,182 +2830,11 @@
       "stage": "S06"
     },
     {
-      "key": "PARITY-BUILD",
-      "phase": "PARITY",
-      "owner": "maestro",
-      "mode": "implementation",
-      "title": "Complete Tauri host service parity for ordinary desktop work \u2014 implementation",
-      "tasks": [
-        {
-          "label": "Port native settings and user-data service",
-          "kind": "IMPLEMENT",
-          "targets": [
-            "src-tauri/src/settings.rs",
-            "src/shared/maestro-lib/desktop-host/settings.ts",
-            "src/renderer/services/tauri/settings.ts"
-          ],
-          "outcome": "Expose existing settings/session-group/tab persistence through authenticated host commands with current policy holds and atomic storage. Keep personal preferences usable, governed agent fields validated at host and secrets excluded. Reuse existing runtime repositories and do not maintain parallel stores.",
-          "backlog": [
-            "M-06"
-          ],
-          "requires": [
-            "TAURI-HOST-BASELINE-BUILD"
-          ],
-          "produces": [],
-          "id": "MCOMP-11-01"
-        },
-        {
-          "label": "Port native files and repository views",
-          "kind": "IMPLEMENT",
-          "targets": [
-            "src-tauri/src/files.rs",
-            "src/shared/maestro-lib/desktop-host/files.ts",
-            "src/renderer/services/tauri/files.ts"
-          ],
-          "outcome": "Implement bounded permitted project tree/preview/search/git views using existing safe utilities and scoped resource handles. Enforce permissions below UI and protect credential/internal paths. File writes and repository mutations require the corresponding current effect authority.",
-          "backlog": [
-            "M-06"
-          ],
-          "requires": [],
-          "produces": [],
-          "id": "MCOMP-11-02"
-        },
-        {
-          "label": "Port native windows dialogs and notifications",
-          "kind": "IMPLEMENT",
-          "targets": [
-            "src-tauri/src/windows.rs",
-            "src/renderer/services/tauri/windows.ts",
-            "src-tauri/src/lib.rs"
-          ],
-          "outcome": "Provide native window/tab/dialog/notification/clipboard actions used by core desktop flows with window identity and data sensitivity bounds. Keep keyboard focus, screen-reader semantics and externalized copy; do not add broad shell/opener powers to arbitrary web content.",
-          "backlog": [
-            "M-06"
-          ],
-          "requires": [],
-          "produces": [],
-          "id": "MCOMP-11-03"
-        },
-        {
-          "label": "Port process stream and interactive session lifecycle",
-          "kind": "IMPLEMENT",
-          "targets": [
-            "src/shared/maestro-lib/desktop-host/processes.ts",
-            "src-tauri/src/processes.rs",
-            "src/renderer/services/tauri/processes.ts"
-          ],
-          "outcome": "Connect actual library turns, output/error/state events and typed cancel/resume through native host. Use current authority for every effect, preserve event IDs and backpressure. Terminal/PTy/SDK routes remain unavailable until their specific qualification tasks, without silently disabling required interactive provider child routes.",
-          "backlog": [
-            "M-03",
-            "M-06"
-          ],
-          "requires": [],
-          "produces": [],
-          "id": "MCOMP-11-04"
-        },
-        {
-          "label": "Reconcile remaining ordinary GUI operation families",
-          "kind": "IMPLEMENT",
-          "targets": [
-            "src/renderer/services/tauri/operation-inventory.ts",
-            "src/shared/maestro-lib/desktop-host/operations.ts"
-          ],
-          "outcome": "Audit actual active GUI consumers against implemented native operation registry. Insert concrete bounded port tasks for any required agent/wizard/clone/import/plugin/browser/Cue/Auto Run family still stranded on Electron. Final inventory cannot mark required families complete using unsupported stubs.",
-          "backlog": [
-            "M-06"
-          ],
-          "requires": [],
-          "produces": [],
-          "id": "MCOMP-11-05"
-        },
-        {
-          "label": "TEST: ordinary native desktop journeys",
-          "kind": "TEST",
-          "targets": [
-            "src/__tests__/integration/tauri/ordinary-desktop.test.ts",
-            "src-tauri/tests/desktop_services.rs"
-          ],
-          "outcome": "Author real ordinary-user startup/navigation/files/settings/tab/output/error/close/restart cases and host-denied forged calls. Keep unit doubles distinct from actual app acceptance.",
-          "backlog": [
-            "M-06"
-          ],
-          "requires": [],
-          "produces": [],
-          "id": "MCOMP-11-06"
-        },
-        {
-          "label": "Verify and publish implementation inputs",
-          "kind": "VERIFY",
-          "targets": [
-            "Plans/integration-completion/evidence/parity-build.json"
-          ],
-          "backlog": [
-            "M-03",
-            "M-06"
-          ],
-          "requires": [],
-          "produces": [
-            "TAURI-SERVICE-PARITY-BUILD"
-          ],
-          "outcome": "Run the changed-module unit suites, type/build checks and public archive load/contract checks relevant to this phase. Fix failures through separate bounded IMPLEMENT/TEST continuations before retrying. Publish the actual clean implementation snapshot, payload/input hashes, public archives and commands/results in the BUILD receipt. This receipt supplies compiled inputs for the other owner; it grants no execution authority and proves no paired/native/provider support. Every paired, native and real-provider requirement remains in its separate qualification task.",
-          "id": "MCOMP-11-07"
-        }
-      ],
-      "dependsOn": [
-        "MCOMP-05",
-        "MCOMP-09"
-      ],
-      "produces": [
-        "TAURI-SERVICE-PARITY-BUILD"
-      ],
-      "id": "MCOMP-11",
-      "path": ".maestro/playbooks/2026-10-29-Maestro-Integration-Completion/MCOMP-11.md",
-      "taskCount": 7,
-      "stage": "S06"
-    },
-    {
-      "key": "PARITY-QUALIFY",
-      "phase": "PARITY",
-      "owner": "maestro",
-      "mode": "qualification",
-      "title": "Complete Tauri host service parity for ordinary desktop work \u2014 qualification",
-      "tasks": [
-        {
-          "label": "VERIFY: native service parity",
-          "kind": "VERIFY",
-          "targets": [
-            "Plans/integration-completion/evidence/tauri-service-parity.json"
-          ],
-          "outcome": "Run affected Rust/TypeScript builds and focused tests, then actual native app smoke through core ordinary-user flows. Record complete required operation inventory and real supported path evidence, not just a shell screenshot.",
-          "backlog": [
-            "M-06"
-          ],
-          "requires": [
-            "TAURI-SERVICE-PARITY-BUILD"
-          ],
-          "produces": [
-            "TAURI-SERVICE-PARITY"
-          ],
-          "id": "MCOMP-12-01"
-        }
-      ],
-      "dependsOn": [
-        "MCOMP-11"
-      ],
-      "produces": [
-        "TAURI-SERVICE-PARITY"
-      ],
-      "id": "MCOMP-12",
-      "path": ".maestro/playbooks/2026-10-29-Maestro-Integration-Completion/MCOMP-12.md",
-      "taskCount": 1,
-      "stage": "S06"
-    },
-    {
       "key": "EFFECT-BUILD",
       "phase": "EFFECT",
       "owner": "maestro",
       "mode": "implementation",
-      "title": "Consume prepared execution and per-effect authority with an early real pair \u2014 implementation",
+      "title": "Consume prepared execution and per-effect authority with an early real pair — implementation",
       "tasks": [
         {
           "label": "Implement negotiated prepared execution mapping",
@@ -2828,7 +2844,7 @@
             "src/shared/maestro-lib/managed/endpoint-port.ts",
             "src/main/enterprise/dispatch.ts"
           ],
-          "outcome": "Consume versioned MEGA-PREPARED-EXECUTION through imported public contracts; bind exact resolved input, resources, policy/trust generations and protected dispatch lifetime. Do not mistake an endpoint effect receipt for permission to duplicate that effect locally. Preserve unknown settlement and prevent blind retry. Pure dispatch logic needed by Tauri must use shared host ports after reuse check. Keep the task to these 1-3 authored files and fewer than 500 changed lines; insert a bounded continuation before the dependent check when necessary.",
+          "outcome": "Consume versioned MEGA-PREPARED-EXECUTION through imported public contracts; bind exact resolved input, resources, policy/trust generations and protected dispatch lifetime. Do not mistake an endpoint effect receipt for permission to duplicate that effect locally. Preserve unknown settlement and prevent blind retry. Pure dispatch logic needed by the desktop host must use shared host ports after reuse check. Keep the task to these 1-3 authored files and fewer than 500 changed lines; insert a bounded continuation before the dependent check when necessary.",
           "backlog": [
             "M-03"
           ],
@@ -2846,15 +2862,14 @@
           "targets": [
             "src/shared/maestro-lib/managed/effects.ts",
             "src/shared/maestro-lib/managed/host-adapter.ts",
-            "src-tauri/src/managed/dispatch.rs"
+            "src/main/enterprise/dispatch.ts"
           ],
           "outcome": "Replace default unavailable effect authority only when negotiated producer exists. Map exact command/file/net/tool inputs to request-bound decisions and consume receipts; cancellation/revocation and lease lifetime govern the actual native/runtime effect. No grant-all or prompt-only enforcement. Keep the task to these 1-3 authored files and fewer than 500 changed lines; insert a bounded continuation before the dependent check when necessary.",
           "backlog": [
             "M-03"
           ],
           "requires": [
-            "MEGA-PREPARED-EXECUTION-BUILD",
-            "TAURI-HOST-BASELINE-BUILD"
+            "MEGA-PREPARED-EXECUTION-BUILD"
           ],
           "produces": [],
           "id": "MCOMP-13-02"
@@ -2863,17 +2878,16 @@
           "label": "Compose authority before desktop runtime admission",
           "kind": "IMPLEMENT",
           "targets": [
-            "src-tauri/src/managed/mod.rs",
-            "src-tauri/src/managed/dispatch.rs",
+            "src/main/enterprise/service.ts",
+            "src/main/enterprise/dispatch.ts",
             "src/shared/maestro-lib/runtime/index.ts"
           ],
-          "outcome": "Use root-discovered Tauri host/runtime boundary, inject current actor/installation and per-effect producer before managed actions become available. Reuse domain dispatch modules through pure adapters; do not import Electron services into the library or require optional plugin enablement. Proposed native files may be renamed only through a recorded continuation. Keep the task to these 1-3 authored files and fewer than 500 changed lines; insert a bounded continuation before the dependent check when necessary.",
+          "outcome": "Use the existing Electron main-process host/runtime boundary, inject current actor/installation and per-effect producer before managed actions become available. Reuse domain dispatch modules through pure adapters; do not import Electron services into the library or require optional plugin enablement. Proposed native files may be renamed only through a recorded continuation. Keep the task to these 1-3 authored files and fewer than 500 changed lines; insert a bounded continuation before the dependent check when necessary.",
           "backlog": [
             "M-03"
           ],
           "requires": [
-            "MEGA-ACTOR-POLICY-BUILD",
-            "TAURI-HOST-BASELINE-BUILD"
+            "MEGA-ACTOR-POLICY-BUILD"
           ],
           "produces": [],
           "id": "MCOMP-13-03"
@@ -2936,9 +2950,7 @@
         "GCOMP-01",
         "GCOMP-03",
         "GCOMP-04",
-        "GCOMP-08",
-        "MCOMP-05",
-        "MCOMP-11"
+        "GCOMP-08"
       ],
       "produces": [
         "MAESTRO-EFFECT-CONSUMERS-BUILD"
@@ -2953,7 +2965,7 @@
       "phase": "G06",
       "owner": "mega-maestro",
       "mode": "qualification",
-      "title": "Constrained effect backend and first real managed run \u2014 qualification",
+      "title": "Constrained effect backend and first real managed run — qualification",
       "tasks": [
         {
           "label": "Verify constrained effect backend and first real managed run",
@@ -2961,7 +2973,7 @@
           "targets": [
             "docs/evidence/integration-completion/06.json"
           ],
-          "outcome": "Run the actual Linux pair with MAESTRO-EFFECT-CONSUMERS. Require observed bounded file effect, durable lease/receipt and central lifecycle event plus zero effect on all denials and correct crash/lost-response reconciliation. Emit PAIR-DIRECT-EVIDENCE and MEGA-PREPARED-EXECUTION only from this real run. The harmless fixture proves this slice and is not real model/provider or native desktop qualification. Where the paired consumer BUILD supersedes the M0 archive, consume its actual new archive, rebuild this owner\u2019s adapter/pins and rerun affected conformance before the pair. Preserve prior immutable archives; never substitute old qualifiedAgainst evidence for changed runtime bytes.",
+          "outcome": "Run the actual Linux pair with MAESTRO-EFFECT-CONSUMERS. Require observed bounded file effect, durable lease/receipt and central lifecycle event plus zero effect on all denials and correct crash/lost-response reconciliation. Emit PAIR-DIRECT-EVIDENCE and MEGA-PREPARED-EXECUTION only from this real run. The harmless fixture proves this slice and is not real model/provider or native desktop qualification. Where the paired consumer BUILD supersedes the M0 archive, consume its actual new archive, rebuild this owner’s adapter/pins and rerun affected conformance before the pair. Preserve prior immutable archives; never substitute old qualifiedAgainst evidence for changed runtime bytes.",
           "backlog": [
             "G-05",
             "PAIR-02",
@@ -2998,7 +3010,7 @@
       "phase": "EFFECT",
       "owner": "maestro",
       "mode": "qualification",
-      "title": "Consume prepared execution and per-effect authority with an early real pair \u2014 qualification",
+      "title": "Consume prepared execution and per-effect authority with an early real pair — qualification",
       "tasks": [
         {
           "label": "Record first actual positive direct pair",
@@ -3041,7 +3053,7 @@
       "phase": "G07",
       "owner": "mega-maestro",
       "mode": "implementation",
-      "title": "Principal-scoped desktop authoring and settings policies \u2014 implementation",
+      "title": "Principal-scoped desktop authoring and settings policies — implementation",
       "tasks": [
         {
           "label": "Add signed desktop authoring constraints",
@@ -3072,7 +3084,7 @@
             "packages/policy/src/compile.ts",
             "packages/policy/src/evaluate.ts"
           ],
-          "outcome": "Extend the existing compiler/evaluator to intersect authoring actions/choices, accumulate denies and honor locked/constrained/user-editable states. No second policy engine. Reuse public Maestro managed settings lock vocabulary through agreed mappings; unknown fields or incompatible capabilities deny without clobbering personal nonsensitive preferences.",
+          "outcome": "Extend the existing compiler/evaluator to intersect authoring actions/choices, accumulate denies and honor locked/constrained/user-editable states. No second policy engine. Reuse public Maestro managed settings lock vocabulary through agreed mappings; unknown fields or incompatible capabilities deny without clobbering personal nonsensitive preferences. This is the mandatory concrete settings mapping deferred from foundation GCOMP-01-03. Consume the actual MAESTRO-DESKTOP-CONTRACT-BUILD produced by MCOMP-07-02/MCOMP-07-05; absence remains a dependency of this integration task and never a reason to block the independent foundation schema.",
           "backlog": [
             "G-02",
             "G-03",
@@ -3208,7 +3220,7 @@
             "packages/runtime-adapter/src/maestro.ts",
             "packages/runtime-adapter/package.json"
           ],
-          "outcome": "Map the negotiated desktop projection to actual public Maestro/Tauri host mutation vocabulary, including bulk persistence and import. Reuse one shared schema and host-validated mutation service; no renderer grant or app-specific duplicate evaluator. Produce a consumer conformance vector artifact before Tauri UI wiring.",
+          "outcome": "Map the negotiated desktop projection to actual public Maestro desktop host mutation vocabulary, including bulk persistence and import. Reuse one shared schema and host-validated mutation service; no renderer grant or app-specific duplicate evaluator. Produce a consumer conformance vector artifact before desktop UI wiring. This is the mandatory concrete settings mapping deferred from foundation GCOMP-01-03. Consume the actual MAESTRO-DESKTOP-CONTRACT-BUILD produced by MCOMP-07-02/MCOMP-07-05; absence remains a dependency of this integration task and never a reason to block the independent foundation schema.",
           "backlog": [
             "G-02",
             "G-03",
@@ -3285,7 +3297,7 @@
       "phase": "G07",
       "owner": "mega-maestro",
       "mode": "qualification",
-      "title": "Principal-scoped desktop authoring and settings policies \u2014 qualification",
+      "title": "Principal-scoped desktop authoring and settings policies — qualification",
       "tasks": [
         {
           "label": "Verify principal-scoped desktop authoring and settings policies",
@@ -3293,7 +3305,7 @@
           "targets": [
             "docs/evidence/integration-completion/07.json"
           ],
-          "outcome": "Run compiler/API/endpoint/console tests and build. Drive the real actor/policy pair to read permitted desktop choices and authorize allowed/denied exact configuration mutations for two users with different permissions; verify no administrative escalation. Emit MEGA-DESKTOP-POLICY for the real service protocol and mapping; full GUI completion remains dependent on the actual Tauri desktop acceptance artifact. Where the paired consumer BUILD supersedes the M0 archive, consume its actual new archive, rebuild this owner\u2019s adapter/pins and rerun affected conformance before the pair. Preserve prior immutable archives; never substitute old qualifiedAgainst evidence for changed runtime bytes.",
+          "outcome": "Run compiler/API/endpoint/console tests and build. Drive the real actor/policy pair to read permitted desktop choices and authorize allowed/denied exact configuration mutations for two users with different permissions; verify no administrative escalation. Emit MEGA-DESKTOP-POLICY for the real service protocol and mapping; full GUI completion remains dependent on the actual Maestro desktop acceptance artifact. Where the paired consumer BUILD supersedes the M0 archive, consume its actual new archive, rebuild this owner’s adapter/pins and rerun affected conformance before the pair. Preserve prior immutable archives; never substitute old qualifiedAgainst evidence for changed runtime bytes.",
           "backlog": [
             "G-02",
             "G-03",
@@ -3332,7 +3344,7 @@
       "phase": "G08",
       "owner": "mega-maestro",
       "mode": "implementation",
-      "title": "Authenticated delegation and durable workflow fencing \u2014 implementation",
+      "title": "Authenticated delegation and durable workflow fencing — implementation",
       "tasks": [
         {
           "label": "Publish complete workflow and delegation DTOs",
@@ -3515,7 +3527,7 @@
       "phase": "G09",
       "owner": "mega-maestro",
       "mode": "implementation",
-      "title": "Actual signed run commands and private notice actions \u2014 implementation",
+      "title": "Actual signed run commands and private notice actions — implementation",
       "tasks": [
         {
           "label": "Extend typed local run-control commands",
@@ -3681,7 +3693,7 @@
       "phase": "G10",
       "owner": "mega-maestro",
       "mode": "implementation",
-      "title": "Governed usage content provenance and detection telemetry \u2014 implementation",
+      "title": "Governed usage content provenance and detection telemetry — implementation",
       "tasks": [
         {
           "label": "Extend bounded collection wire protocol",
@@ -3868,7 +3880,7 @@
       "phase": "G11",
       "owner": "mega-maestro",
       "mode": "implementation",
-      "title": "Offline budget and policy freshness on real runtime routes \u2014 implementation",
+      "title": "Offline budget and policy freshness on real runtime routes — implementation",
       "tasks": [
         {
           "label": "Serve exact offline and budget operations",
@@ -4060,7 +4072,7 @@
       "phase": "G12",
       "owner": "mega-maestro",
       "mode": "implementation",
-      "title": "Native macOS peer service custody and constrained effects \u2014 implementation",
+      "title": "Native macOS peer service custody and constrained effects — implementation",
       "tasks": [
         {
           "label": "Implement native Darwin connected-peer identity",
@@ -4186,7 +4198,7 @@
             "packages/testing/scripts/endpoint-darwin.mjs",
             "packages/testing/src/protected-endpoint.ts"
           ],
-          "outcome": "Provision a disposable macOS test namespace/identities and actual native artifacts without touching developer user profiles or host stack. Drive the same public Maestro runtime/Tauri and real API pair with safe provider fixture and inspect process/file/network boundaries independently.",
+          "outcome": "Provision a disposable macOS test namespace/identities and actual native artifacts without touching developer user profiles or host stack. Drive the same public Maestro runtime/desktop application and real API pair with safe provider fixture and inspect process/file/network boundaries independently.",
           "backlog": [
             "G-05",
             "QUAL-02"
@@ -4254,7 +4266,7 @@
       "phase": "G13",
       "owner": "mega-maestro",
       "mode": "implementation",
-      "title": "Native Windows peer service custody and constrained effects \u2014 implementation",
+      "title": "Native Windows peer service custody and constrained effects — implementation",
       "tasks": [
         {
           "label": "Implement Windows named-pipe peer identity",
@@ -4380,7 +4392,7 @@
             "packages/testing/scripts/endpoint-win32.mjs",
             "packages/testing/src/protected-endpoint.ts"
           ],
-          "outcome": "Provision disposable Windows runner/service/users and pinned public runtime/Tauri artifacts using existing approved native test infrastructure. Avoid live user profiles and customer credentials; independently inspect SID/process creation, file/network denials and Job Object descendant cleanup.",
+          "outcome": "Provision disposable Windows runner/service/users and pinned public runtime/desktop application artifacts using existing approved native test infrastructure. Avoid live user profiles and customer credentials; independently inspect SID/process creation, file/network denials and Job Object descendant cleanup.",
           "backlog": [
             "G-05",
             "QUAL-02"
@@ -4448,7 +4460,7 @@
       "phase": "G14",
       "owner": "mega-maestro",
       "mode": "implementation",
-      "title": "Real provider transport qualification without customer account gates \u2014 implementation",
+      "title": "Real provider transport qualification without customer account gates — implementation",
       "tasks": [
         {
           "label": "Define immutable route qualification receipts",
@@ -4688,14 +4700,14 @@
       "phase": "POLICY",
       "owner": "maestro",
       "mode": "implementation",
-      "title": "Consume policy projections and usable approved desktop choices \u2014 implementation",
+      "title": "Consume policy projections and usable approved desktop choices — implementation",
       "tasks": [
         {
           "label": "Install authenticated native desktop policy projections",
           "kind": "IMPLEMENT",
           "targets": [
             "src/shared/maestro-lib/managed/endpoint-port.ts",
-            "src-tauri/src/managed/policy.rs",
+            "src/main/enterprise/policy-status.ts",
             "src/shared/maestro-lib/managed/host-adapter.ts"
           ],
           "outcome": "Receive signed/applied-revision-bound policy projections for settings, provider/model/account/routes, workspace resources, credentials and secondary effect ceilings. Atomically install on verified source/revision; keep restrictions offline and reject malformed, stale and cross-tenant updates. Never derive authority from renderer JSON. Keep the task to these 1-3 authored files and fewer than 500 changed lines; insert a bounded continuation before the dependent check when necessary.",
@@ -4705,8 +4717,7 @@
           ],
           "requires": [
             "MEGA-ACTOR-POLICY-BUILD",
-            "MEGA-DESKTOP-POLICY-BUILD",
-            "TAURI-HOST-BASELINE-BUILD"
+            "MEGA-DESKTOP-POLICY-BUILD"
           ],
           "produces": [],
           "id": "MCOMP-15-01"
@@ -4716,10 +4727,9 @@
           "kind": "IMPLEMENT",
           "targets": [
             "src/main/enterprise/settings-policy.ts",
-            "src/shared/managedSettingsLock.ts",
-            "src-tauri/src/managed/policy.rs"
+            "src/shared/managedSettingsLock.ts"
           ],
-          "outcome": "Reuse pure lock validation and move required host-facing settings logic behind Tauri-compatible ports. Actually install verified settings projection and pins. Preserve denied keys while permitting edits explicitly allowed by current endpoint policy; do not equate enterprise mode with disabling every setting. Keep the task to these 1-3 authored files and fewer than 500 changed lines; insert a bounded continuation before the dependent check when necessary.",
+          "outcome": "Reuse pure lock validation and move required host-facing settings logic behind shared host ports. Actually install verified settings projection and pins. Preserve denied keys while permitting edits explicitly allowed by current endpoint policy; do not equate enterprise mode with disabling every setting. Keep the task to these 1-3 authored files and fewer than 500 changed lines; insert a bounded continuation before the dependent check when necessary.",
           "backlog": [
             "G-09",
             "M-05",
@@ -4736,7 +4746,7 @@
           "kind": "IMPLEMENT",
           "targets": [
             "src/shared/maestro-lib/managed/agent-policy.ts",
-            "src-tauri/src/managed/agents.rs",
+            "src/main/agents/agent-config-writes.ts",
             "src/renderer/hooks/enterprise/useManagedAgentOptions.ts"
           ],
           "outcome": "After reuse checks, expose host-resolved provider/model/workspace/credential/account/permission/transport choices plus locked reasons, revision and freshness. Return opaque credential/resource references only. Options are affordances; commit/run revalidate independently. Keep the task to these 1-3 authored files and fewer than 500 changed lines; insert a bounded continuation before the dependent check when necessary.",
@@ -4807,7 +4817,6 @@
       ],
       "dependsOn": [
         "GCOMP-03",
-        "MCOMP-05",
         "MCOMP-13",
         "GCOMP-13"
       ],
@@ -4824,7 +4833,7 @@
       "phase": "POLICY",
       "owner": "maestro",
       "mode": "qualification",
-      "title": "Consume policy projections and usable approved desktop choices \u2014 qualification",
+      "title": "Consume policy projections and usable approved desktop choices — qualification",
       "tasks": [
         {
           "label": "Verify endpoint projection changes real host behavior",
@@ -4866,7 +4875,7 @@
       "phase": "WORKFLOW",
       "owner": "maestro",
       "mode": "implementation",
-      "title": "Consume workflow ownership and authenticated delegation without hardcoded denial \u2014 implementation",
+      "title": "Consume workflow ownership and authenticated delegation without hardcoded denial — implementation",
       "tasks": [
         {
           "label": "Negotiate delegation and workflow envelopes",
@@ -4891,8 +4900,7 @@
           "kind": "IMPLEMENT",
           "targets": [
             "src/shared/maestro-lib/managed/workflows.ts",
-            "src/shared/maestro-lib/runtime/autorun.ts",
-            "src-tauri/src/managed/workflows.rs"
+            "src/shared/maestro-lib/runtime/autorun.ts"
           ],
           "outcome": "Consume actual owner service for claim/restart/renew/release, tie active effect lifetime to fence and retain offline uncertainty. Prevent second owner until old one is fenced by producer. Reuse scheduler/process registries rather than inventing a second scheduler. Keep the task to these 1-3 authored files and fewer than 500 changed lines; insert a bounded continuation before the dependent check when necessary.",
           "backlog": [
@@ -4912,7 +4920,7 @@
             "src/main/cue/cue-run-router.ts",
             "src/shared/maestro-lib/runtime/background-turns.ts"
           ],
-          "outcome": "Carry workflow/task/trigger and authenticated delegation through actual task, Cue and background/group-chat/consult turns in shared and native hosts. Reauthorize every dequeue/retry and preserve source/target actor scopes. Cue shell qualification remains separate. Keep the task to these 1-3 authored files and fewer than 500 changed lines; insert a bounded continuation before the dependent check when necessary.",
+          "outcome": "Carry workflow/task/trigger and authenticated delegation through actual task, Cue and background/group-chat/consult turns in shared and desktop hosts. Reauthorize every dequeue/retry and preserve source/target actor scopes. Cue shell qualification remains separate. Keep the task to these 1-3 authored files and fewer than 500 changed lines; insert a bounded continuation before the dependent check when necessary.",
           "backlog": [
             "M-04"
           ],
@@ -4974,7 +4982,7 @@
       "phase": "G08",
       "owner": "mega-maestro",
       "mode": "qualification",
-      "title": "Authenticated delegation and durable workflow fencing \u2014 qualification",
+      "title": "Authenticated delegation and durable workflow fencing — qualification",
       "tasks": [
         {
           "label": "Verify authenticated delegation and durable workflow fencing",
@@ -4982,7 +4990,7 @@
           "targets": [
             "docs/evidence/integration-completion/08.json"
           ],
-          "outcome": "Run focused contracts/database/endpoint/adapter tests and real pair Auto Run/Cue/delegated journeys using MAESTRO-WORKFLOW-CONSUMERS. Require actual parent/child effects and receipts with owner transitions/revocation/restart fences. Publish MEGA-WORKFLOW pin with same-source producers and exact public runtime digest; schema-only or rejection-only success leaves verification incomplete. Where the paired consumer BUILD supersedes the M0 archive, consume its actual new archive, rebuild this owner\u2019s adapter/pins and rerun affected conformance before the pair. Preserve prior immutable archives; never substitute old qualifiedAgainst evidence for changed runtime bytes.",
+          "outcome": "Run focused contracts/database/endpoint/adapter tests and real pair Auto Run/Cue/delegated journeys using MAESTRO-WORKFLOW-CONSUMERS. Require actual parent/child effects and receipts with owner transitions/revocation/restart fences. Publish MEGA-WORKFLOW pin with same-source producers and exact public runtime digest; schema-only or rejection-only success leaves verification incomplete. Where the paired consumer BUILD supersedes the M0 archive, consume its actual new archive, rebuild this owner’s adapter/pins and rerun affected conformance before the pair. Preserve prior immutable archives; never substitute old qualifiedAgainst evidence for changed runtime bytes.",
           "backlog": [
             "G-06"
           ],
@@ -5017,7 +5025,7 @@
       "phase": "G11",
       "owner": "mega-maestro",
       "mode": "qualification",
-      "title": "Offline budget and policy freshness on real runtime routes \u2014 qualification",
+      "title": "Offline budget and policy freshness on real runtime routes — qualification",
       "tasks": [
         {
           "label": "Verify offline budget and policy freshness on real runtime routes",
@@ -5025,7 +5033,7 @@
           "targets": [
             "docs/evidence/integration-completion/11.json"
           ],
-          "outcome": "Run focused policy/clock/finance/endpoint checks, then disconnect/reconnect actual paired services while a declared supported local fixture route exercises signed allowance and same-owner execution. Observe durable debit and denied forbidden fallback. Emit MEGA-OFFLINE-RUNTIME; unsupported actual routes remain incomplete rather than passing on denial tests alone. Where the paired consumer BUILD supersedes the M0 archive, consume its actual new archive, rebuild this owner\u2019s adapter/pins and rerun affected conformance before the pair. Preserve prior immutable archives; never substitute old qualifiedAgainst evidence for changed runtime bytes.",
+          "outcome": "Run focused policy/clock/finance/endpoint checks, then disconnect/reconnect actual paired services while a declared supported local fixture route exercises signed allowance and same-owner execution. Observe durable debit and denied forbidden fallback. Emit MEGA-OFFLINE-RUNTIME; unsupported actual routes remain incomplete rather than passing on denial tests alone. Where the paired consumer BUILD supersedes the M0 archive, consume its actual new archive, rebuild this owner’s adapter/pins and rerun affected conformance before the pair. Preserve prior immutable archives; never substitute old qualifiedAgainst evidence for changed runtime bytes.",
           "backlog": [
             "G-03",
             "G-05",
@@ -5062,7 +5070,7 @@
       "phase": "WORKFLOW",
       "owner": "maestro",
       "mode": "qualification",
-      "title": "Consume workflow ownership and authenticated delegation without hardcoded denial \u2014 qualification",
+      "title": "Consume workflow ownership and authenticated delegation without hardcoded denial — qualification",
       "tasks": [
         {
           "label": "Verify actual automated and delegated pair",
@@ -5103,23 +5111,21 @@
       "phase": "RESIDUAL",
       "owner": "maestro",
       "mode": "implementation",
-      "title": "Close native desktop residual effects and CLI parity \u2014 implementation",
+      "title": "Close native desktop residual effects and CLI parity — implementation",
       "tasks": [
         {
-          "label": "Apply egress and listener ceilings to native host",
+          "label": "Apply egress and listener ceilings to desktop host",
           "kind": "IMPLEMENT",
           "targets": [
-            "src-tauri/src/managed/egress.rs",
-            "src-tauri/src/managed/listeners.rs",
-            "src/main/enterprise/egress-policy.ts"
+            "src/main/enterprise/egress-policy.ts",
+            "src/main/enterprise/listener-policy.ts"
           ],
-          "outcome": "Adapt existing policy semantics to actual Tauri/native HTTP, external origins, sockets and listener bind sites. Verify destination after resolution and every redirect/reconnect; retain required endpoint control path without general egress exception. Root Tauri discovery identifies concrete native sink modules before implementing. Keep the task to these 1-3 authored files and fewer than 500 changed lines; insert a bounded continuation before the dependent check when necessary.",
+          "outcome": "Adapt existing policy semantics to the actual Electron main-process HTTP, external origins, sockets and listener bind sites. Verify destination after resolution and every redirect/reconnect; retain required endpoint control path without general egress exception. Identify the concrete Electron main-process sink modules before implementing. Keep the task to these 1-3 authored files and fewer than 500 changed lines; insert a bounded continuation before the dependent check when necessary.",
           "backlog": [
             "M-05"
           ],
           "requires": [
-            "MEGA-DESKTOP-POLICY-BUILD",
-            "TAURI-HOST-BASELINE-BUILD"
+            "MEGA-DESKTOP-POLICY-BUILD"
           ],
           "produces": [],
           "id": "MCOMP-19-01"
@@ -5130,9 +5136,9 @@
           "targets": [
             "src/main/utils/remote-git.ts",
             "src/main/ipc/handlers/git/streaming.ts",
-            "src-tauri/src/managed/repository.rs"
+            "src/main/enterprise/repository-policy.ts"
           ],
-          "outcome": "Reuse existing repository-policy decision code at async local/SSH git sinks, before child/socket effects, after final argv/remote/cwd resolution. Promise-based paths must await decision and distinguish denied/unknown; no post-effect audit as gate. Apply equivalent native command routing. Keep the task to these 1-3 authored files and fewer than 500 changed lines; insert a bounded continuation before the dependent check when necessary.",
+          "outcome": "Reuse existing repository-policy decision code at async local/SSH git sinks, before child/socket effects, after final argv/remote/cwd resolution. Promise-based paths must await decision and distinguish denied/unknown; no post-effect audit as gate. Apply equivalent main-process command routing. Keep the task to these 1-3 authored files and fewer than 500 changed lines; insert a bounded continuation before the dependent check when necessary.",
           "backlog": [
             "M-05"
           ],
@@ -5148,7 +5154,7 @@
           "targets": [
             "src/main/ipc/handlers/filesystem.ts",
             "src/main/ipc/handlers/autorun.ts",
-            "src-tauri/src/managed/files.rs"
+            "src/main/enterprise/local-effects-policy.ts"
           ],
           "outcome": "Route native and retained backend delete/trash/import writes through shared policy decision before mutation, including Auto Run docs and archives. Realpath/symlink and workspace/resource scope remain enforced; deny creates no transient filesystem effect. Keep the task to these 1-3 authored files and fewer than 500 changed lines; insert a bounded continuation before the dependent check when necessary.",
           "backlog": [
@@ -5161,14 +5167,13 @@
           "id": "MCOMP-19-03"
         },
         {
-          "label": "Apply updater policy in actual Tauri update flow",
+          "label": "Apply updater policy in the actual desktop update flow",
           "kind": "IMPLEMENT",
           "targets": [
-            "src-tauri/src/managed/update.rs",
             "src/main/enterprise/update-policy.ts",
             "src/renderer/hooks/enterprise/useManagedStatus.ts"
           ],
-          "outcome": "Reuse update ceiling/parser semantics in Tauri native check/download/install handoff. Authenticated version/source pins, signature and policy checks precede network/download/relaunch effects; show held/restart-needed state. Do not add CI/release pipelines or force update during verification. Keep the task to these 1-3 authored files and fewer than 500 changed lines; insert a bounded continuation before the dependent check when necessary.",
+          "outcome": "Reuse update ceiling/parser semantics in the Electron updater check/download/install handoff. Authenticated version/source pins, signature and policy checks precede network/download/relaunch effects; show held/restart-needed state. Do not add CI/release pipelines or force update during verification. Keep the task to these 1-3 authored files and fewer than 500 changed lines; insert a bounded continuation before the dependent check when necessary.",
           "backlog": [
             "M-05"
           ],
@@ -5186,13 +5191,11 @@
             "src/cli/commands/managed.ts",
             "src/shared/maestro-lib/client/types.ts"
           ],
-          "outcome": "Use one typed host command boundary for allowed configuration and agent mutations; no Electron-only client assumption. CLI forwards to native host with authenticated scope or refuses enrolled offline writes; direct JSON fallback is standalone only. Reuse actual current command file if discovery finds split modules. Keep the task to these 1-3 authored files and fewer than 500 changed lines; insert a bounded continuation before the dependent check when necessary.",
+          "outcome": "Use one typed host command boundary for allowed configuration and agent mutations; no Electron-only client assumption. CLI forwards to desktop host with authenticated scope or refuses enrolled offline writes; direct JSON fallback is standalone only. Reuse actual current command file if discovery finds split modules. Keep the task to these 1-3 authored files and fewer than 500 changed lines; insert a bounded continuation before the dependent check when necessary.",
           "backlog": [
             "M-05"
           ],
-          "requires": [
-            "TAURI-HOST-BASELINE-BUILD"
-          ],
+          "requires": [],
           "produces": [],
           "id": "MCOMP-19-05"
         },
@@ -5200,7 +5203,7 @@
           "label": "Test native residual effect boundaries",
           "kind": "TEST",
           "targets": [
-            "src-tauri/tests/managed_effects.rs",
+            "src/__tests__/main/enterprise/managed-effects.test.ts",
             "src/__tests__/main/utils/remote-git.test.ts",
             "src/__tests__/cli/services/managed-desktop-write.test.ts"
           ],
@@ -5230,7 +5233,6 @@
         }
       ],
       "dependsOn": [
-        "MCOMP-05",
         "GCOMP-13",
         "MCOMP-17"
       ],
@@ -5247,7 +5249,7 @@
       "phase": "RESIDUAL",
       "owner": "maestro",
       "mode": "qualification",
-      "title": "Close native desktop residual effects and CLI parity \u2014 qualification",
+      "title": "Close native desktop residual effects and CLI parity — qualification",
       "tasks": [
         {
           "label": "Verify residual native and shared effects",
@@ -5288,7 +5290,7 @@
       "phase": "GAPS01",
       "owner": "maestro",
       "mode": "implementation",
-      "title": "Close concrete remaining headless custody lock and after-effect gaps \u2014 implementation",
+      "title": "Close concrete remaining headless custody lock and after-effect gaps — implementation",
       "tasks": [
         {
           "label": "Compose managed authority into standalone Cue service",
@@ -5306,8 +5308,7 @@
             "M-05"
           ],
           "requires": [
-            "MEGA-DESKTOP-POLICY-BUILD",
-            "TAURI-SERVICE-PARITY-BUILD"
+            "MEGA-DESKTOP-POLICY-BUILD"
           ],
           "produces": [],
           "id": "MCOMP-21-01"
@@ -5325,8 +5326,7 @@
             "M-05"
           ],
           "requires": [
-            "MEGA-DESKTOP-POLICY-BUILD",
-            "TAURI-SERVICE-PARITY-BUILD"
+            "MEGA-DESKTOP-POLICY-BUILD"
           ],
           "produces": [],
           "id": "MCOMP-21-02"
@@ -5346,8 +5346,7 @@
             "M-05"
           ],
           "requires": [
-            "MEGA-DESKTOP-POLICY-BUILD",
-            "TAURI-SERVICE-PARITY-BUILD"
+            "MEGA-DESKTOP-POLICY-BUILD"
           ],
           "produces": [],
           "id": "MCOMP-21-03"
@@ -5368,8 +5367,7 @@
             "QUAL-03"
           ],
           "requires": [
-            "MEGA-DESKTOP-POLICY-BUILD",
-            "TAURI-SERVICE-PARITY-BUILD"
+            "MEGA-DESKTOP-POLICY-BUILD"
           ],
           "produces": [],
           "id": "MCOMP-21-04"
@@ -5380,15 +5378,14 @@
           "targets": [
             "src/main/web-server/web-server-factory.ts",
             "src/main/ipc/handlers/web.ts",
-            "src-tauri/src/managed/custody.rs"
+            "src/main/enterprise/credential-custody.ts"
           ],
           "outcome": "Replace plaintext managed webAuthToken persistence/readback with an opaque service-owned custody reference using the existing credential boundary. Migrate or rotate existing plaintext token without logging or retaining a usable copy; renderer/settings/debug/export cannot retrieve it. Current revocation and user/installation ownership apply to web/Lite authentication. Preserve standalone behavior through its supported store.",
           "backlog": [
             "M-05"
           ],
           "requires": [
-            "MEGA-DESKTOP-POLICY-BUILD",
-            "TAURI-SERVICE-PARITY-BUILD"
+            "MEGA-DESKTOP-POLICY-BUILD"
           ],
           "produces": [],
           "id": "MCOMP-21-05"
@@ -5406,8 +5403,7 @@
             "M-05"
           ],
           "requires": [
-            "MEGA-DESKTOP-POLICY-BUILD",
-            "TAURI-SERVICE-PARITY-BUILD"
+            "MEGA-DESKTOP-POLICY-BUILD"
           ],
           "produces": [],
           "id": "MCOMP-21-06"
@@ -5425,8 +5421,7 @@
             "M-05"
           ],
           "requires": [
-            "MEGA-DESKTOP-POLICY-BUILD",
-            "TAURI-SERVICE-PARITY-BUILD"
+            "MEGA-DESKTOP-POLICY-BUILD"
           ],
           "produces": [],
           "id": "MCOMP-21-07"
@@ -5445,8 +5440,7 @@
             "M-06"
           ],
           "requires": [
-            "MEGA-DESKTOP-POLICY-BUILD",
-            "TAURI-SERVICE-PARITY-BUILD"
+            "MEGA-DESKTOP-POLICY-BUILD"
           ],
           "produces": [],
           "id": "MCOMP-21-08"
@@ -5457,15 +5451,14 @@
           "targets": [
             "src/main/ipc/handlers/git/worktree.ts",
             "src/main/ipc/handlers/autorun.ts",
-            "src-tauri/src/managed/repository.rs"
+            "src/main/enterprise/repository-policy.ts"
           ],
           "outcome": "Reacquire current exact resource and repository/delete authority immediately before worktree checkout, rollback rmdir, worktree remove fallback recursive delete, and Auto Run folder removal. An earlier clone/create or admitted Auto Run action is not authorization for these later writes/deletes. Preserve ownership/path handle checks across awaits and record cleanup uncertainty without deleting unrelated content.",
           "backlog": [
             "M-05"
           ],
           "requires": [
-            "MEGA-DESKTOP-POLICY-BUILD",
-            "TAURI-SERVICE-PARITY-BUILD"
+            "MEGA-DESKTOP-POLICY-BUILD"
           ],
           "produces": [],
           "id": "MCOMP-21-09"
@@ -5476,15 +5469,14 @@
           "targets": [
             "src/main/utils/symphony-fork.ts",
             "src/main/services/symphony-runner.ts",
-            "src-tauri/src/managed/repository.rs"
+            "src/main/enterprise/repository-policy.ts"
           ],
           "outcome": "Reacquire exact current managed repository authority before post-fork remote rename/set-url fallback, branch deletion and runner clone cleanup. Separate remote git effects from local write/delete scope and retain source/target identity through asynchronous git calls. A permitted fork or PR operation grants none of these additional sinks.",
           "backlog": [
             "M-05"
           ],
           "requires": [
-            "MEGA-DESKTOP-POLICY-BUILD",
-            "TAURI-SERVICE-PARITY-BUILD"
+            "MEGA-DESKTOP-POLICY-BUILD"
           ],
           "produces": [],
           "id": "MCOMP-21-10"
@@ -5497,13 +5489,12 @@
             "src/main/ipc/handlers/symphony/lifecycle.ts",
             "src/main/ipc/handlers/filesystem.ts"
           ],
-          "outcome": "Guard both failed-clone removals and contribution cleanup with exact current delete ownership, and remote move overwrite/removal with both source/destination authorities immediately before effects. Audit counterpart shared runtime/Tauri equivalents; add bounded continuations for extra actual sinks. A cleanup label or overwrite option never widens a previous action grant.",
+          "outcome": "Guard both failed-clone removals and contribution cleanup with exact current delete ownership, and remote move overwrite/removal with both source/destination authorities immediately before effects. Audit counterpart shared runtime/desktop equivalents; add bounded continuations for extra actual sinks. A cleanup label or overwrite option never widens a previous action grant.",
           "backlog": [
             "M-05"
           ],
           "requires": [
-            "MEGA-DESKTOP-POLICY-BUILD",
-            "TAURI-SERVICE-PARITY-BUILD"
+            "MEGA-DESKTOP-POLICY-BUILD"
           ],
           "produces": [],
           "id": "MCOMP-21-11"
@@ -5521,8 +5512,7 @@
             "M-05"
           ],
           "requires": [
-            "MEGA-DESKTOP-POLICY-BUILD",
-            "TAURI-SERVICE-PARITY-BUILD"
+            "MEGA-DESKTOP-POLICY-BUILD"
           ],
           "produces": [],
           "id": "MCOMP-21-12"
@@ -5541,8 +5531,7 @@
             "QUAL-01"
           ],
           "requires": [
-            "MEGA-DESKTOP-POLICY-BUILD",
-            "TAURI-SERVICE-PARITY-BUILD"
+            "MEGA-DESKTOP-POLICY-BUILD"
           ],
           "produces": [],
           "id": "MCOMP-21-13"
@@ -5560,8 +5549,7 @@
             "M-05"
           ],
           "requires": [
-            "MEGA-DESKTOP-POLICY-BUILD",
-            "TAURI-SERVICE-PARITY-BUILD"
+            "MEGA-DESKTOP-POLICY-BUILD"
           ],
           "produces": [],
           "id": "MCOMP-21-14"
@@ -5579,8 +5567,7 @@
             "M-05"
           ],
           "requires": [
-            "MEGA-DESKTOP-POLICY-BUILD",
-            "TAURI-SERVICE-PARITY-BUILD"
+            "MEGA-DESKTOP-POLICY-BUILD"
           ],
           "produces": [],
           "id": "MCOMP-21-15"
@@ -5610,7 +5597,6 @@
         }
       ],
       "dependsOn": [
-        "MCOMP-11",
         "GCOMP-13",
         "MCOMP-19"
       ],
@@ -5627,7 +5613,7 @@
       "phase": "GAPS01",
       "owner": "maestro",
       "mode": "qualification",
-      "title": "Close concrete remaining headless custody lock and after-effect gaps \u2014 qualification",
+      "title": "Close concrete remaining headless custody lock and after-effect gaps — qualification",
       "tasks": [
         {
           "label": "Verify residual authority closure through actual sinks",
@@ -5641,8 +5627,7 @@
           ],
           "requires": [
             "MAESTRO-RESIDUAL-GAP-CLOSURE-BUILD",
-            "MEGA-DESKTOP-POLICY-BUILD",
-            "TAURI-SERVICE-PARITY"
+            "MEGA-DESKTOP-POLICY-BUILD"
           ],
           "produces": [
             "MAESTRO-RESIDUAL-GAP-CLOSURE"
@@ -5651,7 +5636,6 @@
         }
       ],
       "dependsOn": [
-        "MCOMP-12",
         "GCOMP-13",
         "MCOMP-21"
       ],
@@ -5668,7 +5652,7 @@
       "phase": "AUTHOR",
       "owner": "maestro",
       "mode": "implementation",
-      "title": "Build complete policy-guided native GUI agent creation and editing \u2014 implementation",
+      "title": "Build complete policy-guided native GUI agent creation and editing — implementation",
       "tasks": [
         {
           "label": "Implement host-owned create and edit validation",
@@ -5676,15 +5660,14 @@
           "targets": [
             "src/shared/maestro-lib/managed/agent-policy.ts",
             "src/shared/maestro-lib/agents/repository.ts",
-            "src-tauri/src/managed/agents.rs"
+            "src/main/agents/agent-config-writes.ts"
           ],
           "outcome": "One authenticated native-host create/edit command validates actor scope, approved provider/model/workspace/credential/transport/current revision before record commit. Reuse existing agent rules and repository. Whole-session persistence cannot change governed fields around this command. No blanket managed-mode creation denial. Keep the task to these 1-3 authored files and fewer than 500 changed lines; insert a bounded continuation before the dependent check when necessary.",
           "backlog": [
             "M-06"
           ],
           "requires": [
-            "MEGA-DESKTOP-POLICY-BUILD",
-            "TAURI-HOST-BASELINE-BUILD"
+            "MEGA-DESKTOP-POLICY-BUILD"
           ],
           "produces": [],
           "id": "MCOMP-23-01"
@@ -5697,7 +5680,7 @@
             "src/shared/sessionPersistenceMerge.ts",
             "src/main/ipc/handlers/persistence.ts"
           ],
-          "outcome": "Replace governed direct renderer insertion/persistence with validated native host operation and returned canonical record. Preserve history/log persistence separately. New, edit, clone, wizard and worktree paths must converge; add bounded continuations for remaining adapters before verifying. Retained Electron compatibility cannot bypass same mutation rules. Keep the task to these 1-3 authored files and fewer than 500 changed lines; insert a bounded continuation before the dependent check when necessary.",
+          "outcome": "Replace governed direct renderer insertion/persistence with validated desktop host operation and returned canonical record. Preserve history/log persistence separately. New, edit, clone, wizard and worktree paths must converge; add bounded continuations for remaining adapters before verifying. Retained Electron compatibility cannot bypass same mutation rules. Keep the task to these 1-3 authored files and fewer than 500 changed lines; insert a bounded continuation before the dependent check when necessary.",
           "backlog": [
             "M-06"
           ],
@@ -5713,7 +5696,7 @@
             "src/renderer/components/NewInstanceModal/AgentPickerGrid.tsx",
             "src/renderer/hooks/enterprise/useManagedAgentOptions.ts"
           ],
-          "outcome": "Use real native host projected provider/model/workspace/credential references. Show policy source/revision and allowed alternatives; keep normal editable choices where permitted. Await create, preserve draft on deny, surface field-specific reasons and stale refresh. Secrets never enter environment editors or renderer results. Keep the task to these 1-3 authored files and fewer than 500 changed lines; insert a bounded continuation before the dependent check when necessary.",
+          "outcome": "Use real desktop host projected provider/model/workspace/credential references. Show policy source/revision and allowed alternatives; keep normal editable choices where permitted. Await create, preserve draft on deny, surface field-specific reasons and stale refresh. Secrets never enter environment editors or renderer results. Keep the task to these 1-3 authored files and fewer than 500 changed lines; insert a bounded continuation before the dependent check when necessary.",
           "backlog": [
             "G-09",
             "M-06"
@@ -5743,7 +5726,7 @@
           "label": "Test native create edit and persistence races",
           "kind": "TEST",
           "targets": [
-            "src-tauri/tests/managed_agents.rs",
+            "src/__tests__/main/enterprise/managed-agents.test.ts",
             "src/__tests__/renderer/components/NewInstanceModal.test.tsx",
             "src/__tests__/renderer/components/NewInstanceModal/EditAgentModal.test.tsx"
           ],
@@ -5756,20 +5739,18 @@
           "id": "MCOMP-23-05"
         },
         {
-          "label": "Implement real Tauri GUI creation journey",
+          "label": "Implement real desktop GUI creation journey",
           "kind": "TEST",
           "targets": [
-            "tests/e2e/managed-agents.spec.ts",
-            "wdio.tauri.conf.ts"
+            "e2e/managed-agents.spec.ts"
           ],
-          "outcome": "After reusing existing platform test scaffold, use current @wdio/tauri-service against the actual Tauri app with real native commands and actual endpoint/API. Create and edit approved agents through visible GUI and verify canonical host records. Do not mock Tauri invoke or count browser-only renderer screenshots as native acceptance; run on supported actual platform and record driver/version evidence. Keep the task to these 1-3 authored files and fewer than 500 changed lines; insert a bounded continuation before the dependent check when necessary.",
+          "outcome": "After reusing existing platform test scaffold, use the existing Playwright Electron harness (`e2e/fixtures/electron-app.ts`) against the actual Maestro application with its real IPC handlers and actual endpoint/API. Create and edit approved agents through visible GUI and verify canonical host records. Do not mock the preload IPC bridge or count browser-only renderer screenshots as desktop acceptance; run on supported actual platform and record driver/version evidence. Keep the task to these 1-3 authored files and fewer than 500 changed lines; insert a bounded continuation before the dependent check when necessary.",
           "backlog": [
             "M-06"
           ],
           "requires": [
             "MEGA-ACTOR-POLICY-BUILD",
-            "MEGA-DESKTOP-POLICY-BUILD",
-            "TAURI-HOST-BASELINE-BUILD"
+            "MEGA-DESKTOP-POLICY-BUILD"
           ],
           "produces": [],
           "id": "MCOMP-23-06"
@@ -5794,7 +5775,6 @@
       ],
       "dependsOn": [
         "GCOMP-03",
-        "MCOMP-05",
         "GCOMP-13",
         "MCOMP-21"
       ],
@@ -5811,15 +5791,15 @@
       "phase": "AUTHOR",
       "owner": "maestro",
       "mode": "qualification",
-      "title": "Build complete policy-guided native GUI agent creation and editing \u2014 qualification",
+      "title": "Build complete policy-guided native GUI agent creation and editing — qualification",
       "tasks": [
         {
           "label": "Verify real native GUI create edit flow",
           "kind": "VERIFY",
           "targets": [
-            "Plans/integration-completion/evidence/completion-tauri-agent-crud.json"
+            "Plans/integration-completion/evidence/completion-desktop-agent-crud.json"
           ],
-          "outcome": "Run the actual Tauri GUI journey with synthetic development identities and real endpoint policy. Require approved create/edit persistence, rejected disallowed edit without record mutation, policy refresh during open form and accessibility keyboard/error announcements. No customer accounts, production identity or live messages. Keep the task to these 1-3 authored files and fewer than 500 changed lines; insert a bounded continuation before the dependent check when necessary.",
+          "outcome": "Run the actual desktop GUI journey with synthetic development identities and real endpoint policy. Require approved create/edit persistence, rejected disallowed edit without record mutation, policy refresh during open form and accessibility keyboard/error announcements. No customer accounts, production identity or live messages. Keep the task to these 1-3 authored files and fewer than 500 changed lines; insert a bounded continuation before the dependent check when necessary.",
           "backlog": [
             "M-06"
           ],
@@ -5852,13 +5832,13 @@
       "phase": "INTERACTIVE",
       "owner": "maestro",
       "mode": "implementation",
-      "title": "Deliver visible policy-governed native GUI execution and recovery \u2014 implementation",
+      "title": "Deliver visible policy-governed native GUI execution and recovery — implementation",
       "tasks": [
         {
           "label": "Bind native compose send stop and resume",
           "kind": "IMPLEMENT",
           "targets": [
-            "src-tauri/src/managed/dispatch.rs",
+            "src/main/enterprise/dispatch.ts",
             "src/renderer/hooks/input/useInputProcessing.ts",
             "src/renderer/services/process.ts"
           ],
@@ -5893,7 +5873,7 @@
           "label": "Handle native close restart and mid-run policy loss",
           "kind": "IMPLEMENT",
           "targets": [
-            "src-tauri/src/managed/mod.rs",
+            "src/main/enterprise/service.ts",
             "src/shared/maestro-lib/runtime/processes.ts",
             "src/shared/maestro-lib/managed/run-journal.ts"
           ],
@@ -5909,10 +5889,10 @@
           "label": "Test full real native GUI agent run journey",
           "kind": "TEST",
           "targets": [
-            "tests/e2e/managed-agent-run.spec.ts",
-            "tests/e2e/managed-recovery.spec.ts"
+            "e2e/managed-agent-run.spec.ts",
+            "e2e/managed-recovery.spec.ts"
           ],
-          "outcome": "Drive actual Tauri create approved agent, select allowed model/workspace/ref, send task, see live output, observe permitted bounded effect and exact receipt. Attempt disallowed effect, tighten policy, revoke/reconnect/restart and verify host state and UI. Use actual native API and real endpoint/API, explicit harmless synthetic provider initially; no invoke mocks. Keep the task to these 1-3 authored files and fewer than 500 changed lines; insert a bounded continuation before the dependent check when necessary.",
+          "outcome": "Drive the actual desktop application: create approved agent, select allowed model/workspace/ref, send task, see live output, observe permitted bounded effect and exact receipt. Attempt disallowed effect, tighten policy, revoke/reconnect/restart and verify host state and UI. Use actual native API and real endpoint/API, explicit harmless synthetic provider initially; no IPC mocks. Keep the task to these 1-3 authored files and fewer than 500 changed lines; insert a bounded continuation before the dependent check when necessary.",
           "backlog": [
             "M-06"
           ],
@@ -5934,7 +5914,7 @@
           ],
           "requires": [],
           "produces": [
-            "MAESTRO-TAURI-DESKTOP-BUILD"
+            "MAESTRO-DESKTOP-APP-BUILD"
           ],
           "outcome": "Run the changed-module unit suites, type/build checks and public archive load/contract checks relevant to this phase. Fix failures through separate bounded IMPLEMENT/TEST continuations before retrying. Publish the actual clean implementation snapshot, payload/input hashes, public archives and commands/results in the BUILD receipt. This receipt supplies compiled inputs for the other owner; it grants no execution authority and proves no paired/native/provider support. Every paired, native and real-provider requirement remains in its separate qualification task.",
           "id": "MCOMP-25-05"
@@ -5947,7 +5927,7 @@
         "MCOMP-23"
       ],
       "produces": [
-        "MAESTRO-TAURI-DESKTOP-BUILD"
+        "MAESTRO-DESKTOP-APP-BUILD"
       ],
       "id": "MCOMP-25",
       "path": ".maestro/playbooks/2026-10-29-Maestro-Integration-Completion/MCOMP-25.md",
@@ -5959,13 +5939,13 @@
       "phase": "INTERACTIVE",
       "owner": "maestro",
       "mode": "qualification",
-      "title": "Deliver visible policy-governed native GUI execution and recovery \u2014 qualification",
+      "title": "Deliver visible policy-governed native GUI execution and recovery — qualification",
       "tasks": [
         {
           "label": "Verify complete native end-user loop",
           "kind": "VERIFY",
           "targets": [
-            "Plans/integration-completion/evidence/completion-tauri-agent-run.json"
+            "Plans/integration-completion/evidence/completion-desktop-agent-run.json"
           ],
           "outcome": "Require real GUI create/edit/run/stop/recovery positive and negative journeys, visible output, independently observed effects and correlated central receipts. Record native binary/source/driver/platform and screenshot artifact paths. Synthetic provider pass proves only that route; at least one real provider is separately required before final end-user release claim. Keep the task to these 1-3 authored files and fewer than 500 changed lines; insert a bounded continuation before the dependent check when necessary.",
           "backlog": [
@@ -5973,12 +5953,12 @@
           ],
           "requires": [
             "MAESTRO-EFFECT-CONSUMERS",
-            "MAESTRO-TAURI-DESKTOP-BUILD",
+            "MAESTRO-DESKTOP-APP-BUILD",
             "MEGA-DESKTOP-POLICY-BUILD",
             "PAIR-DIRECT-EVIDENCE"
           ],
           "produces": [
-            "MAESTRO-TAURI-DESKTOP"
+            "MAESTRO-DESKTOP-APP"
           ],
           "id": "MCOMP-26-01"
         }
@@ -5990,7 +5970,7 @@
         "MCOMP-25"
       ],
       "produces": [
-        "MAESTRO-TAURI-DESKTOP"
+        "MAESTRO-DESKTOP-APP"
       ],
       "id": "MCOMP-26",
       "path": ".maestro/playbooks/2026-10-29-Maestro-Integration-Completion/MCOMP-26.md",
@@ -6002,7 +5982,7 @@
       "phase": "COLLECTION",
       "owner": "maestro",
       "mode": "implementation",
-      "title": "Wire actual lifecycle usage content and evidence delivery \u2014 implementation",
+      "title": "Wire actual lifecycle usage content and evidence delivery — implementation",
       "tasks": [
         {
           "label": "Connect real runtime usage producer",
@@ -6010,9 +5990,9 @@
           "targets": [
             "src/main/enterprise/usage.ts",
             "src/shared/maestro-lib/turns/record-turn.ts",
-            "src-tauri/src/managed/telemetry.rs"
+            "src/main/enterprise/telemetry.ts"
           ],
-          "outcome": "Connect actual parsed process/model usage to governed event projection and native host inventory instead of usage:()=>null. Preserve actual/estimated/missing distinctions, retries/provider swaps/account history and stable event idempotency; no fabricated zero spend. Extract pure shared mapper for Tauri reuse if necessary. Keep the task to these 1-3 authored files and fewer than 500 changed lines; insert a bounded continuation before the dependent check when necessary.",
+          "outcome": "Connect actual parsed process/model usage to governed event projection and desktop host inventory instead of usage:()=>null. Preserve actual/estimated/missing distinctions, retries/provider swaps/account history and stable event idempotency; no fabricated zero spend. Extract a pure shared mapper only if a second host needs it. Keep the task to these 1-3 authored files and fewer than 500 changed lines; insert a bounded continuation before the dependent check when necessary.",
           "backlog": [
             "G-08"
           ],
@@ -6027,8 +6007,7 @@
           "kind": "IMPLEMENT",
           "targets": [
             "src/main/enterprise/content.ts",
-            "src/shared/maestro-lib/managed/endpoint-port.ts",
-            "src-tauri/src/managed/collection.rs"
+            "src/shared/maestro-lib/managed/endpoint-port.ts"
           ],
           "outcome": "Install revision-bound content ceiling from actual endpoint policy, enforce separate content roles/permissions/profile/redaction and upload through canonical endpoint capture/spool protocol. Replace permanently pending memory-only capture; preserve original/derivative byte integrity and explicit loss. Never access private recording/export or hidden reasoning. Keep the task to these 1-3 authored files and fewer than 500 changed lines; insert a bounded continuation before the dependent check when necessary.",
           "backlog": [
@@ -6108,7 +6087,7 @@
       "phase": "G10",
       "owner": "mega-maestro",
       "mode": "qualification",
-      "title": "Governed usage content provenance and detection telemetry \u2014 qualification",
+      "title": "Governed usage content provenance and detection telemetry — qualification",
       "tasks": [
         {
           "label": "Verify governed usage content provenance and detection telemetry",
@@ -6116,7 +6095,7 @@
           "targets": [
             "docs/evidence/integration-completion/10.json"
           ],
-          "outcome": "Run focused adapter/endpoint/ingest/worker/content/TRACE/governance checks, then actual paired provider-visible content and usage through API/vault/detection projections with MAESTRO-COLLECTION-CONSUMERS. Verify authorized and denied displays/exports for different users and durable restart recovery. Emit MEGA-COLLECTION; screenshots or fixture-only findings are insufficient. Where the paired consumer BUILD supersedes the M0 archive, consume its actual new archive, rebuild this owner\u2019s adapter/pins and rerun affected conformance before the pair. Preserve prior immutable archives; never substitute old qualifiedAgainst evidence for changed runtime bytes.",
+          "outcome": "Run focused adapter/endpoint/ingest/worker/content/TRACE/governance checks, then actual paired provider-visible content and usage through API/vault/detection projections with MAESTRO-COLLECTION-CONSUMERS. Verify authorized and denied displays/exports for different users and durable restart recovery. Emit MEGA-COLLECTION; screenshots or fixture-only findings are insufficient. Where the paired consumer BUILD supersedes the M0 archive, consume its actual new archive, rebuild this owner’s adapter/pins and rerun affected conformance before the pair. Preserve prior immutable archives; never substitute old qualifiedAgainst evidence for changed runtime bytes.",
           "backlog": [
             "G-08"
           ],
@@ -6151,7 +6130,7 @@
       "phase": "COLLECTION",
       "owner": "maestro",
       "mode": "qualification",
-      "title": "Wire actual lifecycle usage content and evidence delivery \u2014 qualification",
+      "title": "Wire actual lifecycle usage content and evidence delivery — qualification",
       "tasks": [
         {
           "label": "Verify native run reaches central evidence and detection",
@@ -6165,7 +6144,7 @@
           ],
           "requires": [
             "MAESTRO-COLLECTION-CONSUMERS-BUILD",
-            "MAESTRO-TAURI-DESKTOP",
+            "MAESTRO-DESKTOP-APP",
             "MEGA-COLLECTION-BUILD"
           ],
           "produces": [
@@ -6192,15 +6171,14 @@
       "phase": "COMMANDS",
       "owner": "maestro",
       "mode": "implementation",
-      "title": "Complete typed communications and usable end-user notices \u2014 implementation",
+      "title": "Complete typed communications and usable end-user notices — implementation",
       "tasks": [
         {
           "label": "Consume actual inbound commands and receipts",
           "kind": "IMPLEMENT",
           "targets": [
             "src/shared/maestro-lib/managed/commands.ts",
-            "src/main/enterprise/commands.ts",
-            "src-tauri/src/managed/commands.rs"
+            "src/main/enterprise/commands.ts"
           ],
           "outcome": "Connect negotiated MEGA-COMMANDS delivery to actual native runtime cancel/pause/resume/report/refresh handlers with current actor/epoch/policy/run ownership and durable exact receipt. Where pause semantics cannot be safely honored, implement cooperative task-boundary pause and label it; never imply OS process suspension. Keep the task to these 1-3 authored files and fewer than 500 changed lines; insert a bounded continuation before the dependent check when necessary.",
           "backlog": [
@@ -6218,7 +6196,6 @@
           "kind": "IMPLEMENT",
           "targets": [
             "src/main/enterprise/inbox.ts",
-            "src-tauri/src/managed/inbox.rs",
             "src/renderer/components/Enterprise/ManagedInbox.tsx"
           ],
           "outcome": "Deliver real authorized notices in native GUI and send bounded read/ack/private reply receipts through endpoint. Keep delivered/read/ack/reply distinct and durable across restart. Notice text never becomes model input unless separately authorized as operator command. Preserve keyboard/screen-reader behavior. Keep the task to these 1-3 authored files and fewer than 500 changed lines; insert a bounded continuation before the dependent check when necessary.",
@@ -6239,7 +6216,7 @@
             "src/shared/maestro-lib/client/ws-client.ts",
             "src/shared/maestro-lib/runtime/server-requests.ts"
           ],
-          "outcome": "Expose same supported commands, inbox actions and safe status through authenticated host API for native host/CLI, without direct-store fallback on enrolled installations or invented approval. Reuse existing split command modules if applicable. Keep the task to these 1-3 authored files and fewer than 500 changed lines; insert a bounded continuation before the dependent check when necessary.",
+          "outcome": "Expose same supported commands, inbox actions and safe status through authenticated host API for desktop host/CLI, without direct-store fallback on enrolled installations or invented approval. Reuse existing split command modules if applicable. Keep the task to these 1-3 authored files and fewer than 500 changed lines; insert a bounded continuation before the dependent check when necessary.",
           "backlog": [
             "G-07",
             "M-05"
@@ -6254,11 +6231,11 @@
           "label": "Test communications with actual native GUI",
           "kind": "TEST",
           "targets": [
-            "tests/e2e/managed-communications.spec.ts",
+            "e2e/managed-communications.spec.ts",
             "src/__tests__/main/enterprise/commands.test.ts",
             "src/__tests__/main/enterprise/inbox.test.ts"
           ],
-          "outcome": "Drive real central notice to Tauri, acknowledge/reply and correlate receipt; issue typed cancel/pause/resume/policy refresh against real runtime. Cover duplicate, stale actor/epoch, restart receipt loss, offline pending and no model injection. Renderer/host doubles remain unit-only evidence. Keep the task to these 1-3 authored files and fewer than 500 changed lines; insert a bounded continuation before the dependent check when necessary.",
+          "outcome": "Drive real central notice to the desktop application, acknowledge/reply and correlate receipt; issue typed cancel/pause/resume/policy refresh against real runtime. Cover duplicate, stale actor/epoch, restart receipt loss, offline pending and no model injection. Renderer/host doubles remain unit-only evidence. Keep the task to these 1-3 authored files and fewer than 500 changed lines; insert a bounded continuation before the dependent check when necessary.",
           "backlog": [
             "G-07"
           ],
@@ -6302,7 +6279,7 @@
       "phase": "G09",
       "owner": "mega-maestro",
       "mode": "qualification",
-      "title": "Actual signed run commands and private notice actions \u2014 qualification",
+      "title": "Actual signed run commands and private notice actions — qualification",
       "tasks": [
         {
           "label": "Verify actual signed run commands and private notice actions",
@@ -6310,7 +6287,7 @@
           "targets": [
             "docs/evidence/integration-completion/09.json"
           ],
-          "outcome": "Run command/inbox tests and actual paired desktop/runtime command flows with MAESTRO-COMMAND-CONSUMERS. Independently observe process pause/resume/cancel and durable signed receipts, plus notice delivery/read/ack/private reply under correct actors. Emit MEGA-COMMANDS only when actual owned effect semantics and recovery pass. Where the paired consumer BUILD supersedes the M0 archive, consume its actual new archive, rebuild this owner\u2019s adapter/pins and rerun affected conformance before the pair. Preserve prior immutable archives; never substitute old qualifiedAgainst evidence for changed runtime bytes.",
+          "outcome": "Run command/inbox tests and actual paired desktop/runtime command flows with MAESTRO-COMMAND-CONSUMERS. Independently observe process pause/resume/cancel and durable signed receipts, plus notice delivery/read/ack/private reply under correct actors. Emit MEGA-COMMANDS only when actual owned effect semantics and recovery pass. Where the paired consumer BUILD supersedes the M0 archive, consume its actual new archive, rebuild this owner’s adapter/pins and rerun affected conformance before the pair. Preserve prior immutable archives; never substitute old qualifiedAgainst evidence for changed runtime bytes.",
           "backlog": [
             "G-07"
           ],
@@ -6345,7 +6322,7 @@
       "phase": "COMMANDS",
       "owner": "maestro",
       "mode": "qualification",
-      "title": "Complete typed communications and usable end-user notices \u2014 qualification",
+      "title": "Complete typed communications and usable end-user notices — qualification",
       "tasks": [
         {
           "label": "Verify central native communication outcomes",
@@ -6359,7 +6336,7 @@
           ],
           "requires": [
             "MAESTRO-COMMAND-CONSUMERS-BUILD",
-            "MAESTRO-TAURI-DESKTOP",
+            "MAESTRO-DESKTOP-APP",
             "MEGA-COMMANDS-BUILD"
           ],
           "produces": [
@@ -6386,7 +6363,7 @@
       "phase": "ROUTES",
       "owner": "maestro",
       "mode": "implementation",
-      "title": "Qualify actual provider routes and native platforms without fallback \u2014 implementation",
+      "title": "Qualify actual provider routes and native platforms without fallback — implementation",
       "tasks": [
         {
           "label": "Bind one actual provider to protected approved route",
@@ -6394,7 +6371,7 @@
           "targets": [
             "src/shared/maestro-lib/turns/run-agent-turn.ts",
             "src/shared/maestro-lib/launch/agent-args.ts",
-            "src-tauri/src/managed/providers.rs"
+            "src/shared/maestro-lib/managed/provider-route.ts"
           ],
           "outcome": "Consume MEGA-QUALIFIED-PROVIDERS route evidence and implement actual approved provider gateway/credential/sandbox path for native GUI and headless. Preserve usable standard permission mode, exact tool authority and enforced file/net/descendant limits. No SDK blanket approval, personal OAuth fallback or unqualified exec fallback. Real provider tests require explicit allowed traffic/cost fixture scope; otherwise keep that required qualification pending. Keep the task to these 1-3 authored files and fewer than 500 changed lines; insert a bounded continuation before the dependent check when necessary.",
           "backlog": [
@@ -6414,7 +6391,7 @@
           "targets": [
             "src/shared/maestro-lib/codex/server-requests.ts",
             "src/shared/maestro-lib/codex/connection.ts",
-            "src-tauri/src/managed/providers.rs"
+            "src/shared/maestro-lib/managed/provider-route.ts"
           ],
           "outcome": "Reuse public Codex/OpenCode adapters and versioned provider protocols, extract reusable logic from Electron-only spawners through bounded followups. Qualify exact tool/file/permission and session identity isolation; unsupported API features remain visibly unavailable. No broad autoapprove or shared credential bleed. Keep the task to these 1-3 authored files and fewer than 500 changed lines; insert a bounded continuation before the dependent check when necessary.",
           "backlog": [
@@ -6432,7 +6409,7 @@
           "targets": [
             "src/main/enterprise/dispatch.ts",
             "src/shared/maestro-lib/launch/ssh-spawn-wrapper.ts",
-            "src-tauri/src/managed/terminal.rs"
+            "src/main/process-manager/spawners/PtySpawner.ts"
           ],
           "outcome": "Use actual qualified broker/sandbox for native terminal and Cue shell, or keep route explicitly unavailable. SSH requires enrolled remote endpoint and remote confinement/fence/credential proof; unresolved remote never runs locally. Bind terminal write lifetime and prevent unqualified existing-shell attachment. Do not claim all route qualification from one provider. Keep the task to these 1-3 authored files and fewer than 500 changed lines; insert a bounded continuation before the dependent check when necessary.",
           "backlog": [
@@ -6449,8 +6426,8 @@
           "kind": "IMPLEMENT",
           "targets": [
             "src/shared/maestro-lib/managed/endpoint-port.ts",
-            "src-tauri/src/managed/transport.rs",
-            "src-tauri/src/managed/custody.rs"
+            "src/main/enterprise/remote.ts",
+            "src/main/enterprise/credential-custody.ts"
           ],
           "outcome": "Consume platform-specific authenticated endpoint transport and protected custody produced by Mega. Verify host/process/connection registration and current actor, not UID/loopback alone. Preserve Linux. Native GUI automation availability does not establish peer-auth support. Qualify each required shipping platform separately. Keep the task to these 1-3 authored files and fewer than 500 changed lines; insert a bounded continuation before the dependent check when necessary.",
           "backlog": [
@@ -6467,11 +6444,11 @@
           "label": "Test actual provider and platform native app routes",
           "kind": "TEST",
           "targets": [
-            "tests/e2e/managed-provider.spec.ts",
-            "src-tauri/tests/managed_transport.rs",
+            "e2e/managed-provider.spec.ts",
+            "src/__tests__/main/enterprise/managed-transport.test.ts",
             "src/__tests__/integration/mega-maestro/provider-conformance.test.ts"
           ],
-          "outcome": "Use actual Tauri app and qualified actual provider fixture on supported native platforms, with current webdriver/native driver support. Observe allowed task output/effect, denied tool/fs/net/descendant escape, policy tightening and credential/actor isolation. Explicit unsupported or unavailable platform is a gap, not a passed required case. Keep the task to these 1-3 authored files and fewer than 500 changed lines; insert a bounded continuation before the dependent check when necessary.",
+          "outcome": "Use the actual Maestro desktop application and qualified actual provider fixture on supported native platforms, with the existing Playwright Electron driver. Observe allowed task output/effect, denied tool/fs/net/descendant escape, policy tightening and credential/actor isolation. Explicit unsupported or unavailable platform is a gap, not a passed required case. Keep the task to these 1-3 authored files and fewer than 500 changed lines; insert a bounded continuation before the dependent check when necessary.",
           "backlog": [
             "QUAL-01",
             "QUAL-02",
@@ -6496,8 +6473,8 @@
           "requires": [],
           "produces": [
             "MAESTRO-PROVIDER-ROUTES-BUILD",
-            "MAESTRO-TAURI-MACOS-BUILD",
-            "MAESTRO-TAURI-WINDOWS-BUILD"
+            "MAESTRO-APP-MACOS-BUILD",
+            "MAESTRO-APP-WINDOWS-BUILD"
           ],
           "outcome": "Run the changed-module unit suites, type/build checks and public archive load/contract checks relevant to this phase. Fix failures through separate bounded IMPLEMENT/TEST continuations before retrying. Publish the actual clean implementation snapshot, payload/input hashes, public archives and commands/results in the BUILD receipt. This receipt supplies compiled inputs for the other owner; it grants no execution authority and proves no paired/native/provider support. Every paired, native and real-provider requirement remains in its separate qualification task.",
           "id": "MCOMP-31-06"
@@ -6512,8 +6489,8 @@
       ],
       "produces": [
         "MAESTRO-PROVIDER-ROUTES-BUILD",
-        "MAESTRO-TAURI-MACOS-BUILD",
-        "MAESTRO-TAURI-WINDOWS-BUILD"
+        "MAESTRO-APP-MACOS-BUILD",
+        "MAESTRO-APP-WINDOWS-BUILD"
       ],
       "id": "MCOMP-31",
       "path": ".maestro/playbooks/2026-10-29-Maestro-Integration-Completion/MCOMP-31.md",
@@ -6525,7 +6502,7 @@
       "phase": "G12",
       "owner": "mega-maestro",
       "mode": "qualification",
-      "title": "Native macOS peer service custody and constrained effects \u2014 qualification",
+      "title": "Native macOS peer service custody and constrained effects — qualification",
       "tasks": [
         {
           "label": "Verify native macOS peer service custody and constrained effects",
@@ -6533,13 +6510,13 @@
           "targets": [
             "docs/evidence/integration-completion/12.json"
           ],
-          "outcome": "Build Darwin packages and run actual native peer/custody/constrained-effect cases on RUNNER-MACOS with MAESTRO-TAURI-MACOS. Require real actor/policy pair, allowed effect and zero denied effects; record code identity and artifacts. Emit MEGA-NATIVE-MACOS only from actual native evidence. If native runner/Tauri artifacts are absent this verification stays incomplete; do not waive the platform delivery requirement. Where the paired consumer BUILD supersedes the M0 archive, consume its actual new archive, rebuild this owner\u2019s adapter/pins and rerun affected conformance before the pair. Preserve prior immutable archives; never substitute old qualifiedAgainst evidence for changed runtime bytes.",
+          "outcome": "Build Darwin packages and run actual native peer/custody/constrained-effect cases on RUNNER-MACOS with MAESTRO-APP-MACOS. Require real actor/policy pair, allowed effect and zero denied effects; record code identity and artifacts. Emit MEGA-NATIVE-MACOS only from actual native evidence. If native runner/desktop application artifacts are absent this verification stays incomplete; do not waive the platform delivery requirement. Where the paired consumer BUILD supersedes the M0 archive, consume its actual new archive, rebuild this owner’s adapter/pins and rerun affected conformance before the pair. Preserve prior immutable archives; never substitute old qualifiedAgainst evidence for changed runtime bytes.",
           "backlog": [
             "G-05",
             "QUAL-02"
           ],
           "requires": [
-            "MAESTRO-TAURI-MACOS-BUILD",
+            "MAESTRO-APP-MACOS-BUILD",
             "MEGA-DESKTOP-POLICY",
             "MEGA-NATIVE-MACOS-BUILD",
             "MEGA-PREPARED-EXECUTION",
@@ -6570,7 +6547,7 @@
       "phase": "G13",
       "owner": "mega-maestro",
       "mode": "qualification",
-      "title": "Native Windows peer service custody and constrained effects \u2014 qualification",
+      "title": "Native Windows peer service custody and constrained effects — qualification",
       "tasks": [
         {
           "label": "Verify native Windows peer service custody and constrained effects",
@@ -6578,13 +6555,13 @@
           "targets": [
             "docs/evidence/integration-completion/13.json"
           ],
-          "outcome": "Build Windows artifact and run the real actor/policy/effect pair on RUNNER-WINDOWS with MAESTRO-TAURI-WINDOWS. Require actual allowed effects and denied unauthorized file/network/credential/descendant paths, observed cleanup and current receipts. Emit MEGA-NATIVE-WINDOWS only on native evidence; absent runner/artifact remains an open mandatory requirement, not an accepted omission. Where the paired consumer BUILD supersedes the M0 archive, consume its actual new archive, rebuild this owner\u2019s adapter/pins and rerun affected conformance before the pair. Preserve prior immutable archives; never substitute old qualifiedAgainst evidence for changed runtime bytes.",
+          "outcome": "Build Windows artifact and run the real actor/policy/effect pair on RUNNER-WINDOWS with MAESTRO-APP-WINDOWS. Require actual allowed effects and denied unauthorized file/network/credential/descendant paths, observed cleanup and current receipts. Emit MEGA-NATIVE-WINDOWS only on native evidence; absent runner/artifact remains an open mandatory requirement, not an accepted omission. Where the paired consumer BUILD supersedes the M0 archive, consume its actual new archive, rebuild this owner’s adapter/pins and rerun affected conformance before the pair. Preserve prior immutable archives; never substitute old qualifiedAgainst evidence for changed runtime bytes.",
           "backlog": [
             "G-05",
             "QUAL-02"
           ],
           "requires": [
-            "MAESTRO-TAURI-WINDOWS-BUILD",
+            "MAESTRO-APP-WINDOWS-BUILD",
             "MEGA-DESKTOP-POLICY",
             "MEGA-NATIVE-WINDOWS-BUILD",
             "MEGA-PREPARED-EXECUTION",
@@ -6615,7 +6592,7 @@
       "phase": "G14",
       "owner": "mega-maestro",
       "mode": "qualification",
-      "title": "Real provider transport qualification without customer account gates \u2014 qualification",
+      "title": "Real provider transport qualification without customer account gates — qualification",
       "tasks": [
         {
           "label": "Verify real provider transport qualification without customer account gates",
@@ -6623,7 +6600,7 @@
           "targets": [
             "docs/evidence/integration-completion/14.json"
           ],
-          "outcome": "Run the actual pinned provider binaries via all declared supported CLI/SDK/PTY/SSH routes and native backends, using deterministic local model protocol fixtures and real protected effects. Record exact versions and separate fixture model evidence from optional live paid model follow-up. Publish MEGA-QUALIFIED-PROVIDERS only for positively exercised complete route tuples; required unsupported routes remain open, not passed by refusal-only tests. First exercise the actual provider adapter and protected backend in the owned qualification harness without promoting production registry support. Publish current proof only after those independent cases pass, then exercise the actual endpoint/GUI route using that proof. A test flag that enables an unqualified production route is not an acceptable bootstrap mechanism. Where the paired consumer BUILD supersedes the M0 archive, consume its actual new archive, rebuild this owner\u2019s adapter/pins and rerun affected conformance before the pair. Preserve prior immutable archives; never substitute old qualifiedAgainst evidence for changed runtime bytes.",
+          "outcome": "Run the actual pinned provider binaries via all declared supported CLI/SDK/PTY/SSH routes and native backends, using deterministic local model protocol fixtures and real protected effects. Record exact versions and separate fixture model evidence from optional live paid model follow-up. Publish MEGA-QUALIFIED-PROVIDERS only for positively exercised complete route tuples; required unsupported routes remain open, not passed by refusal-only tests. First exercise the actual provider adapter and protected backend in the owned qualification harness without promoting production registry support. Publish current proof only after those independent cases pass, then exercise the actual endpoint/GUI route using that proof. A test flag that enables an unqualified production route is not an acceptable bootstrap mechanism. Where the paired consumer BUILD supersedes the M0 archive, consume its actual new archive, rebuild this owner’s adapter/pins and rerun affected conformance before the pair. Preserve prior immutable archives; never substitute old qualifiedAgainst evidence for changed runtime bytes.",
           "backlog": [
             "G-05",
             "QUAL-01",
@@ -6666,7 +6643,7 @@
       "phase": "ROUTES",
       "owner": "maestro",
       "mode": "qualification",
-      "title": "Qualify actual provider routes and native platforms without fallback \u2014 qualification",
+      "title": "Qualify actual provider routes and native platforms without fallback — qualification",
       "tasks": [
         {
           "label": "Verify route and native platform support matrix",
@@ -6683,15 +6660,15 @@
           ],
           "requires": [
             "MAESTRO-PROVIDER-ROUTES-BUILD",
-            "MAESTRO-TAURI-DESKTOP",
-            "MAESTRO-TAURI-MACOS-BUILD",
-            "MAESTRO-TAURI-WINDOWS-BUILD",
+            "MAESTRO-DESKTOP-APP",
+            "MAESTRO-APP-MACOS-BUILD",
+            "MAESTRO-APP-WINDOWS-BUILD",
             "MEGA-QUALIFIED-PROVIDERS-BUILD"
           ],
           "produces": [
             "MAESTRO-PROVIDER-ROUTES",
-            "MAESTRO-TAURI-MACOS",
-            "MAESTRO-TAURI-WINDOWS"
+            "MAESTRO-APP-MACOS",
+            "MAESTRO-APP-WINDOWS"
           ],
           "id": "MCOMP-32-01"
         }
@@ -6703,8 +6680,8 @@
       ],
       "produces": [
         "MAESTRO-PROVIDER-ROUTES",
-        "MAESTRO-TAURI-MACOS",
-        "MAESTRO-TAURI-WINDOWS"
+        "MAESTRO-APP-MACOS",
+        "MAESTRO-APP-WINDOWS"
       ],
       "id": "MCOMP-32",
       "path": ".maestro/playbooks/2026-10-29-Maestro-Integration-Completion/MCOMP-32.md",
@@ -6716,8 +6693,22 @@
       "phase": "FINAL",
       "owner": "maestro",
       "mode": "implementation",
-      "title": "Package repaired public runtime and verify the complete native application pair \u2014 implementation",
+      "title": "Package repaired public runtime and verify the complete native application pair — implementation",
       "tasks": [
+        {
+          "label": "Refresh the upstream integration to the current upstream rc before final packaging",
+          "kind": "IMPLEMENT",
+          "targets": [
+            "Plans/integration-completion/upstream-merge.json"
+          ],
+          "outcome": "Added 2026-11-05. The merge MCOMP-01-03 delivers is pinned to upstream rc `3c8569162` (2026-10-25) and that pin does not move. On 2026-11-05 upstream rc was 459 commits past it and a dry-run merge of the integration branch reported 57 conflicting files, so the final cohort needs a second, current selection. Select the then-current upstream rc tip, record it in the merge record as a second selection without rewriting the first, dry-run the merge, and insert one bounded conflict-resolution continuation per group of at most three files ahead of MCOMP-33-01, following the MCOMP-01-03A to MCOMP-01-03T pattern (a worktree created through `maestro-cli create-worktree`, the merge commit, type-check, the touched suites, landing on the feature branch, the runtime re-pin). Preserve enterprise guards, the Electron desktop host and standalone semantics. No forced reset, checkout loss or history rewrite.",
+          "backlog": [
+            "BASE-02"
+          ],
+          "requires": [],
+          "produces": [],
+          "id": "MCOMP-33-00"
+        },
         {
           "label": "Package final source-bound native and runtime handoff",
           "kind": "IMPLEMENT",
@@ -6740,14 +6731,14 @@
           "targets": [
             "scripts/mega-maestro-pair.mjs",
             "src/__tests__/integration/mega-maestro/journeys.ts",
-            "tests/e2e/managed-full-journey.spec.ts"
+            "e2e/managed-full-journey.spec.ts"
           ],
-          "outcome": "Join actual native end-user create/edit/run/stop/recovery, Auto Run/Cue/delegation, credential routing, fleet/content/detection/governance and communications scenarios against exact committed paired artifacts. Reuse existing runner and actual Tauri native harness; no Electron or browser-only substitute. Each acceptance row records independent observed effects/receipts and required native platform. Keep the task to these 1-3 authored files and fewer than 500 changed lines; insert a bounded continuation before the dependent check when necessary.",
+          "outcome": "Join actual native end-user create/edit/run/stop/recovery, Auto Run/Cue/delegation, credential routing, fleet/content/detection/governance and communications scenarios against exact committed paired artifacts. Reuse existing runner and the actual desktop application harness; no Electron or browser-only substitute. Each acceptance row records independent observed effects/receipts and required native platform. Keep the task to these 1-3 authored files and fewer than 500 changed lines; insert a bounded continuation before the dependent check when necessary.",
           "backlog": [
             "VERIFY-01"
           ],
           "requires": [
-            "MAESTRO-TAURI-DESKTOP-BUILD",
+            "MAESTRO-DESKTOP-APP-BUILD",
             "MAESTRO-WORKFLOW-CONSUMERS-BUILD",
             "MEGA-COLLECTION-BUILD",
             "MEGA-COMMANDS-BUILD",
@@ -6764,7 +6755,7 @@
           "targets": [
             "src/__tests__/integration/mega-maestro/standalone.test.ts",
             "src/shared/maestro-lib/__tests__/built-entry.test.ts",
-            "tests/e2e/standalone-agent.spec.ts"
+            "e2e/standalone-agent.spec.ts"
           ],
           "outcome": "Retain actual native standalone agent create/edit/run and existing public Node/library/CLI behavior, managed no-bypass regressions, declarations and Electron-free package. Targeted unit doubles are labeled and never replace required native pair checks. Keep the task to these 1-3 authored files and fewer than 500 changed lines; insert a bounded continuation before the dependent check when necessary.",
           "backlog": [
@@ -6806,7 +6797,7 @@
       ],
       "id": "MCOMP-33",
       "path": ".maestro/playbooks/2026-10-29-Maestro-Integration-Completion/MCOMP-33.md",
-      "taskCount": 4,
+      "taskCount": 5,
       "stage": "S18"
     },
     {
@@ -6814,7 +6805,7 @@
       "phase": "G15",
       "owner": "mega-maestro",
       "mode": "implementation",
-      "title": "Final immutable delivery and full Tauri integration acceptance \u2014 implementation",
+      "title": "Final immutable delivery and full desktop integration acceptance — implementation",
       "tasks": [
         {
           "label": "Freeze tested implementation inputs and rebuild artifacts",
@@ -6884,9 +6875,9 @@
           "kind": "IMPLEMENT",
           "targets": [
             "packages/testing/scripts/mega-maestro-pair.mjs",
-            "packages/testing/src/tauri-acceptance.ts"
+            "packages/testing/src/desktop-acceptance.ts"
           ],
-          "outcome": "Drive actual pinned Maestro Tauri desktop bundles and runtime plus real Mega services. Cover original thirteen accepted journeys and added GUI user create/edit/clone/import/agent-tab/provider/model/credential/tool/workspace/automation workflows; host validation must stop forged renderer/IPC/bulk persistence. Use the actual trusted Tauri commands rather than Electron-only mocks.",
+          "outcome": "Drive actual pinned Maestro desktop bundles and runtime plus real Mega services. Cover original thirteen accepted journeys and added GUI user create/edit/clone/import/agent-tab/provider/model/credential/tool/workspace/automation workflows; host validation must stop forged renderer/IPC/bulk persistence. Use the actual trusted Electron IPC handlers rather than renderer-only mocks.",
           "backlog": [
             "G-01",
             "G-09",
@@ -6914,10 +6905,10 @@
           "label": "Implement desktop policy change and recovery journeys",
           "kind": "IMPLEMENT",
           "targets": [
-            "packages/testing/src/tauri-acceptance.ts",
+            "packages/testing/src/desktop-acceptance.ts",
             "packages/testing/src/managed-effect-fixture.ts"
           ],
-          "outcome": "Automate two ordinary signed-in users with different approved choices, allowed edits, locked field denials with preserved drafts, live policy change/revoke, offline/restart, run controls and evidence views. Independently observe actual native child/file/network effects; a browser screenshot, management badge, headless pass or missing Tauri bundle does not satisfy GUI acceptance.",
+          "outcome": "Automate two ordinary signed-in users with different approved choices, allowed edits, locked field denials with preserved drafts, live policy change/revoke, offline/restart, run controls and evidence views. Independently observe actual native child/file/network effects; a browser screenshot, management badge, headless pass or missing desktop bundle does not satisfy GUI acceptance.",
           "backlog": [
             "G-01",
             "G-09",
@@ -6948,7 +6939,7 @@
             "scripts/reconcile-integration-receipts.mjs",
             "docs/evidence/integration-completion/acceptance.schema.json"
           ],
-          "outcome": "Validate all required owner receipts against immutable tested input snapshots, actual archive payloads and dependencies, including Tauri desktop/native/platform/provider proofs. Missing, stale, dirty, skipped, rejection-only or blocked required rows remain incomplete. Do not authorize a result through a manual complete flag or count a log file as evidence of effects.",
+          "outcome": "Validate all required owner receipts against immutable tested input snapshots, actual archive payloads and dependencies, including desktop/native/platform/provider proofs. Missing, stale, dirty, skipped, rejection-only or blocked required rows remain incomplete. Do not authorize a result through a manual complete flag or count a log file as evidence of effects.",
           "backlog": [
             "G-01",
             "G-09",
@@ -6979,7 +6970,7 @@
             "docs/design/maestro-rc/INTEGRATION-COMPLETION-2026-10-29.md",
             "docs/contract-distribution.md"
           ],
-          "outcome": "Record implemented behavior, tested source/artifact tuples, exact launch/manual validation entrypoints and real limitations after acceptance. Surface optional feature proposals and independent security/release review as prose follow-up; do not make paid accounts/manual human approval a code task or call partial Linux/headless completion full Tauri delivery.",
+          "outcome": "Record implemented behavior, tested source/artifact tuples, exact launch/manual validation entrypoints and real limitations after acceptance. Surface optional feature proposals and independent security/release review as prose follow-up; do not make paid accounts/manual human approval a code task or call partial Linux/headless completion full desktop delivery.",
           "backlog": [
             "G-01",
             "G-09",
@@ -7008,9 +6999,9 @@
           "kind": "TEST",
           "targets": [
             "scripts/test/integration-receipts.test.mjs",
-            "packages/testing/src/tauri-acceptance.test.ts"
+            "packages/testing/src/desktop-acceptance.test.ts"
           ],
-          "outcome": "Test stale/foreign/cyclic-pin/source/payload substitution rejection, missing native or Tauri proof, fake screenshot success, ordinary-user administrative escalation and incomplete required row handling. Assert legitimate immutable input snapshots survive unrelated receipt/document commits without accepting changed implementation bytes.",
+          "outcome": "Test stale/foreign/cyclic-pin/source/payload substitution rejection, missing native or desktop proof, fake screenshot success, ordinary-user administrative escalation and incomplete required row handling. Assert legitimate immutable input snapshots survive unrelated receipt/document commits without accepting changed implementation bytes.",
           "backlog": [
             "G-01",
             "G-09",
@@ -7081,15 +7072,15 @@
       "phase": "G15",
       "owner": "mega-maestro",
       "mode": "qualification",
-      "title": "Final immutable delivery and full Tauri integration acceptance \u2014 qualification",
+      "title": "Final immutable delivery and full desktop integration acceptance — qualification",
       "tasks": [
         {
-          "label": "Verify final immutable delivery and full Tauri integration acceptance",
+          "label": "Verify final immutable delivery and full desktop integration acceptance",
           "kind": "VERIFY",
           "targets": [
             "docs/evidence/integration-completion/15.json"
           ],
-          "outcome": "Run focused changed suites/builds and existing required checks, then real joint thirteen-row plus full Tauri desktop journeys against final immutable artifacts on Linux/macOS/Windows. Verify actor/desktop policy/create/edit/interactive run, actual allowed/denied effects, workflows/commands/telemetry/offline and recovery under required real provider routes. Emit PAIR-FINAL-EVIDENCE and MEGA-FINAL-INTEGRATION only when every required positive/negative/native/Tauri row passes. Missing counterpart artifact or native runner leaves verification and final completion unchecked with owner-specific evidence; no new CI/CD project or launched peer playbook. Use the FINAL Maestro implementation snapshot and archive, rebuild the adapter qualifiedAgainst pin and rerun every affected earlier acceptance against this final cohort. Early M0 or intermediate receipts alone cannot qualify final changed bytes. Where the paired consumer BUILD supersedes the M0 archive, consume its actual new archive, rebuild this owner\u2019s adapter/pins and rerun affected conformance before the pair. Preserve prior immutable archives; never substitute old qualifiedAgainst evidence for changed runtime bytes.",
+          "outcome": "Run focused changed suites/builds and existing required checks, then real joint thirteen-row plus full desktop journeys against final immutable artifacts on Linux/macOS/Windows. Verify actor/desktop policy/create/edit/interactive run, actual allowed/denied effects, workflows/commands/telemetry/offline and recovery under required real provider routes. Emit PAIR-FINAL-EVIDENCE and MEGA-FINAL-INTEGRATION only when every required positive/negative/native/desktop row passes. Missing counterpart artifact or native runner leaves verification and final completion unchecked with owner-specific evidence; no new CI/CD project or launched peer playbook. Use the FINAL Maestro implementation snapshot and archive, rebuild the adapter qualifiedAgainst pin and rerun every affected earlier acceptance against this final cohort. Early M0 or intermediate receipts alone cannot qualify final changed bytes. Where the paired consumer BUILD supersedes the M0 archive, consume its actual new archive, rebuild this owner’s adapter/pins and rerun affected conformance before the pair. Preserve prior immutable archives; never substitute old qualifiedAgainst evidence for changed runtime bytes.",
           "backlog": [
             "G-01",
             "G-09",
@@ -7101,7 +7092,7 @@
           ],
           "requires": [
             "MAESTRO-FINAL-CONSUMERS-BUILD",
-            "MAESTRO-TAURI-DESKTOP-BUILD",
+            "MAESTRO-DESKTOP-APP-BUILD",
             "MEGA-COLLECTION",
             "MEGA-COMMANDS",
             "MEGA-DESKTOP-POLICY",
@@ -7144,7 +7135,7 @@
       "phase": "FINAL",
       "owner": "maestro",
       "mode": "qualification",
-      "title": "Package repaired public runtime and verify the complete native application pair \u2014 qualification",
+      "title": "Package repaired public runtime and verify the complete native application pair — qualification",
       "tasks": [
         {
           "label": "Verify final native GUI and runtime pair",
@@ -7159,7 +7150,7 @@
           ],
           "requires": [
             "MAESTRO-FINAL-CONSUMERS-BUILD",
-            "MAESTRO-TAURI-DESKTOP",
+            "MAESTRO-DESKTOP-APP",
             "MAESTRO-WORKFLOW-CONSUMERS",
             "MEGA-COLLECTION-BUILD",
             "MEGA-COMMANDS-BUILD",
@@ -7202,12 +7193,24 @@
       "owner": "mega-maestro",
       "name": "Integration Completion mega-maestro S01",
       "documents": [
-        "GCOMP-01",
-        "GCOMP-02"
+        "GCOMP-01"
       ],
       "requires": [],
       "nativeInputs": false,
-      "taskCount": 9
+      "taskCount": 32
+    },
+    {
+      "id": "S01Q",
+      "owner": "mega-maestro",
+      "name": "Integration Completion mega-maestro S01Q",
+      "documents": [
+        "GCOMP-02"
+      ],
+      "requires": [
+        "MEGA-CONTRACTS-FOUNDATION-BUILD"
+      ],
+      "nativeInputs": false,
+      "taskCount": 1
     },
     {
       "id": "S02",
@@ -7248,20 +7251,17 @@
       "owner": "maestro",
       "name": "Integration Completion maestro S04",
       "documents": [
-        "MCOMP-05",
-        "MCOMP-06",
         "MCOMP-07",
         "MCOMP-08",
         "MCOMP-09"
       ],
       "requires": [
         "MAESTRO-M0-RUNTIME-BUILD",
-        "MAESTRO-SOURCE-BASELINE-BUILD",
         "MEGA-ACTOR-POLICY-BUILD",
         "MEGA-CONTRACTS-FOUNDATION-BUILD"
       ],
       "nativeInputs": false,
-      "taskCount": 26
+      "taskCount": 17
     },
     {
       "id": "S05",
@@ -7293,8 +7293,6 @@
       "name": "Integration Completion maestro S06",
       "documents": [
         "MCOMP-10",
-        "MCOMP-11",
-        "MCOMP-12",
         "MCOMP-13"
       ],
       "requires": [
@@ -7303,11 +7301,10 @@
         "MEGA-ACTOR-POLICY-BUILD",
         "MEGA-CONTRACTS-FOUNDATION-BUILD",
         "MEGA-PREPARED-EXECUTION-BUILD",
-        "MEGA-RUNTIME-ADAPTER-BUILD",
-        "TAURI-HOST-BASELINE-BUILD"
+        "MEGA-RUNTIME-ADAPTER-BUILD"
       ],
       "nativeInputs": false,
-      "taskCount": 15
+      "taskCount": 7
     },
     {
       "id": "S07",
@@ -7386,8 +7383,7 @@
         "MEGA-DESKTOP-POLICY-BUILD",
         "MEGA-PREPARED-EXECUTION",
         "MEGA-WORKFLOW-BUILD",
-        "PAIR-DIRECT-EVIDENCE",
-        "TAURI-HOST-BASELINE-BUILD"
+        "PAIR-DIRECT-EVIDENCE"
       ],
       "nativeInputs": false,
       "taskCount": 12
@@ -7437,10 +7433,7 @@
         "MEGA-PREPARED-EXECUTION",
         "MEGA-PREPARED-EXECUTION-BUILD",
         "MEGA-WORKFLOW-BUILD",
-        "PAIR-DIRECT-EVIDENCE",
-        "TAURI-HOST-BASELINE-BUILD",
-        "TAURI-SERVICE-PARITY",
-        "TAURI-SERVICE-PARITY-BUILD"
+        "PAIR-DIRECT-EVIDENCE"
       ],
       "nativeInputs": false,
       "taskCount": 45
@@ -7472,7 +7465,7 @@
       ],
       "requires": [
         "MAESTRO-COLLECTION-CONSUMERS-BUILD",
-        "MAESTRO-TAURI-DESKTOP",
+        "MAESTRO-DESKTOP-APP",
         "MAESTRO-WORKFLOW-CONSUMERS-BUILD",
         "MEGA-COLLECTION-BUILD",
         "MEGA-COMMANDS-BUILD"
@@ -7507,7 +7500,7 @@
       ],
       "requires": [
         "MAESTRO-COMMAND-CONSUMERS-BUILD",
-        "MAESTRO-TAURI-DESKTOP",
+        "MAESTRO-DESKTOP-APP",
         "MEGA-COMMANDS-BUILD",
         "MEGA-DESKTOP-POLICY-BUILD",
         "MEGA-NATIVE-MACOS-BUILD",
@@ -7528,11 +7521,11 @@
       ],
       "requires": [
         "MAESTRO-ACTOR-BRIDGE-BUILD",
+        "MAESTRO-APP-MACOS-BUILD",
+        "MAESTRO-APP-WINDOWS-BUILD",
         "MAESTRO-DESKTOP-CONTRACT-BUILD",
         "MAESTRO-PROVIDER-CONTRACT-BUILD",
         "MAESTRO-PROVIDER-ROUTES-BUILD",
-        "MAESTRO-TAURI-MACOS-BUILD",
-        "MAESTRO-TAURI-WINDOWS-BUILD",
         "MEGA-DESKTOP-POLICY",
         "MEGA-NATIVE-MACOS-BUILD",
         "MEGA-NATIVE-WINDOWS-BUILD",
@@ -7554,11 +7547,11 @@
         "MCOMP-33"
       ],
       "requires": [
+        "MAESTRO-APP-MACOS-BUILD",
+        "MAESTRO-APP-WINDOWS-BUILD",
+        "MAESTRO-DESKTOP-APP",
+        "MAESTRO-DESKTOP-APP-BUILD",
         "MAESTRO-PROVIDER-ROUTES-BUILD",
-        "MAESTRO-TAURI-DESKTOP",
-        "MAESTRO-TAURI-DESKTOP-BUILD",
-        "MAESTRO-TAURI-MACOS-BUILD",
-        "MAESTRO-TAURI-WINDOWS-BUILD",
         "MAESTRO-WORKFLOW-CONSUMERS-BUILD",
         "MEGA-COLLECTION-BUILD",
         "MEGA-COMMANDS-BUILD",
@@ -7567,7 +7560,7 @@
         "MEGA-RUNTIME-ADAPTER-BUILD"
       ],
       "nativeInputs": false,
-      "taskCount": 5
+      "taskCount": 6
     },
     {
       "id": "S19",
@@ -7578,8 +7571,8 @@
         "GCOMP-30"
       ],
       "requires": [
+        "MAESTRO-DESKTOP-APP-BUILD",
         "MAESTRO-FINAL-CONSUMERS-BUILD",
-        "MAESTRO-TAURI-DESKTOP-BUILD",
         "MEGA-COLLECTION",
         "MEGA-COLLECTION-BUILD",
         "MEGA-COMMANDS",
@@ -7608,8 +7601,8 @@
         "MCOMP-34"
       ],
       "requires": [
+        "MAESTRO-DESKTOP-APP",
         "MAESTRO-FINAL-CONSUMERS-BUILD",
-        "MAESTRO-TAURI-DESKTOP",
         "MAESTRO-WORKFLOW-CONSUMERS",
         "MEGA-COLLECTION-BUILD",
         "MEGA-COMMANDS-BUILD",
@@ -7622,11 +7615,11 @@
       "taskCount": 1
     }
   ],
-  "taskCount": 304,
+  "taskCount": 312,
   "taskCounts": {
-    "IMPLEMENT": 201,
-    "TEST": 39,
-    "VERIFY": 64
+    "IMPLEMENT": 212,
+    "TEST": 40,
+    "VERIFY": 60
   },
   "artifacts": {
     "MEGA-CONTRACTS-FOUNDATION-BUILD": {
@@ -7689,16 +7682,6 @@
       "owner": "mega-maestro",
       "proofClass": "implementation-input"
     },
-    "TAURI-HOST-BASELINE-BUILD": {
-      "producerDocument": "MCOMP-05",
-      "owner": "maestro",
-      "proofClass": "implementation-input"
-    },
-    "TAURI-HOST-BASELINE": {
-      "producerDocument": "MCOMP-06",
-      "owner": "maestro",
-      "proofClass": "qualified-evidence"
-    },
     "MAESTRO-ACTOR-BRIDGE-BUILD": {
       "producerDocument": "MCOMP-07",
       "owner": "maestro",
@@ -7756,16 +7739,6 @@
     },
     "MAESTRO-P0-CLOSURE": {
       "producerDocument": "MCOMP-10",
-      "owner": "maestro",
-      "proofClass": "qualified-evidence"
-    },
-    "TAURI-SERVICE-PARITY-BUILD": {
-      "producerDocument": "MCOMP-11",
-      "owner": "maestro",
-      "proofClass": "implementation-input"
-    },
-    "TAURI-SERVICE-PARITY": {
-      "producerDocument": "MCOMP-12",
       "owner": "maestro",
       "proofClass": "qualified-evidence"
     },
@@ -7894,12 +7867,12 @@
       "owner": "maestro",
       "proofClass": "qualified-evidence"
     },
-    "MAESTRO-TAURI-DESKTOP-BUILD": {
+    "MAESTRO-DESKTOP-APP-BUILD": {
       "producerDocument": "MCOMP-25",
       "owner": "maestro",
       "proofClass": "implementation-input"
     },
-    "MAESTRO-TAURI-DESKTOP": {
+    "MAESTRO-DESKTOP-APP": {
       "producerDocument": "MCOMP-26",
       "owner": "maestro",
       "proofClass": "qualified-evidence"
@@ -7939,12 +7912,12 @@
       "owner": "maestro",
       "proofClass": "implementation-input"
     },
-    "MAESTRO-TAURI-MACOS-BUILD": {
+    "MAESTRO-APP-MACOS-BUILD": {
       "producerDocument": "MCOMP-31",
       "owner": "maestro",
       "proofClass": "implementation-input"
     },
-    "MAESTRO-TAURI-WINDOWS-BUILD": {
+    "MAESTRO-APP-WINDOWS-BUILD": {
       "producerDocument": "MCOMP-31",
       "owner": "maestro",
       "proofClass": "implementation-input"
@@ -7969,12 +7942,12 @@
       "owner": "maestro",
       "proofClass": "qualified-evidence"
     },
-    "MAESTRO-TAURI-MACOS": {
+    "MAESTRO-APP-MACOS": {
       "producerDocument": "MCOMP-32",
       "owner": "maestro",
       "proofClass": "qualified-evidence"
     },
-    "MAESTRO-TAURI-WINDOWS": {
+    "MAESTRO-APP-WINDOWS": {
       "producerDocument": "MCOMP-32",
       "owner": "maestro",
       "proofClass": "qualified-evidence"
@@ -8015,23 +7988,50 @@
       "GCOMP-01-02",
       "GCOMP-01-03",
       "GCOMP-01-04",
+      "GCOMP-01-04A",
       "GCOMP-01-05",
+      "GCOMP-01-05A",
       "GCOMP-01-06",
       "GCOMP-01-07",
+      "GCOMP-01-08R1",
+      "GCOMP-01-08R2",
+      "GCOMP-01-08D01",
+      "GCOMP-01-08D02",
+      "GCOMP-01-08D03",
+      "GCOMP-01-08D04",
+      "GCOMP-01-08D05",
+      "GCOMP-01-08D06",
+      "GCOMP-01-08D07",
+      "GCOMP-01-08D08",
+      "GCOMP-01-08D09",
+      "GCOMP-01-08D10",
+      "GCOMP-01-08D11",
+      "GCOMP-01-08D12",
+      "GCOMP-01-08D13",
+      "GCOMP-01-08D14",
+      "GCOMP-01-08D15",
+      "GCOMP-01-08D16",
+      "GCOMP-01-08D17",
+      "GCOMP-01-08D18",
+      "GCOMP-01-08D19",
+      "GCOMP-01-08E",
       "GCOMP-01-08",
       "GCOMP-02-01",
       "MCOMP-01-01",
       "MCOMP-01-02",
       "MCOMP-01-02A",
-      "MCOMP-01-02B",
       "MCOMP-01-02C",
+      "MCOMP-01-02B",
       "MCOMP-01-04",
       "MCOMP-01-05",
       "MCOMP-02-01",
       "MCOMP-03-01",
       "MCOMP-03-02",
       "MCOMP-03-03",
+      "MCOMP-03-03A",
       "MCOMP-03-04",
+      "MCOMP-03-04A",
+      "MCOMP-03-05A",
       "MCOMP-03-05",
       "MCOMP-04-01"
     ],
@@ -8057,10 +8057,6 @@
       "GCOMP-06-07",
       "GCOMP-06-08",
       "GCOMP-06-09",
-      "MCOMP-05-04",
-      "MCOMP-05-06",
-      "MCOMP-05-07",
-      "MCOMP-05-08",
       "MCOMP-09-03",
       "MCOMP-09-04",
       "MCOMP-09-04A",
@@ -8080,9 +8076,33 @@
       "GCOMP-01-02",
       "GCOMP-01-03",
       "GCOMP-01-04",
+      "GCOMP-01-04A",
       "GCOMP-01-05",
+      "GCOMP-01-05A",
       "GCOMP-01-06",
       "GCOMP-01-07",
+      "GCOMP-01-08R1",
+      "GCOMP-01-08R2",
+      "GCOMP-01-08D01",
+      "GCOMP-01-08D02",
+      "GCOMP-01-08D03",
+      "GCOMP-01-08D04",
+      "GCOMP-01-08D05",
+      "GCOMP-01-08D06",
+      "GCOMP-01-08D07",
+      "GCOMP-01-08D08",
+      "GCOMP-01-08D09",
+      "GCOMP-01-08D10",
+      "GCOMP-01-08D11",
+      "GCOMP-01-08D12",
+      "GCOMP-01-08D13",
+      "GCOMP-01-08D14",
+      "GCOMP-01-08D15",
+      "GCOMP-01-08D16",
+      "GCOMP-01-08D17",
+      "GCOMP-01-08D18",
+      "GCOMP-01-08D19",
+      "GCOMP-01-08E",
       "GCOMP-01-08",
       "GCOMP-02-01",
       "GCOMP-04-01",
@@ -8191,7 +8211,10 @@
       "MCOMP-03-01",
       "MCOMP-03-02",
       "MCOMP-03-03",
+      "MCOMP-03-03A",
       "MCOMP-03-04",
+      "MCOMP-03-04A",
+      "MCOMP-03-05A",
       "MCOMP-03-05",
       "MCOMP-04-01",
       "GCOMP-04-01",
@@ -8280,10 +8303,6 @@
       "GCOMP-28-01"
     ],
     "M-03": [
-      "MCOMP-05-04",
-      "MCOMP-05-08",
-      "MCOMP-11-04",
-      "MCOMP-11-07",
       "MCOMP-13-01",
       "MCOMP-13-02",
       "MCOMP-13-03",
@@ -8436,7 +8455,8 @@
       "MCOMP-01-05",
       "MCOMP-02-01",
       "MCOMP-03-02",
-      "MCOMP-03-05"
+      "MCOMP-03-05",
+      "MCOMP-33-00"
     ],
     "QUAL-01": [
       "GCOMP-06-01",
@@ -8628,25 +8648,8 @@
       "GCOMP-30-01"
     ],
     "M-06": [
-      "MCOMP-05-01",
-      "MCOMP-05-02",
-      "MCOMP-05-03",
-      "MCOMP-05-04",
-      "MCOMP-05-05",
-      "MCOMP-05-06",
-      "MCOMP-05-07",
-      "MCOMP-05-08",
-      "MCOMP-06-01",
       "MCOMP-07-02",
       "MCOMP-07-05",
-      "MCOMP-11-01",
-      "MCOMP-11-02",
-      "MCOMP-11-03",
-      "MCOMP-11-04",
-      "MCOMP-11-05",
-      "MCOMP-11-06",
-      "MCOMP-11-07",
-      "MCOMP-12-01",
       "MCOMP-15-01",
       "MCOMP-15-02",
       "MCOMP-15-03",
@@ -8693,7 +8696,7 @@
     {
       "id": "desktop-dispatch",
       "required": true,
-      "outcome": "Actual desktop Tauri trusted-host child route using a declared safe fixture provider, plus denied stale authority",
+      "outcome": "Actual desktop (Electron main process) trusted-host child route using a declared safe fixture provider, plus denied stale authority",
       "verificationTask": "MCOMP-34-01"
     },
     {
@@ -8764,7 +8767,7 @@
     },
     {
       "id": "GUI-03",
-      "outcome": "Actual Tauri desktop interactive chat, tabs, run controls and policy-authorized automation work with observed effects and central receipts",
+      "outcome": "Actual Maestro desktop interactive chat, tabs, run controls and policy-authorized automation work with observed effects and central receipts",
       "required": true,
       "verificationTask": "MCOMP-34-01"
     },
@@ -8792,5 +8795,17 @@
     "Production signing/notarization, customer IdP/accounts and optional paid live-model validation."
   ],
   "runtimeEvidenceValidated": false,
-  "launched": false
+  "launched": false,
+  "amendments": [
+    {
+      "date": "2026-11-05",
+      "summary": "Maestro has no Tauri target: its desktop host is Electron. Retired MCOMP-05, MCOMP-06, MCOMP-11 and MCOMP-12 (Tauri host and Tauri service parity), removed the TAURI-HOST-BASELINE and TAURI-SERVICE-PARITY receipts from every task and stage, renamed MAESTRO-TAURI-DESKTOP, -MACOS and -WINDOWS to MAESTRO-DESKTOP-APP, MAESTRO-APP-MACOS and MAESTRO-APP-WINDOWS, and retargeted the src-tauri paths onto the existing Electron modules. Reconciled the two manifest copies. Inserted the GCOMP-01-08D and GCOMP-01-08E continuations (delivery of the draft application closure) and MCOMP-33-00 (upstream refresh).",
+      "retiredDocuments": [
+        "MCOMP-05",
+        "MCOMP-06",
+        "MCOMP-11",
+        "MCOMP-12"
+      ]
+    }
+  ]
 }
