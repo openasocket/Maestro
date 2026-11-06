@@ -1842,6 +1842,66 @@ describe('web-server/web-server-factory', () => {
 				tabName: undefined,
 			});
 		});
+
+		it('setNewAITabWithPromptCallback relays the dispatch slots after hidden in order (MCOMP-01-03J wire)', async () => {
+			const server = createWebServerFactory(deps)() as any;
+			const callback = server.setNewAITabWithPromptCallback.mock.calls[0][0];
+			const delegation = { contractVersion: '1.0', traceId: 'trace-1' };
+
+			const pending = callback(
+				'session-1',
+				'consult @Backend',
+				true,
+				false,
+				'consult-first',
+				delegation,
+				'tkt-tab-1'
+			);
+			const request = (mockWebContents.send as ReturnType<typeof vi.fn>).mock.calls.find(
+				(call: unknown[]) => call[0] === 'remote:newAITabWithPrompt'
+			);
+			expect(request?.slice(1)).toEqual([
+				'session-1',
+				'consult @Backend',
+				expect.stringMatching(/^remote:newAITabWithPrompt:response:/),
+				true,
+				false,
+				'consult-first',
+				delegation,
+				'tkt-tab-1',
+			]);
+			const respond = vi
+				.mocked(ipcMain.once)
+				.mock.calls.find((call) => call[0] === request?.[3])?.[1];
+			respond?.({} as any, { success: true, tabId: 'tab-9' });
+			await expect(pending).resolves.toEqual({ success: true, tabId: 'tab-9' });
+		});
+
+		it('setNewAITabWithPromptCallback leaves the three dispatch slots undefined for a plain tab', async () => {
+			const server = createWebServerFactory(deps)() as any;
+			const callback = server.setNewAITabWithPromptCallback.mock.calls[0][0];
+
+			const pending = callback('session-1', 'hello', false);
+			const request = (mockWebContents.send as ReturnType<typeof vi.fn>).mock.calls.find(
+				(call: unknown[]) => call[0] === 'remote:newAITabWithPrompt'
+			);
+			expect(request?.slice(1)).toEqual([
+				'session-1',
+				'hello',
+				expect.any(String),
+				false,
+				undefined,
+				undefined,
+				undefined,
+				undefined,
+			]);
+			expect(request).toHaveLength(9);
+			const respond = vi
+				.mocked(ipcMain.once)
+				.mock.calls.find((call) => call[0] === request?.[3])?.[1];
+			respond?.({} as any, true);
+			await expect(pending).resolves.toEqual({ success: true });
+		});
 	});
 
 	describe('queueCallbacks smoke', () => {
