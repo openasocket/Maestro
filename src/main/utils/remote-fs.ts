@@ -696,7 +696,12 @@ export async function readFileInRootRemote(
 		`[ "$s" -le ${Math.max(0, Math.floor(maxBytes))} ] || exit ${tooLarge}; ` +
 		`cat "$f"`;
 
-	const result = await execRemoteCommand(sshRemote, remoteCommand, deps);
+	const result = await execRemoteCommand(
+		sshRemote,
+		remoteCommand,
+		read('readFileInRoot', path.posix.join(root, relPath)),
+		deps
+	);
 	switch (result.exitCode) {
 		case 0:
 			return { success: true, data: result.stdout };
@@ -1114,7 +1119,12 @@ export async function findAncestorWithDirRemote(
 		`d=$p; ` +
 		`done`;
 
-	const result = await execRemoteCommand(sshRemote, remoteCommand, deps);
+	const result = await execRemoteCommand(
+		sshRemote,
+		remoteCommand,
+		read('findAncestorWithDir', startDir),
+		deps
+	);
 
 	if (result.exitCode !== 0) {
 		return {
@@ -1829,7 +1839,12 @@ export async function listFilesWithStatsRemote(
 		`find -L . -mindepth 1 ${pruneClause}-type f -exec stat -L "$o" "$f" {} + 2>/dev/null; ` +
 		`exit 0`;
 
-	const result = await execRemoteCommand(sshRemote, remoteCommand, deps);
+	const result = await execRemoteCommand(
+		sshRemote,
+		remoteCommand,
+		read('listFilesWithStats', rootPath),
+		deps
+	);
 
 	if (result.exitCode !== 0) {
 		return {

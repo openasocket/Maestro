@@ -157,13 +157,11 @@ async function runStreamingGitCommand(
 	const refused = await holdGitCommand(gitArgs, target);
 	if (refused) {
 		pendingGitCancels.delete(runId);
-		if (!event.sender.isDestroyed()) {
-			event.sender.send('git:commandOutput', {
-				runId,
-				stream: 'stderr',
-				chunk: `${refused.stderr}\n`,
-			});
-		}
+		sendToInvoker(event, 'git:commandOutput', {
+			runId,
+			stream: 'stderr',
+			chunk: `${refused.stderr}\n`,
+		});
 		return {
 			success: false,
 			exitCode: refused.exitCode,
