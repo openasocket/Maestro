@@ -138,9 +138,9 @@
 	],
 	"tool": ".maestro/playbooks/Working/mcomp-01-03/merge-tool.mjs (verbs start, status, show, log, stage, link-modules; not in git)",
 	"status": {
-		"state": "tested: the merge 7c7e13ecb with the repairs 553a7d4e5 (type-check) and 26fd422fd (two suites) on integrate/upstream-rc-3c85691 passes eslint, docs:verify, the 340 touched suites and the full suite except the contracts pin case MCOMP-01-03T re-pins (progress.MCOMP-01-03R); the lockfile reads up to date; RA and RB add the recorded permanent cases, S lands, T re-pins and closes",
-		"updatedAt": "2026-11-06T06:25:47.662Z",
-		"updatedBy": "MCOMP-01-03RB"
+		"state": "landed: the integration branch merged into feature/mega-maestro-v1.1.0-rc at e97ebd3ca (one start-turn.ts conflict kept both sides); the effect and credential rescan reads clean except one upstream plugin TLS egress bypass left to MCOMP-01-03SA; the worktree and its agent are removed; T re-pins and closes",
+		"updatedAt": "2026-11-06T06:33:35.604Z",
+		"updatedBy": "MCOMP-01-03S"
 	},
 	"progress": {
 		"MCOMP-01-03A": {
@@ -1171,6 +1171,105 @@
 				"03E: exact-copy authority guard (export and tampered local.json import)",
 				"03F: execution claim on the managed seams (lifecycle and startTurn)"
 			]
+		},
+		"MCOMP-01-03S": {
+			"doneAt": "2026-11-06",
+			"doneBy": "Maestro-Claude",
+			"landing": {
+				"commit": "e97ebd3cabc62c5bab19f96a172f821eb922b350",
+				"parents": {
+					"feature": "6ac3a4694e632064b1716a6f36223480772a9468",
+					"integration": "57f42978b1d98fdc092c1e5477a88fd9f92c7115"
+				},
+				"command": "git merge --no-ff --no-commit integrate/upstream-rc-3c85691, then commit --no-verify (commit.gpgsign=false)",
+				"diffStatAgainstFeatureParent": "1026 files changed, 89136 insertions(+), 8295 deletions(-)",
+				"featureMovedSinceCut": {
+					"cutAt": "03a65a9a6f5dee871f4de795605fdbac97fb9522",
+					"commits": 38,
+					"nonPlansFiles": 14,
+					"note": "MCOMP-03-04A, 03-05A, MCOMP-09-01, 09-02, 09-02A, 09-04, 09-04A and coordination commits; everything under Plans/ and every other file auto-merged except one"
+				},
+				"conflicts": [
+					{
+						"file": "src/shared/maestro-lib/run/start-turn.ts",
+						"sides": "feature: startTurn spawns the frozen final spec (MCOMP-09-02 freezeTurnProcessSpec); integration: the spawn wrapped in the synchronous-nonstart guard (gate.released spawn-failed, TurnNotStartedError, 03F)",
+						"resolution": "kept both: the guarded spawn reads final.command, final.args, final.cwd, final.env, final.shell; prettier --check and eslint clean",
+						"whyNotAContinuation": "the two hunks touch the same five lines with compatible intents and one mechanical union; leaving the main checkout mid-merge for a continuation would have blocked every other run on the branch"
+					}
+				],
+				"autoMerged": [
+					"CLAUDE.md",
+					"docs/agent-guides/CANONICAL-UTILITIES.md",
+					"src/shared/maestro-lib/runtime/server-requests.ts",
+					"src/shared/maestro-lib/runtime/turns.ts",
+					"src/shared/maestro-lib/turns/run-agent-turn.ts"
+				]
+			},
+			"install": "npm install --ignore-scripts --no-audit --no-fund in the main checkout: exit 0; @napi-rs/keyring 2.0.0, luxon, papaparse, parsimmon, remove-markdown present; electron/dist and better-sqlite3/build kept (Electron version unchanged); package-lock.json rewritten by key order only (20/20 lines) and restored with git checkout",
+			"rescan": {
+				"tsc": {
+					"lint": "exit 2, 1 error: the pre-existing src/main/plugins/plugin-host-handlers.ts(1205,76) TS2339 dispatcher on RequestInit",
+					"main": 0,
+					"cli": 0
+				},
+				"suites": {
+					"inventoryAndGuards": {
+						"files": 86,
+						"tests": 2457,
+						"passed": 2455,
+						"failed": 0,
+						"skipped": 2,
+						"selection": "the 79 test files named in Plans/mega-maestro-rc/evidence/p2-sink-inventory.json (all exist) plus leak-guard.test.ts, redaction-canaries.test.ts, redactSecrets.managed.test.ts and the suites of the conflicted and auto-merged maestro-lib files (start-turn, run-agent-turn, host-managed, built-entry, full-pair, consults): 86 files"
+					},
+					"runtimeAndManaged": {
+						"files": 34,
+						"tests": 629,
+						"passed": 628,
+						"failed": 1,
+						"skipped": 0,
+						"selection": "every test file under the maestro-lib runtime and managed test folders: 34 files",
+						"failure": "contracts.test.ts \"the committed runtime pin names this source\": the pin carries app 1.1.0-RC and library 0.35.0, the merged package.json is 1.1.1-RC; the re-pin of MCOMP-01-03T cures it (same reading as 03R)"
+					}
+				},
+				"handoff": {
+					"via": "buildHandoff({}) from scripts/write-mega-maestro-handoff.mjs, nothing written (Working/mcomp-01-03s/scan.mjs)",
+					"findAbsolutePaths": [],
+					"findCanaries": [],
+					"revision": "e97ebd3cabc62c5bab19f96a172f821eb922b350",
+					"libraryStatus": "stale"
+				},
+				"pairCheck": {
+					"command": "node scripts/mega-maestro-pair.mjs check",
+					"exit": 2,
+					"reading": "not ready, as before the merge: maestro-lib stale (rebuilt by the 03T re-pin), CP-01, CP-02 and CP-03 open on the Mega-Maestro side (no clean contracts artifact, adapter or workflow authority pin)"
+				},
+				"newSinks": {
+					"method": "added lines in non-test src/ between the feature parent and the landing (Working/mcomp-01-03s/sinks.mjs: spawn, shell, socket/HTTP, credential patterns), each hit read at its call site",
+					"bypasses": [
+						{
+							"sink": "src/main/plugins/plugin-tls.ts PluginTlsHost (net.tlsOpen): tls.connect to a consented endpoint",
+							"seams": "held by the broker (plugin-sandbox-host authorize, the managed plugin ceiling over net:tls) and the plugin SSRF EgressGuard",
+							"bypassed": "the desktop egress ceiling (holdEgress, class plugin), which net.fetch reaches through fetchWithTimeout, and the managed plugin binding requirePluginBinding(spawnAuthority) that net.connect checks",
+							"continuation": "MCOMP-01-03SA"
+						}
+					],
+					"reviewedNotBypass": [
+						"src/shared/maestro-lib/run/start-turn.ts spawn: the resolved conflict, after sinkStandingRefusal and the admission gate",
+						"src/main/plugins/plugin-private-state.ts secrets: values live in the OS keyring (protected custody), every method is broker-authorized under secrets:use and the plugin ceiling",
+						"src/main/utils/keyring.ts: one loader over @napi-rs/keyring now shared with keyring-anchor.ts, no new credential",
+						"every other hit is a regex .exec, a SQLite db.exec or an *Entry identifier"
+					]
+				}
+			},
+			"removal": {
+				"worktree": "/Users/dr3/dev-shit/worktrees/integrate/upstream-rc-3c85691",
+				"head": "57f42978b1d98fdc092c1e5477a88fd9f92c7115 (an ancestor of the landing)",
+				"steps": "worktree status clean; the real node_modules removed with fs.rmSync (the electron/dist link unlinked, the main checkout electron/dist unchanged); git worktree remove exit 0; maestro-cli remove-agent bad3ab78-a03f-44d4-974f-76482fa28455 success, absent from list agents",
+				"branch": "integrate/upstream-rc-3c85691 kept as a local ref (not pushed, merged)"
+			},
+			"continuationsInserted": {
+				"MCOMP-01-03SA": "hold the plugin TLS primitive (net.tlsOpen) at the desktop egress ceiling as class plugin and on the managed plugin binding net.connect checks, before tls.connect"
+			}
 		}
 	}
 }
