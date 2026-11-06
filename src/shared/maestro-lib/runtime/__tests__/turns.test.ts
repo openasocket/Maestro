@@ -10,7 +10,7 @@ import { createHash } from 'node:crypto';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
 	CAPTURED_RECORDINGS,
@@ -19,6 +19,7 @@ import {
 } from '../../../../__tests__/main/process-manager/recordings/captured';
 import {
 	FAKE_AGENT_PATH,
+	fakeAgentSpec,
 	fakeTurnFromRecording,
 	writeFakeTurn,
 } from '../../../../__tests__/shared/maestro-lib/run/fakeAgent';
@@ -29,7 +30,12 @@ import {
 	type HostAuthority,
 	type PolicyDecision,
 } from '../../managed/authority';
-import { createManagedBinding } from '../../managed/binding';
+import {
+	createManagedBinding,
+	readManagedBindingFile,
+	type InstallationStanding,
+	type InstallationStandingSource,
+} from '../../managed/binding';
 import { inProcessContext } from '../../managed/operations';
 import {
 	MANAGED_CONTRACT_VERSION,
@@ -38,6 +44,12 @@ import {
 	type ManagedRunIdentity,
 	type ManagedSubmitInput,
 } from '../../managed/types';
+import {
+	DispatchRefusedError,
+	startTurn,
+	turnSinkStanding,
+	type StartTurnOptions,
+} from '../../run/start-turn';
 import { readHistory } from '../../store/read-history';
 import { runAgentTurn, type RunAgentTurnOptions } from '../../turns/run-agent-turn';
 import { RUNTIME_LOCK_FILE_NAME } from '../data-dir-lock';
@@ -514,7 +526,8 @@ describe('runtime turns', () => {
 
 		async function startManaged(
 			authority: HostAuthority | null = managedAuthority(),
-			extra: Partial<RuntimeDeps> = {}
+			extra: Partial<RuntimeDeps> = {},
+			standing?: InstallationStandingSource
 		) {
 			fs.writeFileSync(
 				path.join(dir, 'maestro-sessions.json'),
@@ -525,7 +538,14 @@ describe('runtime turns', () => {
 				mode: 'tui',
 				deps: { ...deps(), ...extra },
 				turns: { bundledPromptsDir: BUNDLED_PROMPTS },
-				...(authority ? { managed: { authority } } : {}),
+				...(authority || standing
+					? {
+							managed: {
+								...(authority ? { authority } : {}),
+								...(standing ? { standing } : {}),
+							},
+						}
+					: {}),
 			});
 			if (!started.ok) throw new Error(`refused: ${started.refusal.message}`);
 			open.push(started.runtime);
@@ -1095,6 +1115,218 @@ describe('runtime turns', () => {
 				],
 			});
 			expect(runtime.turnsInFlight()).toBe(0);
+		});
+
+		/** Enroll the data directory on disk the way the desktop would, for `fleet-authority`. */
+		async function enrollDir(installationId: string, authority: HostAuthority) {
+			const binding = createManagedBinding({
+				paths: { userDataDir: dir, productionDataDir: dir },
+				fence: () => ({ ok: true }),
+				authority,
+				now: () => T0,
+			});
+			const enrolled = await binding.enroll({
+				installationId,
+				authorityId: 'fleet-authority',
+				endpointRef: 'ep',
+				policySources: [],
+				policyRevision: 1,
+			});
+			if (!enrolled.ok) throw new Error(`enroll failed: ${enrolled.message}`);
+		}
+
+		let bare = 0;
+		function bareTurn() {
+			const argvOut = path.join(work, `bare-${++bare}.json`);
+			const spec = fakeAgentSpec(
+				work,
+				fakeTurnFromRecording(CAPTURED_RECORDINGS['captured-claude-code-normal']),
+				{ argvOut }
+			);
+			return {
+				argvOut,
+				run: (options: Partial<StartTurnOptions> = {}) =>
+					startTurn(spec, {}, { stopGraceMs: 200, ...options }),
+			};
+		}
+		/** A bare `startTurn` nobody admitted is refused before a child exists: no argv file, even later. */
+		async function expectNoChild(argvOut: string) {
+			await new Promise((resolve) => setTimeout(resolve, 150));
+			expect(fs.existsSync(argvOut)).toBe(false);
+		}
+
+		const runDetails = () => JSON.stringify(journalRuns());
+
+		it('journals a managed item withdrawn by a queue edit or a closed tab as cancelled, with nothing spawned (MCOMP-09-01)', async () => {
+			const authority = managedAuthority();
+			const runtime = await startManaged(authority);
+			await enrollDir(runtime.installation.installationId, authority);
+			expect(runtime.managedBinding.reload()).toMatchObject({ state: 'enrolled' });
+			const turn = watch(runtime);
+			hold = true;
+			value(await runtime.turns.send('a1', 't1', { text: 'running' }));
+			await turn.started();
+			const queued = value(await runtime.turns.send('a1', 't1', { text: 'removed by a client' }));
+			if (queued.status !== 'queued') throw new Error('expected queued');
+			// A write on another tab waits too: the tabs share a working directory.
+			const other = value(await runtime.turns.send('a1', 't2', { text: 'its tab is closed' }));
+			expect(other.status).toBe('queued');
+
+			expect(value(await runtime.turns.queue.remove('a1', queued.itemId))).toEqual({
+				removed: true,
+			});
+			value(await runtime.tabs.close('a1', 't2'));
+			await vi.waitFor(() =>
+				expect(journalRuns().filter((run) => run.state === 'cancelled')).toHaveLength(2)
+			);
+			expect(runDetails()).toContain(
+				'Removed from the queue by a client before it was dispatched.'
+			);
+			expect(runDetails()).toContain('The tab was closed before it was dispatched.');
+			expect(value(await runtime.turns.queue.list('a1'))).toEqual([]);
+
+			value(await runtime.turns.interrupt('a1', 't1'));
+			await turn.outcome();
+			expect(argvFiles).toHaveLength(1);
+		});
+
+		it('drops a managed item at the dequeue when its agent switched provider while it waited (MCOMP-09-01)', async () => {
+			const authority = managedAuthority();
+			const runtime = await startManaged(authority);
+			await enrollDir(runtime.installation.installationId, authority);
+			runtime.managedBinding.reload();
+			const turn = watch(runtime);
+			hold = true;
+			value(await runtime.turns.send('a1', 't1', { text: 'running' }));
+			await turn.started();
+			hold = false;
+			const queued = value(await runtime.turns.send('a1', 't1', { text: 'admitted on claude' }));
+			expect(queued.status).toBe('queued');
+			value(await runtime.agents.update('a1', { provider: 'opencode' }));
+
+			value(await runtime.turns.interrupt('a1', 't1'));
+			await turn.outcome();
+			await turn.saw('error');
+			expect(JSON.stringify(turn.events)).toContain('dropped from the queue');
+			expect(runDetails()).toContain('admitted for provider claude-code');
+			expect(value(await runtime.turns.queue.list('a1'))).toEqual([]);
+			// The provider layer was asked once, for the turn before the switch; never for the dropped item.
+			expect(argvFiles).toHaveLength(1);
+		});
+
+		it('installs the host standing at the spawn sink: an omitted or forged admission spawns nothing while enrolled, a standalone runtime runs a bare turn (MCOMP-09-02/02A)', async () => {
+			// The explicit standalone positive regression.
+			const authority = managedAuthority();
+			const plain = await startManaged(authority);
+			expect(turnSinkStanding()!.standing()).toBe('standalone');
+			const allowed = bareTurn();
+			expect((await allowed.run().done).exitCode).toBe(0);
+			expect(fs.existsSync(allowed.argvOut)).toBe(true);
+
+			// The enrollment lands; the sink reads it on the next call.
+			await enrollDir(plain.installation.installationId, authority);
+			expect(plain.managedBinding.reload()).toMatchObject({ state: 'enrolled' });
+			expect(turnSinkStanding()!.standing()).toBe('managed');
+			expect(turnSinkStanding()!.authorityId()).toBe('fleet-authority');
+			const omitted = bareTurn();
+			expect(() => omitted.run()).toThrow(DispatchRefusedError);
+			expect(() => omitted.run()).toThrow(
+				expect.objectContaining({
+					code: 'runtime-unavailable',
+					message: expect.stringContaining('carries no admission'),
+				})
+			);
+			await expectNoChild(omitted.argvOut);
+			// A hand-rolled gate is not one the authority minted (the gate is checked before anything else).
+			const forged = bareTurn();
+			const gate = { admit: () => ({ ok: true }) };
+			expect(() => forged.run({ admission: { gate, attribution: {} } as never })).toThrow(
+				DispatchRefusedError
+			);
+			await expectNoChild(forged.argvOut);
+			// Normal send in the same process still runs, on a lease the dequeue minted.
+			const turn = watch(plain);
+			value(await plain.turns.send('a1', 't1', { text: 'admitted' }));
+			await turn.outcome();
+			expect(ran()).toHaveLength(1);
+
+			// An enrolled runtime nothing answers for holds the sink managed with no authority.
+			await plain.connection.close();
+			open = open.filter((runtime) => runtime !== plain);
+			const orphan = await startManaged(null);
+			expect(orphan.managedBinding.state()).toMatchObject({ state: 'enrolled-unavailable' });
+			expect(turnSinkStanding()!.standing()).toBe('managed');
+			expect(turnSinkStanding()!.authorityId()).toBeNull();
+			const unanswered = bareTurn();
+			expect(() => unanswered.run()).toThrow(DispatchRefusedError);
+			await expectNoChild(unanswered.argvOut);
+			// Shutdown releases the install.
+			await orphan.connection.close();
+			open = open.filter((runtime) => runtime !== orphan);
+			expect(turnSinkStanding()).toBeNull();
+		});
+
+		it('holds the binding to an injected custody standing: enrolled with no binding file, deleting the mirror releases nothing, a standalone custody removes a stale mirror (MCOMP-09-04A)', async () => {
+			const authority = managedAuthority();
+			const probe = await startManaged(null);
+			const installationId = probe.installation.installationId;
+			await probe.connection.close();
+			open = open.filter((runtime) => runtime !== probe);
+			const mirror = path.join(dir, 'maestro-managed-binding.json');
+			let custody: InstallationStanding = {
+				standing: 'managed',
+				enrollment: {
+					installationId,
+					authorityId: 'fleet-authority',
+					endpointRef: 'ep',
+					policySources: [],
+					policyRevision: 1,
+					enrolledAt: new Date(T0).toISOString(),
+				},
+				management: 'enrolled',
+				detail: 'the custody enrolls this installation',
+			};
+			const standing: InstallationStandingSource = { read: () => custody };
+			expect(fs.existsSync(mirror)).toBe(false);
+
+			const runtime = await startManaged(authority, {}, standing);
+			expect(runtime.managedBinding.state()).toMatchObject({
+				state: 'enrolled',
+				record: { installationId, authorityId: 'fleet-authority' },
+			});
+			expect(readManagedBindingFile(mirror)).toMatchObject({ status: 'ok' });
+			fs.unlinkSync(mirror);
+			expect(runtime.managedBinding.reload()).toMatchObject({ state: 'enrolled' });
+			const omitted = bareTurn();
+			expect(() => omitted.run()).toThrow(DispatchRefusedError);
+			await expectNoChild(omitted.argvOut);
+			await runtime.connection.close();
+			open = open.filter((candidate) => candidate !== runtime);
+
+			// A record held but unreadable: managed and unavailable, no mirror written.
+			custody = {
+				standing: 'managed',
+				enrollment: null,
+				management: null,
+				detail: 'the record is present and cannot be opened here',
+			};
+			const held = await startManaged(authority, {}, standing);
+			expect(held.managedBinding.state()).toMatchObject({ state: 'unreadable' });
+			expect(fs.existsSync(mirror)).toBe(false);
+			const plain = errorOf(await held.turns.send('a1', 't1', { text: 'plain' }));
+			expect(plain.message).toContain('[managed-unavailable]');
+			expect(ran()).toEqual([]);
+			await held.connection.close();
+			open = open.filter((candidate) => candidate !== held);
+
+			// Released by the custody: a stale mirror goes, and a bare turn runs as before.
+			await enrollDir(installationId, authority);
+			custody = { standing: 'standalone', detail: 'released' };
+			const released = await startManaged(authority, {}, standing);
+			expect(released.managedBinding.state()).toMatchObject({ state: 'standalone' });
+			expect(fs.existsSync(mirror)).toBe(false);
+			const allowed = bareTurn();
+			expect((await allowed.run().done).exitCode).toBe(0);
 		});
 
 		it('lists agents in bounded pages and reports the actor it verified', async () => {

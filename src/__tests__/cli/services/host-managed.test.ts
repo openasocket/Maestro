@@ -14,6 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
 	composeHostManaged,
 	createHeldHostAdapter,
+	createHostInstallationStanding,
 	HOST_ANCHOR_UNAVAILABLE_REASON,
 	HOST_SEAL_UNAVAILABLE_REASON,
 	resolveHostCustody,
@@ -21,10 +22,14 @@ import {
 } from '../../../cli/services/host-managed';
 import { createEnterpriseIdentityStore } from '../../../main/enterprise/identity-store';
 import { obscuringSeal } from '../../../main/utils/safe-storage-seal';
-import type { Anchor } from '../../../main/utils/keyring-anchor';
+import type { Anchor, AnchorStore } from '../../../main/utils/keyring-anchor';
 import {
+	bindingEnrollment,
+	createLocalHostAuthority,
 	createManagedBinding,
 	installationIdentity,
+	managedAuthorityId,
+	type ManagedIdentityRecord,
 	type InstallationStanding,
 	type InstallationStandingSource,
 } from '../../../shared/maestro-lib';
@@ -406,5 +411,206 @@ describe('composeHostManaged', () => {
 		await enrolled.lifecycle.close();
 		expect(enrolled.status()).toMatchObject({ authority: 'none', connection: null });
 		expect(enrolled.identity.read()).toMatchObject({ status: 'ok' });
+	});
+});
+
+describe('createHostInstallationStanding: custody failure keeps the standing managed (MCOMP-09-06)', () => {
+	let dir: string;
+	let alt: string;
+	let holders: Map<string, { value: Anchor | null }>;
+	/** One fake anchor per resolved directory: never the developer's keyring. */
+	const anchorFor = (d: string): AnchorStore => {
+		const key = path.resolve(d);
+		let held = holders.get(key);
+		if (!held) {
+			held = { value: null };
+			holders.set(key, held);
+		}
+		return fakeAnchor(held);
+	};
+	const custodyFor = (d: string): HostCustodyRead => ({
+		ok: true,
+		seal: fakeSeal(),
+		anchor: anchorFor(d),
+	});
+	const REFUSED: HostCustodyRead = { ok: false, reason: HOST_SEAL_UNAVAILABLE_REASON };
+	const identityFile = (d: string) => path.join(d, 'enterprise-identity.bin');
+
+	async function seal(d: string, management: ManagedIdentityRecord['management'] = 'enrolled') {
+		const store = createEnterpriseIdentityStore({
+			file: identityFile(d),
+			seal: fakeSeal(),
+			anchor: anchorFor(d),
+			platform: 'darwin',
+			now: () => NOW,
+		});
+		return store.write({
+			installationId: 'inst-1',
+			tenantId: 'tenant-1',
+			orgId: 'org-1',
+			enrollmentId: 'enr-1',
+			endpoint: {
+				socketPath: '/tmp/endpoint.sock',
+				bindingDigest: 'a'.repeat(64),
+				trustRootDigest: null,
+			},
+			management,
+			registration: null,
+			policy: { desiredRevision: 2, appliedRevision: 2, observedAt: null },
+			enrolledAt: new Date(NOW).toISOString(),
+		});
+	}
+	const authorityWithId = (authorityId: string) =>
+		createLocalHostAuthority({
+			authorityId,
+			decide: () => ({ decision: 'allow', policyRevision: 2 }),
+			now: () => NOW,
+			newId: () => 'lease',
+		});
+	const bindingOver = (standing: InstallationStandingSource, authorityId?: string) =>
+		createManagedBinding({
+			paths: { userDataDir: dir, productionDataDir: dir },
+			fence: () => ({ ok: true as const }),
+			...(authorityId ? { authority: authorityWithId(authorityId) } : {}),
+			standing,
+			now: () => NOW,
+		});
+
+	beforeEach(() => {
+		dir = fs.mkdtempSync(path.join(os.tmpdir(), 'host-standing-'));
+		alt = fs.mkdtempSync(path.join(os.tmpdir(), 'host-standing-alt-'));
+		holders = new Map();
+	});
+	afterEach(() => {
+		fs.rmSync(dir, { recursive: true, force: true });
+		fs.rmSync(alt, { recursive: true, force: true });
+	});
+
+	it('with no default seal: standalone with nothing held, managed for a sealed record with no binding file, managed for an anchor whose record is gone', async () => {
+		const standing = createHostInstallationStanding({
+			userDataDir: dir,
+			custody: REFUSED,
+			anchorFor,
+		});
+		// The explicit standalone positive regression: nothing held, the runtime runs as before.
+		expect(standing.read()).toMatchObject({ standing: 'standalone' });
+		expect(bindingOver(standing).state().state).toBe('standalone');
+
+		await seal(dir);
+		expect(fs.existsSync(path.join(dir, 'maestro-managed-binding.json'))).toBe(false);
+		expect(standing.read()).toMatchObject({
+			standing: 'managed',
+			enrollment: null,
+			detail: expect.stringContaining('cannot be opened in this process'),
+		});
+		const held = bindingOver(standing, 'fleet');
+		expect(held.state().state).toBe('unreadable');
+		expect(held.authority().authorityId).toBe('unavailable');
+
+		// The record deleted by hand while its anchor is still held.
+		fs.unlinkSync(identityFile(dir));
+		expect(standing.read()).toMatchObject({
+			standing: 'managed',
+			enrollment: null,
+			detail: expect.stringContaining('removed without the authenticated release'),
+		});
+		expect(held.reload().state).toBe('unreadable');
+	});
+
+	it('with protected custody: a forged host, revoke, rollback and anchor loss all stay managed with no authority; only retire releases', async () => {
+		const standing = createHostInstallationStanding({
+			userDataDir: dir,
+			custody: custodyFor(dir),
+			anchorFor,
+			platform: 'darwin',
+			now: () => NOW,
+		});
+		const written = await seal(dir);
+		expect(standing.read()).toMatchObject({
+			standing: 'managed',
+			management: 'enrolled',
+			enrollment: { ...bindingEnrollment(written), enrolledAt: written.enrolledAt },
+		});
+		const authorityId = managedAuthorityId(written);
+		const binding = bindingOver(standing, authorityId);
+		expect(binding.state()).toMatchObject({
+			state: 'enrolled',
+			record: { installationId: 'inst-1', authorityId },
+		});
+
+		// A forged host: an authority attached under another id is not the one the custody enrolls.
+		const forged = bindingOver(standing, 'forged-authority');
+		expect(forged.state()).toMatchObject({ state: 'enrolled-unavailable' });
+		expect(forged.authority().authorityId).toBe('unavailable');
+
+		// Revoke: still managed, and nothing answers.
+		const older = fs.readFileSync(identityFile(dir));
+		await seal(dir, 'revoked');
+		expect(standing.read()).toMatchObject({ standing: 'managed', management: 'revoked' });
+		expect(binding.reload()).toMatchObject({
+			state: 'enrolled-unavailable',
+			reason: expect.stringContaining('revoked'),
+		});
+		expect(binding.authority().authorityId).toBe('unavailable');
+
+		// The enrolled copy rolled back under the newer anchor: untrusted, managed.
+		fs.writeFileSync(identityFile(dir), older);
+		expect(standing.read()).toMatchObject({
+			standing: 'managed',
+			enrollment: null,
+			detail: expect.stringContaining('rollback'),
+		});
+		expect(binding.reload().state).toBe('unreadable');
+
+		// Anchor loss with the file present: untrusted, managed.
+		anchorFor(dir).clear();
+		expect(standing.read()).toMatchObject({
+			standing: 'managed',
+			enrollment: null,
+			detail: expect.stringContaining('anchor-missing'),
+		});
+		expect(binding.reload().state).toBe('unreadable');
+
+		// The authenticated release: a retired record reads standalone.
+		fs.unlinkSync(identityFile(dir));
+		await seal(dir, 'retired');
+		expect(standing.read()).toMatchObject({
+			standing: 'standalone',
+			detail: expect.stringContaining('retired'),
+		});
+		expect(binding.reload().state).toBe('standalone');
+	});
+
+	it('an alternate data directory under an enrolled installation stays managed, named or derived', async () => {
+		await seal(dir);
+		const named = createHostInstallationStanding({
+			userDataDir: alt,
+			productionDataDir: dir,
+			custody: custodyFor(alt),
+			anchorFor,
+			platform: 'darwin',
+		});
+		expect(named.read()).toMatchObject({ standing: 'managed', management: 'enrolled' });
+		// A `maestro-dev` directory maps to its `maestro` sibling whatever production dir is named.
+		const root = fs.mkdtempSync(path.join(os.tmpdir(), 'host-standing-root-'));
+		try {
+			const dev = path.join(root, 'maestro-dev');
+			const prod = path.join(root, 'maestro');
+			fs.mkdirSync(dev);
+			fs.mkdirSync(prod);
+			await seal(prod);
+			const derived = createHostInstallationStanding({
+				userDataDir: dev,
+				productionDataDir: alt,
+				custody: REFUSED,
+				anchorFor,
+			});
+			expect(derived.read()).toMatchObject({
+				standing: 'managed',
+				detail: expect.stringContaining(prod),
+			});
+		} finally {
+			fs.rmSync(root, { recursive: true, force: true });
+		}
 	});
 });

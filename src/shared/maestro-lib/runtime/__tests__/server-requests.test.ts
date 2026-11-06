@@ -22,6 +22,7 @@ import type {
 	TurnSendReceipt,
 } from '../../client/types';
 import { createLocalHostAuthority, type PolicyDecision } from '../../managed/authority';
+import { createManagedBinding } from '../../managed/binding';
 import { inProcessContext } from '../../managed/operations';
 import {
 	MANAGED_CAPABILITIES,
@@ -638,6 +639,56 @@ describe('managed_operation (MRC-08-05)', () => {
 		});
 		return (reply?.result as { value: { items: unknown[] } }).value.items;
 	};
+
+	it('places every bridge send on the enrolled standing: a denied submission per verb, journaled, with zero effect (MCOMP-09-02)', async () => {
+		const binding = createManagedBinding({
+			paths: { userDataDir: dir, productionDataDir: dir },
+			fence: () => ({ ok: true }),
+			authority: createLocalHostAuthority({
+				authorityId: 'fleet-authority',
+				decide: () => decision,
+				now: () => Date.now(),
+				newId: () => 'lease-x',
+			}),
+			now: () => 5_000,
+		});
+		const enrolled = await binding.enroll({
+			installationId: runtime.installation.installationId,
+			authorityId: 'fleet-authority',
+			endpointRef: 'ep',
+			policySources: [],
+			policyRevision: 1,
+		});
+		expect(enrolled.ok).toBe(true);
+		expect(runtime.managedBinding.reload()).toMatchObject({ state: 'enrolled' });
+		expect(await send('scope')).toMatchObject({ result: { binding: 'enrolled' } });
+
+		const verbs = [
+			{ type: 'send_command', sessionId: 'a1', command: 'one', inputMode: 'ai' },
+			{ type: 'enqueue_command', sessionId: 'a1', command: 'two', inputMode: 'ai' },
+			{ type: 'new_ai_tab_with_prompt', sessionId: 'a1', prompt: 'three' },
+		];
+		// Images cannot ride a managed submission: refused by name, nothing submitted.
+		const images = { ...verbs[0], command: 'four', images: ['data:image/png;base64,AAAA'] };
+		for (const [verb, refusal] of [
+			...verbs.map((verb) => [verb, '[policy-denied]'] as const),
+			[images, 'Images cannot be sent to an enrolled host'] as const,
+		]) {
+			const reply = await handle(verb);
+			expect(reply).toMatchObject({ success: false });
+			expect(String(reply?.error)).toContain(refusal);
+		}
+
+		// One failed run per verb in the journal, nothing queued, nothing running, nothing written.
+		const runs = JSON.parse(fs.readFileSync(path.join(dir, 'maestro-managed-runs.json'), 'utf-8'))
+			.runs as Array<{ state: string }>;
+		expect(runs.map((run) => run.state)).toEqual(['failed', 'failed', 'failed']);
+		const queued = await runtime.turns.queue.list('a1');
+		expect(queued.ok && queued.value).toEqual([]);
+		expect(runtime.turnsInFlight()).toBe(0);
+		const transcript = await runtime.tabs.transcript('a1', 't1');
+		expect(transcript.ok && transcript.value).toEqual([]);
+	});
 
 	it("answers scope from the runtime's own standing: this installation, its operator, no policy, standalone", async () => {
 		expect(await send('scope')).toEqual({
