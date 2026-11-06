@@ -138,9 +138,9 @@
 	],
 	"tool": ".maestro/playbooks/Working/mcomp-01-03/merge-tool.mjs (verbs start, status, show, log, stage, link-modules; not in git)",
 	"status": {
-		"state": "merge in progress; MCOMP-01-03A..03P staged (all 44 files resolved), 0 files unmerged in the worktree; MCOMP-01-03Q commits the merge and type-checks the merged tree (remote-fs.ts execRemoteCommand access slot, see progress.MCOMP-01-03L.semanticConflictsForQ; the positional order is recorded under progress.MCOMP-01-03I, 03J, 03K, 03L, 03M, 03N, 03O and 03P positionalOrder), R tests (install the merged dependencies first: luxon, papaparse, parsimmon, remove-markdown and their @types; add the remote:newAITabWithPrompt relay case and the browserTabRemote / queueRemote positional cases; the onRemoteCrossAgentAsk request type drift, see progress.MCOMP-01-03P.followUpsForR), S lands, T re-pins and closes",
-		"updatedAt": "2026-10-30T04:00:34.333Z",
-		"updatedBy": "MCOMP-01-03P"
+		"state": "committed: the merge is 7c7e13ecb (parents 03a65a9a6 3c8569162) on integrate/upstream-rc-3c85691, with the semantic-conflict repair 553a7d4e5 on top; the tree type-checks to the two known errors once the Dataview packages are installed (progress.MCOMP-01-03Q.tsc); R tests (install the merged dependencies first: luxon, papaparse, parsimmon, remove-markdown and their @types; add the remote:newAITabWithPrompt relay case and the browserTabRemote / queueRemote positional cases; the onRemoteCrossAgentAsk request type drift, see progress.MCOMP-01-03P.followUpsForR), S lands, T re-pins and closes",
+		"updatedAt": "2026-11-06T05:58:08.148Z",
+		"updatedBy": "MCOMP-01-03Q"
 	},
 	"progress": {
 		"MCOMP-01-03A": {
@@ -913,6 +913,89 @@
 			],
 			"unmergedAfter": 0,
 			"driver": ".maestro/playbooks/Working/mcomp-01-03/apply-03p.mjs (not in git)"
+		},
+		"MCOMP-01-03Q": {
+			"doneAt": "2026-11-06",
+			"doneBy": "Maestro-Claude",
+			"mergeCommit": "7c7e13ecbee84c4eeb9275dac9a5701724cf87b1",
+			"mergeParents": [
+				"03a65a9a6f5dee871f4de795605fdbac97fb9522",
+				"3c85691621acc55aa55309b6676dfb0e759841bd"
+			],
+			"mergeCommittedAt": "2026-10-30T00:03:24-04:00",
+			"mergeDiffStatAgainstFirstParent": {
+				"shortstat": "1020 files changed, 88611 insertions(+), 8274 deletions(-)",
+				"files": 1020,
+				"byStatus": {
+					"M": 684,
+					"A": 334,
+					"R": 1,
+					"D": 1
+				}
+			},
+			"repairCommit": "553a7d4e5f50e05904962c2205aab30d7e0d7d3a",
+			"repairDiffStat": "3 files changed, 23 insertions(+), 11 deletions(-)",
+			"semanticConflictsRepaired": [
+				"src/main/utils/remote-fs.ts: three upstream callers of execRemoteCommand at the base three-argument shape (TS2345 x3) gain the MRC2-05-07 access slot: readFileInRootRemote read('readFileInRoot', path.posix.join(root, relPath)), findAncestorWithDirRemote read('findAncestorWithDir', startDir), listFilesWithStatsRemote read('listFilesWithStats', rootPath)",
+				"src/main/ipc/handlers/git/streaming.ts: upstream typed the event InvokerEvent (sender may be absent for web-desktop, 6fa98f01f); the integration repository-ceiling refusal (MRC2-04-02) wrote through event.sender (TS18049 x2); it now sends through sendToInvoker()",
+				"src/main/index.ts: the execFile import upstream kept has no caller since MRC2-04-10 moved the plugin spawn sink behind createPluginEffectSinks (TS6133); the plugin spawn body is identical on the base and upstream sides; import removed"
+			],
+			"tsc": {
+				"lint": {
+					"command": "node node_modules/typescript/bin/tsc -p tsconfig.lint.json",
+					"exit": 2,
+					"errors": 264,
+					"knownPreExisting": 2,
+					"dataviewMissingDependencies": 262,
+					"other": 0,
+					"withDataviewDependenciesResolved": {
+						"errors": 2,
+						"lines": [
+							"src/main/plugins/plugin-host-handlers.ts(1205,76): error TS2339: Property 'dispatcher' does not exist on type 'RequestInit'.",
+							"src/shared/maestro-lib/__tests__/built-entry.test.ts(37,32): error TS7016: Could not find a declaration file for module '../../../../scripts/package-mega-maestro-runtime.mjs'. '/Users/dr3/dev-shit/worktrees/integrate/upstream-rc-3c85691/scripts/package-mega-maestro-runtime.mjs' implicitly has an 'any' type."
+						]
+					}
+				},
+				"main": {
+					"command": "node node_modules/typescript/bin/tsc -p tsconfig.main.json --noEmit",
+					"exit": 2,
+					"errors": 255,
+					"knownPreExisting": 1,
+					"dataviewMissingDependencies": 254,
+					"other": 0,
+					"withDataviewDependenciesResolved": {
+						"errors": 1,
+						"lines": [
+							"src/shared/maestro-lib/__tests__/built-entry.test.ts(37,32): error TS7016: Could not find a declaration file for module '../../../../scripts/package-mega-maestro-runtime.mjs'. '/Users/dr3/dev-shit/worktrees/integrate/upstream-rc-3c85691/scripts/package-mega-maestro-runtime.mjs' implicitly has an 'any' type."
+						]
+					}
+				},
+				"cli": {
+					"command": "node node_modules/typescript/bin/tsc -p tsconfig.cli.json --noEmit",
+					"exit": 2,
+					"errors": 255,
+					"knownPreExisting": 1,
+					"dataviewMissingDependencies": 254,
+					"other": 0,
+					"withDataviewDependenciesResolved": {
+						"errors": 1,
+						"lines": [
+							"src/shared/maestro-lib/__tests__/built-entry.test.ts(37,32): error TS7016: Could not find a declaration file for module '../../../../scripts/package-mega-maestro-runtime.mjs'. '/Users/dr3/dev-shit/worktrees/integrate/upstream-rc-3c85691/scripts/package-mega-maestro-runtime.mjs' implicitly has an 'any' type."
+						]
+					}
+				}
+			},
+			"dataviewCheck": "the four packages the merge added to package.json (luxon ^3.7.2, papaparse ^5.7.0, parsimmon ^1.18.1, remove-markdown ^0.5.5, @types/luxon, @types/papaparse, @types/parsimmon) installed --no-save into the scratch folder .maestro/playbooks/Working/mcomp-01-03/deps-03q and resolved through throwaway paths configs extending the three worktree configs (Working/mcomp-01-03q/tsc-deps.mjs); nothing installed into the shared node_modules, which 03R does",
+			"suites": {
+				"files": [
+					"src/__tests__/main/ipc/handlers/git/streaming.managed.test.ts",
+					"src/__tests__/main/utils/remote-fs.managed.test.ts",
+					"src/__tests__/main/utils/remote-fs.test.ts"
+				],
+				"passed": 158,
+				"failed": 0
+			},
+			"notes": "the merge commit itself was written by an earlier run on 2026-10-30 (commit-03q-merge.mjs, message commit-03q-merge.txt) which stopped before the record; this run verified its parents, re-ran the three tsc configs, repaired and recorded. upstream/rc has since moved past 3c8569162, so merge-tool.mjs status refuses to run; the selection stays fixed at 3c8569162"
 		}
 	}
 }
