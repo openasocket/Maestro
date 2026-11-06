@@ -10,10 +10,12 @@
  * for the app) and anchors with the OS keyring. A plain Node process has the anchor primitive
  * (`createKeyringAnchor`, when `@napi-rs/keyring` loads) and NO seal: nothing off Electron holds
  * that key, and `obscuringSeal()` is a built-in key, not credential protection. So the production
- * custody (`resolveHostCustody` with no seal injected) is refused by name, the host composes
- * nothing, and `host status` says so in `managedUnavailable`. An enrolled data directory then runs
- * enrolled-unavailable exactly as before: its managed operations answer `unavailable`, never
- * standalone, and nothing here invents a session-only standing.
+ * custody (`resolveHostCustody` with no seal injected) is refused by name, the host composes no
+ * lifecycle, and `host status` says so in `managedUnavailable`. An enrolled data directory then runs
+ * enrolled-unavailable: when a sealed record is present the runtime is still handed a host adapter,
+ * the held one (`createHeldHostAdapter`, MCOMP-09-03), whose every admission answers `unavailable`
+ * by name, so plain Node never falls back to no adapter over a sealed enrollment, and nothing here
+ * invents a session-only standing, copies the desktop's key or installs a shared one.
  *
  * The composition itself is complete and tested over injected custody (`custody`), so the day a
  * protected seal exists off Electron it is one argument, not a new module. Tests inject fakes;
@@ -63,6 +65,8 @@ import {
 	type InstallationStanding,
 	type InstallationStandingSource,
 	type ManagedEnrollmentStatus,
+	type ManagedHostAdapter,
+	type ManagedIdentityView,
 	type ManagedInstallationIdentity,
 	type MaestroRuntimeOptions,
 } from '../../shared/maestro-lib';
@@ -152,7 +156,17 @@ export type HostManagedComposition =
 			/** What this process can say of the installation, composed or not (`createHostInstallationStanding`). */
 			standing: InstallationStandingSource;
 	  }
-	| { composed: false; reason: string; standing: InstallationStandingSource };
+	| {
+			composed: false;
+			reason: string;
+			standing: InstallationStandingSource;
+			/**
+			 * Present when a sealed record exists that this process cannot open (MCOMP-09-03): the
+			 * held adapter (`createHeldHostAdapter`), so the runtime is handed a host that answers
+			 * `unavailable` by name rather than no host at all. Absent when no record is present.
+			 */
+			managed?: NonNullable<MaestroRuntimeOptions['managed']>;
+	  };
 
 function recordFileExists(file: string): boolean {
 	try {
@@ -160,6 +174,20 @@ function recordFileExists(file: string): boolean {
 	} catch {
 		return false;
 	}
+}
+
+/** The directories the installation standing reads: this one, the production one it maps to, the caller's. */
+function standingDirectories(userDataDir: string, productionDataDir?: string): string[] {
+	const directories: string[] = [];
+	for (const dir of [
+		userDataDir,
+		resolveProductionDataDir(userDataDir),
+		...(productionDataDir ? [productionDataDir] : []),
+	]) {
+		const resolved = path.resolve(dir);
+		if (!directories.includes(resolved)) directories.push(resolved);
+	}
+	return directories;
 }
 
 export interface HostInstallationStandingInput {
@@ -208,15 +236,7 @@ export function createHostInstallationStanding(
 				ENTERPRISE_IDENTITY_ANCHOR_SERVICE,
 				anchorAccountForDirectory('enterprise-identity', dir)
 			));
-	const directories: string[] = [];
-	for (const dir of [
-		input.userDataDir,
-		resolveProductionDataDir(input.userDataDir),
-		...(input.productionDataDir ? [input.productionDataDir] : []),
-	]) {
-		const resolved = path.resolve(dir);
-		if (!directories.includes(resolved)) directories.push(resolved);
-	}
+	const directories = standingDirectories(input.userDataDir, input.productionDataDir);
 
 	const heldUnreadable = (detail: string): InstallationStanding => ({
 		standing: 'managed',
@@ -303,6 +323,57 @@ export function createHostInstallationStanding(
 	};
 }
 
+export interface HeldHostAdapterInput {
+	installation: ManagedInstallationIdentity;
+	/** Why this process holds no protected custody (`resolveHostCustody`'s refusal). */
+	custodyReason: string;
+	standing: InstallationStandingSource;
+	now?: () => number;
+}
+
+/**
+ * The host adapter of a process that cannot open a sealed enrollment record (MCOMP-09-03): no
+ * seal, no endpoint, no lifecycle, and an identity view that is never `ok`, so every admission it
+ * is asked for answers `unavailable` with the custody refusal and the installation standing in its
+ * reason, and its authority id is `unavailable`. It holds no key and reads no secret: the record
+ * stays sealed for the desktop's custody, and nothing here unseals, copies or re-seals it. The
+ * view is read per call, so a record the endpoint retired (the authenticated release) reads `none`
+ * and the binding decides standalone, while a record merely removed still reads managed by its
+ * anchor.
+ */
+export function createHeldHostAdapter(input: HeldHostAdapterInput): ManagedHostAdapter {
+	const view = (): ManagedIdentityView => {
+		const standing = input.standing.read();
+		if (standing.standing !== 'managed')
+			return { status: 'none', reason: null, message: standing.detail, record: null };
+		return {
+			status: 'unprotected',
+			reason: 'encryption-unavailable',
+			message: `${standing.detail} This host holds no protected custody for it (${input.custodyReason}), so managed operations are unavailable here.`,
+			record: null,
+		};
+	};
+	const status = (): ManagedEnrollmentStatus => {
+		const identity = view();
+		return {
+			identity,
+			connection: null,
+			endpoint: null,
+			authority: 'none',
+			reason: identity.message,
+			pendingApproval: null,
+			lastDenial: null,
+		};
+	};
+	return createManagedHostAdapter({
+		installation: input.installation,
+		identity: { read: view },
+		endpoint: null,
+		status,
+		...(input.now ? { now: input.now } : {}),
+	});
+}
+
 /**
  * Compose the detached host's managed standing over the data directory's sealed record, or name
  * why none is composed. The adapter is built for the installation the runtime computes (the
@@ -331,7 +402,23 @@ export function composeHostManaged(deps: HostManagedDeps): HostManagedCompositio
 		const record = recordFileExists(file)
 			? `An enrollment record is present at ${file} and cannot be opened here, so this host runs enrolled-unavailable.`
 			: `No enrollment record is present at ${file}.`;
-		return { composed: false, reason: `${custody.reason}. ${record}`, standing };
+		const reason = `${custody.reason}. ${record}`;
+		// A sealed record this process cannot open is still an enrollment: the runtime gets the held
+		// adapter, never no adapter. Presence alone decides here, so composing never reads the keyring.
+		const sealed = standingDirectories(deps.userDataDir, deps.productionDataDir).some((dir) =>
+			recordFileExists(path.join(dir, ENTERPRISE_IDENTITY_FILE_NAME))
+		);
+		if (!sealed) return { composed: false, reason, standing };
+		const custodyReason = custody.reason;
+		return {
+			composed: false,
+			reason,
+			standing,
+			managed: {
+				host: (installation) =>
+					createHeldHostAdapter({ installation, custodyReason, standing, now }),
+			},
+		};
 	}
 
 	const identity = createEnterpriseIdentityStore({

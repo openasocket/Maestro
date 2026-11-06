@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
 	composeHostManaged,
+	createHeldHostAdapter,
 	HOST_ANCHOR_UNAVAILABLE_REASON,
 	HOST_SEAL_UNAVAILABLE_REASON,
 	resolveHostCustody,
@@ -21,7 +22,12 @@ import {
 import { createEnterpriseIdentityStore } from '../../../main/enterprise/identity-store';
 import { obscuringSeal } from '../../../main/utils/safe-storage-seal';
 import type { Anchor } from '../../../main/utils/keyring-anchor';
-import { installationIdentity } from '../../../shared/maestro-lib';
+import { installationIdentity, type InstallationStanding } from '../../../shared/maestro-lib';
+import {
+	buildDispatchSnapshot,
+	createContextVerifier,
+} from '../../../shared/maestro-lib/managed/authority';
+import { inProcessContext } from '../../../shared/maestro-lib/managed/operations';
 import { fakeAnchor, fakeSeal } from '../../main/enterprise/fakeCustody';
 import { startFakeEndpoint, type FakeEndpoint } from '../../main/enterprise/fakeEndpoint';
 
@@ -138,6 +144,140 @@ describe('composeHostManaged', () => {
 		expect(present.reason).toContain('enrolled-unavailable');
 		// The record is left exactly where it was.
 		expect(fs.existsSync(path.join(dir, 'enterprise-identity.bin'))).toBe(true);
+	});
+
+	it('hands the runtime the held adapter, never no adapter, when a sealed record cannot be opened (MCOMP-09-03)', async () => {
+		// No record: no adapter, and composing never reads the keyring.
+		const anchorFor = vi.fn(() => fakeAnchor({ value: null }));
+		const absent = composeHostManaged({ userDataDir: dir, version: '1.1.0', anchorFor });
+		if (absent.composed) throw new Error('unreachable');
+		expect(absent.managed).toBeUndefined();
+		expect(anchorFor).not.toHaveBeenCalled();
+
+		await enroll('/tmp/endpoint.sock');
+		const present = composeHostManaged({ userDataDir: dir, version: '1.1.0', anchorFor });
+		if (present.composed) throw new Error('unreachable');
+		expect(present.managed?.host).toBeTypeOf('function');
+		const adapter = present.managed!.host!(installation);
+		expect(adapter.installation).toBe(installation);
+		// Never `ok`, never a record: the seal stays the desktop's, nothing is unsealed here.
+		const view = adapter.identity.read();
+		expect(view).toMatchObject({ status: 'unprotected', record: null });
+		expect(view.message).toContain('cannot be opened in this process');
+		expect(view.message).toContain(HOST_SEAL_UNAVAILABLE_REASON);
+		expect(adapter.authority.authorityId).toBe('unavailable');
+		expect(adapter.policy()).toEqual({ sources: [], policyRevision: null });
+		expect(adapter.status()).toMatchObject({ authority: 'none', connection: null, endpoint: null });
+		expect(adapter.workflows).toBeNull();
+		expect(adapter.telemetry).toBeNull();
+		expect(adapter.inbox).toBeNull();
+		expect(adapter.telemetryStanding()).toMatchObject({
+			ok: false,
+			reason: expect.stringContaining(HOST_SEAL_UNAVAILABLE_REASON),
+		});
+		expect(adapter.inboxStanding()).toMatchObject({ ok: false });
+		expect(adapter.policyStatus().admission.possible).toBe(false);
+		// Every admission is refused by name, before any lease is minted.
+		const verified = createContextVerifier({
+			verifierId: 'test',
+			peer: 'in-process',
+			now: () => NOW,
+			accept: () => [],
+		}).verify(
+			inProcessContext({
+				installation,
+				actor: { kind: 'human', id: 'ada' },
+				delegation: { chain: [], grantRef: null },
+				identity: {
+					requestId: 'req-1',
+					idempotencyKey: 'key-1',
+					attemptId: 'att-1',
+					runId: 'run-1',
+					rootRunId: 'run-1',
+					parentRunId: null,
+				},
+				policyRevision: 2,
+				workflow: null,
+				traceId: 'trace-1',
+				requestedCapabilities: ['runs.submit'],
+			})
+		);
+		if (!verified.ok) throw new Error(verified.problems.join('; '));
+		const outcome = await adapter.authority.admit({
+			context: verified.context,
+			snapshot: buildDispatchSnapshot(
+				{ command: '/bin/claude', args: ['--print'], cwd: '/work', env: {} },
+				{ provider: 'claude-code', model: 'sonnet' }
+			),
+			policy: { sources: [], policyRevision: 2 },
+		});
+		expect(outcome).toMatchObject({
+			state: 'unavailable',
+			message: expect.stringContaining('no protected custody'),
+		});
+		expect(adapter.authority.live()).toEqual([]);
+	});
+
+	it('hands over the held adapter for a sealed record in the production directory the caller named', async () => {
+		const prod = fs.mkdtempSync(path.join(os.tmpdir(), 'host-managed-prod-'));
+		try {
+			const store = createEnterpriseIdentityStore({
+				file: path.join(prod, 'enterprise-identity.bin'),
+				seal: fakeSeal(),
+				anchor: fakeAnchor({ value: null }),
+				platform: 'darwin',
+				now: () => NOW,
+			});
+			await store.write({
+				installationId: installation.installationId,
+				tenantId: 'tenant-1',
+				orgId: 'org-1',
+				enrollmentId: 'enr-1',
+				endpoint: {
+					socketPath: '/tmp/e.sock',
+					bindingDigest: 'a'.repeat(64),
+					trustRootDigest: null,
+				},
+				management: 'enrolled',
+				registration: null,
+				policy: { desiredRevision: 1, appliedRevision: 1, observedAt: null },
+				enrolledAt: new Date(NOW).toISOString(),
+			});
+			const composed = composeHostManaged({
+				userDataDir: dir,
+				productionDataDir: prod,
+				version: '1.1.0',
+				anchorFor: () => fakeAnchor({ value: null }),
+			});
+			if (composed.composed) throw new Error('unreachable');
+			expect(composed.managed?.host).toBeTypeOf('function');
+			expect(composed.managed!.host!(installation).identity.read().status).toBe('unprotected');
+		} finally {
+			fs.rmSync(prod, { recursive: true, force: true });
+		}
+	});
+
+	it('the held adapter follows the standing per call: a released installation reads none', () => {
+		let current: InstallationStanding = {
+			standing: 'managed',
+			enrollment: null,
+			management: null,
+			detail: 'An enrollment record is present.',
+		};
+		const adapter = createHeldHostAdapter({
+			installation,
+			custodyReason: HOST_SEAL_UNAVAILABLE_REASON,
+			standing: { read: () => current },
+		});
+		expect(adapter.identity.read().status).toBe('unprotected');
+		current = { standing: 'standalone', detail: 'released by the endpoint' };
+		expect(adapter.identity.read()).toEqual({
+			status: 'none',
+			reason: null,
+			message: 'released by the endpoint',
+			record: null,
+		});
+		expect(adapter.authority.authorityId).toBe('unavailable');
 	});
 
 	it('passes a refused custody through by its own reason', () => {

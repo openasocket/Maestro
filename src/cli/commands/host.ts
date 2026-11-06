@@ -398,7 +398,11 @@ async function runForeground(
 			...(options.port !== undefined ? { port: Number(options.port) } : {}),
 			...(standing.composed
 				? { managed: standing.managed, managedLifecycle: standing.lifecycle }
-				: { managedUnavailable: standing.reason }),
+				: {
+						managedUnavailable: standing.reason,
+						// A sealed record this process cannot open still hands over the held adapter (MCOMP-09-03).
+						...(standing.managed ? { managed: standing.managed } : {}),
+					}),
 			log: (line) => console.log(line),
 		});
 	} catch (error) {
