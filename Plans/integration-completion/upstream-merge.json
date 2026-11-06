@@ -139,8 +139,8 @@
 	"tool": ".maestro/playbooks/Working/mcomp-01-03/merge-tool.mjs (verbs start, status, show, log, stage, link-modules; not in git)",
 	"status": {
 		"state": "tested: the merge 7c7e13ecb with the repairs 553a7d4e5 (type-check) and 26fd422fd (two suites) on integrate/upstream-rc-3c85691 passes eslint, docs:verify, the 340 touched suites and the full suite except the contracts pin case MCOMP-01-03T re-pins (progress.MCOMP-01-03R); the lockfile reads up to date; RA and RB add the recorded permanent cases, S lands, T re-pins and closes",
-		"updatedAt": "2026-11-06T06:16:21.562Z",
-		"updatedBy": "MCOMP-01-03R"
+		"updatedAt": "2026-11-06T06:20:11.568Z",
+		"updatedBy": "MCOMP-01-03RA"
 	},
 	"progress": {
 		"MCOMP-01-03A": {
@@ -1066,6 +1066,40 @@
 				"MCOMP-01-03RA": "permanent positional cases of the 03J wire: browserTabRemote.test.ts onRemoteNewAITabWithPrompt, a new queueRemote.test.ts, and the main-side remote:newAITabWithPrompt relay case (03M); the two preload files are written and proved (17/17) as Working/mcomp-01-03r/*.test.ts.txt, moved out of 03R to keep it at three authored files",
 				"MCOMP-01-03RB": "permanent managed cases recorded by 03E and 03F: the exact-copy authority guard of the Cue bundle exporter/importer, and the execution claim of cue-process-lifecycle.managed and start-turn"
 			}
+		},
+		"MCOMP-01-03RA": {
+			"doneAt": "2026-11-06",
+			"doneBy": "Maestro-Claude",
+			"worktree": "/Users/dr3/dev-shit/worktrees/integrate/upstream-rc-3c85691",
+			"commit": "c8edb36fca5185fba6d2bd3f9e5db1498df5cf5c",
+			"diffStat": "3 files changed, 282 insertions(+)",
+			"authored": [
+				"src/__tests__/main/preload/process/browserTabRemote.test.ts",
+				"src/__tests__/main/preload/process/queueRemote.test.ts",
+				"src/__tests__/main/web-server/web-server-factory.test.ts"
+			],
+			"cases": {
+				"browserTabRemote.test.ts": "onRemoteNewAITabWithPrompt block, 4 cases: eight-argument order sessionId, prompt, responseChannel, background, hidden, mentionRouting, delegation, dispatchTicket; undefined slots of a plain tab; false ack before a rethrow; unsubscribe (from Working/mcomp-01-03r/browserTabRemote.test.ts.txt, verified to be the committed file plus that block)",
+				"queueRemote.test.ts": "new file, 5 cases: onRemoteEnqueueCommand eleven-argument order after held; undefined slots; { success: false } ack before a rethrow; unsubscribe; sendRemoteEnqueueCommandResponse (from queueRemote.test.ts.txt)",
+				"web-server-factory.test.ts": "2 cases in the browserTabCallbacks describe: setNewAITabWithPromptCallback sends [sessionId, prompt, responseChannel, background, hidden, mentionRouting, delegation, dispatchTicket] in order, and a plain tab sends the three dispatch slots undefined (9 send arguments); both answer on the minted response channel"
+			},
+			"commands": {
+				"suites": {
+					"command": "node node_modules/vitest/vitest.mjs run <3 files>",
+					"files": 3,
+					"tests": 139,
+					"passed": 139,
+					"failed": 0
+				},
+				"prettier": "prettier --check: clean (unchanged by --write)",
+				"eslint": "eslint (src config): exit 0, the three files are ignored by it; eslint -c eslint.dashes.config.mjs: exit 0",
+				"tsc": "throwaway tsconfig extending tsconfig.main.json over the three files + src/types/dns-packet.d.ts: 9 errors, all in web-server-factory.test.ts and all pre-existing (the 9 recorded by MCOMP-01-03M: TS6133 WebServer, TS2339 getAll x2, TS2348, TS2532 x2 in the MRC-08-02A writeTerminalTab cases, TS2352 x3); 0 in the new cases and 0 in the two preload suites",
+				"mutation": "dropping dispatchTicket from the browserTabCallbacks remote:newAITabWithPrompt send fails both new factory cases (2 failed); restored"
+			},
+			"followUpsClosed": [
+				"03M: remote:newAITabWithPrompt positional relay case",
+				"03N: no queueRemote.test.ts, no browserTabRemote newAITabWithPrompt case"
+			]
 		}
 	}
 }
