@@ -139,8 +139,8 @@
 	"tool": ".maestro/playbooks/Working/mcomp-01-03/merge-tool.mjs (verbs start, status, show, log, stage, link-modules; not in git)",
 	"status": {
 		"state": "tested: the merge 7c7e13ecb with the repairs 553a7d4e5 (type-check) and 26fd422fd (two suites) on integrate/upstream-rc-3c85691 passes eslint, docs:verify, the 340 touched suites and the full suite except the contracts pin case MCOMP-01-03T re-pins (progress.MCOMP-01-03R); the lockfile reads up to date; RA and RB add the recorded permanent cases, S lands, T re-pins and closes",
-		"updatedAt": "2026-11-06T06:20:11.568Z",
-		"updatedBy": "MCOMP-01-03RA"
+		"updatedAt": "2026-11-06T06:25:47.662Z",
+		"updatedBy": "MCOMP-01-03RB"
 	},
 	"progress": {
 		"MCOMP-01-03A": {
@@ -1099,6 +1099,77 @@
 			"followUpsClosed": [
 				"03M: remote:newAITabWithPrompt positional relay case",
 				"03N: no queueRemote.test.ts, no browserTabRemote newAITabWithPrompt case"
+			]
+		},
+		"MCOMP-01-03RB": {
+			"doneAt": "2026-11-06",
+			"doneBy": "Maestro-Claude",
+			"worktree": "/Users/dr3/dev-shit/worktrees/integrate/upstream-rc-3c85691",
+			"commit": "57f42978b1d98fdc092c1e5477a88fd9f92c7115",
+			"diffStat": "3 files changed, 185 insertions(+)",
+			"authored": [
+				"src/__tests__/main/cue/bundle/cue-bundle-exact-copy.test.ts",
+				"src/__tests__/main/cue/cue-process-lifecycle.managed.test.ts",
+				"src/__tests__/shared/maestro-lib/run/start-turn.test.ts"
+			],
+			"cases": {
+				"cue-bundle-exact-copy.test.ts": "new describe \"exact copy managed authority\", 2 cases: (1) an agent with MAESTRO_MANAGED_LEASE and TEAM_GRANT_TOKEN in customEnvVars, ENROLLMENT_GRANT in customEnvVarsDisabled and MAESTRO_MANAGED_LEASE in providerOverrides.codex.customEnvVars exports under includeLocal with none of them in local.json, none of the four values in any archive entry, exactly one \"the exact copy leaves them out\" warning naming all four (codex.MAESTRO_MANAGED_LEASE included) and no API_TOKEN/TOOLS_DIR warning; (2) a fixture bundle whose local.json carries the same shapes imports with the three authorityDroppedWarning lines (customEnvVars, customEnvVarsDisabled, providerOverrides) and a stored agent carrying none of the values, REGION_NAME kept",
+				"cue-process-lifecycle.managed.test.ts": "executionStarted false asserted on the denied, unavailable and stop-during-decision cases; new case: a spawn throwing synchronously after the admission answers failed, executionStarted false, stderr \"Spawn error: spawn EINVAL\", no managed field, the lease released { outcome: spawn-failed, message }, no live lease, captureException with a TurnNotStartedError under cue:spawn",
+				"start-turn.test.ts": "managed admission block, 1 case: a NUL byte in an argument makes the native spawn throw synchronously after a leaseAdmission gate admitted the spec; startTurn throws TurnNotStartedError (cause ERR_INVALID_ARG_VALUE), the lease is released spawn-failed and the authority holds no live lease"
+			},
+			"commands": {
+				"suites": {
+					"command": "node node_modules/vitest/vitest.mjs run <3 files>",
+					"files": 3,
+					"tests": 67,
+					"passed": 66,
+					"skipped": 1,
+					"failed": 0,
+					"note": "the skip is the Windows-only .cmd shim case of start-turn.test"
+				},
+				"prettier": "prettier --write reformatted one line of the new exact-copy case; --check clean",
+				"eslint": "eslint (src config): exit 0, the three files are ignored by it; eslint -c eslint.dashes.config.mjs: exit 0",
+				"tsc": "throwaway tsconfig extending tsconfig.main.json over the three files + src/types/dns-packet.d.ts: 2 errors, both pre-existing in start-turn.test.ts (TS2322 LocalLaunchPlan literals of the turnProcessSpecFromPlan cases, HEAD lines 565 and 634, shifted by the two new import names); 0 in new code",
+				"mutations": {
+					"export-guard": {
+						"failed": ["leaves authority-shaped env out of local.json and the whole archive"],
+						"caught": true
+					},
+					"import-guard": {
+						"failed": ["drops authority-shaped env from a tampered local.json on import"],
+						"caught": true
+					},
+					"refusal-claim": {
+						"failed": [
+							"a denied policy starts nothing and is the run result",
+							"an authority that cannot decide is unavailable, never a local fallback"
+						],
+						"caught": true
+					},
+					"stop-claim": {
+						"failed": ["a stop while the authority is deciding releases the lease unused"],
+						"caught": true
+					},
+					"nonstart-error": {
+						"failed": [
+							"a spawn that throws after the admission releases the lease as spawn-failed",
+							"releases the lease as spawn-failed and throws TurnNotStartedError when the spawn itself throws"
+						],
+						"caught": true
+					},
+					"spawn-failed-release": {
+						"failed": [
+							"a spawn that throws after the admission releases the lease as spawn-failed",
+							"releases the lease as spawn-failed and throws TurnNotStartedError when the spawn itself throws"
+						],
+						"caught": true
+					}
+				},
+				"mutationNote": "Working/mcomp-01-03rb/mutate.mjs: export-guard (buildLocalAgent writes record[field]), import-guard (localAgentFields sanitizes the raw env), refusal-claim (managedRefusal executionStarted true), stop-claim (stoppedResult executionStarted true), nonstart-error (startTurn rethrows the raw error), spawn-failed-release (the catch never calls gate.released); each restored, baseline and after 66/66"
+			},
+			"followUpsClosed": [
+				"03E: exact-copy authority guard (export and tampered local.json import)",
+				"03F: execution claim on the managed seams (lifecycle and startTurn)"
 			]
 		}
 	}
