@@ -72,23 +72,33 @@ const mockFetch = vi.fn();
 global.fetch = mockFetch;
 
 /**
- * Every Symphony store write lands on `<path>.tmp` and is renamed over the store
- * (MCOMP-01-02C), so a write to `symphony-state.json` or `symphony-cache.json`
- * is read off its temp path on `fs.writeFile`, in call order, and the publish
- * off `fs.rename`. The store path itself never appears on `fs.writeFile`.
+ * Every Symphony store write lands on a temp path beside the store and is
+ * renamed over it (MCOMP-01-02C), so a write to `symphony-state.json` or
+ * `symphony-cache.json` is read off its temp path on `fs.writeFile`, in call
+ * order, and the publish off `fs.rename`. The store path itself never appears
+ * on `fs.writeFile`. The temp name is unique per process and per call,
+ * `<path>.<pid>.<sequence>.tmp` (atomicWriteFile, upstream MAESTRO-15K).
  */
+const isTempPathOf = (tmp: string, target: string): boolean =>
+	tmp.startsWith(`${target}.`) && /^\.\d+\.\d+\.tmp$/.test(tmp.slice(target.length));
+
 const storeWrites = (file: string): any[] =>
 	vi
 		.mocked(fs.writeFile)
-		.mock.calls.filter((call) => String(call[0]).endsWith(`${file}.tmp`))
+		.mock.calls.filter((call) => /\.\d+\.\d+\.tmp$/.test(String(call[0])))
+		.filter((call) =>
+			String(call[0])
+				.replace(/\.\d+\.\d+\.tmp$/, '')
+				.endsWith(file)
+		)
 		.map((call) => JSON.parse(call[1] as string));
 
-/** The renames that published `file`: each from the fixed temp path over the store. */
+/** The renames that published `file`: each from its unique temp path over the store. */
 const storePublishes = (file: string) =>
 	vi
 		.mocked(fs.rename)
 		.mock.calls.filter(
-			([from, to]) => String(to).endsWith(file) && String(from) === `${String(to)}.tmp`
+			([from, to]) => String(to).endsWith(file) && isTempPathOf(String(from), String(to))
 		);
 
 // Import mocked functions

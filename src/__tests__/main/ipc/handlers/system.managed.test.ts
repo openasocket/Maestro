@@ -25,6 +25,7 @@ import {
 } from '../../../../main/ipc/handlers/system';
 import { logger } from '../../../../main/utils/logger';
 import { runAsTransport } from '../../../../main/web-server/auth/transport-actor';
+import { getLiveModeController } from '../../../../main/web-server/live-mode';
 import { setSettingsWriteAuthority } from '../../../../main/enterprise/settings-policy';
 import { installManagedSettingsPolicy } from '../../../helpers/managedSettingsPolicy';
 
@@ -86,6 +87,11 @@ vi.mock('../../../../main/power-manager', () => ({
 vi.mock('../../../../main/tunnel-manager', () => ({
 	tunnelManager: { start: vi.fn(), stop: vi.fn(), getStatus: vi.fn() },
 }));
+// Remote Control starts through the Live mode controller (upstream 1.1.1-RC);
+// its own behavior is covered in live-mode.test.ts.
+vi.mock('../../../../main/web-server/live-mode', () => ({
+	getLiveModeController: vi.fn(),
+}));
 vi.mock('fs', () => ({
 	default: {
 		existsSync: vi.fn(),
@@ -134,8 +140,6 @@ describe('system handlers under the local-effects ceiling (MRC2-04-09)', () => {
 			getMainWindow: () => null,
 			app: {} as never,
 			settingsStore: { get: vi.fn(), set: vi.fn() } as never,
-			tunnelManager: {} as never,
-			getWebServer: () => null,
 			...(mode === 'none' ? {} : { localEffects: () => source }),
 		};
 		registerSystemHandlers(deps);
@@ -318,25 +322,34 @@ describe('system handlers under the local-effects ceiling (MRC2-04-09)', () => {
 			set: vi.fn((key: string, value: unknown) => void (bootstrap.data[key] = value)),
 			delete: vi.fn((key: string) => void delete bootstrap.data[key]),
 		};
-		const tunnel = { start: vi.fn(), stop: vi.fn(), getStatus: vi.fn() };
+		const liveMode = {
+			startRemoteControl: vi.fn(),
+			stopRemoteControl: vi.fn(),
+			getStatus: vi.fn(),
+		};
 		const registerLocks = () =>
 			registerSystemHandlers({
 				getMainWindow: () => null,
 				app: { getPath: () => '/data' } as never,
 				settingsStore: { get: vi.fn(), set: vi.fn() } as never,
-				tunnelManager: tunnel as never,
-				getWebServer: () => ({ getSecureUrl: () => 'http://127.0.0.1:8080/tok' }) as never,
 				bootstrapStore: bootstrap as never,
 			});
 		beforeEach(() => {
 			bootstrap.data = {};
 			vi.mocked(fsSync.existsSync).mockReturnValue(false);
+			liveMode.startRemoteControl.mockReset();
+			vi.mocked(getLiveModeController).mockReturnValue(liveMode as never);
 		});
 		afterEach(() => setSettingsWriteAuthority(null));
 
 		it('standalone moves the folder and starts the tunnel as before', async () => {
 			registerLocks();
-			tunnel.start.mockResolvedValue({ success: true, url: 'https://x.trycloudflare.com' });
+			// The controller hands back the published URL with the token path already joined.
+			liveMode.startRemoteControl.mockResolvedValue({
+				success: true,
+				url: 'https://x.trycloudflare.com/tok',
+				status: {},
+			});
 			await expect(call('sync:setCustomPath', '/Users/me/Sync')).resolves.toMatchObject({
 				success: true,
 				requiresRestart: true,
@@ -346,6 +359,7 @@ describe('system handlers under the local-effects ceiling (MRC2-04-09)', () => {
 				success: true,
 				url: 'https://x.trycloudflare.com/tok',
 			});
+			expect(liveMode.startRemoteControl).toHaveBeenCalledTimes(1);
 			expect(logger.warn).not.toHaveBeenCalled();
 		});
 
@@ -367,7 +381,8 @@ describe('system handlers under the local-effects ceiling (MRC2-04-09)', () => {
 				error: 'the "web.tunnel" setting is locked by managed policy revision 3',
 				managed: { code: 'locked', policyRevision: 3 },
 			});
-			expect(tunnel.start).not.toHaveBeenCalled();
+			expect(liveMode.startRemoteControl).not.toHaveBeenCalled();
+			expect(getLiveModeController).not.toHaveBeenCalled();
 			expect(logger.warn).toHaveBeenCalledTimes(2);
 		});
 
