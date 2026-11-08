@@ -1,0 +1,399 @@
+{
+	"schemaVersion": 1,
+	"schema": "maestro-consumer-input-receipt-set/1",
+	"artifactIds": ["MAESTRO-ACTOR-BRIDGE", "MAESTRO-DESKTOP-CONTRACT", "MAESTRO-PROVIDER-CONTRACT"],
+	"owner": "maestro",
+	"proofClass": "implementation-input",
+	"status": "published",
+	"producerDocument": "MCOMP-08",
+	"task": "MCOMP-08-01",
+	"stage": "S04",
+	"recordedAt": "2026-11-08T08:35:07.510480+00:00",
+	"standing": "Local consumer implementation snapshots for counterpart producer development. Artifact names without BUILD do not imply paired, provider, native, policy-delivery or live-authentication qualification. This task follows the 2026-11-08 independent implementation amendment.",
+	"grants": {
+		"authority": "none",
+		"lease": "none",
+		"policy": "none"
+	},
+	"qualification": {
+		"paired": false,
+		"provider": false,
+		"native": false,
+		"liveAuthentication": false
+	},
+	"implementationRevision": "7964b2de2751fc1132e1761e9f556554af61037c",
+	"observedRevision": "c153c6d19737b2c12f6fa57ac4626bed84d1c63b",
+	"inputDigest": "d66260ff5c8a10db808e2326a31d88a04d76e1ff7bf41eb61fcfe1cd585e9c94",
+	"artifacts": [
+		{
+			"artifactId": "MAESTRO-ACTOR-BRIDGE",
+			"schemaVersion": 1,
+			"owner": "maestro",
+			"proofClass": "implementation-input",
+			"archiveRef": "#/archives/actor",
+			"entry": "scripts/mega-maestro-pair.mjs",
+			"exports": ["createActorApprovalBridge", "watchForChallenge", "inspectProducers"],
+			"implemented": "Pinned browser-session/CSRF v1 approval, single-use bounded challenge, cancellation, uncertain POST reconciliation and challenge acknowledgement cleanup. Owned browser/service responses in tests only; endpoint redemption is not qualified.",
+			"remainingMappings": ["REGISTRATION-HTTP/2"],
+			"buildArtifactId": "MAESTRO-ACTOR-BRIDGE-BUILD",
+			"payloadSha256": {
+				"scripts/mega-maestro-pair.mjs": "5ead49c2b3b858342e4a4aa99ab8655dee2e3f48c83d53478cdabe6ed8ce2481"
+			}
+		},
+		{
+			"artifactId": "MAESTRO-DESKTOP-CONTRACT",
+			"schemaVersion": 1,
+			"owner": "maestro",
+			"proofClass": "implementation-input",
+			"archiveRef": "#/archives/runtime",
+			"entry": "library/index.js",
+			"declaration": "library/types/shared/maestro-lib/managed/desktop-contract.d.ts",
+			"exports": ["mapDesktopPolicy"],
+			"implemented": "Public schema-1 projection mapped to existing settings/host types; field states, approved references, freshness, actor/runtime/policy binding and lock revision preserved. Tool/automation host destinations remain mapping_unavailable.",
+			"remainingMappings": ["DESKTOP-LOCAL/1"],
+			"buildArtifactId": "MAESTRO-DESKTOP-CONTRACT-BUILD",
+			"payloadSha256": {
+				"library/index.js": "9fe1b09e1cf43fa000c9dabe9d3ae158ffc1de2b0859f1245d3d2afc3bae9848",
+				"library/types/shared/maestro-lib/managed/desktop-contract.d.ts": "5e9cec5a32dd07228597cc3d652cb95a5e12767b66c0e3c6dd5178aa0fc48013"
+			}
+		},
+		{
+			"artifactId": "MAESTRO-PROVIDER-CONTRACT",
+			"schemaVersion": 1,
+			"owner": "maestro",
+			"proofClass": "implementation-input",
+			"archiveRef": "#/archives/runtime",
+			"entry": "library/index.js",
+			"declaration": "library/types/shared/maestro-lib/managed/provider-contract.d.ts",
+			"exports": [
+				"PROVIDER_HOST_CONTRACT_VERSION",
+				"PROVIDER_CONFORMANCE_LIMITS",
+				"providerTransportForRoute",
+				"providerCallProblems",
+				"providerResourceProblems"
+			],
+			"implemented": "Bounded effect/transport/peer/process/resource ports with branded authority and explicit uncertain cancellation outcomes. Public CLI/SDK/PTY/SSH vocabulary checked; no provider implementation or availability inferred.",
+			"remainingMappings": ["PREPARED/1", "EFFECT/1"],
+			"buildArtifactId": "MAESTRO-PROVIDER-CONTRACT-BUILD",
+			"payloadSha256": {
+				"library/index.js": "9fe1b09e1cf43fa000c9dabe9d3ae158ffc1de2b0859f1245d3d2afc3bae9848",
+				"library/types/shared/maestro-lib/managed/provider-contract.d.ts": "de3d6b025802941e539f5fd1655b10e649aeed1a1e84b50c1941a506916a2434"
+			}
+		}
+	],
+	"snapshot": {
+		"rules": "maestro-implementation-tree/1",
+		"implementationDigest": "c0add995932495e6d55d18c1de1dbc9c86c81eeb5d7f721e57a8fe8692eac4f9",
+		"implementationFiles": 6924,
+		"implementationDirty": false,
+		"checkoutDirty": true,
+		"inputMap": {
+			"path": ".maestro/playbooks/Working/MCOMP-08-01-local/input-map.json",
+			"sha256": "622736a05268cd2296d61d4e190425a7d71294a9c80f7df190594059fe2f9dbb"
+		},
+		"inputDigestEncoding": "sha256(canonicalJson(inputs))",
+		"buildInputMap": {
+			"path": ".maestro/playbooks/Working/MCOMP-07-05/input-map.json",
+			"sha256": "719b4d24c9b4fcc054f75a3ea850fbc442682c2f1c8a6d109126a567dc31544f"
+		},
+		"buildInputDigest": "fd3c82ceb98498a43c26eb4d2d6ccbe7b1d8e8fc95c1dd9b2d574f46ddaa56c8",
+		"sourceAuthority": "All 6924 implementation files match the clean committed BUILD snapshot. The 12 additional committed inputs bind build/test configs, library documentation, SDK metadata, public input receipts and coverage. Coordination-only HEAD movement has not changed the compiled inputs.",
+		"installedDependencyFiles": 77914,
+		"importedContractFiles": 891,
+		"toolchain": {
+			"node": "v26.13.0",
+			"platform": "darwin",
+			"arch": "arm64",
+			"nodeExecutable": "/opt/homebrew/Cellar/node/26.13.0_2/bin/node",
+			"nodeSha256": "64e4f47aef084a288c443ebe9a0091a34acba03ad176fb612b6e7d90784ff93d"
+		},
+		"preservedChanges": [
+			"M Plans/integration-completion/EXECUTION-RULES.md",
+			" M Plans/integration-completion/README.md",
+			" M Plans/integration-completion/RUN-ORDER.md",
+			" M Plans/integration-completion/program.json",
+			"?? .sloptimize/",
+			"?? Plans/integration-completion/parallel-authoring-verification.json",
+			"?? rustygraphify-out/"
+		],
+		"exclusions": "Existing dirty coordination documents, generated .sloptimize/rustygraphify output and the playbook do not enter this build or these tests. Actual consumed Plans files, library README, SDK metadata, source prompts/templates, lockfiles and test/build configs are explicitly mapped. Receipt is an output."
+	},
+	"dependencies": [
+		{
+			"artifactId": "MAESTRO-ACTOR-BRIDGE-BUILD",
+			"path": "Plans/integration-completion/evidence/early-build.json",
+			"sha256": "477a15ebed1096a431f84d11845fecad8dd53f057a2b38bdd03e1e5adb5e6f19",
+			"implementationRevision": "7964b2de2751fc1132e1761e9f556554af61037c",
+			"inputDigest": "fd3c82ceb98498a43c26eb4d2d6ccbe7b1d8e8fc95c1dd9b2d574f46ddaa56c8"
+		},
+		{
+			"artifactId": "MAESTRO-DESKTOP-CONTRACT-BUILD",
+			"path": "Plans/integration-completion/evidence/early-build.json",
+			"sha256": "477a15ebed1096a431f84d11845fecad8dd53f057a2b38bdd03e1e5adb5e6f19",
+			"implementationRevision": "7964b2de2751fc1132e1761e9f556554af61037c",
+			"inputDigest": "fd3c82ceb98498a43c26eb4d2d6ccbe7b1d8e8fc95c1dd9b2d574f46ddaa56c8"
+		},
+		{
+			"artifactId": "MAESTRO-PROVIDER-CONTRACT-BUILD",
+			"path": "Plans/integration-completion/evidence/early-build.json",
+			"sha256": "477a15ebed1096a431f84d11845fecad8dd53f057a2b38bdd03e1e5adb5e6f19",
+			"implementationRevision": "7964b2de2751fc1132e1761e9f556554af61037c",
+			"inputDigest": "fd3c82ceb98498a43c26eb4d2d6ccbe7b1d8e8fc95c1dd9b2d574f46ddaa56c8"
+		},
+		{
+			"artifactId": "MAESTRO-CONTRACT-INPUTS-BUILD",
+			"path": "Plans/integration-completion/evidence/contract-inputs-build.json",
+			"sha256": "206664f3ab7605927bbf9964597da12f4607da34bac5f601ce18e19fffca34c2",
+			"implementationRevision": "dc5938509be17742adcca713cca07c0176af6fe6",
+			"inputDigest": "115a3223b356e0975ca73b9a53c4b6e25031437915888b5534bcfd955f6116b5",
+			"archiveSha256": "c34e6cd0590fdce90cd2ace60f8f43ee278f6d24d62d4b6caab2bb4f720ab177",
+			"pin": {
+				"path": "vendor/mega-maestro/contracts.pin.json",
+				"sha256": "8343292d926cf3ed7b67a3c6f34a88eecedf85045dddb187d0357deae3daf3f4"
+			},
+			"protocol": 1,
+			"desktopPolicySchema": 1,
+			"dependencyClosure": {
+				"zod": "4.6.5",
+				"lock": {
+					"path": "vendor/mega-maestro/contracts/package-lock.json",
+					"sha256": "3d742b654bdb2d702dbd6138ac28eef968a3009515db5dec20d8df97ee5306ae"
+				}
+			},
+			"validation": "Public archive SHA-256/sidecar/SHA-512, manifest identity/provenance, all 46 payloads, pin and exact installed dependency closure verified before code loading."
+		},
+		{
+			"artifactId": "MAESTRO-M0-RUNTIME-BUILD",
+			"path": "Plans/integration-completion/evidence/m0-build.json",
+			"sha256": "796a9c0ac01581efb96ad616ba08df51f56d473562856b67a7183033008a952c",
+			"archiveSha256": "759b947aaf546631e573642e5a9c8450adafa74a239e42741766cc1acef05a3e",
+			"role": "Historical S04 prerequisite, immutable archive SHA-256/SHA-512/size checked. New early consumers use archives.runtime below; the old M0 archive is not claimed current or requalified.",
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-07-05/m0-archive-validation.json",
+				"sha256": "ca37123cbe291dd2479a015df1d2b3e74f16da153096e0eb3274910239b1f1b7"
+			}
+		}
+	],
+	"archives": {
+		"actor": {
+			"path": "dist/mega-maestro-actor-bridge/1/a3f1b43f2e9be9251ada1027fa55dedef0382ec920494e274438e42b27a3b198/actor-bridge.tgz",
+			"sha256": "a3f1b43f2e9be9251ada1027fa55dedef0382ec920494e274438e42b27a3b198",
+			"sha512": "09514bba9792b57695fac73bcbfc9fa62ad9cab355d66d658e3334815a76ad46067f05027c7f29cf1a90552a5ddb543b8dbf381ff73a29af0f04a9d30ac36799",
+			"bytes": 402382,
+			"sidecar": {
+				"path": "dist/mega-maestro-actor-bridge/1/a3f1b43f2e9be9251ada1027fa55dedef0382ec920494e274438e42b27a3b198/actor-bridge.tgz.sha256",
+				"sha256": "9cbb60c25ce4d71cd2b353d7c6916389ff4ff65f07863d1a3f1e007ae8c86250"
+			},
+			"manifest": {
+				"path": "dist/mega-maestro-actor-bridge/1/a3f1b43f2e9be9251ada1027fa55dedef0382ec920494e274438e42b27a3b198/artifact.json",
+				"sha256": "45ac795edead32896e43d622937a984354159c3d07d47d55fbc3af29003053b4"
+			},
+			"payloadFiles": 12,
+			"payloadMap": "artifact.json#/payloadSha256; verified equal to manifest.json inside archive"
+		},
+		"runtime": {
+			"path": "dist/mega-maestro-runtime/0.36.0/6b9b95fd019bcd748300cbde02da5b6749784d870cf35144ea31237f0d709924/runtime.tgz",
+			"sha256": "6b9b95fd019bcd748300cbde02da5b6749784d870cf35144ea31237f0d709924",
+			"sha512": "7184726bfb45b3982e884be19f151ce4f58d6d630125982a98e51d1063cffad59ab81157d195815419300dc2f9f06f7ecbfd35114d32c7a3bd00c344b499266c",
+			"bytes": 2587666,
+			"sidecar": {
+				"path": "dist/mega-maestro-runtime/0.36.0/6b9b95fd019bcd748300cbde02da5b6749784d870cf35144ea31237f0d709924/runtime.tgz.sha256",
+				"sha256": "d08709883055e85a6ef1399c91a3bc2470c5c62e6fdf9f8386b7df59a9b9851e"
+			},
+			"manifest": {
+				"path": "dist/mega-maestro-runtime/0.36.0/6b9b95fd019bcd748300cbde02da5b6749784d870cf35144ea31237f0d709924/artifact.json",
+				"sha256": "0801915dcbeb131a96eced54903c8b2909335893723bde518e25942a1bd46cb2"
+			},
+			"payloadFiles": 309,
+			"payloadMap": "artifact.json#/payloadSha256; verified equal to manifest.json inside archive"
+		},
+		"publicContracts": {
+			"path": "../mega-maestro/artifacts/enterprise/0.1.0/c34e6cd0590fdce90cd2ace60f8f43ee278f6d24d62d4b6caab2bb4f720ab177/contracts.tgz",
+			"sha256": "c34e6cd0590fdce90cd2ace60f8f43ee278f6d24d62d4b6caab2bb4f720ab177",
+			"integrity": "sha512-MNZe6OgdHh5LwxRVY85zDkudqUFJjyQHdW/IgfuzH3S0cGnN1lKLaAV4dT1Z4hpyXzMbhIYiKQjpECt9RWNhTA==",
+			"manifest": {
+				"path": "../mega-maestro/artifacts/enterprise/0.1.0/c34e6cd0590fdce90cd2ace60f8f43ee278f6d24d62d4b6caab2bb4f720ab177/artifact.json",
+				"sha256": "6c346c4fa4a7b7d4ec41b1624c7b155715128ec04c877bf0830910fd49aa127d"
+			}
+		}
+	},
+	"publicSchemaSnapshots": {
+		"archiveRef": "#/archives/publicContracts",
+		"package": "@mega-maestro/contracts",
+		"version": "0.1.0",
+		"acceptedEndpointProtocols": [1],
+		"desktopPolicySchema": 1,
+		"providerHostContractVersion": 1,
+		"payloadSha256": {
+			"dist/http.js": "03de5281876e4d5308a972eee2729bfd89f2282596118bbf9d44b32eaab20807",
+			"dist/http.d.ts": "5a19776c3414d029923850511a75372daff06c5271ad0ac8f03595f08d248e67",
+			"dist/desktop-policy.js": "b8adceff0035e6cf7e8ac30e097ced404f470f599e67e147b188f19958cd6559",
+			"dist/desktop-policy.d.ts": "0c54fbc508b2f0f1c7d1ec98ce52b7091fd595929cd57a40a85c017159edd484",
+			"dist/execution.js": "fcf690cbe24df6a0fc762f71882342ad682ff96da970383f38f97f0ea75a3597",
+			"dist/execution.d.ts": "6648748b4743dbf25238b4201db5d5e6e4af1e652fd63ad2d7bca431e27e13b0"
+		},
+		"scope": "Public v1 registration HTTP schemas, desktop schema 1 and execution vocabulary only. Public v2 registration is explicitly refused by the current bridge; proposed operations are not negotiated capabilities."
+	},
+	"consumerHandoff": {
+		"actor": "Reuse scripts/mega-maestro-pair.mjs#createActorApprovalBridge; no duplicate mega-maestro-approval.mjs was introduced. Extract the actor archive and place its pinned public schemas/dependency closure as described below.",
+		"actorDependencyPlacement": "Extract actor archive; place the verified public contracts and exact dependency closure at vendor/mega-maestro/contracts and its enclosed contracts/contracts.pin.json at vendor/mega-maestro/contracts.pin.json under the extraction root. Compiled bridge validates that pin before loading schemas.",
+		"desktop": "Load mapDesktopPolicy from runtime library/index.js; inject the verified public desktopPolicyResult schema and authenticated host binding. Consume desktop-contract.d.ts for locked/constrained/user_editable states and host destinations.",
+		"provider": "Import provider-contract.d.ts through library/index.d.ts. Compose the existing authority, peer, transport, effect and process lifetime ports; CLI/SDK/PTY/SSH vocabulary is not route availability.",
+		"runtimeIdentity": {
+			"path": ".maestro/playbooks/Working/MCOMP-07-05/runtime-input.json",
+			"sha256": "3ad806afd65da0fa373ef7ac49e56bb8e65284a7da9f6a9128b4cb4a77a0630a"
+		},
+		"cohortRule": "Counterpart producers must bind and requalify against archives.runtime.sha256 when moving to this runtime. No adapter pin, tenant enrollment, production authority or existing qualification is changed.",
+		"publication": "Archives remain at their explicit immutable local paths. No GitHub release upload, remote availability or CI qualification is claimed."
+	},
+	"checks": [
+		{
+			"name": "contracts-archive",
+			"command": "node .maestro/playbooks/Working/MCOMP-00-01/verify-inputs.mjs",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-08-01-local/contracts-archive.log",
+				"sha256": "36eef50e024c7307bd9a3e4832a63c265dcb6df7b15878eb105b99f0b2f989a9"
+			}
+		},
+		{
+			"name": "build-receipt",
+			"command": "node .maestro/playbooks/Working/MCOMP-08-01-local/validate-build.mjs",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-08-01-local/build-receipt.log",
+				"sha256": "6d2c718981778990214a0f0a808750f396d41d3c5046293b6d01fed36e485e9c"
+			}
+		},
+		{
+			"name": "extract",
+			"command": "python3 .maestro/playbooks/Working/MCOMP-08-01-local/extract.py",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-08-01-local/extract.log",
+				"sha256": "ba9e6071437e73ac674e21fe7becdb433d5415a475a703ef22842b4a1a6ed4b4"
+			}
+		},
+		{
+			"name": "unit",
+			"command": "node node_modules/vitest/vitest.mjs run src/__tests__/integration/mega-maestro/approval-bridge.test.ts src/__tests__/shared/maestro-lib/managed/desktop-contract.test.ts src/__tests__/shared/maestro-lib/managed/provider-contract.test.ts src/__tests__/shared/maestro-lib/managed/contracts.test.ts src/__tests__/shared/maestro-lib/managed/contract-vectors.test.ts src/__tests__/shared/managedSettingsLock.test.ts --reporter=default --reporter=json --outputFile=.maestro/playbooks/Working/MCOMP-08-01-local/tests.json",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-08-01-local/unit.log",
+				"sha256": "aa814dc8ade0ac19891ca3a0cf5b1b93601b8ca1d03f30f609f0072be40678a3"
+			},
+			"passed": 192,
+			"skipped": 0,
+			"report": {
+				"path": ".maestro/playbooks/Working/MCOMP-08-01-local/tests.json",
+				"sha256": "b72b457713b289f6133d46c9b955275c4857170bb420ed6cc2bdb59eb9913b4b"
+			}
+		},
+		{
+			"name": "archive-tests",
+			"command": "node node_modules/vitest/vitest.mjs run --config .maestro/playbooks/Working/MCOMP-08-01-local/vitest.archive.config.mts --project node src/__tests__/integration/mega-maestro/approval-bridge.test.ts src/__tests__/shared/maestro-lib/managed/desktop-contract.test.ts src/__tests__/shared/maestro-lib/managed/provider-contract.test.ts --reporter=default --reporter=json --outputFile=.maestro/playbooks/Working/MCOMP-08-01-local/archive-tests.report.json",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-08-01-local/archive-tests.log",
+				"sha256": "c541be40216f4d4a7f228d3887cedf4d83858a177a023171ea3bbd6aeb3896ac"
+			},
+			"passed": 111,
+			"skipped": 0,
+			"report": {
+				"path": ".maestro/playbooks/Working/MCOMP-08-01-local/archive-tests.report.json",
+				"sha256": "bef775284873dd9d428c3a1acc47a8b092511de061559fbb1a14866a90910efa"
+			}
+		},
+		{
+			"name": "plain-node",
+			"command": "node .maestro/playbooks/Working/MCOMP-08-01-local/load.mjs",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-08-01-local/plain-node.log",
+				"sha256": "4fdb1fbedd9c9c3bfbd184bfbe333e6313b50ca61eae8ffe18f5208849fa55f5"
+			}
+		},
+		{
+			"name": "consumer-types",
+			"command": "node node_modules/typescript/bin/tsc --ignoreConfig --noEmit --strict --target es2022 --module esnext --moduleResolution bundler --skipLibCheck --esModuleInterop .maestro/playbooks/Working/MCOMP-08-01-local/consumer.ts",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-08-01-local/consumer-types.log",
+				"sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+			}
+		},
+		{
+			"name": "build-library",
+			"command": "node scripts/build-maestro-lib.mjs --out-dir .maestro/playbooks/Working/MCOMP-08-01-local/library",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-08-01-local/build-library.log",
+				"sha256": "1aa51c1335891874ad6252aaf7f0c214187ee7ff76c562baf996bf7e329fa4bf"
+			}
+		},
+		{
+			"name": "lint-types",
+			"command": "npm run lint",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-08-01-local/lint-types.log",
+				"sha256": "fe36220ec374c21c79f929dcd2c9b649e69bb7f00d2673010752e2623eaf6092"
+			}
+		},
+		{
+			"name": "snapshot",
+			"command": "node .maestro/playbooks/Working/MCOMP-08-01-local/snapshot.mjs",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-08-01-local/snapshot.log",
+				"sha256": "fbe4f3f4b67afb420dd17368d44e771b42dc4104f4226e029ebffe1c2a161fe9"
+			}
+		}
+	],
+	"archiveValidation": {
+		"path": ".maestro/playbooks/Working/MCOMP-08-01-local/archive-validation.json",
+		"sha256": "ba9e6071437e73ac674e21fe7becdb433d5415a475a703ef22842b4a1a6ed4b4"
+	},
+	"compiledImportTrace": {
+		"path": ".maestro/playbooks/Working/MCOMP-08-01-local/archive-redirects.log",
+		"sha256": "feb4463cb8da5bba87fe4b72a6b077f916a3e5c217815573af6a5dddaeb36a94"
+	},
+	"rebuildComparison": {
+		"path": ".maestro/playbooks/Working/MCOMP-08-01-local/rebuild-comparison.json",
+		"sha256": "b5af575cdc64bfc57af32f35caaa3af424b68a7a3c9812cba3f46be46d98c468"
+	},
+	"rebuildProvenance": {
+		"path": ".maestro/playbooks/Working/MCOMP-08-01-local/library/provenance.json",
+		"sha256": "db0c195a10488b3eb5af0c55ebf8c385c8391bd91530b4fcd7bd7abec7aacb7c"
+	},
+	"cases": {
+		"actor": "36 compiled-archive cases: browser/CSRF approval, session/principal/expiry changes, one-use/replay fences, v2-purpose refusal, cancellation and unknown POST reconciliation, challenge acknowledgement cleanup.",
+		"desktop": "46 compiled-archive cases: approved field/reference projection, settings locks/personal preferences, actor/runtime/policy mismatch, malformed/missing/expired policies and unavailable host mappings.",
+		"provider": "29 compiled-archive cases: public route vocabulary, resource/call bounds, cancellation, branded leases/context and distinct uncertain outcomes. TypeScript additionally rejects forged authority, missing process birth and unshipped effect operations.",
+		"scope": "111 archive cases are a subset of the 192 passing source cases, not additional distinct security journeys. Browser/service responses are isolated test fixtures; no real endpoint, provider or native peer was exercised."
+	},
+	"coverage": {
+		"path": "Plans/integration-completion/contract-coverage.json",
+		"sha256": "93cefb4293048474b9305f22d636b793433c2753528e5b2e161ef5510304aa34",
+		"remainingProposals": ["REGISTRATION-HTTP/2", "PREPARED/1", "EFFECT/1", "DESKTOP-LOCAL/1"],
+		"status": "proposed-not-negotiated; no shipped protocol or capability added"
+	},
+	"verificationRecipes": {
+		"reuse": {
+			"path": ".maestro/playbooks/Working/MCOMP-08-01-local/reuse.json",
+			"sha256": "ad2144d2a89dcefcc39dc1f57fc5f75170392ebf5c88c759ccfa2f77e6b68305"
+		},
+		"inputMapLocation": "snapshot.inputMap#/inputs/harnessInputs",
+		"generatedChanges": "MCOMP-07-05 verification recipes were copied with scratch/output paths redirected; snapshot adds the committed early-build receipt and current harness hashes. Generated extraction, reports, rebuild and exhaustive input map are local ignored outputs.",
+		"receiptValidator": {
+			"path": ".maestro/playbooks/Working/MCOMP-08-01-local/validate-consumer.mjs",
+			"sha256": "4f233455f0d00bf2eb6108d65638748bb7df00462c925abd6976ebbec6623e43"
+		}
+	},
+	"limitations": [
+		"Implementation inputs only. Production authority remains authenticated and fail-closed; no support, lease, policy grant or qualification flag changes.",
+		"REGISTRATION-HTTP/2, DESKTOP-LOCAL/1, PREPARED/1 and EFFECT/1 remain proposed, unnegotiated mappings in contract-coverage.json.",
+		"M0 remains a historical stage input. Producers moving to this early runtime must bind its archive digest and rerun their separate paired qualification.",
+		"No implementation source or new test behavior was authored in this VERIFY task. Existing source and compiled-archive suites were executed unchanged. No associated images; images analyzed: 0."
+	]
+}
