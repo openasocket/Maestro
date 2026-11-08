@@ -493,7 +493,10 @@ export class ProcessManager extends EventEmitter {
 			source: CallerCredentialSource;
 			process: ManagedProcess;
 			admission: ProcessSpawnAdmission;
-			/** For an Auto Run attempt, the record its admission was bound on (MCOMP-17-03BE). */
+			/**
+			 * For an Auto Run attempt (MCOMP-17-03BE) or a room participant turn (MCOMP-17-03BQ), the
+			 * record its admission was bound on. A chat turn's credential carries none.
+			 */
 			lineage?: ManagedDelegationContext;
 		}
 	>();
@@ -899,7 +902,7 @@ export class ProcessManager extends EventEmitter {
 				bound.admission === config.admission
 			) {
 				const lineage =
-					callerSource.kind === 'auto-run'
+					callerSource.kind === 'auto-run' || callerSource.kind === 'group-chat'
 						? this.admissionContexts.get(bound.admission)
 						: undefined;
 				this.callerCredentials.set(callerCredential, {
@@ -1332,6 +1335,21 @@ export class ProcessManager extends EventEmitter {
 	 */
 	autoRunCallerLineageOf(credential: unknown): ManagedDelegationContext | null {
 		if (this.liveCallerSource(credential)?.kind !== 'auto-run') return null;
+		const lineage = this.callerCredentials.get(credential as string)?.lineage;
+		return lineage ? delegationContextOf(lineage) : null;
+	}
+
+	/**
+	 * Host-only: the record the live desktop room participant or recovery turn a caller credential
+	 * was minted for was admitted on (MCOMP-17-03BQ): the room's child for that turn, its identity,
+	 * trace and delegation chain (the room service link, then the turn's own link) and the
+	 * policy generation, as the authority verified them. A consult that turn starts can be bound as
+	 * its child on this record, so the room survives the ask as the initiator's lineage. Same
+	 * custody rules as `groupChatCallerSourceOf`; null for a chat turn's or an Auto Run attempt's
+	 * credential and for a turn with no verified record. A fresh copy each read, never the held one.
+	 */
+	groupChatCallerLineageOf(credential: unknown): ManagedDelegationContext | null {
+		if (this.liveCallerSource(credential)?.kind !== 'group-chat') return null;
 		const lineage = this.callerCredentials.get(credential as string)?.lineage;
 		return lineage ? delegationContextOf(lineage) : null;
 	}

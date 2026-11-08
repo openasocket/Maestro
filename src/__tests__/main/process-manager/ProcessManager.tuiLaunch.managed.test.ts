@@ -85,9 +85,13 @@ import {
 	autoRunSpawnSourceOf,
 	chatTurnSourceOf,
 	groupChatParticipantSourceOf,
+	dispatchedChildContext,
 	localTuiLaunchOf,
 } from '../../../main/process-manager/ProcessManager';
-import { groupChatRoomContext } from '../../../shared/maestro-lib/groupchat/spawn';
+import {
+	groupChatRoomContext,
+	groupChatRoomRunId,
+} from '../../../shared/maestro-lib/groupchat/spawn';
 import { childDelegationContext } from '../../../shared/maestro-lib/managed/delegation';
 import { CALLER_CREDENTIAL_ENV_VAR } from '../../../shared/maestro-lib/launch/env';
 import {
@@ -1172,6 +1176,104 @@ describe('the caller credential of a managed desktop room participant turn (MCOM
 		expect(manager.groupChatCallerSourceOf(live)).not.toBeNull();
 		expect(port.authority.revokeAll('policy changed')).toBe(1);
 		expect(manager.groupChatCallerSourceOf(live)).toBeNull();
+	});
+
+	describe('the room record the turn was admitted on (MCOMP-17-03BQ)', () => {
+		it('answers the verified child of the room for exactly that turn', async () => {
+			const manager = managedManager();
+			const alpha = await admitAndSpawn(manager, roomTurn(participantId('Alpha')));
+			const beta = await admitAndSpawn(manager, roomTurn(participantId('Beta')));
+			const first = envOf(captured.child[0])[CALLER_CREDENTIAL_ENV_VAR];
+			const second = envOf(captured.child[1])[CALLER_CREDENTIAL_ENV_VAR];
+			const room = groupChatRoomRunId(CHAT);
+			for (const [credential, turn] of [
+				[first, alpha.turn],
+				[second, beta.turn],
+			] as const) {
+				const lineage = manager.groupChatCallerLineageOf(credential);
+				const admitted = dispatchedChildContext(turn)!;
+				expect(lineage).not.toBeNull();
+				expect(lineage!.identity).toEqual(admitted.identity);
+				expect(lineage!.identity.requestId).toBe(turn.sessionId);
+				expect(lineage!.identity.attemptId).toBe(turn.sessionId);
+				expect(lineage!.identity.rootRunId).toBe(room);
+				expect(lineage!.identity.parentRunId).toBe(room);
+				expect(lineage!.traceId).toBe(admitted.traceId);
+				expect(lineage!.workflow).toBeNull();
+				expect(lineage!.delegation.chain).toEqual(admitted.delegation.chain);
+				expect(lineage!.delegation.chain[0]).toEqual({ kind: 'service', id: room });
+			}
+			expect(manager.groupChatCallerLineageOf(first)!.identity.requestId).not.toBe(
+				manager.groupChatCallerLineageOf(second)!.identity.requestId
+			);
+		});
+
+		it('hands out a fresh copy each read, so a caller cannot rewrite the held record', async () => {
+			const manager = managedManager();
+			await admitAndSpawn(manager, roomTurn(participantId('Alpha')));
+			const credential = envOf(captured.child[0])[CALLER_CREDENTIAL_ENV_VAR];
+			const first = manager.groupChatCallerLineageOf(credential)!;
+			first.identity.rootRunId = 'forged';
+			first.delegation.chain.push({ kind: 'agent', id: 'forged' });
+			const second = manager.groupChatCallerLineageOf(credential)!;
+			expect(second.identity.rootRunId).toBe(groupChatRoomRunId(CHAT));
+			expect(second.delegation.chain).not.toContainEqual({ kind: 'agent', id: 'forged' });
+		});
+
+		it('never answers for a chat or Auto Run credential, nor lends the room record to the Auto Run lookup', async () => {
+			const manager = managedManager();
+			await admitAndSpawn(manager, roomTurn(participantId('Alpha')));
+			await admitAndSpawn(manager, tuiTurn({ command: binPath, args: HOST_ARGS }));
+			const attribution = newAutoRunTurnRequest(
+				{
+					workflowId: 'playbook:/work/p',
+					version: 'v1',
+					triggerEventId: 'operator:1',
+					runId: 'run-root',
+				},
+				{ purpose: 'task', document: '01', newId: () => `id-${++stamp}` }
+			);
+			await admitAndSpawn(
+				manager,
+				tuiTurn({
+					command: binPath,
+					args: HOST_ARGS,
+					sessionId: `agent-1-batch-${++stamp}`,
+					querySource: 'auto',
+					autoRun: { attribution, fence: { ownerEpoch: 'e', fencingToken: 'f' } },
+				})
+			);
+			const room = envOf(captured.child[0])[CALLER_CREDENTIAL_ENV_VAR];
+			const chat = envOf(captured.child[1])[CALLER_CREDENTIAL_ENV_VAR];
+			const attempt = envOf(captured.child[2])[CALLER_CREDENTIAL_ENV_VAR];
+			expect(manager.callerSourceOf(chat)).not.toBeNull();
+			expect(manager.autoRunCallerLineageOf(attempt)).not.toBeNull();
+			expect(manager.groupChatCallerLineageOf(chat)).toBeNull();
+			expect(manager.groupChatCallerLineageOf(attempt)).toBeNull();
+			expect(manager.groupChatCallerLineageOf(room)).not.toBeNull();
+			expect(manager.autoRunCallerLineageOf(room)).toBeNull();
+		});
+
+		it('answers nothing once the turn is killed or its lease revoked, or for forged credentials', async () => {
+			const port = fakeSpawnPort();
+			const manager = new ProcessManager(undefined, {
+				spawnAuthority: () => port,
+				userDataDir: dataDir,
+			});
+			const killed = await admitAndSpawn(manager, roomTurn(participantId('Alpha')));
+			await admitAndSpawn(manager, roomTurn(participantId('Beta')));
+			const gone = envOf(captured.child[0])[CALLER_CREDENTIAL_ENV_VAR];
+			const live = envOf(captured.child[1])[CALLER_CREDENTIAL_ENV_VAR];
+			expect(manager.groupChatCallerLineageOf(gone)).not.toBeNull();
+			expect(manager.kill(killed.turn.sessionId)).toBe(true);
+			expect(manager.groupChatCallerLineageOf(gone)).toBeNull();
+			for (const bad of ['forged', '', `${live}x`, undefined, null, 42, { live }]) {
+				expect(manager.groupChatCallerLineageOf(bad)).toBeNull();
+			}
+			expect(manager.groupChatCallerLineageOf(live)).not.toBeNull();
+			expect(port.authority.revokeAll('policy changed')).toBe(1);
+			expect(manager.groupChatCallerLineageOf(live)).toBeNull();
+		});
 	});
 
 	it('mints none on a standalone host', () => {
