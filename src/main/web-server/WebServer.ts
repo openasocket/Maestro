@@ -57,7 +57,10 @@ import {
 import { captureException } from '../utils/sentry';
 import { WebSocketMessageHandler } from './handlers';
 import type { MessageHandlerCallbacks } from './handlers';
-import type { CallerSourceResolver } from './handlers/messageHandlers/commands';
+import type {
+	CallerConsultWithdrawer,
+	CallerSourceResolver,
+} from './handlers/messageHandlers/commands';
 import type {
 	WebTerminalInputResult,
 	WebTerminalSpawnResult,
@@ -725,6 +728,23 @@ export class WebServer {
 	setCallerSourceResolver(resolver: CallerSourceResolver): void {
 		const callbacks: Partial<MessageHandlerCallbacks> & { callerSourceOf: CallerSourceResolver } = {
 			callerSourceOf: resolver,
+		};
+		this.messageHandler.setCallbacks(callbacks);
+	}
+
+	/**
+	 * The host-only hook that stops the consult a withdrawn ask started (MCOMP-17-03AV): the
+	 * desktop composes `withdrawCrossAgentConsult`. When a credentialed `cross_agent_ask` loses
+	 * its caller's custody, the handler withdraws the ask and hands this hook the dispatch ticket
+	 * the ask issued. Merged into the message handler like `setCallerSourceResolver`, so it
+	 * survives `start()` and never crosses the renderer. Until one is composed, a withdrawn ask
+	 * is still refused to its caller while the consult runs to its own end.
+	 */
+	setCallerConsultWithdrawer(withdrawer: CallerConsultWithdrawer): void {
+		const callbacks: Partial<MessageHandlerCallbacks> & {
+			withdrawCallerConsult: CallerConsultWithdrawer;
+		} = {
+			withdrawCallerConsult: withdrawer,
 		};
 		this.messageHandler.setCallbacks(callbacks);
 	}

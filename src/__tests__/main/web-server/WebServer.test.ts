@@ -458,3 +458,139 @@ describe('caller credential resolver composition (MCOMP-17-03AQ)', () => {
 		expect(consultAgent.mock.calls[0][0]).toMatchObject({ fromSessionId: 'caller-1' });
 	});
 });
+
+describe('caller consult withdrawer composition (MCOMP-17-03AV)', () => {
+	const LIVE = 'mcc_live-turn-credential';
+	const RECHECK_MS = 1_000;
+
+	function compose(opts: { withdrawer?: (ticket: string) => void; resolverFirst?: boolean } = {}) {
+		const server = new WebServer(0);
+		let finish: (result: Record<string, unknown>) => void = () => {};
+		const consultAgent = vi.fn(
+			() =>
+				new Promise((resolve) => {
+					finish = resolve as typeof finish;
+				})
+		);
+		server.setConsultAgentCallback(consultAgent as never);
+		server.setGetSessionDetailCallback(vi.fn().mockReturnValue({ state: 'idle' }) as never);
+		let live = true;
+		const resolver = vi.fn((credential: string) =>
+			live && credential === LIVE ? { agentId: 'caller-1', tabId: 'caller-tab' } : null
+		);
+		// Composed before start() wires the remaining callbacks, as the factory does, in
+		// either order: neither setter may drop the other's hook.
+		if (opts.resolverFirst !== false) server.setCallerSourceResolver(resolver);
+		if (opts.withdrawer) server.setCallerConsultWithdrawer(opts.withdrawer);
+		if (opts.resolverFirst === false) server.setCallerSourceResolver(resolver);
+		(server as any).setupMessageHandlerCallbacks();
+		const sent: Array<Record<string, unknown>> = [];
+		const client = {
+			id: 'cli-socket',
+			connectedAt: Date.now(),
+			cli: true,
+			socket: {
+				readyState: WebSocket.OPEN,
+				send: vi.fn((frame: string) => sent.push(JSON.parse(frame))),
+				once: vi.fn(),
+				off: vi.fn(),
+			},
+		};
+		const ask = (fields: Record<string, unknown>) =>
+			(server as any).messageHandler.handleMessage(client, {
+				type: 'cross_agent_ask',
+				sessionId: 'target-agent',
+				question: 'q',
+				requestId: 'r-1',
+				...fields,
+			});
+		const results = () => sent.filter((r) => r.type === 'cross_agent_ask_result');
+		const ticket = () => (consultAgent.mock.calls[0] as unknown[])[0] as { dispatchTicket: string };
+		const loseCustody = () => {
+			live = false;
+		};
+		return {
+			consultAgent,
+			ask,
+			results,
+			ticket,
+			loseCustody,
+			finish: (r: Record<string, unknown>) => finish(r),
+		};
+	}
+
+	const credentialed = {
+		fromSessionId: 'caller-1',
+		fromTabId: 'caller-tab',
+		callerCredential: LIVE,
+	};
+
+	beforeEach(() => {
+		vi.useFakeTimers();
+	});
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	it('hands the composed withdrawer the ticket of an ask whose caller lost custody', () => {
+		const withdrawer = vi.fn();
+		const { consultAgent, ask, results, ticket, loseCustody } = compose({ withdrawer });
+		ask(credentialed);
+		expect(consultAgent).toHaveBeenCalledTimes(1);
+		const issued = ticket().dispatchTicket;
+		expect(typeof issued).toBe('string');
+		expect(issued.length).toBeGreaterThan(0);
+		vi.advanceTimersByTime(RECHECK_MS);
+		expect(withdrawer).not.toHaveBeenCalled();
+		loseCustody();
+		vi.advanceTimersByTime(RECHECK_MS);
+		expect(withdrawer).toHaveBeenCalledTimes(1);
+		expect(withdrawer).toHaveBeenCalledWith(issued);
+		expect(results()).toHaveLength(1);
+		expect(results()[0]).toMatchObject({ success: false, requestId: 'r-1' });
+		vi.advanceTimersByTime(RECHECK_MS * 3);
+		expect(withdrawer).toHaveBeenCalledTimes(1);
+	});
+
+	it('keeps the resolver when the withdrawer is composed first', () => {
+		const withdrawer = vi.fn();
+		const { ask, results, loseCustody } = compose({ withdrawer, resolverFirst: false });
+		ask(credentialed);
+		// Authenticated through the resolver: no refusal yet.
+		expect(results()).toHaveLength(0);
+		loseCustody();
+		vi.advanceTimersByTime(RECHECK_MS);
+		expect(withdrawer).toHaveBeenCalledTimes(1);
+	});
+
+	it('never withdraws a consult whose caller kept custody', async () => {
+		const withdrawer = vi.fn();
+		const { ask, results, finish } = compose({ withdrawer });
+		ask(credentialed);
+		vi.advanceTimersByTime(RECHECK_MS * 2);
+		finish({ success: true, response: 'answer' });
+		await vi.waitFor(() => expect(results()).toHaveLength(1));
+		expect(results()[0]).toMatchObject({ success: true, requestId: 'r-1' });
+		expect(withdrawer).not.toHaveBeenCalled();
+	});
+
+	it('never withdraws an uncredentialed ask', async () => {
+		const withdrawer = vi.fn();
+		const { ask, results, finish } = compose({ withdrawer });
+		ask({ fromSessionId: 'caller-1' });
+		vi.advanceTimersByTime(RECHECK_MS * 3);
+		finish({ success: true, response: 'answer' });
+		await vi.waitFor(() => expect(results()).toHaveLength(1));
+		expect(withdrawer).not.toHaveBeenCalled();
+	});
+
+	it('still refuses a withdrawn ask to its caller when no withdrawer was composed', () => {
+		const { ask, results, loseCustody } = compose();
+		ask(credentialed);
+		loseCustody();
+		vi.advanceTimersByTime(RECHECK_MS);
+		expect(results()).toHaveLength(1);
+		expect(results()[0]).toMatchObject({ success: false, requestId: 'r-1' });
+		expect(String(results()[0].error)).toContain('no longer holds its admission');
+	});
+});
