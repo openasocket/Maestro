@@ -1113,7 +1113,8 @@ app
 		// The settings lock source (MRC2-06-02): the one authority the store guard,
 		// settings:set and the bridge's set_setting hold every write to. Pins are
 		// restored now and on every install or clear, and every window reloads.
-		// None installed yet (CP-01): an enrolled host refuses every lockable key.
+		// Only a verified host projection releases permitted keys. Without a
+		// negotiated producer the source still holds lockable keys unavailable.
 		const settingsPolicy = createSettingsPolicySource({
 			identity: { read: () => enterpriseService?.identity.read() ?? { status: 'none' } },
 			policy: () => enterpriseService?.policy.status() ?? null,
@@ -1958,6 +1959,10 @@ app
 				'Enterprise'
 			);
 		}
+
+		// The settings guards precede enterprise composition. Connect their
+		// existing restorers now, before the service starts receiving projections.
+		if (enterpriseService) settingsPolicy.connectVerified(enterpriseService.policy.settings);
 
 		// WakaTime auto-install, after the enterprise service so the ceiling sees the enrollment.
 		if (store.get('wakatimeEnabled', false)) {

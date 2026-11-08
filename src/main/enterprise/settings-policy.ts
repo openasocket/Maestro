@@ -7,9 +7,9 @@
  * `holdSettingWrite()`; `guardSettingsStore()` wraps the store so a direct
  * write to a held key throws `ManagedSettingLockedError` by name, and
  * `restoreManagedSettingPins()` is the one writer that bypasses the guard, at
- * startup and on each policy change. No endpoint operation of this build
- * carries a settings policy (CP-01), so nothing calls `install()` yet: an
- * enrolled desktop refuses every lockable key `unavailable`; standalone, none.
+ * startup and on each policy change. The host's verified projection port
+ * supplies current restrictions; without it an enrolled desktop refuses every
+ * lockable key `unavailable`. Public endpoint delivery remains unqualified.
  *
  * The per-provider configuration (MRC2-06-03: path, arguments, environment,
  * model, effort) is held the same way through `holdAgentConfigWrite()`, read
@@ -52,6 +52,7 @@ import {
 	type ManagedSettingLockCode,
 	type ManagedSettingLocksView,
 	type ManagedSettingsPolicy,
+	type ManagedSettingsPolicyPort,
 } from '../../shared/managedSettingsLock';
 import {
 	PLAIN_SETTINGS_CREDENTIAL_KEYS,
@@ -216,6 +217,8 @@ export function agentConfigWriteVerdict(
 export interface SettingsPolicySourceDeps {
 	identity: Pick<EnterpriseIdentityStore, 'read'>;
 	policy(): Pick<ManagedPolicyStatus, 'appliedRevision'> | null;
+	/** Only the host's authenticated projection service may supply this port. */
+	verified?: ManagedSettingsPolicyPort;
 }
 
 /** What a write path holds a key with: the source, or a test double. */
@@ -231,6 +234,8 @@ export interface SettingsWriteAuthority {
 export interface SettingsPolicySource extends SettingsWriteAuthority {
 	standing(): ManagedSettingsStanding;
 	installed(): ManagedSettingsPolicy | null;
+	/** Connect once after host startup; existing listeners immediately receive its policy. */
+	connectVerified(port: ManagedSettingsPolicyPort): void;
 	/** Install a policy an authenticated endpoint path handed over; a refused document keeps the previous one. */
 	install(
 		raw: unknown
@@ -244,18 +249,40 @@ export interface SettingsPolicySource extends SettingsWriteAuthority {
 
 export function createSettingsPolicySource(deps: SettingsPolicySourceDeps): SettingsPolicySource {
 	let installed: ManagedSettingsPolicy | null = null;
+	let verified = deps.verified;
 	const listeners = new Set<() => void>();
+	const subscriptions = new Map<() => void, () => void>();
+	const read = () => {
+		// Read through on every decision: a copied cache would survive a tenant
+		// or actor change that invalidated the verified service's projection.
+		const raw = verified ? verified.read() : installed;
+		if (!raw) return null;
+		const parsed = parseManagedSettingsPolicy(raw);
+		return parsed.ok ? parsed.policy : null;
+	};
 	const standing = () =>
 		managedSettingsStanding({
 			enrolled: identityStandingOf(deps.identity.read()) === 'managed',
 			policy: deps.policy(),
-			installed,
+			installed: read(),
 		});
 	const changed = () => [...listeners].forEach((listener) => listener());
 	return {
 		standing,
-		installed: () => installed,
+		installed: read,
+		connectVerified(port) {
+			if (verified) throw new Error('The settings source already has a verified host port');
+			verified = port;
+			installed = null;
+			for (const listener of listeners) subscriptions.set(listener, port.onChange(listener));
+			changed();
+		},
 		install(raw) {
+			if (verified)
+				return {
+					installed: false,
+					problems: ['settings policy is owned by the verified host port'],
+				};
 			const parsed = parseManagedSettingsPolicy(raw);
 			if (!parsed.ok) return { installed: false, problems: parsed.problems };
 			installed = parsed.policy;
@@ -263,6 +290,7 @@ export function createSettingsPolicySource(deps: SettingsPolicySourceDeps): Sett
 			return { installed: true, policyRevision: parsed.policy.policyRevision };
 		},
 		clear() {
+			if (verified) return;
 			installed = null;
 			changed();
 		},
@@ -275,7 +303,13 @@ export function createSettingsPolicySource(deps: SettingsPolicySourceDeps): Sett
 		},
 		onChange(listener) {
 			listeners.add(listener);
-			return () => listeners.delete(listener);
+			if (verified && !subscriptions.has(listener))
+				subscriptions.set(listener, verified.onChange(listener));
+			return () => {
+				listeners.delete(listener);
+				subscriptions.get(listener)?.();
+				subscriptions.delete(listener);
+			};
 		},
 	};
 }

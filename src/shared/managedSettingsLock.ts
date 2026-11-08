@@ -69,6 +69,18 @@ export interface ManagedSettingsPolicy {
 	locks: ManagedSettingsLock[];
 }
 
+/**
+ * Host-only access to verified settings restrictions. The producer authenticates
+ * the whole projection, fences its identity/revision and retains it offline.
+ * This port is never constructed from renderer JSON or exposed over IPC.
+ */
+export interface ManagedSettingsPolicyPort {
+	/** A detached copy for the current identity, or null when none is installed. */
+	read(): ManagedSettingsPolicy | null;
+	/** Called after an atomic install, so listeners can restore pins immediately. */
+	onChange(listener: () => void): () => void;
+}
+
 /** No policy: standalone. */
 export type ManagedSettingsPolicyRef = ManagedSettingsPolicy | null | undefined;
 

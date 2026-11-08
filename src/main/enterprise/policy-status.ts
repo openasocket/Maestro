@@ -34,6 +34,7 @@ import type { ManagedRouteCeiling } from '../../shared/maestro-lib/launch/env';
 import {
 	parseManagedSettingsPolicy,
 	type ManagedSettingsPolicy,
+	type ManagedSettingsPolicyPort,
 } from '../../shared/managedSettingsLock';
 import type {
 	DesktopPolicyProjection,
@@ -140,6 +141,8 @@ export type PolicyRecovery =
 
 export interface PolicyStatusService {
 	status(): ManagedPolicyStatus;
+	/** Host-only settings consumer port; never a renderer authority. */
+	readonly settings: ManagedSettingsPolicyPort;
 	refreshProjection(): Promise<PolicyProjectionInstall>;
 	/** Last verified restrictions, including offline. Never a grant or fresh choice list. */
 	installedProjection(): NativePolicyProjection | null;
@@ -159,6 +162,7 @@ export function createPolicyStatusService(deps: PolicyStatusServiceDeps): Policy
 	const freshnessMs = deps.freshnessMs ?? POLICY_FRESHNESS_MS;
 	let installed: { scope: string; value: NativePolicyProjection; content: string } | null = null;
 	let request = 0;
+	const settingsListeners = new Set<() => void>();
 	const scope = () => {
 		const identity = deps.lifecycle.status().identity;
 		const record = identity.status === 'ok' ? identity.record : null;
@@ -174,7 +178,7 @@ export function createPolicyStatusService(deps: PolicyStatusServiceDeps): Policy
 			: null;
 	};
 	const generation = () => canonicalJson(deps.lifecycle.status());
-	const refreshProjection = async (): Promise<PolicyProjectionInstall> => {
+	const installProjection = async (): Promise<PolicyProjectionInstall> => {
 		const attempt = ++request;
 		try {
 			const port = deps.projections?.();
@@ -284,6 +288,23 @@ export function createPolicyStatusService(deps: PolicyStatusServiceDeps): Policy
 			return { installed: false, reason: 'unavailable' };
 		}
 	};
+	const refreshProjection = async (): Promise<PolicyProjectionInstall> => {
+		const result = await installProjection();
+		if (result.installed) {
+			// All sinks see the complete batch. A failed restorer must neither
+			// prevent the others running nor be mistaken for a transport failure.
+			const errors: unknown[] = [];
+			for (const listener of [...settingsListeners]) {
+				try {
+					listener();
+				} catch (error) {
+					errors.push(error);
+				}
+			}
+			if (errors.length) throw errors[0];
+		}
+		return result;
+	};
 	const refresh = async () => {
 		const result = await deps.lifecycle.connect();
 		if (result.status === 'ok') await refreshProjection();
@@ -291,6 +312,14 @@ export function createPolicyStatusService(deps: PolicyStatusServiceDeps): Policy
 	};
 
 	return {
+		settings: {
+			read: () =>
+				installed && installed.scope === scope() ? structuredClone(installed.value.settings) : null,
+			onChange(listener) {
+				settingsListeners.add(listener);
+				return () => settingsListeners.delete(listener);
+			},
+		},
 		refreshProjection,
 		installedProjection: () =>
 			installed && installed.scope === scope() ? structuredClone(installed.value) : null,

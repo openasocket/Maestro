@@ -20,6 +20,10 @@ import {
 	type NativePolicyProjectionPort,
 } from '../../../../main/enterprise/policy-status';
 import { registeredStatus } from '../../../main/enterprise/fakeManaged';
+import {
+	createSettingsPolicySource,
+	restoreManagedSettingPins,
+} from '../../../../main/enterprise/settings-policy';
 
 const now = Date.parse('2026-11-08T12:00:00Z');
 const uuid = '11111111-1111-4111-8111-111111111111';
@@ -142,8 +146,14 @@ describe('desktop authoring mapping against pinned public schema 1', () => {
 			projections: () => port,
 			now: () => clock.now,
 		});
+		const settings = createSettingsPolicySource({
+			identity: { read: () => standing.identity },
+			policy: () => service.status(),
+			verified: service.settings,
+		});
 		return {
 			service,
+			settings,
 			source,
 			standing,
 			record,
@@ -154,6 +164,95 @@ describe('desktop authoring mapping against pinned public schema 1', () => {
 			},
 		};
 	}
+
+	it('installs verified settings and restores pins before refresh returns, allowing unheld edits', async () => {
+		const h = nativeHarness();
+		h.source.settings.locks.push(
+			{ key: 'ghPath', pin: { value: '/managed/gh' } },
+			{ key: 'encore.plugins', pin: { value: false } }
+		);
+		const store = {
+			store: { ghPath: '/user/gh', encoreFeatures: { plugins: true } },
+			set: vi.fn(),
+		};
+		const restored = vi.fn(() => restoreManagedSettingPins(store, h.settings.pins()));
+		const unsubscribe = h.settings.onChange(restored);
+		expect(h.settings.authorize('shellEnvVars')).toMatchObject({ code: 'unavailable' });
+		expect((await h.service.refreshProjection()).installed).toBe(true);
+		expect(store.set).toHaveBeenCalledWith('ghPath', '/managed/gh');
+		expect(store.set).toHaveBeenCalledWith('encoreFeatures', { plugins: false });
+		expect(h.settings.authorize('shellEnvVars')).toEqual({ allowed: true });
+		expect(h.settings.authorize('ghPath')).toMatchObject({ code: 'locked', policyRevision: 7 });
+		expect(h.settings.authorizeAgentConfig('codex', 'model', 'allowed-model')).toMatchObject({
+			code: 'locked',
+		});
+		expect(h.settings.authorizeAgentConfig('codex', 'reasoningEffort', 'high')).toEqual({
+			allowed: true,
+		});
+		expect(h.settings.authorize('wakatimeApiKey')).toMatchObject({ code: 'custody' });
+		unsubscribe();
+		await h.service.refreshProjection();
+		expect(restored).toHaveBeenCalledTimes(1);
+	});
+
+	it('keeps verified restrictions across failed refreshes and expiry offline', async () => {
+		const h = nativeHarness();
+		const heard = vi.fn();
+		h.settings.onChange(heard);
+		await h.service.refreshProjection();
+		h.source.settings.locks = [];
+		expect((await h.service.refreshProjection()).installed).toBe(false);
+		expect(heard).toHaveBeenCalledTimes(1);
+		h.disconnect();
+		h.clock.now += 3_600_000;
+		h.standing.connection!.closed = true;
+		expect((await h.service.refreshProjection()).installed).toBe(false);
+		expect(h.settings.authorize('agentConfig.model')).toMatchObject({ code: 'locked' });
+		expect(h.settings.authorize('shellEnvVars')).toEqual({ allowed: true });
+		expect(h.settings.pins()).toEqual({
+			policyRevision: 7,
+			locks: [{ key: 'agentConfig.model' }],
+		});
+	});
+
+	it.each(['tenant', 'actor', 'trust', 'revision'] as const)(
+		'holds writes immediately after a %s change without retaining an old settings cache',
+		async (change) => {
+			const h = nativeHarness();
+			await h.service.refreshProjection();
+			if (change === 'tenant') h.record.tenantId = 'other-tenant';
+			if (change === 'actor') h.record.registration!.actorId = 'other-actor';
+			if (change === 'trust') h.record.endpoint.trustRootDigest = 'c'.repeat(64);
+			if (change === 'revision')
+				h.record.policy.appliedRevision = h.standing.endpoint!.appliedPolicyRevision = 8;
+			expect(h.settings.authorize('shellEnvVars')).toMatchObject({ code: 'unavailable' });
+			expect(h.settings.authorize('agentConfig.model')).toMatchObject({ code: 'unavailable' });
+			expect(h.settings.pins()).toBeNull();
+		}
+	);
+
+	it('does not let raw installs, clears or mutated reads replace verified settings', async () => {
+		const h = nativeHarness();
+		await h.service.refreshProjection();
+		expect(h.settings.install({ policyRevision: 7, locks: [] }).installed).toBe(false);
+		h.settings.clear();
+		h.service.settings.read()!.locks.length = 0;
+		h.settings.installed()!.locks.length = 0;
+		h.settings.pins()!.locks.length = 0;
+		expect(h.settings.authorize('agentConfig.model')).toMatchObject({ code: 'locked' });
+	});
+
+	it('runs every restorer and reports a sink failure without hiding the installed restrictions', async () => {
+		const h = nativeHarness();
+		h.settings.onChange(() => {
+			throw new Error('test store failure');
+		});
+		const next = vi.fn();
+		h.settings.onChange(next);
+		await expect(h.service.refreshProjection()).rejects.toThrow('test store failure');
+		expect(next).toHaveBeenCalledOnce();
+		expect(h.settings.authorize('agentConfig.model')).toMatchObject({ code: 'locked' });
+	});
 
 	it('atomically receives all native restrictions and returns detached copies, including offline', async () => {
 		const h = nativeHarness();
@@ -283,6 +382,7 @@ describe('desktop authoring mapping against pinned public schema 1', () => {
 		});
 		h.record.policy.appliedRevision = h.standing.endpoint!.appliedPolicyRevision = 8;
 		expect((await h.service.refreshProjection()).installed).toBe(true);
+		expect(h.settings.authorize('agentConfig.model')).toEqual({ allowed: true });
 		h.source.desktop.binding.policyRevision = h.source.settings.policyRevision = 7;
 		Object.values(h.source.ceilings).forEach((ceiling) => {
 			ceiling.policyRevision = 7;
@@ -290,6 +390,7 @@ describe('desktop authoring mapping against pinned public schema 1', () => {
 		h.record.policy.appliedRevision = h.standing.endpoint!.appliedPolicyRevision = 7;
 		expect((await h.service.refreshProjection()).installed).toBe(false);
 		expect(h.service.installedProjection()!.desktop.binding.policyRevision).toBe(8);
+		expect(h.settings.authorize('agentConfig.model')).toMatchObject({ code: 'unavailable' });
 	});
 
 	it.each(['connection', 'trust', 'tenant', 'registration', 'producer'] as const)(

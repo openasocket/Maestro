@@ -25,7 +25,7 @@ import {
 	settingWriteVerdict,
 } from '../../../main/enterprise/settings-policy';
 import { handleUpdateSessionConfig } from '../../../main/web-server/handlers/messageHandlers/sessions';
-import { MANAGED_LOCK_KEYS } from '../../../shared/managedSettingsLock';
+import { MANAGED_LOCK_KEYS, type ManagedSettingsPolicy } from '../../../shared/managedSettingsLock';
 import { handleSetSetting } from '../../../main/web-server/handlers/messageHandlers/settings';
 import type { MessageHandlerContext } from '../../../main/web-server/handlers/messageHandlers/types';
 
@@ -156,6 +156,47 @@ describe('managedSettingsStanding and settingWriteVerdict', () => {
 });
 
 describe('holdSettingWrite and guardSettingsStore', () => {
+	it('uses the verified host port for guarded writes and restores changed pins on notification', () => {
+		let policy: ManagedSettingsPolicy | null = null;
+		let notify = () => {};
+		const current = createSettingsPolicySource({
+			identity: { read: () => enrolled },
+			policy: () => ({ appliedRevision: 3 }),
+		});
+		setSettingsWriteAuthority(current);
+		const store = guardSettingsStore(fakeStore({ ghPath: '/user/gh' }));
+		const stop = current.onChange(() => restoreManagedSettingPins(store, current.pins()));
+		expect(() => store.set('shellEnvVars', { EDITOR: 'vi' })).toThrow(ManagedSettingLockedError);
+		policy = document();
+		const unsubscribe = vi.fn();
+		const port = {
+			read: () => policy,
+			onChange(listener: () => void) {
+				notify = listener;
+				return unsubscribe;
+			},
+		};
+		current.connectVerified(port);
+		expect(store.store.ghPath).toBe('/opt/managed/gh');
+		expect(() => current.connectVerified(port)).toThrow('already has a verified host port');
+		policy.locks[0] = { key: 'ghPath', pin: { value: '/managed/new-gh' } };
+		notify();
+		expect(store.store.ghPath).toBe('/managed/new-gh');
+		store.set('shellEnvVars', { EDITOR: 'vi' });
+		expect(store.store.shellEnvVars).toEqual({ EDITOR: 'vi' });
+		expect(() => store.set('ghPath', '/override')).toThrow(ManagedSettingLockedError);
+		expect(() => store.delete('webAuthEnabled')).toThrow(ManagedSettingLockedError);
+		expect(readManagedSettingLocks()).toMatchObject({
+			policyRevision: 3,
+			locks: { ghPath: { code: 'locked', pinned: true } },
+		});
+		expect(readManagedSettingLocks().locks.shellEnvVars).toBeUndefined();
+		policy = null;
+		expect(() => store.set('shellEnvVars', {})).toThrow(ManagedSettingLockedError);
+		stop();
+		expect(unsubscribe).toHaveBeenCalledOnce();
+	});
+
 	it('admits every write with no authority composed (standalone), dotted keys included', () => {
 		const store = guardSettingsStore(fakeStore({ ghPath: '/usr/bin/gh' }));
 		store.set('ghPath', '/x');
