@@ -42,6 +42,7 @@ import { createOutputParser } from '../parsers/parser-factory';
 import type { MaestroPaths } from '../paths/resolve';
 import {
 	buildDispatchSnapshot,
+	type DispatchLease,
 	type HostAuthority,
 	type PolicySourceSet,
 } from '../managed/authority';
@@ -173,6 +174,8 @@ interface TurnHooks {
 	onUsage?(usage: UsageStats): void;
 	/** The turn is over and everything above has been reported. The registry waits for this. */
 	onEnd(completed: CompletedTurn): Promise<void> | void;
+	/** Release observer state after reporting, or when a pending launch never starts. */
+	onSettled?(): void;
 }
 
 /** What a group chat round hears about its turns. `onEnd` is the engine's `turnEnded`. */
@@ -196,10 +199,7 @@ export interface BackgroundTurns {
 	consultRunner(): ConsultRunner;
 	/** Turns whose process is running now (group chat and consult). */
 	activeCount(): number;
-	/**
-	 * Turns the process registry still holds for this module: running, or ended and still
-	 * reporting their end. The count to subtract from the registry's size.
-	 */
+	/** Turns still held by the registry: preparing, running, or reporting their end. */
 	registeredCount(): number;
 	/**
 	 * Resolves once every registered turn `match` selects has ended and reported its end. A turn
@@ -221,7 +221,7 @@ export function createBackgroundTurns(options: BackgroundTurnsOptions): Backgrou
 	const running = new Map<string, { turn: RunningTurn; stops: GuardedTurnStops }>();
 	// A turn stays in the process registry until `done` settles, which is after its end has been
 	// reported (and the moderator's report starts the participants). `running` drops it earlier.
-	const registered = new Map<string, Promise<void>>();
+	const registered = new Map<string, { done: Promise<void>; stops: GuardedTurnStops }>();
 
 	function readCustomShellPath(): string | undefined {
 		const settings = readSettingsStore(paths.settingsFile);
@@ -342,6 +342,46 @@ export function createBackgroundTurns(options: BackgroundTurnsOptions): Backgrou
 		owner: string,
 		hooks: TurnHooks
 	): Promise<GroupChatTurnStart> {
+		const processId = spawn.processId;
+		if (registered.has(processId)) {
+			return { success: false, error: 'A background turn with this process id is still settling.' };
+		}
+		const controller = new AbortController();
+		const { promise: done, resolve: resolveDone } = Promise.withResolvers<void>();
+		const settle = (): void => {
+			registered.delete(processId);
+			hooks.onSettled?.();
+			resolveDone();
+		};
+		const stop = (mode: keyof GuardedTurnStops): void => {
+			controller.abort();
+			running.get(processId)?.stops[mode]();
+		};
+		const stops: GuardedTurnStops = {
+			interrupt: () => stop('interrupt'),
+			terminate: () => stop('terminate'),
+			terminateNow: () => stop('terminateNow'),
+		};
+		// Register before the first await so room deletion, fencing and shutdown also own a
+		// launch awaiting preparation or authority. Keep custody until a late lease is released.
+		registered.set(processId, { done, stops });
+		registry.register(owner, processId, { ...stops, done });
+		let started = false;
+		try {
+			const result = await launchTurn(spawn, hooks, controller.signal, settle);
+			started = result.success;
+			return result;
+		} finally {
+			if (!started) settle();
+		}
+	}
+
+	async function launchTurn(
+		spawn: GroupChatSpawn,
+		hooks: TurnHooks,
+		signal: AbortSignal,
+		settle: () => void
+	): Promise<GroupChatTurnStart> {
 		// The lineage first: what the turn is bound as, and what its process is stamped with, so
 		// what the agent itself asks or dispatches from its shell carries the chain one link deeper.
 		// Stamped BEFORE the SSH wrap, so it reaches the remote agent and not only the ssh client.
@@ -354,7 +394,13 @@ export function createBackgroundTurns(options: BackgroundTurnsOptions): Backgrou
 		const customEnvVars = boundDelegation
 			? { ...(spawn.customEnvVars ?? {}), ...delegationContextEnv(boundDelegation) }
 			: spawn.customEnvVars;
+		const cancellation = (): GroupChatTurnStart | null =>
+			signal.aborted
+				? { success: false, error: 'The background turn was cancelled before it started.' }
+				: null;
 		const recheckBinding = (): GroupChatTurnStart | null => {
+			const cancelled = cancellation();
+			if (cancelled) return cancelled;
 			let current: ManagedTurn;
 			try {
 				current = managedTurnFor(spawn.processId, delegation);
@@ -436,6 +482,7 @@ export function createBackgroundTurns(options: BackgroundTurnsOptions): Backgrou
 		// spawned, and the lease it grants is checked again inside `startTurn` against the spec that
 		// reaches `spawn`, so a replaced spec fails there rather than running.
 		let admission: RunTurnOptions['admission'];
+		let lease: DispatchLease | undefined;
 		const preparationRefusal = recheckBinding();
 		if (preparationRefusal) {
 			removeTempFiles(plan.tempFiles);
@@ -468,18 +515,27 @@ export function createBackgroundTurns(options: BackgroundTurnsOptions): Backgrou
 				removeTempFiles(plan.tempFiles);
 				return admissionRefusal;
 			}
-			options.managed?.onAdmission?.({
-				kind: 'admitted',
-				processId: spawn.processId,
-				delegation: boundDelegation,
-				leaseId: admitted.lease.leaseId,
-			});
+			lease = admitted.lease;
 			const gate: DispatchAdmission = leaseAdmission(managedTurn.authority, admitted.lease);
 			admission = { gate, attribution };
 		}
 
 		let turn: RunningTurn;
 		try {
+			if (lease && boundDelegation) {
+				options.managed?.onAdmission?.({
+					kind: 'admitted',
+					processId: spawn.processId,
+					delegation: boundDelegation,
+					leaseId: lease.leaseId,
+				});
+			}
+			const cancelled = cancellation();
+			if (cancelled) {
+				lease?.release({ outcome: 'spawn-failed', message: cancelled.error! });
+				removeTempFiles(plan.tempFiles);
+				return cancelled;
+			}
 			turn = deps.runTurn(
 				plan.spec,
 				{
@@ -501,6 +557,7 @@ export function createBackgroundTurns(options: BackgroundTurnsOptions): Backgrou
 				}
 			);
 		} catch (error) {
+			lease?.release({ outcome: 'spawn-failed', message: errorText(error) });
 			removeTempFiles(plan.tempFiles);
 			// The lease did not cover the spec that reached the spawn: a decision, nothing started.
 			if (error instanceof DispatchRefusedError) {
@@ -533,7 +590,7 @@ export function createBackgroundTurns(options: BackgroundTurnsOptions): Backgrou
 
 		const processId = prepared.processId;
 		running.set(processId, { turn, stops });
-		const done = ended.then(async (completed) => {
+		void ended.then(async (completed) => {
 			running.delete(processId);
 			try {
 				if (completed.sessionId) await hooks.onSessionId?.(completed.sessionId);
@@ -548,15 +605,8 @@ export function createBackgroundTurns(options: BackgroundTurnsOptions): Backgrou
 			} catch (error) {
 				logger.error(`Reporting the end of ${processId} failed: ${errorText(error)}`, LOG_CONTEXT);
 			} finally {
-				registered.delete(processId);
+				settle();
 			}
-		});
-		registered.set(processId, done);
-		registry.register(owner, processId, {
-			interrupt: stops.interrupt,
-			terminate: stops.terminate,
-			terminateNow: stops.terminateNow,
-			done,
 		});
 		return { success: true, pid: turn.handle.pid };
 	}
@@ -579,7 +629,7 @@ export function createBackgroundTurns(options: BackgroundTurnsOptions): Backgrou
 				});
 			},
 			stop: (processId) => {
-				running.get(processId)?.stops.terminate();
+				registered.get(processId)?.stops.terminate();
 			},
 		}),
 
@@ -598,14 +648,14 @@ export function createBackgroundTurns(options: BackgroundTurnsOptions): Backgrou
 							if (live()) observer.onSessionId(sessionId);
 						},
 						onEnd: (completed) => {
-							if (!live()) {
-								detached.delete(processId);
-								return;
-							}
+							if (!live()) return;
 							observer.onEnd({
 								exitCode: completed.exit.exitCode,
 								readText: () => completed.answerText ?? '',
 							});
+						},
+						onSettled: () => {
+							detached.delete(processId);
 						},
 					});
 				},
@@ -613,7 +663,7 @@ export function createBackgroundTurns(options: BackgroundTurnsOptions): Backgrou
 					detached.add(processId);
 					const entry = running.get(processId);
 					const partial = entry?.turn.answerSoFar() ?? '';
-					entry?.stops.terminate();
+					registered.get(processId)?.stops.terminate();
 					return partial;
 				},
 			};
@@ -622,7 +672,7 @@ export function createBackgroundTurns(options: BackgroundTurnsOptions): Backgrou
 		activeCount: () => running.size,
 		registeredCount: () => registered.size,
 		whenSettled: async (match) => {
-			await Promise.all([...registered].filter(([id]) => match(id)).map(([, done]) => done));
+			await Promise.all([...registered].filter(([id]) => match(id)).map(([, entry]) => entry.done));
 		},
 	};
 }

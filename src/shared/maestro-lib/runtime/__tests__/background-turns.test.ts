@@ -214,6 +214,32 @@ describe('background turns', () => {
 			await vi.waitFor(() => expect(background.activeCount()).toBe(0));
 			expect(registry.size()).toBe(0);
 		});
+
+		it('retains one registration until end reporting completes and rejects overlapping launches', async () => {
+			const { background, provider } = turns(() => ({ text: 'done' }));
+			const reporting = Promise.withResolvers<void>();
+			const finish = Promise.withResolvers<void>();
+			const runner = background.groupChatRunner({
+				...handlers,
+				onEnd: async () => {
+					reporting.resolve();
+					await finish.promise;
+				},
+			});
+			try {
+				await expect(runner.start(spawnOf())).resolves.toMatchObject({ success: true });
+				await reporting.promise;
+				expect(background.activeCount()).toBe(0);
+				expect(background.registeredCount()).toBe(1);
+				expect(registry.size()).toBe(1);
+				await expect(runner.start(spawnOf())).resolves.toMatchObject({ success: false });
+				expect(provider!.calls).toHaveLength(1);
+			} finally {
+				finish.resolve();
+				await background.whenSettled(() => true);
+			}
+			expect(registry.size()).toBe(0);
+		});
 	});
 
 	describe('the system prompt a turn carries', () => {
@@ -533,6 +559,145 @@ describe('background turns', () => {
 			asked = [];
 			admissions = [];
 			leases = 0;
+		});
+
+		it.each([
+			['preparation', 'group'],
+			['preparation', 'consult'],
+			['preparation', 'standalone'],
+			['admission', 'group'],
+			['admission', 'consult'],
+			['admission', 'stopAgent'],
+			['admission', 'stopTab'],
+			['admission', 'interruptTab'],
+			['admission', 'stopAll'],
+			['admission', 'terminateAllNow'],
+		] as const)('cancels during %s through %s without a child effect', async (phase, route) => {
+			const authority = authorityOf(() => 'allow');
+			const admissionReady = Promise.withResolvers<void>();
+			const resumeAdmission = Promise.withResolvers<void>();
+			const admit = authority.admit.bind(authority);
+			let issued: ReturnType<typeof authority.live> = [];
+			vi.spyOn(authority, 'admit').mockImplementationOnce(async (request) => {
+				const result = await admit(request);
+				issued = authority.live();
+				admissionReady.resolve();
+				await resumeAdmission.promise;
+				return result;
+			});
+			const { background, provider } = managedTurns(
+				() => ({ text: 'ok', sessionId: 'retry' }),
+				route === 'standalone' ? null : authority
+			);
+			const observer = { onActivity: vi.fn(), onSessionId: vi.fn(), onEnd: vi.fn() };
+			const consult = background.consultRunner();
+			const group = background.groupChatRunner(handlers);
+			const spawn = spawnOf({ delegation: carried(route === 'standalone' ? null : 3) });
+			const start = () =>
+				route === 'consult' ? consult.start(spawn, observer) : group.start(spawn);
+			const pending = start();
+			let stop: Promise<unknown> | undefined;
+			try {
+				if (phase === 'admission') await admissionReady.promise;
+				expect(background.activeCount()).toBe(0);
+				expect(background.registeredCount()).toBe(1);
+				expect(registry.size()).toBe(1);
+				const settled = vi.fn();
+				const settlement = background.whenSettled((id) => id === spawn.processId).then(settled);
+				const owner = groupChatOwner(CHAT_ID);
+				if (route === 'consult') expect(consult.stop(spawn.processId)).toBe('');
+				else if (route === 'stopAgent') stop = registry.stopAgent(owner);
+				else if (route === 'stopTab') stop = registry.stopTab(owner, spawn.processId);
+				else if (route === 'interruptTab') stop = registry.interruptTab(owner, spawn.processId);
+				else if (route === 'stopAll') stop = registry.stopAll();
+				else if (route === 'terminateAllNow') registry.terminateAllNow();
+				else group.stop(spawn.processId);
+				if (phase === 'admission') {
+					await expect(start()).resolves.toMatchObject({
+						success: false,
+						error: expect.stringMatching(/still settling/),
+					});
+					expect(settled).not.toHaveBeenCalled();
+					expect(issued[0].state()).toBe('issued');
+				}
+				resumeAdmission.resolve();
+				await expect(pending).resolves.toMatchObject({
+					success: false,
+					error: expect.stringMatching(/cancelled/),
+				});
+				await stop;
+				await settlement;
+				expect(provider.calls).toEqual([]);
+				expect(reported).toEqual([]);
+				expect(observer.onEnd).not.toHaveBeenCalled();
+				expect(observer.onSessionId).not.toHaveBeenCalled();
+				expect(admissions).toEqual([]);
+				expect(registry.size()).toBe(0);
+				expect(background.registeredCount()).toBe(0);
+				expect(authority.live()).toEqual([]);
+				if (phase === 'admission') {
+					expect(issued[0].pid()).toBeUndefined();
+					expect(issued[0].ended()).toMatchObject({
+						state: 'released',
+						release: { outcome: 'spawn-failed' },
+					});
+				}
+				// Cancellation owns one attempt only. A later retry is admitted and observed normally.
+				await expect(start()).resolves.toMatchObject({ success: true });
+				await background.whenSettled(() => true);
+				expect(provider.calls).toHaveLength(1);
+				if (route === 'consult') expect(observer.onEnd).toHaveBeenCalledOnce();
+				else expect(reported.some((line) => line.startsWith('end:'))).toBe(true);
+			} finally {
+				resumeAdmission.resolve();
+				await pending;
+			}
+		});
+
+		it('honors a stop from the admission notification before binding a process', async () => {
+			const authority = authorityOf(() => 'allow');
+			const provider = createFakeGroupChatProvider(dir, () => ({ text: 'never' }));
+			let issued: ReturnType<typeof authority.live> = [];
+			const background = createBackgroundTurns({
+				paths: paths(),
+				registry,
+				host: {},
+				beginTurn,
+				deps: { runTurn: provider.runTurn },
+				managed: {
+					port: () => portOf(authority),
+					onAdmission: () => {
+						issued = authority.live();
+						registry.terminateAllNow();
+					},
+				},
+			});
+			await expect(background.groupChatRunner(handlers).start(spawnOf())).resolves.toMatchObject({
+				success: false,
+				error: expect.stringMatching(/cancelled/),
+			});
+			expect(provider.calls).toEqual([]);
+			expect(issued[0].ended()).toMatchObject({
+				state: 'released',
+				release: { outcome: 'spawn-failed' },
+			});
+			expect(registry.size()).toBe(0);
+		});
+
+		it('drops pending registration when preparation or admission throws', async () => {
+			const authority = authorityOf(() => 'allow');
+			const { background, provider } = managedTurns(() => ({ text: 'never' }), authority);
+			const runner = background.groupChatRunner(handlers);
+			await expect(
+				runner.start(spawnOf({ sshRemoteConfig: { enabled: true, remoteId: 'gone' } }))
+			).rejects.toThrow(/SSH/);
+			expect(background.registeredCount()).toBe(0);
+			vi.spyOn(authority, 'admit').mockRejectedValueOnce(new Error('authority disconnected'));
+			await expect(runner.start(spawnOf())).rejects.toThrow('authority disconnected');
+			await background.whenSettled(() => true);
+			expect(background.registeredCount()).toBe(0);
+			expect(registry.size()).toBe(0);
+			expect(provider.calls).toEqual([]);
 		});
 
 		it.each(['local', 'ssh'] as const)(

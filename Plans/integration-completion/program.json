@@ -3736,6 +3736,20 @@
 					"id": "MCOMP-17-03B"
 				},
 				{
+					"label": "Cancel pending background launches through existing process custody",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/shared/maestro-lib/runtime/background-turns.ts",
+						"src/shared/maestro-lib/runtime/__tests__/background-turns.test.ts",
+						"Plans/integration-completion/program.json"
+					],
+					"outcome": "Consume MAESTRO-EFFECT-CONSUMERS-BUILD and its pinned MAESTRO-CONTRACT-INPUTS-BUILD dependency. Bounded continuation of MCOMP-17-03: register shared background/group-chat/consult launches before asynchronous preparation and admission so Stop, owner deletion, fencing and shutdown can cancel pending work. Hold pending custody until admission resolves, release late unbound leases without spawning, reject overlapping process IDs and preserve ordinary guarded local/SSH stops and end reporting. Exercise cancellation, late admission, cleanup and retry through the existing fake-provider harness. Retain MCOMP-17-03 unchecked for incoming authenticated delegation, Cue, desktop composition and managed room custody across turns. No external capability, producer mapping or paired/provider/native qualification is supplied. Keep to three authored files and fewer than 500 changed lines.",
+					"backlog": ["M-04"],
+					"requires": ["MAESTRO-EFFECT-CONSUMERS-BUILD"],
+					"produces": [],
+					"id": "MCOMP-17-03C"
+				},
+				{
 					"label": "Bind Auto Run Cue and nested work at dispatch",
 					"kind": "IMPLEMENT",
 					"targets": [
@@ -3778,7 +3792,7 @@
 			"produces": ["MAESTRO-WORKFLOW-CONSUMERS-BUILD"],
 			"id": "MCOMP-17",
 			"path": ".maestro/playbooks/2026-10-29-Maestro-Integration-Completion/MCOMP-17.md",
-			"taskCount": 7,
+			"taskCount": 8,
 			"stage": "S10"
 		},
 		{
@@ -5568,7 +5582,7 @@
 				"PAIR-DIRECT-EVIDENCE"
 			],
 			"nativeInputs": false,
-			"taskCount": 14
+			"taskCount": 15
 		},
 		{
 			"id": "S11",
@@ -5772,9 +5786,9 @@
 			"taskCount": 1
 		}
 	],
-	"taskCount": 327,
+	"taskCount": 328,
 	"taskCounts": {
-		"IMPLEMENT": 218,
+		"IMPLEMENT": 219,
 		"TEST": 49,
 		"VERIFY": 60
 	},
@@ -6522,6 +6536,7 @@
 			"MCOMP-17-02",
 			"MCOMP-17-03A",
 			"MCOMP-17-03B",
+			"MCOMP-17-03C",
 			"MCOMP-17-03",
 			"MCOMP-17-04",
 			"MCOMP-17-05",
