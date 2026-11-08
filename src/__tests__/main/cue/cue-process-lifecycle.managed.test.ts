@@ -27,6 +27,7 @@ import {
 	MANAGED_CONTRACT_VERSION,
 	type ManagedAuthenticatedContext,
 } from '../../../shared/maestro-lib/managed/types';
+import { installTurnSinkStanding } from '../../../shared/maestro-lib/run/start-turn';
 
 vi.mock('../../../main/parsers', () => ({
 	getOutputParser: () => null,
@@ -64,13 +65,19 @@ vi.mock('child_process', async (importOriginal) => {
 	};
 });
 
-import { runProcess, type CueManagedSpawn } from '../../../main/cue/cue-process-lifecycle';
+import {
+	getActiveProcessMap,
+	runProcess,
+	type CueManagedSpawn,
+} from '../../../main/cue/cue-process-lifecycle';
 
 // ─── Doubles ─────────────────────────────────────────────────────────────────
 
 const NOW = 1_700_000_000_000;
 
-function verifiedContext(): ManagedAuthenticatedContext {
+function verifiedContext(
+	identity: Partial<ManagedAuthenticatedContext['identity']> = {}
+): ManagedAuthenticatedContext {
 	const verified = createContextVerifier({
 		verifierId: 'cue-test',
 		peer: 'in-process',
@@ -95,6 +102,7 @@ function verifiedContext(): ManagedAuthenticatedContext {
 			runId: 'run-1',
 			rootRunId: 'run-1',
 			parentRunId: null,
+			...identity,
 		},
 		policyRevision: 3,
 		workflow: {
@@ -272,7 +280,191 @@ describe('runProcess managed admission', () => {
 		expect(result.status).toBe('failed');
 		expect(result.managed).toEqual({ state: 'denied', code: 'lease-invalid' });
 		expect(result.stderr).toContain('revoked');
+		expect(authority.live()).toEqual([]);
 	});
+
+	it.each(['deny', 'unavailable', 'unknown'] as const)(
+		'a stop during a pending %s answer preserves the decision without starting work',
+		async (decision) => {
+			const controller = new AbortController();
+			let answer!: (decision: PolicyDecision) => void;
+			const { authority, asked } = tableAuthority(
+				() => new Promise((resolve) => (answer = resolve))
+			);
+			const onLease = vi.fn();
+			const run = runProcess(
+				'run-1',
+				spec(),
+				options({ signal: controller.signal, managed: managedSpawn(authority, { onLease }) })
+			);
+			expect(asked).toHaveLength(1);
+			controller.abort();
+			answer({ decision, reason: 'late producer answer', policyRevision: 3 });
+			const result = await run;
+			expect(result).toMatchObject({
+				status: 'stopped',
+				executionStarted: false,
+				exitCode: null,
+				managed: {
+					state: decision === 'deny' ? 'denied' : decision,
+					code:
+						decision === 'deny'
+							? 'policy-denied'
+							: decision === 'unknown'
+								? 'outcome-unknown'
+								: 'runtime-unavailable',
+				},
+			});
+			expect(result.stderr).toContain('late producer answer');
+			expect(mockSpawn).not.toHaveBeenCalled();
+			expect(onLease).not.toHaveBeenCalled();
+			expect(getActiveProcessMap().has('run-1')).toBe(false);
+			expect(authority.live()).toEqual([]);
+		}
+	);
+
+	it('keeps a pending admission until a late lease can be released, then admits a fresh retry', async () => {
+		const controller = new AbortController();
+		let answer!: (decision: PolicyDecision) => void;
+		const { authority, asked } = tableAuthority(() => new Promise((resolve) => (answer = resolve)));
+		const leases: DispatchLease[] = [];
+		const observed: DispatchLease[] = [];
+		const delayed: HostAuthority = {
+			...authority,
+			async admit(request) {
+				const outcome = await authority.admit(request);
+				if (outcome.state === 'admitted') leases.push(outcome.lease);
+				return outcome;
+			},
+		};
+		const run = runProcess(
+			'run-1',
+			spec(),
+			options({
+				signal: controller.signal,
+				managed: managedSpawn(delayed, { onLease: (lease) => observed.push(lease) }),
+			})
+		);
+		const settled = vi.fn();
+		void run.then(settled);
+		controller.abort();
+		await Promise.resolve();
+		expect(settled).not.toHaveBeenCalled();
+		answer({ decision: 'allow', policyRevision: 3 });
+		expect(await run).toMatchObject({ status: 'stopped', executionStarted: false });
+		expect(leases[0].pid()).toBeUndefined();
+		expect(leases[0].ended().release).toEqual({ outcome: 'stopped', by: 'caller' });
+		expect(observed).toEqual([]);
+		expect(authority.live()).toEqual([]);
+		expect(mockSpawn).not.toHaveBeenCalled();
+		const retry = runProcess(
+			'run-2',
+			spec(),
+			options({
+				managed: managedSpawn(delayed, {
+					context: verifiedContext({
+						requestId: 'run-2',
+						idempotencyKey: 'run-2',
+						runId: 'run-2',
+						attemptId: 'attempt-2',
+					}),
+				}),
+			})
+		);
+		answer({ decision: 'allow', policyRevision: 3 });
+		const child = await spawned();
+		expect(asked.map(({ context }) => context.identity.attemptId)).toEqual([
+			'attempt-1',
+			'attempt-2',
+		]);
+		expect(leases[1].state()).toBe('bound');
+		child.emit('close', 0);
+		expect(await retry).toMatchObject({ status: 'completed', executionStarted: true });
+		expect(authority.live()).toEqual([]);
+	});
+
+	it.each(['stop', 'throw', 'stop-and-throw'] as const)(
+		'an admission observer that requests %s leaves no process or live lease',
+		async (action) => {
+			const controller = new AbortController();
+			const { authority } = tableAuthority(() => ({ decision: 'allow', policyRevision: 3 }));
+			const leases: DispatchLease[] = [];
+			const result = await runProcess(
+				'run-1',
+				spec(),
+				options({
+					signal: controller.signal,
+					managed: managedSpawn(authority, {
+						onLease: (lease) => {
+							leases.push(lease);
+							if (action !== 'throw') controller.abort();
+							if (action !== 'stop') throw new Error('admission observer failed');
+						},
+					}),
+				})
+			);
+			expect(result).toMatchObject({
+				status: action === 'throw' ? 'failed' : 'stopped',
+				executionStarted: false,
+			});
+			expect(mockSpawn).not.toHaveBeenCalled();
+			expect(leases).toHaveLength(1);
+			expect(leases[0].pid()).toBeUndefined();
+			expect(leases[0].ended().release).toEqual(
+				action === 'throw'
+					? { outcome: 'spawn-failed', message: 'admission observer failed' }
+					: { outcome: 'stopped', by: 'caller' }
+			);
+			expect(authority.live()).toEqual([]);
+			expect(getActiveProcessMap().has('run-1')).toBe(false);
+			if (action !== 'stop') {
+				expect(mockCaptureException).toHaveBeenCalledWith(
+					expect.objectContaining({ message: 'admission observer failed' }),
+					expect.objectContaining({ operation: 'cue:spawn', runId: 'run-1' })
+				);
+			}
+		}
+	);
+
+	it.each(['standing', 'snapshot', 'revocation'] as const)(
+		'releases an unused lease when %s changes inside the observer before the final gate',
+		async (change) => {
+			const { authority } = tableAuthority(() => ({ decision: 'allow', policyRevision: 3 }));
+			const spawnSpec = spec();
+			const leases: DispatchLease[] = [];
+			let releaseStanding: (() => void) | undefined;
+			try {
+				const result = await runProcess(
+					'run-1',
+					spawnSpec,
+					options({
+						managed: managedSpawn(authority, {
+							onLease: (lease) => {
+								leases.push(lease);
+								if (change === 'standing') {
+									releaseStanding = installTurnSinkStanding({
+										standing: () => 'managed',
+										authorityId: () => null,
+									});
+								} else if (change === 'snapshot') spawnSpec.args.push('changed');
+								else authority.revoke(lease.leaseId, 'owner fenced');
+							},
+						}),
+					})
+				);
+				expect(result).toMatchObject({ status: 'failed', executionStarted: false });
+				expect(result.managed?.code).toBe(
+					change === 'standing' ? 'runtime-unavailable' : 'lease-invalid'
+				);
+				expect(mockSpawn).not.toHaveBeenCalled();
+				expect(authority.live()).toEqual([]);
+				expect(leases[0].pid()).toBeUndefined();
+				expect(getActiveProcessMap().has('run-1')).toBe(false);
+			} finally {
+				releaseStanding?.();
+			}
+		}
+	);
 
 	it('a stop while the authority is deciding releases the lease unused', async () => {
 		const controller = new AbortController();
@@ -334,5 +526,46 @@ describe('runProcess managed admission', () => {
 		const result = await run;
 		expect(result.status).toBe('completed');
 		expect(result.managed).toBeUndefined();
+	});
+
+	it('retains a bound lease when setup throws after spawn instead of claiming a nonstart', async () => {
+		const { authority } = tableAuthority(() => ({ decision: 'allow', policyRevision: 3 }));
+		const leases: DispatchLease[] = [];
+		mockSpawn.mockImplementationOnce(() => {
+			mockChild = new MockChildProcess();
+			mockChild.stdin.end.mockImplementationOnce(() => {
+				throw new Error('post-spawn setup failed');
+			});
+			return mockChild as unknown as ChildProcess;
+		});
+		const result = await runProcess(
+			'run-1',
+			spec(),
+			options({ managed: managedSpawn(authority, { onLease: (lease) => leases.push(lease) }) })
+		);
+		expect(result).toMatchObject({ status: 'failed', executionStarted: true });
+		expect(leases[0].state()).toBe('bound');
+		expect(authority.live()).toEqual(leases);
+		mockChild.emit('close', 1);
+		expect(leases[0].ended().release).toEqual({ outcome: 'exited', exitCode: 1, signal: null });
+		expect(authority.live()).toEqual([]);
+	});
+
+	it('still stops a running child when the producer revokes its lease', async () => {
+		const { authority } = tableAuthority(() => ({ decision: 'allow', policyRevision: 3 }));
+		const leases: DispatchLease[] = [];
+		const run = runProcess(
+			'run-1',
+			spec(),
+			options({ managed: managedSpawn(authority, { onLease: (lease) => leases.push(lease) }) })
+		);
+		const child = await spawned();
+		expect(authority.revoke(leases[0].leaseId, 'owner fenced')).toBe(true);
+		expect(child.killed).toBe(true);
+		child.emit('close', null, 'SIGTERM');
+		expect(await run).toMatchObject({ status: 'failed', executionStarted: true });
+		expect(leases[0].ended().reason).toBe('owner fenced');
+		expect(authority.live()).toEqual([]);
+		expect(getActiveProcessMap().has('run-1')).toBe(false);
 	});
 });

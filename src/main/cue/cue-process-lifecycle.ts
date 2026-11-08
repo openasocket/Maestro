@@ -568,6 +568,7 @@ export async function runProcess(
 		};
 	};
 	let admission: StartTurnOptions['admission'];
+	let lease: DispatchLease | undefined;
 	if (options.managed) {
 		const managed = options.managed;
 		const admitted = await managed.authority.admit({
@@ -576,14 +577,17 @@ export async function runProcess(
 			policy: managed.policy,
 		});
 		if (admitted.state !== 'admitted') {
-			return managedRefusal(admitted.state, admitted.code, admitted.message);
+			const result = managedRefusal(admitted.state, admitted.code, admitted.message);
+			// Stop still owns this pending launch, but retain the producer's answer,
+			// especially an unknown outcome that still needs reconciliation.
+			return isLaunchCancelled(options.signal) ? { ...result, status: 'stopped' } : result;
 		}
 		// Stopped while the authority was deciding: release the lease unused.
 		if (isLaunchCancelled(options.signal)) {
 			admitted.lease.release({ outcome: 'stopped', by: 'caller' });
 			return stoppedResult();
 		}
-		managed.onLease?.(admitted.lease);
+		lease = admitted.lease;
 		admission = {
 			gate: leaseAdmission(managed.authority, admitted.lease),
 			attribution: managed.attribution,
@@ -591,10 +595,19 @@ export async function runProcess(
 	}
 
 	let turn: TurnHandle;
+	let startAttempted = false;
 	try {
+		if (lease) options.managed?.onLease?.(lease);
+		// An observer can synchronously request Stop. No await or observer may
+		// reopen the launch after this check; startTurn retains the final gate.
+		if (isLaunchCancelled(options.signal)) {
+			lease?.release({ outcome: 'stopped', by: 'caller' });
+			return stoppedResult();
+		}
 		// maestro-p (interactive token mode) self-allocates its own PTY via
 		// node-pty internally, so plain pipe stdio here is sufficient; no
 		// caller-side TTY is needed.
+		startAttempted = true;
 		turn = startTurn(
 			processSpec,
 			{
@@ -628,17 +641,30 @@ export async function runProcess(
 			}
 		);
 	} catch (err) {
+		// These failures are proven nonstarts. startTurn owns release once it
+		// attempts spawn; an uncertain post-spawn error must retain custody.
+		if (!startAttempted || err instanceof DispatchRefusedError) {
+			lease?.release(
+				isLaunchCancelled(options.signal)
+					? { outcome: 'stopped', by: 'caller' }
+					: {
+							outcome: 'spawn-failed',
+							message: err instanceof Error ? err.message : String(err),
+						}
+			);
+		}
 		// The gate refused the final spec: a decision, not a crash.
 		if (err instanceof DispatchRefusedError) {
 			return managedRefusal(err.state, err.code, err.message);
 		}
 		captureException(err, { operation: 'cue:spawn', runId, command: spec.command });
+		if (!startAttempted && isLaunchCancelled(options.signal)) return stoppedResult();
 		return {
 			stdout: '',
 			stderr: `Spawn error: ${err instanceof Error ? err.message : String(err)}`,
 			exitCode: null,
 			status: 'failed',
-			executionStarted: !(err instanceof TurnNotStartedError),
+			executionStarted: startAttempted && !(err instanceof TurnNotStartedError),
 			providerSessionId: null,
 			usage: null,
 		};

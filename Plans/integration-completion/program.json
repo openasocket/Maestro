@@ -3792,6 +3792,20 @@
 					"id": "MCOMP-17-03F"
 				},
 				{
+					"label": "Close Cue prompt cancellation and unused lease cleanup",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/main/cue/cue-process-lifecycle.ts",
+						"src/__tests__/main/cue/cue-process-lifecycle.managed.test.ts",
+						"Plans/integration-completion/program.json"
+					],
+					"outcome": "Consume MAESTRO-EFFECT-CONSUMERS-BUILD and its pinned MAESTRO-CONTRACT-INPUTS-BUILD dependency. Bounded continuation of MCOMP-17-03: close cancellation and observer cleanup at the existing Cue prompt process sink, the lifecycle boundary delegated by cue-run-router.ts. A stop during admission remains stopped while preserving denied, unavailable and unknown producer diagnostics; late leases and observer failures release unused custody. Recheck cancellation after the observer and release unused leases when the canonical final gate refuses. Retain uncertainty after a spawn attempt, the original producer lease, normal exit and revocation behavior, and fresh retry admission. Exercise these paths with the real lease authority and declared process fixtures. Retain MCOMP-17-03 unchecked for Cue shell lifecycle cancellation/observer cleanup, Cue Auto Run actions, incoming authenticated delegation, desktop composition and managed room custody across turns. No new wire definition, external capability, producer mapping or paired/provider/native qualification is supplied. Keep to three authored files and fewer than 500 changed lines.",
+					"backlog": ["M-04"],
+					"requires": ["MAESTRO-EFFECT-CONSUMERS-BUILD"],
+					"produces": [],
+					"id": "MCOMP-17-03G"
+				},
+				{
 					"label": "Bind Auto Run Cue and nested work at dispatch",
 					"kind": "IMPLEMENT",
 					"targets": [
@@ -3834,7 +3848,7 @@
 			"produces": ["MAESTRO-WORKFLOW-CONSUMERS-BUILD"],
 			"id": "MCOMP-17",
 			"path": ".maestro/playbooks/2026-10-29-Maestro-Integration-Completion/MCOMP-17.md",
-			"taskCount": 11,
+			"taskCount": 12,
 			"stage": "S10"
 		},
 		{
@@ -5624,7 +5638,7 @@
 				"PAIR-DIRECT-EVIDENCE"
 			],
 			"nativeInputs": false,
-			"taskCount": 18
+			"taskCount": 19
 		},
 		{
 			"id": "S11",
@@ -5828,9 +5842,9 @@
 			"taskCount": 1
 		}
 	],
-	"taskCount": 331,
+	"taskCount": 332,
 	"taskCounts": {
-		"IMPLEMENT": 222,
+		"IMPLEMENT": 223,
 		"TEST": 49,
 		"VERIFY": 60
 	},
@@ -6582,6 +6596,7 @@
 			"MCOMP-17-03D",
 			"MCOMP-17-03E",
 			"MCOMP-17-03F",
+			"MCOMP-17-03G",
 			"MCOMP-17-03",
 			"MCOMP-17-04",
 			"MCOMP-17-05",
