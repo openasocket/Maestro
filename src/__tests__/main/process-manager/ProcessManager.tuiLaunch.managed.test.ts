@@ -84,8 +84,11 @@ import {
 	ProcessManager,
 	autoRunSpawnSourceOf,
 	chatTurnSourceOf,
+	groupChatParticipantSourceOf,
 	localTuiLaunchOf,
 } from '../../../main/process-manager/ProcessManager';
+import { groupChatRoomContext } from '../../../shared/maestro-lib/groupchat/spawn';
+import { childDelegationContext } from '../../../shared/maestro-lib/managed/delegation';
 import { CALLER_CREDENTIAL_ENV_VAR } from '../../../shared/maestro-lib/launch/env';
 import {
 	autoRunRunIdentity,
@@ -1055,5 +1058,192 @@ describe('the caller credential of a managed desktop Auto Run attempt (MCOMP-17-
 		).toBeNull();
 		// An Auto Run attempt is never a chat-turn source.
 		expect(chatTurnSourceOf({ ...base, sessionId: 'agent-1-ai-tab-9' })).toBeNull();
+	});
+});
+
+describe('the caller credential of a managed desktop room participant turn (MCOMP-17-03BM)', () => {
+	const CHAT = '550e8400-e29b-41d4-a716-446655440000';
+	const OTHER_CHAT = '6ba7b810-9dad-11d1-80b4-00c04fd430c8';
+	let stamp = 1_700_000_000_000;
+	const participantId = (name: string, chat = CHAT) =>
+		`group-chat-${chat}-participant-${name}-${++stamp}`;
+	/** A room turn as `spawnGroupChatAgent` hands it to the sink: the room's record, its own ids. */
+	const roomTurn = (sessionId: string, overrides: Partial<ProcessConfig> = {}) =>
+		tuiTurn({
+			command: binPath,
+			args: HOST_ARGS,
+			sessionId,
+			delegation: groupChatRoomContext(CHAT),
+			dispatchedAs: { requestId: sessionId, attemptId: sessionId },
+			...overrides,
+		});
+
+	it('stamps a credential per turn that resolves to exactly its room, participant and process', async () => {
+		const manager = managedManager();
+		const alpha = await admitAndSpawn(manager, roomTurn(participantId('Alpha')));
+		const beta = await admitAndSpawn(manager, roomTurn(participantId('Beta-Two')));
+		const first = envOf(captured.child[0])[CALLER_CREDENTIAL_ENV_VAR];
+		const second = envOf(captured.child[1])[CALLER_CREDENTIAL_ENV_VAR];
+		expect(first).toMatch(/^[A-Za-z0-9_-]{43}$/);
+		expect(second).not.toBe(first);
+		// Stamped at the sink, never on the request the snapshot digests.
+		expect(alpha.turn.customEnvVars?.[CALLER_CREDENTIAL_ENV_VAR]).toBeUndefined();
+		expect(manager.groupChatCallerSourceOf(first)).toEqual({
+			groupChatId: CHAT,
+			participantName: 'Alpha',
+			processId: alpha.turn.sessionId,
+		});
+		expect(manager.groupChatCallerSourceOf(second)).toEqual({
+			groupChatId: CHAT,
+			participantName: 'Beta-Two',
+			processId: beta.turn.sessionId,
+		});
+	});
+
+	it('credentials a recovery turn as the participant it recovers', async () => {
+		const manager = managedManager();
+		const sessionId = `group-chat-${CHAT}-participant-Alpha-recovery-${++stamp}`;
+		await admitAndSpawn(manager, roomTurn(sessionId));
+		const credential = envOf(captured.child[0])[CALLER_CREDENTIAL_ENV_VAR];
+		expect(manager.groupChatCallerSourceOf(credential)).toEqual({
+			groupChatId: CHAT,
+			participantName: 'Alpha',
+			processId: sessionId,
+		});
+	});
+
+	it('never lends a room turn standing to the chat or Auto Run lookups, nor theirs to it', async () => {
+		const manager = managedManager();
+		await admitAndSpawn(manager, roomTurn(participantId('Alpha')));
+		await admitAndSpawn(manager, tuiTurn({ command: binPath, args: HOST_ARGS }));
+		const room = envOf(captured.child[0])[CALLER_CREDENTIAL_ENV_VAR];
+		const chat = envOf(captured.child[1])[CALLER_CREDENTIAL_ENV_VAR];
+		expect(manager.callerSourceOf(room)).toBeNull();
+		expect(manager.autoRunCallerSourceOf(room)).toBeNull();
+		expect(manager.autoRunCallerLineageOf(room)).toBeNull();
+		expect(manager.callerSourceOf(chat)).not.toBeNull();
+		expect(manager.groupChatCallerSourceOf(chat)).toBeNull();
+		const attribution = newAutoRunTurnRequest(
+			{
+				workflowId: 'playbook:/work/p',
+				version: 'v1',
+				triggerEventId: 'operator:1',
+				runId: 'run-root',
+			},
+			{ purpose: 'task', document: '01', newId: () => `id-${++stamp}` }
+		);
+		await admitAndSpawn(
+			manager,
+			tuiTurn({
+				command: binPath,
+				args: HOST_ARGS,
+				sessionId: `agent-1-batch-${++stamp}`,
+				querySource: 'auto',
+				autoRun: { attribution, fence: { ownerEpoch: 'e', fencingToken: 'f' } },
+			})
+		);
+		const attempt = envOf(captured.child[2])[CALLER_CREDENTIAL_ENV_VAR];
+		expect(manager.autoRunCallerSourceOf(attempt)).not.toBeNull();
+		expect(manager.groupChatCallerSourceOf(attempt)).toBeNull();
+	});
+
+	it('mints none for a moderator or synthesis turn, which asks as nobody', async () => {
+		const manager = managedManager();
+		const moderator = `group-chat-${CHAT}-moderator-${++stamp}`;
+		await admitAndSpawn(manager, roomTurn(moderator));
+		expect(envOf(captured.child[0])).not.toHaveProperty(CALLER_CREDENTIAL_ENV_VAR);
+	});
+
+	it('stops authenticating once the turn is killed or its lease revoked, and refuses forged credentials', async () => {
+		const port = fakeSpawnPort();
+		const manager = new ProcessManager(undefined, {
+			spawnAuthority: () => port,
+			userDataDir: dataDir,
+		});
+		const killed = await admitAndSpawn(manager, roomTurn(participantId('Alpha')));
+		await admitAndSpawn(manager, roomTurn(participantId('Beta')));
+		const gone = envOf(captured.child[0])[CALLER_CREDENTIAL_ENV_VAR];
+		const live = envOf(captured.child[1])[CALLER_CREDENTIAL_ENV_VAR];
+		expect(manager.kill(killed.turn.sessionId)).toBe(true);
+		expect(manager.groupChatCallerSourceOf(gone)).toBeNull();
+		for (const bad of ['forged', '', `${live}x`, undefined, null, 42, { live }]) {
+			expect(manager.groupChatCallerSourceOf(bad)).toBeNull();
+		}
+		expect(manager.groupChatCallerSourceOf(live)).not.toBeNull();
+		expect(port.authority.revokeAll('policy changed')).toBe(1);
+		expect(manager.groupChatCallerSourceOf(live)).toBeNull();
+	});
+
+	it('mints none on a standalone host', () => {
+		const standalone = new ProcessManager(undefined, { userDataDir: dataDir });
+		expect(standalone.spawn(roomTurn(participantId('Alpha')))).toEqual(SPAWN_RESULT);
+		expect(envOf(captured.child[0])).not.toHaveProperty(CALLER_CREDENTIAL_ENV_VAR);
+	});
+
+	it('reads the source only off a participant id carrying exactly its own room record', () => {
+		const sessionId = participantId('Alpha');
+		const base = {
+			sessionId,
+			toolType: 'claude-code',
+			delegation: groupChatRoomContext(CHAT),
+			dispatchedAs: { requestId: sessionId, attemptId: sessionId },
+		};
+		expect(groupChatParticipantSourceOf(base)).toEqual({
+			groupChatId: CHAT,
+			participantName: 'Alpha',
+			processId: sessionId,
+		});
+		expect(groupChatParticipantSourceOf({ ...base, purpose: 'conversation' })).not.toBeNull();
+		// Another room's record, a room turn's child (a dispatch or consult it made), or none.
+		expect(
+			groupChatParticipantSourceOf({ ...base, delegation: groupChatRoomContext(OTHER_CHAT) })
+		).toBeNull();
+		const child = childDelegationContext(groupChatRoomContext(CHAT), {
+			link: { kind: 'agent', id: sessionId },
+			requestId: 'child',
+			attemptId: 'child',
+		});
+		expect(groupChatParticipantSourceOf({ ...base, delegation: child })).toBeNull();
+		expect(groupChatParticipantSourceOf({ ...base, delegation: undefined })).toBeNull();
+		const twoLinks = groupChatRoomContext(CHAT);
+		twoLinks.delegation.chain.push({ kind: 'agent', id: 'agent-1' });
+		expect(groupChatParticipantSourceOf({ ...base, delegation: twoLinks })).toBeNull();
+		// Ids the spawn handler did not mint as this process.
+		expect(groupChatParticipantSourceOf({ ...base, dispatchedAs: undefined })).toBeNull();
+		expect(
+			groupChatParticipantSourceOf({
+				...base,
+				dispatchedAs: { requestId: sessionId, attemptId: 'other' },
+			})
+		).toBeNull();
+		// Not a participant process id.
+		for (const id of [`group-chat-${CHAT}-moderator-1700`, 'agent-1-ai-tab-9', 'agent-1-batch-1']) {
+			expect(
+				groupChatParticipantSourceOf({
+					...base,
+					sessionId: id,
+					dispatchedAs: { requestId: id, attemptId: id },
+				})
+			).toBeNull();
+		}
+		expect(groupChatParticipantSourceOf({ ...base, toolType: 'terminal' })).toBeNull();
+		for (const purpose of ['utility', 'probe', 'supervisor'] as const) {
+			expect(groupChatParticipantSourceOf({ ...base, purpose })).toBeNull();
+		}
+		expect(
+			groupChatParticipantSourceOf({
+				...base,
+				autoRun: {} as NonNullable<ProcessConfig['autoRun']>,
+			})
+		).toBeNull();
+		expect(
+			groupChatParticipantSourceOf({
+				...base,
+				utilityOf: {} as NonNullable<ProcessConfig['utilityOf']>,
+			})
+		).toBeNull();
+		// A room turn is never a chat-turn or Auto Run source.
+		expect(chatTurnSourceOf(base)).toBeNull();
+		expect(autoRunSpawnSourceOf(base)).toBeNull();
 	});
 });

@@ -53,6 +53,8 @@ import {
 	intersectDelegationScope,
 	type ManagedDelegationContext,
 } from '../../shared/maestro-lib/managed/delegation';
+import { parseParticipantSessionId } from '../../shared/maestro-lib/groupchat/session-ids';
+import { groupChatRoomRunId } from '../../shared/maestro-lib/groupchat/spawn';
 import { argsResumeSession } from './utils/resumeArgs';
 import { PtySpawner } from './spawners/PtySpawner';
 import { ChildProcessSpawner } from './spawners/ChildProcessSpawner';
@@ -357,17 +359,66 @@ export function autoRunSpawnSourceOf(
 	return agentId ? { agentId, processId: config.sessionId } : null;
 }
 
-/** What a caller credential was minted for: a chat turn, or one Auto Run attempt. */
+/**
+ * The group chat participant source a spawn is (MCOMP-17-03BM): the room, participant name and
+ * exact process of one desktop room participant or recovery turn, read off the
+ * `group-chat-<chatId>-participant-<name>-...` process id, for a spawn that carries exactly the
+ * room's own record (`groupChatRoomContext`) as its delegation and the process id as its
+ * dispatched request and attempt, as `spawnGroupChatAgent` hands it to the sink. Null for
+ * anything else: a moderator or synthesis turn (which asks as nobody), a consult (which carries
+ * the asking operation's record), a dispatched child of a room turn, a terminal, a chat turn, an
+ * Auto Run attempt, or a utility/probe/supervisor turn. The participant name is a display name;
+ * which live agent it is stays the resolving host's decision, never this sink's.
+ */
+export function groupChatParticipantSourceOf(
+	config: Pick<
+		ProcessConfig,
+		'sessionId' | 'toolType' | 'autoRun' | 'delegation' | 'dispatchedAs' | 'utilityOf' | 'purpose'
+	>
+): { groupChatId: string; participantName: string; processId: string } | null {
+	if (config.toolType === 'terminal' || config.autoRun || config.utilityOf || !config.delegation) {
+		return null;
+	}
+	if (config.purpose !== undefined && config.purpose !== 'conversation') return null;
+	const owner = parseParticipantSessionId(config.sessionId);
+	if (!owner) return null;
+	const room = groupChatRoomRunId(owner.groupChatId);
+	const { identity, delegation } = config.delegation;
+	const chain = delegation?.chain;
+	if (
+		identity?.runId !== room ||
+		identity.rootRunId !== room ||
+		identity.parentRunId !== null ||
+		!Array.isArray(chain) ||
+		chain.length !== 1 ||
+		chain[0]?.kind !== 'service' ||
+		chain[0].id !== room ||
+		config.dispatchedAs?.requestId !== config.sessionId ||
+		config.dispatchedAs.attemptId !== config.sessionId
+	) {
+		return null;
+	}
+	return {
+		groupChatId: owner.groupChatId,
+		participantName: owner.participantName,
+		processId: config.sessionId,
+	};
+}
+
+/** What a caller credential was minted for: a chat turn, one Auto Run attempt, or a room turn. */
 type CallerCredentialSource =
 	| { kind: 'chat'; agentId: string; tabId: string }
-	| { kind: 'auto-run'; agentId: string; processId: string };
+	| { kind: 'auto-run'; agentId: string; processId: string }
+	| { kind: 'group-chat'; groupChatId: string; participantName: string; processId: string };
 
-/** The credential source a spawn is, if it is one; the two kinds never overlap. */
+/** The credential source a spawn is, if it is one; the three kinds never overlap. */
 function callerCredentialSourceOf(config: ProcessConfig): CallerCredentialSource | null {
 	const chat = chatTurnSourceOf(config);
 	if (chat) return { kind: 'chat', ...chat };
 	const run = autoRunSpawnSourceOf(config);
-	return run ? { kind: 'auto-run', ...run } : null;
+	if (run) return { kind: 'auto-run', ...run };
+	const participant = groupChatParticipantSourceOf(config);
+	return participant ? { kind: 'group-chat', ...participant } : null;
 }
 
 export interface TerminalTabSpawnConfig {
@@ -794,6 +845,7 @@ export class ProcessManager extends EventEmitter {
 		// and resolvable only while this process holds this admission (`callerSourceOf`).
 		// An admitted desktop Auto Run attempt is credentialed the same way (MCOMP-17-03BA), per
 		// attempt: a retry is a new spawn, so it is stamped afresh and the old one lapses with it.
+		// So is an admitted desktop room participant or recovery turn (MCOMP-17-03BM), per turn.
 		const callerSource = lease && config.admission ? callerCredentialSourceOf(config) : null;
 		const callerCredential = callerSource ? randomBytes(32).toString('base64url') : null;
 		const stamped: Record<string, string> = {
@@ -1246,6 +1298,27 @@ export class ProcessManager extends EventEmitter {
 		const source = this.liveCallerSource(credential);
 		return source?.kind === 'auto-run'
 			? { agentId: source.agentId, processId: source.processId }
+			: null;
+	}
+
+	/**
+	 * Host-only: the exact live desktop group chat participant or recovery turn a caller
+	 * credential was minted for (MCOMP-17-03BM): its room, participant name and process id, under
+	 * the same custody rules as `callerSourceOf`. Null for a chat turn's or an Auto Run attempt's
+	 * credential (and both of their lookups answer null for a room turn's), so no kind lends its
+	 * standing to another. The participant name is a display name, not an agent: the resolving
+	 * host decides which live agent it is, and only while the room still holds it.
+	 */
+	groupChatCallerSourceOf(
+		credential: unknown
+	): { groupChatId: string; participantName: string; processId: string } | null {
+		const source = this.liveCallerSource(credential);
+		return source?.kind === 'group-chat'
+			? {
+					groupChatId: source.groupChatId,
+					participantName: source.participantName,
+					processId: source.processId,
+				}
 			: null;
 	}
 
