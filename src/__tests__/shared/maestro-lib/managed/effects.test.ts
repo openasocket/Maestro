@@ -278,6 +278,47 @@ describe('EFFECT/1 local receipt consumer', () => {
 		expect(effectGranted(decision)).toBe(false);
 	});
 
+	it.each(['deny', 'unavailable', 'unknown'] as const)(
+		'never retries a %s consumption, including after reconnection',
+		async (decision) => {
+			const f = await fixture();
+			vi.mocked(f.producer.consume).mockResolvedValue({ decision, reason: 'fixture settlement' });
+			expect(await f.decide()).toEqual({ decision, reason: 'fixture settlement' });
+			f.setProducer(null);
+			expect(effectGranted(await f.decide())).toBe(false);
+			f.setProducer({ ...f.producer });
+			expect(await f.decide()).toEqual({ decision, reason: 'fixture settlement' });
+			expect(f.producer.authorize).toHaveBeenCalledOnce();
+			expect(f.producer.consume).toHaveBeenCalledOnce();
+		}
+	);
+
+	it.each(['caller', 'lease'] as const)(
+		'cancels pending consumption on %s end and ignores a late allow',
+		async (ending) => {
+			const f = await fixture();
+			let settle!: (answer: ManagedEffectAuthorization) => void;
+			vi.mocked(f.producer.consume).mockImplementation(
+				() =>
+					new Promise((resolve) => {
+						settle = resolve;
+					})
+			);
+			const pending = f.decide();
+			await vi.waitFor(() => expect(f.producer.consume).toHaveBeenCalledOnce());
+			const [request, receipt, signal] = vi.mocked(f.producer.consume).mock.calls[0];
+			if (ending === 'caller') f.caller.abort();
+			else f.authority.revoke(f.lease.leaseId, 'fixture revoke during consume');
+			expect(await pending).toEqual(EFFECT_REVOKED);
+			expect(signal.aborted).toBe(true);
+			settle({ decision: 'allow', receipt });
+			expect(
+				await f.consumer.decide(request.effect, request.binding, new AbortController().signal)
+			).toMatchObject({ decision: 'unknown' });
+			expect(f.producer.consume).toHaveBeenCalledOnce();
+		}
+	);
+
 	it('binds file contents and network fields into the exact effect digest', async () => {
 		const f = await fixture();
 		const original = effectDigest(f.effect, f.binding);

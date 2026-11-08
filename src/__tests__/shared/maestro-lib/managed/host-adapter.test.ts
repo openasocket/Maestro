@@ -226,6 +226,10 @@ describe('managed host adapter', () => {
 		'policy',
 		'disconnect',
 		'expiry',
+		'disconnect-after-consume',
+		'policy-after-consume',
+		'actor-after-consume',
+		'expiry-after-consume',
 	] as const)('binds effects to owned prepared leases: %s', async (change) => {
 		const fake = await endpoint();
 		const port = await attachedPort(fake);
@@ -288,8 +292,21 @@ describe('managed host adapter', () => {
 			request: { method: 'Write', input: { file_path: '/work/a', content: 'one' } },
 		};
 		const answer = await adapter.effects.decide(effect, binding, new AbortController().signal);
-		expect(effectGranted(answer)).toBe(change === 'live');
-		expect(producer.consume).toHaveBeenCalledTimes(change === 'live' ? 1 : 0);
+		const consumed = change === 'live' || change.endsWith('-after-consume');
+		expect(effectGranted(answer)).toBe(consumed);
+		expect(producer.consume).toHaveBeenCalledTimes(consumed ? 1 : 0);
+		if (change.endsWith('-after-consume')) {
+			if (change === 'disconnect-after-consume') port.redial();
+			if (change === 'policy-after-consume') r.policy.appliedRevision++;
+			if (change === 'actor-after-consume') r.registration!.actorId = 'other';
+			if (change === 'expiry-after-consume')
+				r.registration!.expiresAt = new Date(NOW).toISOString();
+			expect(effectGranted(answer)).toBe(false);
+			expect(
+				await adapter.effects.decide(effect, binding, new AbortController().signal)
+			).toMatchObject({ decision: 'deny' });
+			expect(producer.consume).toHaveBeenCalledOnce();
+		}
 		if (change === 'live') {
 			vi.mocked(producer.authorize).mockImplementation(() => new Promise(() => {}));
 			const pending = adapter.effects.decide(

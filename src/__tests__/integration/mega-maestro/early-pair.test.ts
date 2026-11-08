@@ -3,14 +3,14 @@
  * through the protected dispatch against an endpoint, with every effect
  * observed independently of what any receipt says.
  *
- * Two parts. The deterministic part runs against the fake daemon (a
- * declared double of the endpoint's socket protocol) with the real client,
- * the real adapter, the real bridge and the real spawn sink, and proves
+ * Two parts. The deterministic part uses a declared local PREPARED/1
+ * producer and fake registration daemon with the real client, adapter,
+ * bridge and spawn sink. The producer is test-only. This proves
  * local behavior: an allowed run leaves exactly its effects (a file in its
  * work directory, nothing on the wire, no descendant, no undeclared read); a
  * denial, a replay, a changed snapshot, a lost endpoint, a wrong runtime and
- * a lost answer each leave none; the broker's decision receipt joins the
- * local ledger; an attached session that drops is unavailable until it is
+ * a lost answer each leave none. The local ledger contains the prepared
+ * lease; a dropped session is unavailable until it is
  * re-registered. The real part runs the harness script against the real
  * endpoint when `check` says every producer is present and otherwise skips,
  * naming the dependency and its owner in the test title. Unit doubles close
@@ -20,25 +20,31 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { dispatchHarness, type HarnessDispatchOutcome } from '../../../main/enterprise/dispatch';
 import {
 	buildDispatchSnapshot,
-	dispatchSnapshotDigest,
+	createLocalHostAuthority,
 } from '../../../shared/maestro-lib/managed/authority';
+import { managedAuthorityId } from '../../../shared/maestro-lib/managed/host-adapter';
 import {
 	buildHarnessLaunchSpec,
 	SYNTHETIC_HARNESS_PROVIDER,
 	type HarnessRouteRequest,
 } from '../../../shared/maestro-lib/managed/provider-route';
-import { DispatchRefusedError, startTurn } from '../../../shared/maestro-lib/run/start-turn';
 import {
-	brokerReceipt,
+	DispatchRefusedError,
+	leaseAdmission,
+	startTurn,
+} from '../../../shared/maestro-lib/run/start-turn';
+import {
 	composePair,
 	describePairSkip,
 	PAIR_HARNESS_SCRIPT,
 	PAIR_INSTALLATION,
+	PAIR_POLICY_REVISION,
+	PAIR_T0,
 	readSyntheticEffects,
 	runPairCheck,
 	startEgressObserver,
@@ -58,6 +64,10 @@ describe('early pair: the synthetic harness route through the protected dispatch
 	let declared: string;
 	let undeclared: string;
 	let workDirs = 0;
+	let clock: number;
+	let decision: 'allow' | 'deny' | 'unavailable';
+	let loseResponse: boolean;
+	let producerCalls: number;
 
 	beforeEach(async () => {
 		root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'early-pair-')));
@@ -65,14 +75,53 @@ describe('early pair: the synthetic harness route through the protected dispatch
 		undeclared = path.join(root, 'undeclared.txt');
 		fs.writeFileSync(declared, 'declared input');
 		fs.writeFileSync(undeclared, 'not for the program');
-		pair = await composePair({ dir: root });
+		clock = PAIR_T0;
+		decision = 'allow';
+		loseResponse = false;
+		producerCalls = 0;
+		pair = await composePair({
+			dir: root,
+			now: () => clock,
+			prepared: {
+				actorId: 'user-pair',
+				create: (identity) => {
+					const authority = createLocalHostAuthority({
+						authorityId: managedAuthorityId(identity),
+						now: () => clock,
+						newId: () => `fixture-lease-${producerCalls}`,
+						leaseTtlMs: 1000,
+						decide: () => ({
+							decision,
+							reason: 'fixture policy',
+							policyRevision: PAIR_POLICY_REVISION,
+						}),
+					});
+					return {
+						...authority,
+						version: 1,
+						admit: async (request) => {
+							producerCalls++;
+							if (loseResponse) throw new Error('fixture lost preparation response');
+							return authority.admit(request);
+						},
+					};
+				},
+			},
+		});
 		expect(await pair.attach()).toBe('ok');
 		observer = await startEgressObserver();
 	});
 	afterEach(async () => {
-		await observer.close();
-		await pair.close();
-		fs.rmSync(root, { recursive: true, force: true });
+		try {
+			expect(observer.connections()).toBe(0);
+			for (const dir of fs.readdirSync(root).filter((name) => name.startsWith('work-')))
+				expect(fs.existsSync(path.join(root, dir, 'child.marker'))).toBe(false);
+			expect(executionCalls()).toHaveLength(0);
+		} finally {
+			await observer?.close();
+			await pair?.close();
+			fs.rmSync(root, { recursive: true, force: true });
+		}
 	});
 
 	/** A fresh private work directory per run, so an absent effects file means nothing ran there. */
@@ -93,6 +142,7 @@ describe('early pair: the synthetic harness route through the protected dispatch
 				probePort: observer.port,
 				declaredFile: declared,
 				undeclaredFile: undeclared,
+				childMarker: path.join(dir, 'child.marker'),
 			}),
 			...overrides,
 		};
@@ -105,7 +155,7 @@ describe('early pair: the synthetic harness route through the protected dispatch
 		'allow: an admitted run leaves its effects in its work directory and nowhere else',
 		async () => {
 			const dir = workDir();
-			const context = verifiedContext(pair.verifier);
+			const context = verifiedContext(pair.verifier, { actor: { kind: 'human', id: 'user-pair' } });
 			const outcome = await dispatchHarness(pair.bridge, request(dir), { context });
 			expect(outcome.status).toBe('ran');
 			if (outcome.status !== 'ran') return;
@@ -127,21 +177,9 @@ describe('early pair: the synthetic harness route through the protected dispatch
 			expect(observer.connections()).toBe(0);
 			expect(fs.readdirSync(dir)).toEqual([SYNTHETIC_EFFECTS_FILE]);
 
-			// What went to the endpoint is the broker's vocabulary, with no command line on the wire.
-			const sent = executionCalls();
-			expect(sent).toHaveLength(1);
-			expect((sent[0].body as { payload: unknown }).payload).toEqual({
-				requestId: context.identity.requestId,
-				attemptId: context.identity.attemptId,
-				runId: context.identity.runId,
-				source: 'headless',
-				operation: 'start',
-				arguments: [],
-				resources: [declared],
-				provider: SYNTHETIC_HARNESS_PROVIDER,
-				model: 'synthetic',
-				policyRevision: 3,
-			});
+			// The prepared producer authorizes locally; broker dispatch is never a launch permit.
+			expect(producerCalls).toBe(1);
+			expect(outcome.decision).toBeNull();
 			expect(outcome.receipt?.effect).toMatchObject({
 				state: 'released',
 				release: { outcome: 'exited', exitCode: 0 },
@@ -152,39 +190,33 @@ describe('early pair: the synthetic harness route through the protected dispatch
 	);
 
 	it(
-		'policy receipt: the broker decision travels on the lease and joins the durable ledger',
+		'prepared receipt: the owned lease joins the durable ledger without a broker decision',
 		async () => {
 			const dir = workDir();
 			const outcome = await dispatchHarness(pair.bridge, request(dir), {
-				context: verifiedContext(pair.verifier),
+				context: verifiedContext(pair.verifier, { actor: { kind: 'human', id: 'user-pair' } }),
 			});
 			expect(outcome.status).toBe('ran');
 			if (outcome.status !== 'ran') return;
-			expect(outcome.decision).toEqual({
-				decisionId: 'decision-1',
-				requestDigest: 'd'.repeat(64),
-				brokerId: 'broker-pair',
-				policyRevision: 3,
-			});
-			const joined = pair.bridge.byDecision('decision-1');
+			expect(outcome.decision).toBeNull();
+			const joined = pair.bridge.receipt(outcome.leaseId);
 			expect(joined?.leaseId).toBe(outcome.leaseId);
 			expect(joined?.registration).toMatchObject({
 				challengeId: 'challenge-pair',
 				runtimeId: PAIR_INSTALLATION.runtimeId,
 			});
-			await new Promise((resolve) => setTimeout(resolve, 30));
+			await pair.bridge.flush();
 			const ledger = JSON.parse(fs.readFileSync(pair.ledgerFile, 'utf8')) as {
-				receipts: Array<{ decision: { decisionId: string }; effect: { state: string } }>;
+				receipts: Array<{ leaseId: string; decision: null; effect: { state: string } }>;
 			};
-			expect(ledger.receipts.map((r) => [r.decision.decisionId, r.effect.state])).toEqual([
-				['decision-1', 'released'],
-			]);
+			expect(ledger.receipts).toEqual([joined]);
+			expect(joined?.effect.state).toBe('released');
 		},
 		RUN_TIMEOUT_MS
 	);
 
 	it(
-		'deny before effect: a policy refusal, a replay and an unsupported broker each run nothing',
+		'deny before effect: a policy refusal, a replay and unavailable authority each run nothing',
 		async () => {
 			const expectNothingRan = (dir: string, outcome: HarnessDispatchOutcome) => {
 				expect(readSyntheticEffects(dir)).toBeNull();
@@ -192,48 +224,40 @@ describe('early pair: the synthetic harness route through the protected dispatch
 				expect(outcome.status).not.toBe('ran');
 			};
 
-			pair.fake.options.operations = {
-				execution: () => ({ outcome: 'denied', reason: 'policy_denied' }),
-			};
+			decision = 'deny';
 			const denied = workDir();
 			const deniedOutcome = await dispatchHarness(pair.bridge, request(denied), {
-				context: verifiedContext(pair.verifier),
+				context: verifiedContext(pair.verifier, { actor: { kind: 'human', id: 'user-pair' } }),
 			});
 			expect(deniedOutcome).toMatchObject({ status: 'denied', code: 'policy-denied' });
 			expectNothingRan(denied, deniedOutcome);
 
-			// A replay of a consumed request: the broker refuses, and the second attempt leaves nothing.
-			const seen = new Set<string>();
-			pair.fake.options.operations = {
-				execution: (payload) => {
-					const p = payload as Record<string, unknown>;
-					const key = `${p.requestId}/${p.attemptId}`;
-					if (seen.has(key)) return { outcome: 'denied', reason: 'replay' };
-					seen.add(key);
-					return brokerReceipt(p, 'decision-r');
-				},
-			};
+			// A consumed attempt cannot run again, even with a different work directory.
+			decision = 'allow';
 			const first = workDir();
 			const identity = { requestId: 'req-replay', attemptId: 'att-replay', runId: 'run-replay' };
 			const ran = await dispatchHarness(pair.bridge, request(first), {
-				context: verifiedContext(pair.verifier, { identity }),
+				context: verifiedContext(pair.verifier, {
+					actor: { kind: 'human', id: 'user-pair' },
+					identity,
+				}),
 			});
 			expect(ran.status).toBe('ran');
 			expect(readSyntheticEffects(first)).not.toBeNull();
 			const second = workDir();
 			const replayed = await dispatchHarness(pair.bridge, request(second), {
-				context: verifiedContext(pair.verifier, { identity }),
+				context: verifiedContext(pair.verifier, {
+					actor: { kind: 'human', id: 'user-pair' },
+					identity,
+				}),
 			});
 			expect(replayed).toMatchObject({ status: 'denied', code: 'idempotency-conflict' });
 			expectNothingRan(second, replayed);
 
-			// An endpoint that advertises no execution gives no decision: unavailable, nothing runs.
-			pair.fake.options.operations = {
-				execution: () => ({ outcome: 'denied', reason: 'unsupported_capability' }),
-			};
+			decision = 'unavailable';
 			const unsupported = workDir();
 			const noDecision = await dispatchHarness(pair.bridge, request(unsupported), {
-				context: verifiedContext(pair.verifier),
+				context: verifiedContext(pair.verifier, { actor: { kind: 'human', id: 'user-pair' } }),
 			});
 			expect(noDecision).toMatchObject({ status: 'unavailable', code: 'runtime-unavailable' });
 			expectNothingRan(unsupported, noDecision);
@@ -242,54 +266,55 @@ describe('early pair: the synthetic harness route through the protected dispatch
 		RUN_TIMEOUT_MS
 	);
 
-	it('changed inputs: a lease admitted for one snapshot refuses another at the spawn, before any effect', async () => {
-		const dir = workDir();
-		const admittedRequest = request(dir);
-		const spec = buildHarnessLaunchSpec(admittedRequest);
-		const attribution = {
-			provider: SYNTHETIC_HARNESS_PROVIDER,
-			model: 'synthetic',
-			operation: 'start' as const,
-			resourceIds: [declared],
-		};
-		const context = verifiedContext(pair.verifier);
-		const admitted = await pair.bridge.authority.admit({
-			context,
-			snapshot: buildDispatchSnapshot(spec, attribution),
-			policy: pair.host.policy(),
-		});
-		expect(admitted.state).toBe('admitted');
-		if (admitted.state !== 'admitted') return;
-		const { lease } = admitted;
+	it.each(['input', 'policy', 'actor', 'expired', 'revoked', 'disconnect'] as const)(
+		'holds changed %s at the spawn, before any effect',
+		async (change) => {
+			const dir = workDir();
+			const admittedRequest = request(dir);
+			const spec = buildHarnessLaunchSpec(admittedRequest);
+			const attribution = {
+				provider: SYNTHETIC_HARNESS_PROVIDER,
+				model: 'synthetic',
+				operation: 'start' as const,
+				resourceIds: [declared],
+			};
+			const context = verifiedContext(pair.verifier, { actor: { kind: 'human', id: 'user-pair' } });
+			const admitted = await pair.bridge.authority.admit({
+				context,
+				snapshot: buildDispatchSnapshot(spec, attribution),
+				policy: pair.host.policy(),
+			});
+			expect(admitted.state).toBe('admitted');
+			if (admitted.state !== 'admitted') return;
+			const { lease } = admitted;
 
-		// The program that reaches the spawn is not the one admitted: one more argument.
-		const replaced = { ...spec, args: [...spec.args, '--allow-net'] };
-		const refused = () =>
-			startTurn(
-				replaced,
-				{},
-				{
-					admission: {
-						gate: {
-							admit: (final) => {
-								const verdict = pair.bridge.authority.check(lease, dispatchSnapshotDigest(final));
-								return verdict.ok
-									? { ok: true }
-									: { ok: false, state: 'denied', code: 'lease-invalid', message: verdict.reason };
-							},
+			const replaced = change === 'input' ? { ...spec, stdin: `${spec.stdin} ` } : spec;
+			if (change === 'policy') pair.view.record!.policy.appliedRevision++;
+			if (change === 'actor') context.actor.id = 'other-actor';
+			if (change === 'expired') clock += 1001;
+			if (change === 'revoked') pair.bridge.authority.revoke(lease.leaseId, 'fixture cancellation');
+			if (change === 'disconnect') pair.port.redial();
+			const refused = () =>
+				startTurn(
+					replaced,
+					{},
+					{
+						admission: {
+							gate: leaseAdmission(pair.bridge.authority, lease),
+							attribution,
 						},
-						attribution,
-					},
-					stopGraceMs: 100,
-				}
+						stopGraceMs: 100,
+					}
+				);
+			expect(refused).toThrow(DispatchRefusedError);
+			expect(lease.state()).toBe(
+				change === 'input' ? 'issued' : change === 'expired' ? 'expired' : 'revoked'
 			);
-		expect(refused).toThrow(DispatchRefusedError);
-		expect(refused).toThrow('snapshot-mismatch');
-		expect(readSyntheticEffects(dir)).toBeNull();
-		expect(fs.readdirSync(dir)).toEqual([]);
-		expect(lease.state()).toBe('issued');
-		expect(pair.bridge.receipt(lease.leaseId)?.effect.state).toBe('admitted');
-	});
+			expect(readSyntheticEffects(dir)).toBeNull();
+			expect(fs.readdirSync(dir)).toEqual([]);
+			expect(pair.bridge.receipt(lease.leaseId)?.effect.pid).toBeNull();
+		}
+	);
 
 	it('wrong runtime: a context for another installation is refused by the verifier, and another runtime cannot attach', async () => {
 		expect(() =>
@@ -305,7 +330,7 @@ describe('early pair: the synthetic harness route through the protected dispatch
 		);
 		const dir = workDir();
 		const outcome = await dispatchHarness(pair.bridge, request(dir), {
-			context: verifiedContext(pair.verifier),
+			context: verifiedContext(pair.verifier, { actor: { kind: 'human', id: 'user-pair' } }),
 		});
 		expect(outcome).toMatchObject({ status: 'unavailable' });
 		expect(readSyntheticEffects(dir)).toBeNull();
@@ -315,10 +340,10 @@ describe('early pair: the synthetic harness route through the protected dispatch
 		'offline and restart: a dropped endpoint session is unavailable until re-attached; the ledger survives a host restart',
 		async () => {
 			pair.fake.dropConnections();
-			await new Promise((resolve) => setTimeout(resolve, 20));
+			await vi.waitFor(() => expect(pair.port.state().attached).toBe(false));
 			const dropped = workDir();
 			const offline = await dispatchHarness(pair.bridge, request(dropped), {
-				context: verifiedContext(pair.verifier),
+				context: verifiedContext(pair.verifier, { actor: { kind: 'human', id: 'user-pair' } }),
 			});
 			expect(offline).toMatchObject({ status: 'unavailable' });
 			expect(readSyntheticEffects(dropped)).toBeNull();
@@ -328,7 +353,7 @@ describe('early pair: the synthetic harness route through the protected dispatch
 			expect(await pair.attach()).toBe('ok');
 			const back = workDir();
 			const again = await dispatchHarness(pair.bridge, request(back), {
-				context: verifiedContext(pair.verifier),
+				context: verifiedContext(pair.verifier, { actor: { kind: 'human', id: 'user-pair' } }),
 			});
 			expect(again.status).toBe('ran');
 			expect(readSyntheticEffects(back)).not.toBeNull();
@@ -338,7 +363,7 @@ describe('early pair: the synthetic harness route through the protected dispatch
 			try {
 				expect(restarted.bridge.receipts()).toHaveLength(1);
 				expect(restarted.bridge.receipts()[0]).toMatchObject({
-					decision: { decisionId: 'decision-1' },
+					decision: null,
 					effect: { state: 'released' },
 				});
 			} finally {
@@ -351,23 +376,83 @@ describe('early pair: the synthetic harness route through the protected dispatch
 	it(
 		'endpoint loss: an answer lost after the request left is unknown, a closed endpoint is unavailable; neither runs anything',
 		async () => {
-			pair.fake.options.delayMs = 1_500;
+			loseResponse = true;
 			const lost = workDir();
 			const unknown = await dispatchHarness(pair.bridge, request(lost), {
-				context: verifiedContext(pair.verifier),
+				context: verifiedContext(pair.verifier, { actor: { kind: 'human', id: 'user-pair' } }),
 			});
 			expect(unknown).toMatchObject({ status: 'unknown', code: 'outcome-unknown' });
 			expect(readSyntheticEffects(lost)).toBeNull();
-			pair.fake.options.delayMs = 0;
+			loseResponse = false;
 
 			await pair.fake.close();
+			await vi.waitFor(() => expect(pair.port.state().attached).toBe(false));
 			const gone = workDir();
 			const unavailable = await dispatchHarness(pair.bridge, request(gone), {
-				context: verifiedContext(pair.verifier),
+				context: verifiedContext(pair.verifier, { actor: { kind: 'human', id: 'user-pair' } }),
 			});
 			expect(unavailable).toMatchObject({ status: 'unavailable' });
 			expect(readSyntheticEffects(gone)).toBeNull();
 			expect(observer.connections()).toBe(0);
+		},
+		RUN_TIMEOUT_MS
+	);
+
+	it.each(['disconnect', 'unknown-settlement'] as const)(
+		'%s after an observed effect stops the owned process and prevents replay',
+		async (ending) => {
+			const dir = workDir();
+			const context = verifiedContext(pair.verifier, { actor: { kind: 'human', id: 'user-pair' } });
+			const input = request(dir);
+			input.stdin = JSON.stringify({ ...JSON.parse(input.stdin!), holdOpen: true });
+			const controller = new AbortController();
+			let observedPid: number | undefined;
+			const outcome = await dispatchHarness(
+				pair.bridge,
+				input,
+				{ context },
+				{
+					signal: controller.signal,
+					stopGraceMs: 50,
+					onStdout: () => {
+						if (observedPid) return;
+						const observed = readSyntheticEffects(dir);
+						if (!observed) return;
+						const lease = pair.bridge.authority.live()[0];
+						observedPid = lease.pid();
+						pair.port.redial();
+						if (ending === 'disconnect') {
+							// Reaching the next sink rechecks standing and revokes the running lease.
+							pair.bridge.authority.check(lease, lease.snapshotDigest);
+						} else {
+							// Declared lost settlement; cleanup must not replace it with a successful exit.
+							lease.release({ outcome: 'unknown', message: 'fixture settlement response lost' });
+							controller.abort();
+						}
+					},
+				}
+			);
+			expect(outcome.status).toBe('ran');
+			if (outcome.status !== 'ran') throw new Error('Expected an owned process');
+			expect(observedPid).toBeGreaterThan(0);
+			expect(readSyntheticEffects(dir)?.pid).toBe(observedPid);
+			expect(() => process.kill(observedPid!, 0)).toThrow();
+			expect(pair.bridge.authority.live()).toHaveLength(0);
+			expect(outcome.receipt?.effect).toMatchObject(
+				ending === 'disconnect'
+					? { state: 'revoked' }
+					: { state: 'released', release: { outcome: 'unknown' } }
+			);
+			const ledger = JSON.parse(fs.readFileSync(pair.ledgerFile, 'utf8'));
+			expect(ledger.receipts[0].effect).toEqual(outcome.receipt?.effect);
+			expect(await pair.attach()).toBe('ok');
+			const retryDir = workDir();
+			expect(await dispatchHarness(pair.bridge, request(retryDir), { context })).toMatchObject({
+				status: 'denied',
+				code: 'idempotency-conflict',
+			});
+			expect(fs.readdirSync(retryDir)).toEqual([]);
+			expect(producerCalls).toBe(1);
 		},
 		RUN_TIMEOUT_MS
 	);
