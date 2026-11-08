@@ -84,7 +84,11 @@ import {
 import { getVisibleAgentDefinitions } from '../providers/definitions';
 import { installTurnSinkStanding } from '../run/start-turn';
 import type { AgentRecord } from '../store/records';
-import { createBackgroundTurns, type BackgroundTurnDeps } from './background-turns';
+import {
+	createBackgroundTurns,
+	type BackgroundManagedOptions,
+	type BackgroundTurnDeps,
+} from './background-turns';
 import { createRuntimeConsults, type RuntimeConsultsManagedOptions } from './consults';
 import { createRuntimeGroupChats } from './group-chats';
 import { createProcessRegistry } from './processes';
@@ -166,6 +170,13 @@ export interface MaestroRuntimeOptions {
 		scopeAgents?(context: ManagedAuthenticatedContext, agents: AgentRecord[]): AgentRecord[];
 		/** The policy sources admissions are decided on. Default: what the enrollment record names. */
 		policy?(): PolicySourceSet;
+		/**
+		 * Trusted host lookup of a background turn's authenticated initiating operation, keyed by
+		 * its process id. The runner rechecks it through preparation, admission and the final gate;
+		 * missing or withdrawn custody refuses the child. This is a host port, never caller JSON or
+		 * environment authority. The host must associate every turn with its current source custody.
+		 */
+		backgroundParentContext?: BackgroundManagedOptions['parentContext'];
 		/**
 		 * The owner fence of an Auto Run's (or a hosted Cue run's) workflow, claimed on every
 		 * attempt for that attempt's run and attempt ids. Default: the runtime's own
@@ -706,6 +717,9 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 		// Every group chat turn and consult process is admitted on the host's standing (MRC-07-05).
 		managed: {
 			port: backgroundSpawnPort,
+			...(options.managed?.backgroundParentContext
+				? { parentContext: options.managed.backgroundParentContext }
+				: {}),
 			...(deps.background?.onAdmission ? { onAdmission: deps.background.onAdmission } : {}),
 		},
 	});

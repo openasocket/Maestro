@@ -14,14 +14,26 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
 	createFakeGroupChatProvider,
+	roleOf,
 	type FakeGroupChatProvider,
 	type FakeScript,
 } from '../../../../__tests__/shared/maestro-lib/run/fakeGroupChatProvider';
 import { DEFAULT_TAB_DEFAULTS } from '../../agents/rules';
 import type { ClientResult } from '../../client/types';
 import type { GroupChatEvent, GroupChatRecord } from '../../groupchat/chat';
-import { createLocalHostAuthority, type AdmissionRequest } from '../../managed/authority';
+import {
+	createLocalHostAuthority,
+	type AdmissionRequest,
+	type ContextVerification,
+	type HostAuthority,
+} from '../../managed/authority';
 import { createManagedBinding } from '../../managed/binding';
+import {
+	delegationContextEnv,
+	delegationContextOf,
+	readDelegationContextEnv,
+} from '../../managed/delegation';
+import { createHeadlessSpawnAuthority } from '../../managed/host-adapter';
 import {
 	createMaestroRuntime,
 	type MaestroRuntime,
@@ -125,6 +137,31 @@ describe('runtime group chats', () => {
 		return started.runtime;
 	}
 
+	async function startEnrolled(
+		authority: HostAuthority,
+		script: FakeScript = ROUND,
+		managed: MaestroRuntimeOptions['managed'] = {}
+	): Promise<MaestroRuntime> {
+		const enroller = await start();
+		const binding = createManagedBinding({
+			paths: { userDataDir: dir, productionDataDir: dir },
+			fence: () => ({ ok: true }),
+			authority,
+			now: () => T0,
+		});
+		const enrollment = await binding.enroll({
+			installationId: enroller.installation.installationId,
+			authorityId: 'fleet',
+			endpointRef: 'fixture-endpoint',
+			policySources: [],
+			policyRevision: 3,
+		});
+		if (!enrollment.ok) throw new Error(enrollment.message);
+		await enroller.connection.close();
+		open.splice(open.indexOf(enroller), 1);
+		return start(script, undefined, { ...managed, authority });
+	}
+
 	/** Collect a chat's events, and let a test wait for a state or a line. */
 	function watch(runtime: MaestroRuntime) {
 		const events: Array<{ chatId: string; event: GroupChatEvent }> = [];
@@ -225,24 +262,7 @@ describe('runtime group chats', () => {
 				now: () => Date.now(),
 				leaseTtlMs: 60_000,
 			});
-			const enroller = await start();
-			const binding = createManagedBinding({
-				paths: { userDataDir: dir, productionDataDir: dir },
-				fence: () => ({ ok: true }),
-				authority,
-				now: () => T0,
-			});
-			const enrollment = await binding.enroll({
-				installationId: enroller.installation.installationId,
-				authorityId: 'fleet',
-				endpointRef: 'fixture-endpoint',
-				policySources: [],
-				policyRevision: 3,
-			});
-			if (!enrollment.ok) throw new Error(enrollment.message);
-			await enroller.connection.close();
-			open.splice(open.indexOf(enroller), 1);
-			const runtime = await start(ROUND, undefined, { authority });
+			const runtime = await startEnrolled(authority);
 			const chat = watch(runtime);
 			const created = await runtime.groupChats.create({
 				name: 'Managed review',
@@ -283,6 +303,276 @@ describe('runtime group chats', () => {
 			expect(chat.lines()).toContain('moderator: Both agree it is ready.');
 			expect((await readChat(runtime, room.id)).state).toBe('idle');
 		}
+	});
+
+	describe('hosted authenticated parent custody', () => {
+		async function enrolled(script: FakeScript = ROUND) {
+			const asked: AdmissionRequest[] = [];
+			const custody: { current: ContextVerification; onAdmit?: () => void; revision: number } = {
+				current: { ok: false, code: 'unauthenticated', problems: ['Parent custody withdrawn.'] },
+				revision: 3,
+			};
+			let leases = 0;
+			const authority = createLocalHostAuthority({
+				authorityId: 'fleet',
+				decide: (request) => {
+					asked.push(request);
+					custody.onAdmit?.();
+					return { decision: 'allow', policyRevision: custody.revision };
+				},
+				newId: () => `lease-${++leases}`,
+				now: () => Date.now(),
+				leaseTtlMs: 60_000,
+			});
+			const parentContext = vi.fn((_processId: string) => custody.current);
+			const runtime = await startEnrolled(authority, script, {
+				policy: () => ({ sources: [], policyRevision: custody.revision }),
+				backgroundParentContext: parentContext,
+			});
+			const parent = (grant = 'grant-1', fencingToken = 'fence-1') =>
+				createHeadlessSpawnAuthority({
+					installation: runtime.installation,
+					binding: runtime.managedBinding.state(),
+					host: { authority, policy: () => ({ sources: [], policyRevision: 7 }) },
+					origin: 'cue',
+					actor: { kind: 'human', id: 'source-operator' },
+				}).context({
+					traceId: 'cue-trace',
+					policyRevision: 7,
+					identity: {
+						requestId: 'cue-request',
+						idempotencyKey: 'cue-request',
+						attemptId: 'cue-attempt',
+						runId: 'cue-run',
+						rootRunId: 'root-run',
+						parentRunId: 'root-run',
+					},
+					workflow: {
+						workflowId: 'nightly',
+						version: 'v1',
+						triggerEventId: 'cue:1',
+						ownerEpoch: 'epoch-1',
+						fencingToken,
+					},
+					delegation: { chain: [{ kind: 'agent', id: 'source-agent' }], grantRef: grant },
+				});
+			custody.current = parent();
+			expect(custody.current.ok).toBe(true);
+			return { runtime, custody, parent, parentContext, asked, authority };
+		}
+
+		it('binds moderator, participant and synthesis processes to the host-verified source', async () => {
+			const { runtime, asked, parentContext } = await enrolled();
+			const chat = watch(runtime);
+			await startChat(runtime);
+			await chat.idle();
+			expect(provider.calls).toHaveLength(4);
+			expect(asked).toHaveLength(4);
+			for (const [index, call] of provider.calls.entries()) {
+				const stamped = readDelegationContextEnv(call.spec.env);
+				expect(stamped.status).toBe('ok');
+				if (stamped.status !== 'ok') throw new Error('The child has no delegation context.');
+				expect(stamped.context).toMatchObject({
+					identity: { requestId: call.processId, rootRunId: 'root-run', parentRunId: 'cue-run' },
+					workflow: {
+						workflowId: 'nightly',
+						version: 'v1',
+						triggerEventId: 'cue:1',
+						ownerEpoch: 'epoch-1',
+						fencingToken: 'fence-1',
+					},
+					delegation: {
+						chain: [
+							{ kind: 'agent', id: 'source-agent' },
+							{ kind: 'human', id: 'source-operator' },
+						],
+						grantRef: 'grant-1',
+					},
+					policyRevision: 3,
+				});
+				expect(asked[index].context).toMatchObject({
+					...stamped.context,
+					actor: { kind: 'human', id: `operator:${runtime.installation.installationId}` },
+				});
+				expect(parentContext).toHaveBeenCalledWith(call.processId);
+			}
+			expect(chat.lines()).toContain('moderator: Both agree it is ready.');
+		});
+
+		it.each(['withdrawn', 'copied', 'throws'] as const)(
+			'refuses a %s parent without a child effect',
+			async (kind) => {
+				const { runtime, custody, parent, parentContext, asked } = await enrolled();
+				if (kind === 'withdrawn')
+					custody.current = {
+						ok: false,
+						code: 'unauthenticated',
+						problems: ['Parent custody withdrawn.'],
+					};
+				if (kind === 'copied') custody.current = structuredClone(custody.current);
+				if (kind === 'throws')
+					parentContext.mockImplementation(() => {
+						throw new Error('Custody unavailable.');
+					});
+				const chat = watch(runtime);
+				expect(
+					errorOf(
+						await runtime.groupChats.create({
+							name: 'Parent custody',
+							participantIds: ['a1', 'a2'],
+						})
+					)
+				).toMatchObject({
+					code: 'failed',
+					message: expect.stringMatching(/managed-(denied|unavailable)/),
+				});
+				const [room] = value(await runtime.groupChats.list());
+				expect(room.state).toBe('idle');
+				expect(provider.calls).toEqual([]);
+				expect(asked).toEqual([]);
+				custody.current = parent('fresh-grant');
+				parentContext.mockImplementation(() => custody.current);
+				value(await runtime.groupChats.send(room.id, 'Retry with verified custody.'));
+				await chat.idle(2);
+				expect(provider.calls).toHaveLength(4);
+				expect(
+					asked.every((request) => request.context.delegation.grantRef === 'fresh-grant')
+				).toBe(true);
+			}
+		);
+
+		it.each(['participants', 'synthesis'] as const)(
+			'rechecks custody before %s and reauthorizes a fresh round',
+			async (boundary) => {
+				const { runtime, custody, parent, parentContext, asked } = await enrolled();
+				let firstProcess: string | undefined;
+				let withdrawn = true;
+				parentContext.mockImplementation((processId) => {
+					firstProcess ??= processId;
+					return withdrawn &&
+						processId !== firstProcess &&
+						(boundary === 'participants' || roleOf(processId).role !== 'participant')
+						? { ok: false, code: 'unauthenticated', problems: ['Parent custody withdrawn.'] }
+						: custody.current;
+				});
+				const chat = watch(runtime);
+				const chatId = await startChat(runtime);
+				await chat.idle();
+				const effects = boundary === 'participants' ? 1 : 3;
+				expect(provider.calls).toHaveLength(effects);
+				expect(asked).toHaveLength(effects);
+				expect(chat.lines().join('\n')).toContain('@Alpha @Beta please look at this');
+				custody.current = parent('grant-2');
+				custody.revision = 4;
+				withdrawn = false;
+				value(await runtime.groupChats.send(chatId, 'Try the renewed grant.'));
+				await chat.idle(2);
+				expect(provider.calls).toHaveLength(effects + 4);
+				expect(asked.slice(effects)).toHaveLength(4);
+				for (const request of asked.slice(effects)) {
+					expect(request.context).toMatchObject({
+						delegation: { grantRef: 'grant-2' },
+						policyRevision: 4,
+					});
+				}
+				expect(chat.lines()).toContain('moderator: Both agree it is ready.');
+			}
+		);
+
+		it.each(['grant', 'fence', 'policy'] as const)(
+			'releases an unused lease on a changed %s and permits a fresh retry',
+			async (change) => {
+				const { runtime, custody, parent, asked, authority } = await enrolled();
+				const admission = vi.spyOn(authority, 'admit');
+				custody.onAdmit = () => {
+					if (change === 'policy') custody.revision = 4;
+					else
+						custody.current = parent(
+							change === 'grant' ? 'replacement-grant' : 'grant-1',
+							change === 'fence' ? 'fence-2' : 'fence-1'
+						);
+				};
+				const chat = watch(runtime);
+				expect(
+					errorOf(
+						await runtime.groupChats.create({
+							name: 'Parent custody',
+							participantIds: ['a1', 'a2'],
+						})
+					)
+				).toMatchObject({ code: 'failed' });
+				const [room] = value(await runtime.groupChats.list());
+				const chatId = room.id;
+				expect(room.state).toBe('idle');
+				expect(provider.calls).toEqual([]);
+				expect(asked).toHaveLength(1);
+				const issued = await admission.mock.results[0].value;
+				expect(issued.state).toBe('admitted');
+				if (issued.state !== 'admitted') throw new Error('Expected a fixture lease.');
+				expect(issued.lease.ended()).toMatchObject({
+					state: 'released',
+					release: { outcome: 'spawn-failed' },
+				});
+				expect(authority.live()).toEqual([]);
+				custody.onAdmit = undefined;
+				value(await runtime.groupChats.send(chatId, 'Try again.'));
+				await chat.idle(2);
+				expect(provider.calls).toHaveLength(4);
+				expect(asked).toHaveLength(5);
+				for (const request of asked.slice(1)) {
+					expect(request.context).toMatchObject({
+						delegation: { grantRef: change === 'grant' ? 'replacement-grant' : 'grant-1' },
+						workflow: { fencingToken: change === 'fence' ? 'fence-2' : 'fence-1' },
+						policyRevision: change === 'policy' ? 4 : 3,
+					});
+				}
+			}
+		);
+
+		it('does not replace withdrawn host custody with caller JSON or environment context', async () => {
+			const { runtime, custody, asked } = await enrolled();
+			const source = custody.current;
+			if (!source.ok) throw new Error('Expected verified fixture custody.');
+			const context = delegationContextOf(source.context);
+			custody.current = { ok: false, code: 'unauthenticated', problems: ['Parent withdrawn.'] };
+			try {
+				for (const [key, value] of Object.entries(delegationContextEnv(context)))
+					vi.stubEnv(key, value);
+				const result = await runtime.groupChats.create({
+					name: 'Untrusted custody',
+					participantIds: ['a1', 'a2'],
+					...{ context, backgroundParentContext: () => source },
+				});
+				expect(errorOf(result).message).toContain('Parent withdrawn.');
+				expect(asked).toEqual([]);
+				expect(provider.calls).toEqual([]);
+			} finally {
+				vi.unstubAllEnvs();
+			}
+		});
+
+		it('requires managed standing when the host supplied a parent verifier', async () => {
+			const parentContext = vi.fn(
+				(): ContextVerification => ({
+					ok: false,
+					code: 'unauthenticated',
+					problems: ['No parent.'],
+				})
+			);
+			const runtime = await start(ROUND, undefined, { backgroundParentContext: parentContext });
+			expect(
+				errorOf(
+					await runtime.groupChats.create({ name: 'Parent custody', participantIds: ['a1', 'a2'] })
+				)
+			).toMatchObject({
+				code: 'failed',
+				message: expect.stringContaining('requires managed host standing'),
+			});
+			const [room] = value(await runtime.groupChats.list());
+			expect(room.state).toBe('idle');
+			expect(provider.calls).toEqual([]);
+			expect(parentContext).not.toHaveBeenCalled();
+		});
 	});
 
 	describe('a round (GC-1, GC-2)', () => {
