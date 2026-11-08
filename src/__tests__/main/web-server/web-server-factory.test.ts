@@ -73,6 +73,8 @@ vi.mock('../../../main/web-server/WebServer', () => {
 			setCallerSourceResolver = vi.fn();
 			// MCOMP-17-03AW: and the consult withdrawer beside it.
 			setCallerConsultWithdrawer = vi.fn();
+			// MCOMP-17-03BD: and the Auto Run attempt credential resolver.
+			setAutoRunCallerSourceResolver = vi.fn();
 			setNoteAgentDelegationCallback = vi.fn();
 			setEnqueueCommandCallback = vi.fn();
 			setListQueueCallback = vi.fn();
@@ -544,6 +546,91 @@ describe('web-server/web-server-factory', () => {
 			getProcessManager.mockReturnValue({ ...mockProcessManager, callerSourceOf: after } as any);
 			expect(resolver('cred-1')).toBeNull();
 			expect(after).toHaveBeenCalledWith('cred-1');
+			expect(before).toHaveBeenCalledTimes(1);
+		});
+	});
+
+	describe('Auto Run caller credential resolver composition (MCOMP-17-03BD)', () => {
+		it('composes exactly one Auto Run resolver on every server it builds', () => {
+			const createWebServer = createWebServerFactory(deps);
+			const first = createWebServer() as any;
+			const second = createWebServer({ lanAccess: true }) as any;
+
+			expect(first.setAutoRunCallerSourceResolver).toHaveBeenCalledTimes(1);
+			expect(second.setAutoRunCallerSourceResolver).toHaveBeenCalledTimes(1);
+			expect(typeof first.setAutoRunCallerSourceResolver.mock.calls[0][0]).toBe('function');
+		});
+
+		it('resolves through the manager Auto Run lookup only and returns its source unchanged', () => {
+			const autoRunCallerSourceOf = vi
+				.fn()
+				.mockReturnValue({ agentId: 'agent-a', processId: 'agent-a-batch-1' });
+			const callerSourceOf = vi.fn().mockReturnValue({ agentId: 'agent-x', tabId: 'tab-x' });
+			deps.getProcessManager = vi
+				.fn()
+				.mockReturnValue({ ...mockProcessManager, callerSourceOf, autoRunCallerSourceOf } as any);
+			const server = createWebServerFactory(deps)() as any;
+			const resolver = server.setAutoRunCallerSourceResolver.mock.calls[0][0];
+
+			expect(resolver('attempt-cred')).toEqual({
+				agentId: 'agent-a',
+				processId: 'agent-a-batch-1',
+			});
+			expect(autoRunCallerSourceOf).toHaveBeenCalledWith('attempt-cred');
+			expect(callerSourceOf).not.toHaveBeenCalled();
+		});
+
+		it('keeps the chat resolver off the Auto Run lookup', () => {
+			const autoRunCallerSourceOf = vi
+				.fn()
+				.mockReturnValue({ agentId: 'agent-a', processId: 'agent-a-batch-1' });
+			const callerSourceOf = vi.fn().mockReturnValue(null);
+			deps.getProcessManager = vi
+				.fn()
+				.mockReturnValue({ ...mockProcessManager, callerSourceOf, autoRunCallerSourceOf } as any);
+			const server = createWebServerFactory(deps)() as any;
+			const chat = server.setCallerSourceResolver.mock.calls[0][0];
+
+			expect(chat('attempt-cred')).toBeNull();
+			expect(autoRunCallerSourceOf).not.toHaveBeenCalled();
+		});
+
+		it('authenticates nobody when the manager refuses or is absent', () => {
+			const autoRunCallerSourceOf = vi.fn().mockReturnValue(null);
+			const getProcessManager = vi
+				.fn()
+				.mockReturnValue({ ...mockProcessManager, autoRunCallerSourceOf } as any);
+			deps.getProcessManager = getProcessManager;
+			const server = createWebServerFactory(deps)() as any;
+			const resolver = server.setAutoRunCallerSourceResolver.mock.calls[0][0];
+
+			expect(resolver('revoked')).toBeNull();
+			expect(autoRunCallerSourceOf).toHaveBeenCalledWith('revoked');
+
+			getProcessManager.mockReturnValue(null);
+			expect(resolver('attempt-cred')).toBeNull();
+		});
+
+		it('re-reads the process manager on every ask instead of capturing one at build', () => {
+			const before = vi.fn().mockReturnValue({ agentId: 'agent-a', processId: 'agent-a-batch-1' });
+			const after = vi.fn().mockReturnValue(null);
+			const getProcessManager = vi
+				.fn()
+				.mockReturnValue({ ...mockProcessManager, autoRunCallerSourceOf: before } as any);
+			deps.getProcessManager = getProcessManager;
+			const server = createWebServerFactory(deps)() as any;
+			const resolver = server.setAutoRunCallerSourceResolver.mock.calls[0][0];
+
+			expect(resolver('attempt-cred')).toEqual({
+				agentId: 'agent-a',
+				processId: 'agent-a-batch-1',
+			});
+			getProcessManager.mockReturnValue({
+				...mockProcessManager,
+				autoRunCallerSourceOf: after,
+			} as any);
+			expect(resolver('attempt-cred')).toBeNull();
+			expect(after).toHaveBeenCalledWith('attempt-cred');
 			expect(before).toHaveBeenCalledTimes(1);
 		});
 	});

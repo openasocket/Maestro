@@ -195,6 +195,13 @@ export function createWebServerFactory(deps: WebServerFactoryDependencies) {
 			(credential) => deps.getProcessManager()?.callerSourceOf(credential) ?? null
 		);
 
+		// A forwarded Auto Run attempt credential authenticates the same way, through the
+		// manager's Auto Run lookup only (MCOMP-17-03BD). The handler tries it after the chat
+		// resolver, so neither kind of credential ever resolves as the other.
+		server.setAutoRunCallerSourceResolver(
+			(credential) => deps.getProcessManager()?.autoRunCallerSourceOf(credential) ?? null
+		);
+
 		// When that caller loses custody mid-consult, the ask handler withdraws the ask and hands
 		// over the dispatch ticket it issued (MCOMP-17-03AW). The router cancels the consult the
 		// ticket started and tombstones the ticket, so a later arrival on it is refused as canceled.
