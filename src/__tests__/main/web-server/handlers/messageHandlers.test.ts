@@ -1167,6 +1167,232 @@ describe('WebSocketMessageHandler', () => {
 					});
 				});
 			});
+			describe('a room participant turn credential (MCOMP-17-03BN)', () => {
+				const CHAT = 'mcc_live-chat-credential';
+				const RUN = 'mcc_live-attempt-credential';
+				const ROOM = 'mcc_live-room-credential';
+				const PROCESS = 'group-chat-chat-1-participant-Session 1-1700000000000';
+				let callerSourceOf: ReturnType<typeof vi.fn>;
+				let autoRunCallerSourceOf: ReturnType<typeof vi.fn>;
+				let groupChatCallerSourceOf: ReturnType<typeof vi.fn>;
+				let bindAutoRunConsultLineage: ReturnType<typeof vi.fn>;
+				const ask = (fields: Record<string, unknown>) =>
+					handler.handleMessage(
+						{ ...client, cli: true },
+						{
+							type: 'cross_agent_ask',
+							sessionId: 'session-2',
+							question: 'q',
+							requestId: 'r-room',
+							...fields,
+						}
+					);
+				const roomAsk = () =>
+					ask({ fromSessionId: 'session-1', fromTabId: 'room-tab', callerCredential: ROOM });
+				const replies = () =>
+					vi
+						.mocked(client.socket.send)
+						.mock.calls.map((call) => JSON.parse(String(call[0])))
+						.filter((r) => r.type === 'cross_agent_ask_result');
+				const agent = (id: string, name: string) => ({
+					id,
+					name,
+					toolType: 'claude-code',
+					state: 'idle',
+					inputMode: 'ai',
+					cwd: '/home/user/project',
+				});
+
+				beforeEach(() => {
+					callerSourceOf = vi.fn((credential: string) =>
+						credential === CHAT ? { agentId: 'session-1', tabId: 'room-tab' } : null
+					);
+					autoRunCallerSourceOf = vi.fn((credential: string) =>
+						credential === RUN ? { agentId: 'session-1', processId: 'session-1-batch-1' } : null
+					);
+					groupChatCallerSourceOf = vi.fn((credential: string) =>
+						credential === ROOM
+							? { groupChatId: 'chat-1', participantName: 'Session 1', processId: PROCESS }
+							: null
+					);
+					bindAutoRunConsultLineage = vi.fn(() => true);
+					vi.mocked(callbacks.getSessions).mockReturnValue([
+						agent('session-1', 'Session 1'),
+						agent('session-2', 'Session 2'),
+					]);
+					handler.setCallbacks({
+						callerSourceOf,
+						autoRunCallerSourceOf,
+						groupChatCallerSourceOf,
+						bindAutoRunConsultLineage,
+					} as Partial<MessageHandlerCallbacks>);
+				});
+
+				it('consults as exactly the live agent the participant name stands for', async () => {
+					roomAsk();
+					await vi.waitFor(() => expect(callbacks.consultAgent).toHaveBeenCalled());
+					expect(groupChatCallerSourceOf).toHaveBeenCalledWith(ROOM);
+					const params = vi.mocked(callbacks.consultAgent).mock.calls[0][0];
+					expect(params).toMatchObject({ fromSessionId: 'session-1', fromTabId: 'room-tab' });
+					expect(JSON.stringify(params)).not.toContain(ROOM);
+					expect(lastReply()).toMatchObject({ success: true, requestId: 'r-room' });
+					expect(JSON.stringify(lastReply())).not.toContain(ROOM);
+					// A room turn's ask is never bound as an Auto Run attempt's lineage.
+					expect(bindAutoRunConsultLineage).not.toHaveBeenCalled();
+				});
+
+				it('authenticates with only the room resolver composed', async () => {
+					handler.setCallbacks({
+						callerSourceOf: undefined,
+						autoRunCallerSourceOf: undefined,
+					} as Partial<MessageHandlerCallbacks>);
+					roomAsk();
+					await vi.waitFor(() => expect(callbacks.consultAgent).toHaveBeenCalled());
+					expect(lastReply()).toMatchObject({ success: true });
+				});
+
+				it('chat and Auto Run credentials never reach the room resolver', async () => {
+					ask({ fromSessionId: 'session-1', fromTabId: 'room-tab', callerCredential: CHAT });
+					ask({ fromSessionId: 'session-1', fromTabId: 'room-tab', callerCredential: RUN });
+					await vi.waitFor(() => expect(callbacks.consultAgent).toHaveBeenCalledTimes(2));
+					expect(groupChatCallerSourceOf).not.toHaveBeenCalled();
+				});
+
+				it('a room credential is not offered as a chat turn or attempt of the agent it names', () => {
+					handler.setCallbacks({
+						groupChatCallerSourceOf: undefined,
+					} as Partial<MessageHandlerCallbacks>);
+					roomAsk();
+					expect(callbacks.consultAgent).not.toHaveBeenCalled();
+					expect(lastReply().error).toContain('authenticates no live');
+				});
+
+				it.each([
+					['another agent', 'session-2', 'room-tab', [], 'is not the group chat participant'],
+					['no stated agent', undefined, 'room-tab', [], 'is not the group chat participant'],
+					['no stated tab', 'session-1', undefined, [], 'is not the group chat participant'],
+					[
+						'a name no live agent holds',
+						'session-1',
+						'room-tab',
+						[agent('session-2', 'Session 2')],
+						'is not the group chat participant',
+					],
+					[
+						'a name two live agents hold',
+						'session-1',
+						'room-tab',
+						[agent('session-1', 'Session 1'), agent('session-3', 'Session 1')],
+						'is not the group chat participant',
+					],
+				])(
+					'refuses %s before any ticket, lookup or consult',
+					(_label, fromSessionId, fromTabId, sessions, reason) => {
+						if ((sessions as unknown[]).length) {
+							vi.mocked(callbacks.getSessions).mockReturnValue(sessions as never);
+						}
+						ask({
+							...(fromSessionId ? { fromSessionId } : {}),
+							...(fromTabId ? { fromTabId } : {}),
+							callerCredential: ROOM,
+						});
+						expect(callbacks.consultAgent).not.toHaveBeenCalled();
+						expect(callbacks.getSessionDetail).not.toHaveBeenCalled();
+						const response = lastReply();
+						expect(response).toMatchObject({ success: false, requestId: 'r-room' });
+						expect(response.error).toContain(reason);
+						expect(response.error).toContain('nothing was asked');
+						expect(JSON.stringify(response)).not.toContain(ROOM);
+					}
+				);
+
+				it('an unknown credential names every kind it was tried as', () => {
+					ask({
+						fromSessionId: 'session-1',
+						fromTabId: 'room-tab',
+						callerCredential: 'mcc_forged',
+					});
+					expect(groupChatCallerSourceOf).toHaveBeenCalledWith('mcc_forged');
+					expect(lastReply().error).toContain('no group chat participant');
+				});
+
+				describe('custody of the room turn while the consult runs', () => {
+					let finish: (result: Record<string, unknown>) => void;
+					let withdrawCallerConsult: ReturnType<typeof vi.fn>;
+
+					beforeEach(() => {
+						vi.useFakeTimers();
+						vi.mocked(callbacks.consultAgent).mockImplementation(
+							() =>
+								new Promise((resolve) => {
+									finish = resolve as typeof finish;
+								})
+						);
+						withdrawCallerConsult = vi.fn();
+						handler.setCallbacks({
+							callerSourceOf,
+							autoRunCallerSourceOf,
+							groupChatCallerSourceOf,
+							withdrawCallerConsult,
+						} as Partial<MessageHandlerCallbacks>);
+					});
+					afterEach(() => {
+						vi.useRealTimers();
+					});
+
+					it('delivers the answer while the room turn holds custody', async () => {
+						roomAsk();
+						vi.advanceTimersByTime(CALLER_CUSTODY_RECHECK_MS * 2);
+						expect(groupChatCallerSourceOf.mock.calls.length).toBeGreaterThanOrEqual(3);
+						finish({ success: true, answer: 'room answer' });
+						await vi.advanceTimersByTimeAsync(0);
+						expect(replies()).toHaveLength(1);
+						expect(replies()[0]).toMatchObject({ success: true, answer: 'room answer' });
+						expect(withdrawCallerConsult).not.toHaveBeenCalled();
+					});
+
+					it('withdraws the ask when the room turn ends (the room was stopped)', async () => {
+						roomAsk();
+						const ticket = ticketSent();
+						groupChatCallerSourceOf.mockReturnValue(null);
+						vi.advanceTimersByTime(CALLER_CUSTODY_RECHECK_MS);
+						expect(replies()).toHaveLength(1);
+						expect(replies()[0].error).toContain('the ask was withdrawn');
+						expect(withdrawCallerConsult).toHaveBeenCalledWith(ticket);
+						finish({ success: true, answer: 'late answer' });
+						await vi.advanceTimersByTimeAsync(0);
+						expect(JSON.stringify(replies())).not.toContain('late answer');
+					});
+
+					it('a credential that moves to another room process is custody lost', () => {
+						roomAsk();
+						groupChatCallerSourceOf.mockReturnValue({
+							groupChatId: 'chat-1',
+							participantName: 'Session 1',
+							processId: `${PROCESS}-recovery`,
+						});
+						vi.advanceTimersByTime(CALLER_CUSTODY_RECHECK_MS);
+						expect(replies()).toHaveLength(1);
+						expect(replies()[0].error).toContain('the ask was withdrawn');
+					});
+
+					it('a participant name that no longer names the asking agent is custody lost', () => {
+						roomAsk();
+						vi.mocked(callbacks.getSessions).mockReturnValue([agent('session-9', 'Session 1')]);
+						vi.advanceTimersByTime(CALLER_CUSTODY_RECHECK_MS);
+						expect(replies()).toHaveLength(1);
+						expect(replies()[0].error).toContain('the ask was withdrawn');
+					});
+
+					it('a credential that turns into an Auto Run attempt of the same agent is custody lost', () => {
+						roomAsk();
+						autoRunCallerSourceOf.mockReturnValue({ agentId: 'session-1', processId: PROCESS });
+						vi.advanceTimersByTime(CALLER_CUSTODY_RECHECK_MS);
+						expect(replies()).toHaveLength(1);
+						expect(replies()[0].error).toContain('the ask was withdrawn');
+					});
+				});
+			});
 
 			it('a request without the field keeps the existing consult path', async () => {
 				handler.handleMessage(client, {

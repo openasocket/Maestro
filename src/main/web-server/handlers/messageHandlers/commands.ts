@@ -19,6 +19,7 @@ import {
 import { LOG_CONTEXT } from './shared';
 import { interruptTurnFailure } from '../../../../shared/turnInterrupt';
 import { parseMentionRoutingField } from '../../../../shared/crossAgentContext';
+import { findSessionForParticipantName } from '../../../../shared/group-chat-types';
 import type { WebClient, WebClientMessage, MessageHandlerContext } from './types';
 
 /**
@@ -518,10 +519,38 @@ function autoRunCallerSourceResolverOf(
 	return typeof autoRunCallerSourceOf === 'function' ? autoRunCallerSourceOf : undefined;
 }
 
-/** The source a forwarded caller credential authenticated (MCOMP-17-03AP, 03BB). */
+/**
+ * The host-only lookup from a caller credential to the live group chat participant turn it was
+ * stamped on (`ProcessManager.groupChatCallerSourceOf`, MCOMP-17-03BM). It answers the room, the
+ * participant's display name and the process, never an agent: which live agent the name stands
+ * for is this handler's to resolve. Null for anything that authenticates nobody.
+ */
+export type GroupChatCallerSourceResolver = (
+	credential: string
+) => { groupChatId: string; participantName: string; processId: string } | null;
+
+/** The room participant resolver the desktop composed for the ask handler, when it composed one. */
+function groupChatCallerSourceResolverOf(
+	ctx: MessageHandlerContext
+): GroupChatCallerSourceResolver | undefined {
+	const { groupChatCallerSourceOf } = ctx.callbacks as MessageHandlerContext['callbacks'] & {
+		groupChatCallerSourceOf?: GroupChatCallerSourceResolver;
+	};
+	return typeof groupChatCallerSourceOf === 'function' ? groupChatCallerSourceOf : undefined;
+}
+
+/** The source a forwarded caller credential authenticated (MCOMP-17-03AP, 03BB, 03BN). */
 export type ForwardedCaller =
 	| { ok: true; kind: 'chat'; agentId: string; tabId: string }
 	| { ok: true; kind: 'auto-run'; agentId: string; tabId: string; processId: string }
+	| {
+			ok: true;
+			kind: 'group-chat';
+			agentId: string;
+			tabId: string;
+			processId: string;
+			groupChatId: string;
+	  }
 	| { ok: false; error: string };
 
 /**
@@ -572,7 +601,11 @@ function autoRunConsultLineageBinderOf(
  * standing to another agent or tab. Otherwise an Auto Run attempt's credential (MCOMP-17-03BB):
  * the stated agent must be exactly the attempt's agent and pins its process. An attempt runs in
  * no tab, so (as the shared host's `askAsCaller` does) the stated tab is required only as where
- * the consult is shown, never as custody. The two kinds never resolve as each other.
+ * the consult is shown, never as custody. Otherwise a room participant turn's credential
+ * (MCOMP-17-03BN): its participant name must name exactly one live agent by the rule the room
+ * router picks the agent it runs as (`findSessionForParticipantName`), the stated agent must be
+ * exactly that agent, and the stated tab is display only, as for an attempt. A name that matches
+ * no live agent, or is ambiguous, authenticates nobody. The kinds never resolve as each other.
  */
 export function resolveForwardedCaller(
 	ctx: MessageHandlerContext,
@@ -584,7 +617,8 @@ export function resolveForwardedCaller(
 	}
 	const resolveChat = callerSourceResolverOf(ctx);
 	const resolveAutoRun = autoRunCallerSourceResolverOf(ctx);
-	if (!resolveChat && !resolveAutoRun) {
+	const resolveRoom = groupChatCallerSourceResolverOf(ctx);
+	if (!resolveChat && !resolveAutoRun && !resolveRoom) {
 		return {
 			ok: false,
 			error: 'This host cannot authenticate a caller credential; nothing was asked.',
@@ -618,10 +652,32 @@ export function resolveForwardedCaller(
 			processId: run.processId,
 		};
 	}
+	const room = credential && resolveRoom ? resolveRoom(credential) : null;
+	if (room) {
+		const agent = findSessionForParticipantName(
+			room.participantName,
+			ctx.callbacks.getSessions?.() ?? []
+		);
+		if (!agent || stated.fromSessionId !== agent.id || !stated.fromTabId) {
+			return {
+				ok: false,
+				error:
+					'The stated caller is not the group chat participant the caller credential names; nothing was asked.',
+			};
+		}
+		return {
+			ok: true,
+			kind: 'group-chat',
+			agentId: agent.id,
+			tabId: stated.fromTabId,
+			processId: room.processId,
+			groupChatId: room.groupChatId,
+		};
+	}
 	return {
 		ok: false,
 		error:
-			'The caller credential authenticates no live chat turn or Auto Run attempt; nothing was asked.',
+			'The caller credential authenticates no live chat turn or Auto Run attempt, and no group chat participant; nothing was asked.',
 	};
 }
 
@@ -677,6 +733,7 @@ export function handleCrossAgentAsk(
 	let fromTabId = statedFromTabId;
 	let custodyCredential: string | undefined;
 	let custodyProcessId: string | undefined;
+	let custodyKind: 'chat' | 'auto-run' | 'group-chat' | undefined;
 	if ('callerCredential' in message) {
 		const caller = resolveForwardedCaller(ctx, message.callerCredential, {
 			fromSessionId: statedFromSessionId,
@@ -689,7 +746,8 @@ export function handleCrossAgentAsk(
 		fromSessionId = caller.agentId;
 		fromTabId = caller.tabId;
 		custodyCredential = message.callerCredential as string;
-		if (caller.kind === 'auto-run') custodyProcessId = caller.processId;
+		custodyKind = caller.kind;
+		if (caller.kind !== 'chat') custodyProcessId = caller.processId;
 	}
 	if (!ctx.callbacks.getSessionDetail?.(targetSessionId)) {
 		reply({ success: false, error: 'Agent not found' });
@@ -721,7 +779,7 @@ export function handleCrossAgentAsk(
 	// ticket before the consult is dispatched, so the consult is the run's child on its fenced
 	// workflow. A composed binder that cannot hold the binding refuses the ask: the ticket is
 	// withdrawn and the target is never consulted under a lineage it was not given.
-	if (custodyCredential !== undefined && custodyProcessId !== undefined) {
+	if (custodyCredential !== undefined && custodyKind === 'auto-run') {
 		const bindLineage = autoRunConsultLineageBinderOf(ctx);
 		if (bindLineage && bindLineage(custodyCredential, dispatchTicket) !== true) {
 			withdrawDispatchTicket(dispatchTicket);
@@ -750,14 +808,14 @@ export function handleCrossAgentAsk(
 		return true;
 	};
 	// Custody holds only while the credential still names the same kind of source: the same chat
-	// turn, or the same Auto Run attempt process (MCOMP-17-03BB).
+	// turn, the same Auto Run attempt process (MCOMP-17-03BB), or the same room participant process
+	// whose name still resolves to the same live agent (MCOMP-17-03BN). A room that is stopped or
+	// removed kills its participant turns, so the room's lifetime bounds the ask.
 	const custodyHeld = (): boolean => {
 		if (custodyCredential === undefined) return true;
 		const held = resolveForwardedCaller(ctx, custodyCredential, { fromSessionId, fromTabId });
-		if (!held.ok) return false;
-		return custodyProcessId === undefined
-			? held.kind === 'chat'
-			: held.kind === 'auto-run' && held.processId === custodyProcessId;
+		if (!held.ok || held.kind !== custodyKind) return false;
+		return held.kind === 'chat' || held.processId === custodyProcessId;
 	};
 	const withdrawForCustody = (): void => {
 		const replied = settle({
