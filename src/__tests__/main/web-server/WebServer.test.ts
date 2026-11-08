@@ -754,3 +754,104 @@ describe('Auto Run caller credential resolver composition (MCOMP-17-03BC)', () =
 		});
 	});
 });
+
+describe('Auto Run consult lineage binder composition (MCOMP-17-03BH)', () => {
+	const ATTEMPT = 'mcc_auto-run-attempt-credential';
+	const CHAT = 'mcc_live-turn-credential';
+
+	type Binder = (credential: string, ticket: string) => boolean;
+
+	function compose(opts: { binder?: Binder; binderFirst?: boolean; withChat?: boolean } = {}) {
+		const server = new WebServer(0);
+		const consultAgent = vi.fn().mockResolvedValue({ success: true, response: 'answer' });
+		server.setConsultAgentCallback(consultAgent as never);
+		server.setGetSessionDetailCallback(vi.fn().mockReturnValue({ state: 'idle' }) as never);
+		// Composed before start() wires the remaining callbacks, in either order relative to the
+		// resolver: neither setter may drop the other's hook.
+		if (opts.binderFirst && opts.binder) server.setAutoRunConsultLineageBinder(opts.binder);
+		if (opts.withChat) {
+			server.setCallerSourceResolver((c) =>
+				c === CHAT ? { agentId: 'caller-1', tabId: 'tab-1' } : null
+			);
+		}
+		server.setAutoRunCallerSourceResolver((c) =>
+			c === ATTEMPT ? { agentId: 'runner-agent', processId: 'runner-agent-batch-1' } : null
+		);
+		if (!opts.binderFirst && opts.binder) server.setAutoRunConsultLineageBinder(opts.binder);
+		(server as any).setupMessageHandlerCallbacks();
+		const sent: Array<Record<string, unknown>> = [];
+		const client = {
+			id: 'cli-socket',
+			connectedAt: Date.now(),
+			cli: true,
+			socket: {
+				readyState: WebSocket.OPEN,
+				send: vi.fn((frame: string) => sent.push(JSON.parse(frame))),
+				once: vi.fn(),
+				off: vi.fn(),
+			},
+		};
+		const ask = (fields: Record<string, unknown>) =>
+			(server as any).messageHandler.handleMessage(client, {
+				type: 'cross_agent_ask',
+				sessionId: 'target-agent',
+				question: 'q',
+				requestId: 'r-1',
+				...fields,
+			});
+		const results = () => sent.filter((r) => r.type === 'cross_agent_ask_result');
+		return { consultAgent, ask, results };
+	}
+
+	const attemptAsk = {
+		fromSessionId: 'runner-agent',
+		fromTabId: 'shown-tab',
+		callerCredential: ATTEMPT,
+	};
+
+	it('binds the attempt credential to the ticket the consult is dispatched with', async () => {
+		const binder = vi.fn<Binder>(() => true);
+		const { consultAgent, ask, results } = compose({ binder });
+		ask(attemptAsk);
+		await vi.waitFor(() => expect(consultAgent).toHaveBeenCalledTimes(1));
+		expect(binder).toHaveBeenCalledTimes(1);
+		const { dispatchTicket } = consultAgent.mock.calls[0][0] as { dispatchTicket: string };
+		expect(binder).toHaveBeenCalledWith(ATTEMPT, dispatchTicket);
+		expect(JSON.stringify(consultAgent.mock.calls[0][0])).not.toContain(ATTEMPT);
+		await vi.waitFor(() => expect(results()[0]).toMatchObject({ success: true }));
+	});
+
+	it('keeps the binder whichever of it and the resolver is composed first', async () => {
+		const binder = vi.fn<Binder>(() => true);
+		const { consultAgent, ask } = compose({ binder, binderFirst: true });
+		ask(attemptAsk);
+		await vi.waitFor(() => expect(consultAgent).toHaveBeenCalledTimes(1));
+		expect(binder).toHaveBeenCalledTimes(1);
+	});
+
+	it('refuses the ask when the composed binder cannot hold the binding', () => {
+		const binder = vi.fn<Binder>(() => false);
+		const { consultAgent, ask, results } = compose({ binder });
+		ask(attemptAsk);
+		expect(binder).toHaveBeenCalledTimes(1);
+		expect(consultAgent).not.toHaveBeenCalled();
+		expect(results()).toHaveLength(1);
+		expect(results()[0]).toMatchObject({ success: false, requestId: 'r-1' });
+		expect(String(results()[0].error)).toContain('no lineage this host can bind');
+		expect(JSON.stringify(results())).not.toContain(ATTEMPT);
+	});
+
+	it('never offers a chat turn credential to the binder', async () => {
+		const binder = vi.fn<Binder>(() => false);
+		const { consultAgent, ask } = compose({ binder, withChat: true });
+		ask({ fromSessionId: 'caller-1', fromTabId: 'tab-1', callerCredential: CHAT });
+		await vi.waitFor(() => expect(consultAgent).toHaveBeenCalledTimes(1));
+		expect(binder).not.toHaveBeenCalled();
+	});
+
+	it('asks unbound when no binder was composed', async () => {
+		const { consultAgent, ask } = compose();
+		ask(attemptAsk);
+		await vi.waitFor(() => expect(consultAgent).toHaveBeenCalledTimes(1));
+	});
+});

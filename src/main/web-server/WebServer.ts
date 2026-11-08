@@ -59,6 +59,7 @@ import { WebSocketMessageHandler } from './handlers';
 import type { MessageHandlerCallbacks } from './handlers';
 import type {
 	AutoRunCallerSourceResolver,
+	AutoRunConsultLineageBinder,
 	CallerConsultWithdrawer,
 	CallerSourceResolver,
 } from './handlers/messageHandlers/commands';
@@ -746,6 +747,24 @@ export class WebServer {
 			autoRunCallerSourceOf: AutoRunCallerSourceResolver;
 		} = {
 			autoRunCallerSourceOf: resolver,
+		};
+		this.messageHandler.setCallbacks(callbacks);
+	}
+
+	/**
+	 * The host-only hook that binds an asking Auto Run attempt's admitted lineage to the dispatch
+	 * ticket its `cross_agent_ask` issued (MCOMP-17-03BH): the desktop composes
+	 * `ProcessManager.autoRunCallerLineageOf` with `bindCrossAgentConsultInitiator`, so the
+	 * consult the ticket starts is admitted as that run's child. Merged into the message handler
+	 * like `setAutoRunCallerSourceResolver`, so it survives `start()` and never crosses the
+	 * renderer. A composed binder that does not answer true refuses the ask; until one is
+	 * composed, an attempt's ask is admitted as the transport that asked.
+	 */
+	setAutoRunConsultLineageBinder(binder: AutoRunConsultLineageBinder): void {
+		const callbacks: Partial<MessageHandlerCallbacks> & {
+			bindAutoRunConsultLineage: AutoRunConsultLineageBinder;
+		} = {
+			bindAutoRunConsultLineage: binder,
 		};
 		this.messageHandler.setCallbacks(callbacks);
 	}
