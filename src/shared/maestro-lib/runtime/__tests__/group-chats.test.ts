@@ -694,6 +694,80 @@ describe('runtime group chats', () => {
 			expect(provider.calls).toEqual([]);
 			expect(parentContext).not.toHaveBeenCalled();
 		});
+
+		describe('a room !autorun', () => {
+			const AUTORUN: FakeScript = (call) =>
+				call.role === 'moderator' && call.nth === 1
+					? { text: '!autorun @Alpha:plan.md' }
+					: call.role === 'synthesis'
+						? { text: 'Wrapped up.' }
+						: { text: 'unexpected' };
+
+			async function withPlan(runtime: MaestroRuntime) {
+				const plan = path.join(work, 'plan.md');
+				fs.writeFileSync(plan, '- [ ] one\n');
+				value(await runtime.agents.update('a1', { autoRunFolderPath: work }));
+				const runs: string[] = [];
+				runtime.events.subscribe(
+					(event) => {
+						if (event.type === 'autorun') runs.push(event.agentId);
+					},
+					{ types: ['autorun'] }
+				);
+				return { plan, runs };
+			}
+
+			it('is refused, with no run, when the host verifies an authenticated parent', async () => {
+				const { runtime, asked } = await enrolled(AUTORUN);
+				const { plan, runs } = await withPlan(runtime);
+				const chat = watch(runtime);
+				value(
+					await runtime.groupChats.create({
+						name: 'Plan room',
+						participantIds: ['a1'],
+						message: 'Run the plan',
+					})
+				);
+				await chat.idle();
+				expect(chat.lines()).toEqual(
+					expect.arrayContaining([
+						expect.stringMatching(
+							/^Alpha: Auto Run could not start for Alpha: .*authenticated parent custody/
+						),
+						'moderator: Wrapped up.',
+					])
+				);
+				expect(runs).toEqual([]);
+				expect(runtime.runs.activeRuns()).toEqual([]);
+				expect(fs.readFileSync(plan, 'utf8')).toBe('- [ ] one\n');
+				// Only the moderator's two turns ran, each still under the verified parent.
+				expect(provider.calls.map((call) => call.role)).toEqual(['moderator', 'synthesis']);
+				for (const request of asked)
+					expect(request.context).toMatchObject({ delegation: { grantRef: 'grant-1' } });
+			});
+
+			it('still launches on a managed host that verifies no parent', async () => {
+				const authority = createLocalHostAuthority({
+					authorityId: 'fleet',
+					decide: () => ({ decision: 'allow', policyRevision: 3 }),
+					newId: () => `lease-${Math.random()}`,
+					now: () => Date.now(),
+					leaseTtlMs: 60_000,
+				});
+				const runtime = await startEnrolled(authority, AUTORUN, {
+					policy: () => ({ sources: [], policyRevision: 3 }),
+				});
+				const { runs } = await withPlan(runtime);
+				value(
+					await runtime.groupChats.create({
+						name: 'Plan room',
+						participantIds: ['a1'],
+						message: 'Run the plan',
+					})
+				);
+				await vi.waitFor(() => expect(runs).toContain('a1'), { timeout: 10_000, interval: 20 });
+			});
+		});
 	});
 
 	describe('a round (GC-1, GC-2)', () => {

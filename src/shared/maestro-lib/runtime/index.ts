@@ -809,7 +809,29 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 		fence,
 		background,
 		metrics: groupChatMetrics,
-		autoRun,
+		// A room's `!autorun` would mint a new workflow under the host's own authority. Where the
+		// host verifies an authenticated parent for every room child, that run cannot yet carry the
+		// parent's chain, grant and fence into a new workflow (the Auto Run runner requires its
+		// parent to own the run's workflow), so it is refused rather than launched without them.
+		// Checked at launch, not per round: a run queued behind a busy agent starts outside it.
+		autoRun: {
+			holds: (agentId) => autoRun.holds(agentId),
+			api: {
+				stop: (agentId) => autoRun.api.stop(agentId),
+				launch: (agentId, input) =>
+					options.managed?.backgroundParentContext
+						? Promise.resolve({
+								ok: false,
+								error: {
+									code: 'unsupported',
+									method: 'autoRun.launch',
+									message:
+										'This group chat runs under authenticated parent custody, which a new Auto Run cannot carry yet; start the Auto Run directly.',
+								},
+							} as const)
+						: autoRun.api.launch(agentId, input),
+			},
+		},
 		options: options.turns,
 	});
 	const consults = createRuntimeConsults({
