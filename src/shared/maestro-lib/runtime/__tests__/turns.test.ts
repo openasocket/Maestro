@@ -100,6 +100,7 @@ describe('runtime turns', () => {
 						...turn.launch.sessionCustomEnvVars,
 						FAKE_AGENT_RECORDING: recordings[turn.provider.id],
 						FAKE_AGENT_ARGV_OUT: argvOut,
+						FAKE_AGENT_ENV_OUT: argvOut.replace(/argv-(\d+)\.json$/, 'env-$1.json'),
 						...(hold ? { FAKE_AGENT_HOLD: '1' } : {}),
 					},
 				},
@@ -525,6 +526,18 @@ describe('runtime turns', () => {
 
 		/** The argv files the fake agent actually wrote: one per process that ran. */
 		const ran = () => argvFiles.filter((file) => fs.existsSync(file));
+		/** The environment the n-th started process actually ran with, once the fake agent wrote it. */
+		async function envOf(nth: number): Promise<Record<string, string>> {
+			const file = argvFiles[nth].replace(/argv-(\d+)\.json$/, 'env-$1.json');
+			await vi.waitFor(() => expect(fs.existsSync(file)).toBe(true));
+			return JSON.parse(fs.readFileSync(file, 'utf-8'));
+		}
+		/** The caller credential the n-th process was stamped with. */
+		async function credentialOf(nth: number): Promise<string> {
+			const credential = (await envOf(nth))[runtimeTurns.CALLER_CREDENTIAL_ENV_VAR];
+			expect(typeof credential).toBe('string');
+			return credential;
+		}
 
 		async function startManaged(
 			authority: HostAuthority | null = managedAuthority(),
@@ -1207,6 +1220,8 @@ describe('runtime turns', () => {
 				value(await runtime.turns.send('a1', 't1', { text: 'source' }));
 				const custody = service.sourceCustody('a1', 't1');
 				expect(custody).not.toBeNull();
+				const credential = await credentialOf(0);
+				expect(service.callerSource(credential)).toEqual({ agentId: 'a1', tabId: 't1' });
 				const lease = authority.live()[0];
 				const port = options.standing.port();
 				switch (change) {
@@ -1274,6 +1289,8 @@ describe('runtime turns', () => {
 						break;
 				}
 				expect(service.sourceCustody('a1', 't1')).toBeNull();
+				// The credential authenticates nobody once its process's custody is withheld.
+				expect(service.callerSource(credential)).toBeNull();
 			});
 
 			it('retains the verified peer actor and complete workflow lineage', async () => {
@@ -1359,6 +1376,71 @@ describe('runtime turns', () => {
 				value(await sent);
 				await events.outcome();
 				expect(service.sourceCustody('a1', 't1')).toBeNull();
+			});
+
+			it('stamps each admitted process with its own caller credential, valid only while it holds custody (MCOMP-17-03AI)', async () => {
+				const authority = managedAuthority();
+				const runtime = await startManaged(authority);
+				await enrollDir(runtime.installation.installationId, authority);
+				runtime.managedBinding.reload();
+				const service = capture.mock.results[0].value as runtimeTurns.RuntimeTurns;
+				// Read-only tabs run side by side, as in the isolation case above.
+				for (const tab of ['t1', 't2']) {
+					value(await runtime.tabs.update('a1', tab, { readOnly: true }));
+					expect(value(await runtime.turns.send('a1', tab, { text: tab })).status).toBe('started');
+				}
+				const first = await credentialOf(0);
+				const second = await credentialOf(1);
+				expect(first).toMatch(/^[A-Za-z0-9_-]{43}$/);
+				expect(second).not.toBe(first);
+				// The credential, not a stated id, names the source: each maps to its own tab only.
+				expect(service.callerSource(first)).toEqual({ agentId: 'a1', tabId: 't1' });
+				expect(service.callerSource(second)).toEqual({ agentId: 'a1', tabId: 't2' });
+				for (const forged of ['', 'a1', 't1', first.slice(1), `${first} `, first.toUpperCase()]) {
+					expect(service.callerSource(forged)).toBeNull();
+				}
+				expect(service.callerSource(undefined as unknown as string)).toBeNull();
+				// Stopping one process withdraws its credential and leaves the other tab's alone.
+				const stopped = runtime.turns.interrupt('a1', 't1');
+				expect(service.callerSource(first)).toBeNull();
+				await stopped;
+				expect(service.callerSource(second)).toEqual({ agentId: 'a1', tabId: 't2' });
+				// A fresh turn on the same tab gets a fresh credential; the old one stays dead.
+				value(await runtime.turns.send('a1', 't1', { text: 'fresh' }));
+				await vi.waitFor(() => expect(ran()).toHaveLength(3));
+				const fresh = await credentialOf(2);
+				expect(fresh).not.toBe(first);
+				expect(service.callerSource(fresh)).toEqual({ agentId: 'a1', tabId: 't1' });
+				expect(service.callerSource(first)).toBeNull();
+			});
+
+			it('replaces an inherited caller credential and never honors it (MCOMP-17-03AI)', async () => {
+				const inherited = process.env[runtimeTurns.CALLER_CREDENTIAL_ENV_VAR];
+				process.env[runtimeTurns.CALLER_CREDENTIAL_ENV_VAR] = 'inherited-forgery';
+				try {
+					const authority = managedAuthority();
+					const runtime = await startManaged(authority);
+					await enrollDir(runtime.installation.installationId, authority);
+					runtime.managedBinding.reload();
+					const service = capture.mock.results[0].value as runtimeTurns.RuntimeTurns;
+					value(await runtime.turns.send('a1', 't1', { text: 'source' }));
+					const credential = await credentialOf(0);
+					expect(credential).not.toBe('inherited-forgery');
+					expect(service.callerSource('inherited-forgery')).toBeNull();
+					expect(service.callerSource(credential)).toEqual({ agentId: 'a1', tabId: 't1' });
+				} finally {
+					if (inherited === undefined) delete process.env[runtimeTurns.CALLER_CREDENTIAL_ENV_VAR];
+					else process.env[runtimeTurns.CALLER_CREDENTIAL_ENV_VAR] = inherited;
+				}
+			});
+
+			it('stamps no caller credential on a standalone process (MCOMP-17-03AI)', async () => {
+				const runtime = await start();
+				value(await runtime.turns.send('a1', 't1', { text: 'plain' }));
+				await vi.waitFor(() => expect(ran()).toHaveLength(1));
+				const env = await envOf(0);
+				expect(env[runtimeTurns.CALLER_CREDENTIAL_ENV_VAR]).toBeUndefined();
+				expect(env.MAESTRO_CALLER_AGENT_ID).toBe('a1');
 			});
 
 			it('never derives source custody from a standalone process', async () => {

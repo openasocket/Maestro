@@ -72,6 +72,7 @@ import type {
 	TurnsApi,
 	Unsubscribe,
 } from '../client/types';
+import { randomBytes } from 'node:crypto';
 import { logger } from '../host';
 import { canonicalJson } from '../../canonicalJson';
 import { isVerifiedContext, type DispatchLease } from '../managed/authority';
@@ -125,6 +126,15 @@ import type { ProcessRegistry } from './processes';
 import { createSshRemoteStore } from './ssh-store';
 
 const LOG_CONTEXT = '[RuntimeTurns]';
+
+/**
+ * The caller credential a managed chat turn's process is spawned with (MCOMP-17-03AI): a fresh
+ * random secret per admitted process, so a host can tell which live source a request from that
+ * process's shell comes from without trusting the agent and tab ids the caller states. A
+ * `MAESTRO_MANAGED_` name, which the environment ceiling strips from every user layer and
+ * inherited copy before Maestro restates its own. A standalone turn is stamped with none.
+ */
+export const CALLER_CREDENTIAL_ENV_VAR = 'MAESTRO_MANAGED_CALLER_CREDENTIAL';
 
 /** What the host passes the runtime so it can run turns. Every field is optional. */
 export interface RuntimeTurnOptions {
@@ -203,6 +213,14 @@ export interface RuntimeTurns {
 		agentId: string,
 		tabId: string
 	): { context: ManagedAuthenticatedContext; writable: boolean } | null;
+	/**
+	 * Host-only: the exact live source a caller credential (`CALLER_CREDENTIAL_ENV_VAR`) was
+	 * minted for, while that admitted process still holds source custody. Null for an unknown,
+	 * stale or malformed credential and once the custody is withdrawn, so a credential copied
+	 * out of an ended, stopped or revoked process authenticates nobody. The coordinates select
+	 * `sourceCustody`; they are no spawn permit. Never exposed on the client API.
+	 */
+	callerSource(credential: string): { agentId: string; tabId: string } | null;
 	/** Look at an agent's queue again, for a hold that cleared (an Auto Run ended). */
 	drain(agentId: string): void;
 	/** Stop looking at queues: nothing more starts. Running turns are left to `registry.stopAll`. */
@@ -305,6 +323,15 @@ export function createRuntimeTurns(options: RuntimeTurnsOptions): RuntimeTurns {
 
 	const queues = new Map<string, ExecutionQueue<TurnItem>>();
 	const sources = new Map<string, () => ReturnType<RuntimeTurns['sourceCustody']>>();
+	// Caller credential -> the source it was minted for and that source's own custody reader.
+	const callers = new Map<
+		string,
+		{
+			agentId: string;
+			tabId: string;
+			read: () => ReturnType<RuntimeTurns['sourceCustody']>;
+		}
+	>();
 	let disposed = false;
 	/** Resolved by the first dispatch attempt of an item that ran straight away. */
 	const verdicts = new Map<string, (verdict: Verdict) => void>();
@@ -457,7 +484,22 @@ export function createRuntimeTurns(options: RuntimeTurnsOptions): RuntimeTurns {
 			lease: null,
 			admission: null,
 		};
-		const started = await deps.runAgentTurn(turn, {
+		// A managed turn's process gets its own caller credential, restated by Maestro after the
+		// environment ceiling. It authenticates a caller only once this process holds source custody.
+		const credential = managed ? randomBytes(32).toString('base64url') : null;
+		const launched: AssembledTurn = credential
+			? {
+					...turn,
+					launch: {
+						...turn.launch,
+						maestroEnvVars: {
+							...turn.launch.maestroEnvVars,
+							[CALLER_CREDENTIAL_ENV_VAR]: credential,
+						},
+					},
+				}
+			: turn;
+		const started = await deps.runAgentTurn(launched, {
 			sessionId: `${agentId}-ai-${item.tabId}`,
 			sshStore,
 			claudeTokenSource: getClaudeTokenSourceFields(record as ClaudeTokenSourceFields),
@@ -567,8 +609,10 @@ export function createRuntimeTurns(options: RuntimeTurnsOptions): RuntimeTurns {
 				}
 			};
 			sources.set(sourceKey, readSource);
+			if (credential) callers.set(credential, { agentId, tabId: item.tabId, read: readSource });
 			forgetSource = () => {
 				if (sources.get(sourceKey) === readSource) sources.delete(sourceKey);
+				if (credential) callers.delete(credential);
 			};
 			run.result.then(forgetSource, forgetSource);
 			settled.then(forgetSource, forgetSource);
@@ -1190,10 +1234,22 @@ export function createRuntimeTurns(options: RuntimeTurnsOptions): RuntimeTurns {
 		api,
 		managed: managedPort,
 		sourceCustody: (agentId, tabId) => sources.get(canonicalJson([agentId, tabId]))?.() ?? null,
+		callerSource: (credential) => {
+			const caller = typeof credential === 'string' ? callers.get(credential) : undefined;
+			// The credential holds only while its own reader is still this tab's live custody.
+			if (
+				!caller ||
+				sources.get(canonicalJson([caller.agentId, caller.tabId])) !== caller.read ||
+				caller.read() === null
+			)
+				return null;
+			return { agentId: caller.agentId, tabId: caller.tabId };
+		},
 		drain: (agentId) => queues.get(agentId)?.drain(),
 		dispose() {
 			disposed = true;
 			sources.clear();
+			callers.clear();
 			unsubscribeLifecycle();
 			for (const queue of queues.values()) queue.dispose();
 			queues.clear();

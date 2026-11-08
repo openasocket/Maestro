@@ -4184,6 +4184,20 @@
 					"produces": []
 				},
 				{
+					"id": "MCOMP-17-03AI",
+					"label": "Mint per-process caller credentials for managed runtime chat turns",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/shared/maestro-lib/runtime/turns.ts",
+						"src/shared/maestro-lib/runtime/__tests__/turns.test.ts",
+						"Plans/integration-completion/program.json"
+					],
+					"outcome": "Consume MAESTRO-EFFECT-CONSUMERS-BUILD and its pinned MAESTRO-CONTRACT-INPUTS-BUILD dependency. Bounded prerequisite continuation of MCOMP-17-03 toward incoming transport authentication: a host cannot tell which live source a request from an agent shell comes from, because the stated agent and tab ids are caller claims. Stamp every admitted managed chat turn process with a fresh random caller credential under a MAESTRO_MANAGED_ name (stripped by the environment ceiling from user layers and inherited copies, then restated by Maestro), and expose a host-only resolver that maps a credential to its exact agent/tab only while that process still holds source custody. Unknown, malformed, inherited and stale credentials, and those of stopped, revoked or withheld processes, authenticate nobody; a standalone turn is stamped with none. Exercise real fixture processes, concurrent isolation, inheritance replacement, withdrawal and fresh minting. Background/consult and Auto Run child credentials, the CLI forwarding the credential, server-side resolution and consultSource installation, desktop composition and room owner lifetime remain pending. Reuse WORKFLOW-CONTEXT/1; no new wire capability, producer mapping or paired/provider/native qualification. Keep to three authored files and fewer than 500 changed lines.",
+					"backlog": ["M-04"],
+					"requires": ["MAESTRO-EFFECT-CONSUMERS-BUILD"],
+					"produces": []
+				},
+				{
 					"label": "Bind Auto Run Cue and nested work at dispatch",
 					"kind": "IMPLEMENT",
 					"targets": [
@@ -4226,7 +4240,7 @@
 			"produces": ["MAESTRO-WORKFLOW-CONSUMERS-BUILD"],
 			"id": "MCOMP-17",
 			"path": ".maestro/playbooks/2026-10-29-Maestro-Integration-Completion/MCOMP-17.md",
-			"taskCount": 39,
+			"taskCount": 40,
 			"stage": "S10"
 		},
 		{
@@ -6016,7 +6030,7 @@
 				"PAIR-DIRECT-EVIDENCE"
 			],
 			"nativeInputs": false,
-			"taskCount": 46
+			"taskCount": 47
 		},
 		{
 			"id": "S11",
@@ -6220,8 +6234,8 @@
 			"taskCount": 1
 		}
 	],
-	"taskCount": 359,
-	"taskCounts": { "IMPLEMENT": 250, "TEST": 49, "VERIFY": 60 },
+	"taskCount": 360,
+	"taskCounts": { "IMPLEMENT": 251, "TEST": 49, "VERIFY": 60 },
 	"artifacts": {
 		"MEGA-CONTRACTS-FOUNDATION-BUILD": {
 			"producerDocument": "GCOMP-01",
@@ -6996,6 +7010,7 @@
 			"MCOMP-17-03AF",
 			"MCOMP-17-03AG",
 			"MCOMP-17-03AH",
+			"MCOMP-17-03AI",
 			"MCOMP-17-03",
 			"MCOMP-17-04",
 			"MCOMP-17-05",
