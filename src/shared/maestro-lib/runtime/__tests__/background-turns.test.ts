@@ -570,6 +570,146 @@ describe('background turns', () => {
 			leases = 0;
 		});
 
+		describe('request-specific consult custody', () => {
+			const refusal = {
+				state: 'unavailable' as const,
+				code: 'runtime-unavailable' as const,
+				message: 'The consult source custody changed; submit a fresh request.',
+			};
+
+			describe.each(['initial', 'preparation', 'admission', 'observer', 'sink'] as const)(
+				'%s boundary',
+				(boundary) => {
+					it.each(['refused', 'unreadable'] as const)(
+						'refuses %s custody without binding a process and recovers',
+						async (failure) => {
+							const authority = authorityOf(() => 'allow');
+							let withdrawn = boundary === 'initial';
+							let recovered = false;
+							const change = () => {
+								if (!recovered) withdrawn = true;
+							};
+							const { background, provider } = managedTurns(
+								() => {
+									if (boundary === 'sink') change();
+									return { text: 'Fresh answer' };
+								},
+								authority,
+								null,
+								undefined,
+								{
+									onAdmission: (event) => {
+										admissions.push(event);
+										if (event.kind === 'admitted' && boundary === 'observer') change();
+									},
+								}
+							);
+							const issued: import('../../managed/authority').DispatchLease[] = [];
+							const admit = authority.admit.bind(authority);
+							vi.spyOn(authority, 'admit').mockImplementation(async (request) => {
+								const result = await admit(request);
+								if (result.state === 'admitted') issued.push(result.lease);
+								if (boundary === 'admission') change();
+								return result;
+							});
+							const runner = background.consultRunner(() => {
+								if (withdrawn && failure === 'unreadable') throw new Error('custody unreadable');
+								return withdrawn ? refusal : null;
+							});
+							const observer = { onActivity: vi.fn(), onSessionId: vi.fn(), onEnd: vi.fn() };
+							const spawn = spawnOf({ processId: 'cross-agent-scoped', delegation: carried(3) });
+							const pending = runner.start(spawn, observer);
+							if (boundary === 'preparation') change();
+							await expect(pending).resolves.toMatchObject({ success: false });
+							await background.whenSettled(() => true);
+							expect(admissions).toContainEqual(
+								expect.objectContaining({
+									kind: 'refused',
+									message: expect.stringMatching(/custody/),
+								})
+							);
+							expect(observer.onEnd).not.toHaveBeenCalled();
+							expect(observer.onSessionId).not.toHaveBeenCalled();
+							expect(authority.live()).toEqual([]);
+							expect(registry.size()).toBe(0);
+							expect(background.registeredCount()).toBe(0);
+							if (boundary !== 'sink') expect(provider.calls).toEqual([]);
+							if (boundary === 'initial' || boundary === 'preparation') expect(asked).toEqual([]);
+							else {
+								expect(issued).toHaveLength(1);
+								expect(issued[0].pid()).toBeUndefined();
+								expect(issued[0].ended()).toMatchObject({
+									state: 'released',
+									release: { outcome: 'spawn-failed' },
+								});
+							}
+							withdrawn = false;
+							recovered = true;
+							await expect(runner.start(spawn, observer)).resolves.toMatchObject({ success: true });
+							await background.whenSettled(() => true);
+							expect(observer.onEnd).toHaveBeenCalledOnce();
+							expect(issued.at(-1)!.pid()).toBeGreaterThan(0);
+							expect(authority.live()).toEqual([]);
+						}
+					);
+				}
+			);
+
+			it('isolates concurrent consult checks and preserves host admission', async () => {
+				const authority = authorityOf(() => 'allow');
+				const { background, provider } = managedTurns(() => ({ text: 'Allowed' }), authority);
+				const observer = { onActivity: vi.fn(), onSessionId: vi.fn(), onEnd: vi.fn() };
+				const results = await Promise.all([
+					background
+						.consultRunner(() => refusal)
+						.start(
+							spawnOf({ processId: 'cross-agent-withdrawn', delegation: carried(3) }),
+							observer
+						),
+					background
+						.consultRunner(() => null)
+						.start(spawnOf({ processId: 'cross-agent-current', delegation: carried(3) }), observer),
+				]);
+				expect(results.map((result) => result.success)).toEqual([false, true]);
+				await background.whenSettled(() => true);
+				expect(provider.calls.map((call) => call.processId)).toEqual(['cross-agent-current']);
+				expect(asked).toHaveLength(1);
+				expect(observer.onEnd).toHaveBeenCalledOnce();
+			});
+
+			it('cannot replace host denial or authenticated parent verification with a passing check', async () => {
+				for (const boundary of ['authority', 'parent'] as const) {
+					const authority = authorityOf(() => (boundary === 'authority' ? 'deny' : 'allow'));
+					const { background, provider } = managedTurns(
+						() => ({ text: 'Must not run' }),
+						authority,
+						null,
+						undefined,
+						boundary === 'parent'
+							? {
+									parentContext: () => ({
+										ok: false,
+										code: 'unauthenticated',
+										problems: ['withdrawn'],
+									}),
+								}
+							: {}
+					);
+					await expect(
+						background
+							.consultRunner(() => null)
+							.start(spawnOf({ processId: 'cross-agent-denied', delegation: carried(3) }), {
+								onActivity: vi.fn(),
+								onSessionId: vi.fn(),
+								onEnd: vi.fn(),
+							})
+					).resolves.toMatchObject({ success: false });
+					expect(provider.calls).toEqual([]);
+					expect(authority.live()).toEqual([]);
+				}
+			});
+		});
+
 		describe('authenticated background parents', () => {
 			function parent(authority: ReturnType<typeof authorityOf>, actorId = 'source', change = '') {
 				const record = carried(7);

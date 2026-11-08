@@ -117,6 +117,17 @@ export type BackgroundSpawnAuthorityPort = AutoRunSpawnAuthorityPort;
 
 export type BackgroundManagedState = 'denied' | 'unavailable' | 'unknown';
 
+/**
+ * A trusted consult service's check of the request it handed to this runner. Null means its
+ * source scope still holds, never permission to bypass host admission or parent verification.
+ * Kept on the runner, not serialized in the spawn or accepted from caller/environment data.
+ */
+export type ConsultScopeCheck = () => {
+	state: BackgroundManagedState;
+	code: ManagedDenialCode;
+	message: string;
+} | null;
+
 /** What became of one turn's admission, for a journal or a test. */
 export type BackgroundAdmissionEvent =
 	| { kind: 'admitted'; processId: string; delegation: ManagedDelegationContext; leaseId: string }
@@ -173,6 +184,8 @@ type ManagedTurn =
 
 /** What a runner reports about one turn, in the order it happens. */
 interface TurnHooks {
+	/** Recheck this consult's source through preparation, admission and the managed spawn gate. */
+	checkScope?: ConsultScopeCheck;
 	/** Proof of life: output arrived. Restarts the silence budget. */
 	onActivity?(): void;
 	/** A chunk of the provider's raw output, as it streams. */
@@ -205,7 +218,7 @@ export interface BackgroundTurns {
 	/** The runner a group chat round starts its turns through. */
 	groupChatRunner(handlers: GroupChatRunnerHandlers): GroupChatTurnRunner;
 	/** The runner a consult starts its one turn through. */
-	consultRunner(): ConsultRunner;
+	consultRunner(checkScope?: ConsultScopeCheck): ConsultRunner;
 	/** Turns whose process is running now (group chat and consult). */
 	activeCount(): number;
 	/** Turns still held by the registry: preparing, running, or reporting their end. */
@@ -443,6 +456,30 @@ export function createBackgroundTurns(options: BackgroundTurnsOptions): Backgrou
 		// Stamped BEFORE the SSH wrap, so it reaches the remote agent and not only the ssh client.
 		const delegation = groupChatTurnContext(spawn);
 		const explicit = spawn.delegation !== undefined;
+		const recheckScope = (): GroupChatTurnStart | null => {
+			try {
+				const refusal = hooks.checkScope?.();
+				return refusal
+					? managedRefusal(
+							spawn.processId,
+							delegation,
+							refusal.state,
+							refusal.code,
+							refusal.message
+						)
+					: null;
+			} catch (error) {
+				return managedRefusal(
+					spawn.processId,
+					delegation,
+					'unavailable',
+					'runtime-unavailable',
+					`The consult source custody could not be rechecked: ${errorText(error)}`
+				);
+			}
+		};
+		const sourceRefusal = recheckScope();
+		if (sourceRefusal) return sourceRefusal;
 		const managedTurn = managedTurnFor(spawn.processId, delegation, explicit);
 		if (managedTurn.managed && 'refusal' in managedTurn) return managedTurn.refusal;
 		const boundDelegation = managedTurn.managed
@@ -456,8 +493,8 @@ export function createBackgroundTurns(options: BackgroundTurnsOptions): Backgrou
 				? { success: false, error: 'The background turn was cancelled before it started.' }
 				: null;
 		const recheckBinding = (): GroupChatTurnStart | null => {
-			const cancelled = cancellation();
-			if (cancelled) return cancelled;
+			const refusal = cancellation() ?? recheckScope();
+			if (refusal) return refusal;
 			let current: ManagedTurn;
 			try {
 				current = managedTurnFor(spawn.processId, delegation, explicit);
@@ -699,7 +736,7 @@ export function createBackgroundTurns(options: BackgroundTurnsOptions): Backgrou
 			},
 		}),
 
-		consultRunner: () => {
+		consultRunner: (checkScope) => {
 			/** Consults the service stopped: nothing is reported about them after that. */
 			const detached = new Set<string>();
 			return {
@@ -707,6 +744,7 @@ export function createBackgroundTurns(options: BackgroundTurnsOptions): Backgrou
 					const processId = spawn.processId;
 					const live = (): boolean => !detached.has(processId);
 					return launch(spawn, consultOwner(processId), {
+						checkScope,
 						onActivity: () => {
 							if (live()) observer.onActivity();
 						},

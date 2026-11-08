@@ -4002,6 +4002,20 @@
 					"produces": []
 				},
 				{
+					"id": "MCOMP-17-03V",
+					"label": "Recheck request-specific consult custody through background dispatch",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/shared/maestro-lib/runtime/background-turns.ts",
+						"src/shared/maestro-lib/runtime/__tests__/background-turns.test.ts",
+						"Plans/integration-completion/program.json"
+					],
+					"outcome": "Consume MAESTRO-EFFECT-CONSUMERS-BUILD and its pinned MAESTRO-CONTRACT-INPUTS-BUILD dependency. Bounded prerequisite continuation of MCOMP-17-03: extend the existing consult runner with a trusted request-specific scope check, separate from the host-wide authenticated parent verifier. Recheck before preparation, after preparation and admission, before runner handoff and at the canonical managed lease gate. Refused or unreadable custody must start no process, release unused leases and permit fresh independently checked attempts. Preserve concurrent request isolation, host admission, parent verification and standalone behavior. Exercise the existing real fixture-process harness. Consult-service wiring and production source association remain pending, alongside desktop/headless Auto Run composition, incoming transport authentication, desktop composition and managed room custody. Reuse WORKFLOW-CONTEXT/1; no new wire capability, producer mapping or paired/provider/native qualification. Keep to three authored files and fewer than 500 changed lines.",
+					"backlog": ["M-04"],
+					"requires": ["MAESTRO-EFFECT-CONSUMERS-BUILD"],
+					"produces": []
+				},
+				{
 					"label": "Bind Auto Run Cue and nested work at dispatch",
 					"kind": "IMPLEMENT",
 					"targets": [
@@ -4044,7 +4058,7 @@
 			"produces": ["MAESTRO-WORKFLOW-CONSUMERS-BUILD"],
 			"id": "MCOMP-17",
 			"path": ".maestro/playbooks/2026-10-29-Maestro-Integration-Completion/MCOMP-17.md",
-			"taskCount": 26,
+			"taskCount": 27,
 			"stage": "S10"
 		},
 		{
@@ -5834,7 +5848,7 @@
 				"PAIR-DIRECT-EVIDENCE"
 			],
 			"nativeInputs": false,
-			"taskCount": 33
+			"taskCount": 34
 		},
 		{
 			"id": "S11",
@@ -6038,8 +6052,12 @@
 			"taskCount": 1
 		}
 	],
-	"taskCount": 346,
-	"taskCounts": { "IMPLEMENT": 237, "TEST": 49, "VERIFY": 60 },
+	"taskCount": 347,
+	"taskCounts": {
+		"IMPLEMENT": 238,
+		"TEST": 49,
+		"VERIFY": 60
+	},
 	"artifacts": {
 		"MEGA-CONTRACTS-FOUNDATION-BUILD": {
 			"producerDocument": "GCOMP-01",
@@ -6801,6 +6819,7 @@
 			"MCOMP-17-03S",
 			"MCOMP-17-03T",
 			"MCOMP-17-03U",
+			"MCOMP-17-03V",
 			"MCOMP-17-03",
 			"MCOMP-17-04",
 			"MCOMP-17-05",
