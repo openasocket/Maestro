@@ -545,16 +545,28 @@ export function createRuntimeAutoRun(options: RuntimeAutoRunOptions): RuntimeAut
 											message: 'Workflow ownership is no longer live.',
 										};
 									run.removeWorkflowListener?.();
-									run.workflowLifetime = lifetime;
+									// The turn settles its attempt; run cleanup may reach the same custody.
+									// Share its result, including rejection, rather than releasing it twice.
+									let settlement: Promise<void> | undefined;
+									const removeListener = () => lifetime.signal.removeEventListener('abort', stop);
+									const ownedLifetime: WorkflowFenceLifetime = {
+										signal: lifetime.signal,
+										current: () => lifetime.current(),
+										finish: (effect) => {
+											removeListener();
+											return (settlement ??= Promise.resolve().then(() => lifetime.finish(effect)));
+										},
+									};
+									run.workflowLifetime = ownedLifetime;
 									const stop = () => {
 										run.controller.requestStop();
 										run.abort.abort();
 										void registry.stopAgent(agentId);
 									};
 									lifetime.signal.addEventListener('abort', stop, { once: true });
-									run.removeWorkflowListener = () =>
-										lifetime.signal.removeEventListener('abort', stop);
+									run.removeWorkflowListener = removeListener;
 									if (!lifetime.current()) stop();
+									return { ...answer, lifetime: ownedLifetime };
 								}
 								return answer;
 							},
@@ -691,7 +703,19 @@ export function createRuntimeAutoRun(options: RuntimeAutoRunOptions): RuntimeAut
 						!run.admitted ? 'no_effect' : outcome?.status === 'completed' ? 'applied' : 'uncertain'
 					);
 				} catch (error) {
-					logger.warn(`Workflow settlement remains uncertain: ${errorText(error)}`, LOG_CONTEXT);
+					const message = errorText(error);
+					const execution = outcome ?? silentEnd(run);
+					const prior =
+						'reason' in execution && execution.reason !== message
+							? `${execution.reason}; `
+							: execution.status === 'stopped'
+								? 'The run was stopped; '
+								: '';
+					outcome = {
+						status: 'error',
+						reason: `${prior}Workflow settlement remains uncertain: ${message}`,
+					};
+					logger.warn(outcome.reason, LOG_CONTEXT);
 				}
 				runs.delete(run.agentId);
 				bus.emit({

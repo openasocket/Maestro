@@ -12,7 +12,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
 	CAPTURED_RECORDINGS,
@@ -35,6 +35,7 @@ import {
 	type HostAuthority,
 } from '../../managed/authority';
 import { createManagedBinding } from '../../managed/binding';
+import type { WorkflowFenceLifetime } from '../../managed/workflows';
 import { readHistory } from '../../store/read-history';
 import { AUTO_RUN_SESSION_COLUMNS, AUTO_RUN_TASK_COLUMNS } from '../../stats/auto-run-insert';
 import { QUERY_EVENT_COLUMNS } from '../../stats/query-event-insert';
@@ -869,6 +870,230 @@ describe('runtime Auto Run', () => {
 			await run.ended();
 			expect(run.outcome()).toEqual({ status: 'stopped' });
 			expect(runLaunches).toEqual([]);
+		});
+
+		describe('workflow settlement', () => {
+			it('continues to the next task when a successful release ends the old owner signal', async () => {
+				const file = doc('tasks', tasks(2));
+				script = [1, 2].map(() => ({ text: 'Finished this task. Done.', tick: file }));
+				const { authority } = fleetAuthority();
+				const finishes: Array<ReturnType<typeof vi.fn<WorkflowFenceLifetime['finish']>>> = [];
+				const runtime = await startEnrolled(authority, () => {
+					const owner = new AbortController();
+					const finish = vi.fn<WorkflowFenceLifetime['finish']>(async () => owner.abort());
+					finishes.push(finish);
+					return {
+						ownerEpoch: 'epoch-1',
+						fencingToken: 'fence-1',
+						lifetime: { signal: owner.signal, current: () => !owner.signal.aborted, finish },
+					};
+				});
+				const run = watchRun(runtime);
+				value(await runtime.autoRun.launch('a1', { documents: [{ file }] }));
+				await run.ended();
+				expect(run.outcome()).toEqual({ status: 'completed' });
+				expect(finishes.map((finish) => finish.mock.calls)).toEqual([[['applied']], [['applied']]]);
+				expect(read(file)).toBe(tasks(2, 2));
+			});
+
+			it.each(['playbook', 'goal'] as const)(
+				'reports rejected settlement after a completed %s and admits a fresh retry',
+				async (kind) => {
+					const file = doc('tasks', tasks(1));
+					const { authority, asked } = fleetAuthority();
+					const finish = vi
+						.fn<WorkflowFenceLifetime['finish']>()
+						.mockRejectedValueOnce(new Error('release acknowledgement lost'))
+						.mockResolvedValue(undefined);
+					const claim = vi.fn(() => ({
+						ownerEpoch: 'epoch-1',
+						fencingToken: 'fence-1',
+						lifetime: { signal: new AbortController().signal, current: () => true, finish },
+					}));
+					const runtime = await startEnrolled(authority, claim);
+					for (const retry of [false, true]) {
+						fs.writeFileSync(file, tasks(1));
+						script =
+							kind === 'playbook'
+								? [{ text: 'Finished task one. Done.', tick: file }]
+								: [{ text: 'Finished.\n<!-- maestro:goal-complete -->' }];
+						const run = watchRun(runtime);
+						value<unknown>(
+							await (kind === 'playbook'
+								? runtime.autoRun.launch('a1', { documents: [{ file }] })
+								: runtime.autoRun.launchGoal('a1', { goal: 'Ship the parser', maxIterations: 1 }))
+						);
+						await run.ended();
+						expect(run.outcome()).toEqual(
+							retry
+								? { status: 'completed' }
+								: {
+										status: 'error',
+										reason: 'Workflow settlement remains uncertain: release acknowledgement lost',
+									}
+						);
+						expect(runtime.runs.activeRuns()).toEqual([]);
+					}
+					expect(finish.mock.calls).toEqual([['applied'], ['applied']]);
+					expect(claim).toHaveBeenCalledTimes(2);
+					expect(asked).toHaveLength(2);
+					expect(asked[0].context.identity.attemptId).not.toBe(asked[1].context.identity.attemptId);
+					expect(runLaunches).toHaveLength(2);
+				}
+			);
+
+			it.each(['throw', 'reject'] as const)(
+				'retains settlement failures when finish uses %s',
+				async (mode) => {
+					const file = doc('tasks', tasks(1));
+					script = [{ text: 'Finished task one. Done.', tick: file }];
+					const { authority } = fleetAuthority();
+					const finish = vi.fn<WorkflowFenceLifetime['finish']>(() => {
+						if (mode === 'throw') throw new Error('release failed');
+						return Promise.reject('release failed');
+					});
+					const runtime = await startEnrolled(authority, () => ({
+						ownerEpoch: 'epoch-1',
+						fencingToken: 'fence-1',
+						lifetime: { signal: new AbortController().signal, current: () => true, finish },
+					}));
+					const run = watchRun(runtime);
+					value(await runtime.autoRun.launch('a1', { documents: [{ file }] }));
+					await run.ended();
+					expect(run.outcome()).toEqual({
+						status: 'error',
+						reason: 'Workflow settlement remains uncertain: release failed',
+					});
+					expect(finish.mock.calls).toEqual([['applied']]);
+					expect(read(file)).toBe(tasks(1, 1));
+				}
+			);
+
+			it.each([true, false])('settles an unused claim once with success=%s', async (success) => {
+				const file = doc('tasks', tasks(1));
+				script = [{ text: 'Never starts.' }];
+				const { authority } = fleetAuthority();
+				authority.admit = async () => ({
+					state: 'denied',
+					code: 'policy-denied',
+					message: 'No effects allowed.',
+					policyRevision: 1,
+				});
+				const finish = vi.fn<WorkflowFenceLifetime['finish']>(() =>
+					success ? Promise.resolve() : Promise.reject('release failed')
+				);
+				const runtime = await startEnrolled(authority, () => ({
+					ownerEpoch: 'epoch-1',
+					fencingToken: 'fence-1',
+					lifetime: { signal: new AbortController().signal, current: () => true, finish },
+				}));
+				const run = watchRun(runtime);
+				value(await runtime.autoRun.launch('a1', { documents: [{ file }] }));
+				if (success) {
+					await run.paused();
+					value(await runtime.autoRun.abort('a1'));
+				}
+				await run.ended();
+				expect(run.outcome()).toEqual(
+					success
+						? { status: 'stopped' }
+						: {
+								status: 'error',
+								reason: 'Workflow settlement remains uncertain: release failed',
+							}
+				);
+				expect(finish.mock.calls).toEqual([['no_effect']]);
+				expect(envFiles.every((file) => !fs.existsSync(file))).toBe(true);
+				expect(read(file)).toBe(tasks(1));
+			});
+
+			it('settles each attempt once while preserving a later engine failure', async () => {
+				const file = doc('tasks', tasks(2));
+				script = [{ text: 'Finished task one. Done.', tick: file }];
+				const { authority } = fleetAuthority();
+				const finish = vi.fn<WorkflowFenceLifetime['finish']>().mockResolvedValue(undefined);
+				const runtime = await startEnrolled(authority, () => ({
+					ownerEpoch: 'epoch-1',
+					fencingToken: 'fence-1',
+					lifetime: { signal: new AbortController().signal, current: () => true, finish },
+				}));
+				const run = watchRun(runtime);
+				value(await runtime.autoRun.launch('a1', { documents: [{ file }] }));
+				await run.ended();
+				expect(run.outcome()).toEqual({
+					status: 'error',
+					reason: expect.stringContaining('no step left'),
+				});
+				expect(finish.mock.calls).toEqual([['applied'], ['uncertain']]);
+				expect(read(file)).toBe(tasks(2, 1));
+			});
+
+			it('settles a revoked running attempt once as uncertain', async () => {
+				const file = doc('tasks', tasks(1));
+				script = [{ text: 'Working.', hang: true }];
+				const { authority } = fleetAuthority();
+				const owner = new AbortController();
+				const finish = vi.fn<WorkflowFenceLifetime['finish']>().mockResolvedValue(undefined);
+				const runtime = await startEnrolled(authority, () => ({
+					ownerEpoch: 'epoch-1',
+					fencingToken: 'fence-1',
+					lifetime: { signal: owner.signal, current: () => !owner.signal.aborted, finish },
+				}));
+				const run = watchRun(runtime);
+				value(await runtime.autoRun.launch('a1', { documents: [{ file }] }));
+				await vi.waitFor(() => expect(envFiles.some((file) => fs.existsSync(file))).toBe(true));
+				owner.abort();
+				await run.ended();
+				expect(run.outcome()).toEqual({ status: 'stopped' });
+				expect(finish.mock.calls).toEqual([['uncertain']]);
+				expect(read(file)).toBe(tasks(1));
+			});
+
+			it.each([true, false])(
+				'holds the run until settlement finishes with success=%s',
+				async (success) => {
+					const file = doc('tasks', tasks(1));
+					script = [{ text: 'Finished task one. Done.', tick: file }];
+					const { authority } = fleetAuthority();
+					const pending = Promise.withResolvers<void>();
+					const owner = new AbortController();
+					const removed = vi.spyOn(owner.signal, 'removeEventListener');
+					const finish = vi.fn<WorkflowFenceLifetime['finish']>(() => pending.promise);
+					const runtime = await startEnrolled(authority, () => ({
+						ownerEpoch: 'epoch-1',
+						fencingToken: 'fence-1',
+						lifetime: { signal: owner.signal, current: () => !owner.signal.aborted, finish },
+					}));
+					const run = watchRun(runtime);
+					value(await runtime.autoRun.launch('a1', { documents: [{ file }] }));
+					try {
+						await vi.waitFor(() => expect(finish).toHaveBeenCalledWith('applied'));
+						expect(removed).toHaveBeenCalledWith('abort', expect.any(Function));
+						expect(run.outcomes).toEqual([]);
+						expect(runtime.runs.activeRuns()).toHaveLength(1);
+						expect(
+							errorOf(await runtime.autoRun.launch('a1', { documents: [{ file }] }))
+						).toMatchObject({
+							code: 'rejected',
+							message: expect.stringContaining('busy'),
+						});
+					} finally {
+						if (success) pending.resolve();
+						else pending.reject(new Error('release failed'));
+						removed.mockRestore();
+					}
+					await run.ended();
+					expect(run.outcome()).toEqual(
+						success
+							? { status: 'completed' }
+							: {
+									status: 'error',
+									reason: 'Workflow settlement remains uncertain: release failed',
+								}
+					);
+					expect(runtime.runs.activeRuns()).toEqual([]);
+				}
+			);
 		});
 
 		it("parks the run on the producer's own refusal, with its state and code, and asks the authority nothing", async () => {
