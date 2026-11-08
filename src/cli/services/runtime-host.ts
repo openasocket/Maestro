@@ -32,7 +32,11 @@ import {
 } from '../../main/enterprise/telemetry';
 import { PROMPT_IDS } from '../../shared/promptDefinitions';
 import { startHostCue, type HostCue } from './host-cue';
-import type { HostManagedLifecycle } from './host-managed';
+import {
+	composeHostManaged,
+	type HostManagedComposition,
+	type HostManagedLifecycle,
+} from './host-managed';
 
 /** The runtime refused the directory: another host, a desktop, a held lock, a corrupt store. */
 export class HostStartError extends Error {
@@ -43,6 +47,8 @@ export class HostStartError extends Error {
 }
 
 export interface RuntimeHostOptions {
+	/** Keep custody, controls and their lifecycle together. Default: compose for this directory. */
+	managedComposition?: HostManagedComposition;
 	paths: Pick<MaestroPaths, 'userDataDir' | 'productionDataDir' | 'settingsFile' | 'cliServerFile'>;
 	/** The folder the running bundle sits in: where `maestro-cli.js` and `maestro-p.js` are looked for. */
 	moduleDirectory: string;
@@ -89,6 +95,7 @@ export class HostPromptsMissingError extends Error {
 }
 
 export interface RuntimeHostDeps {
+	composeManaged: typeof composeHostManaged;
 	createRuntime: typeof createMaestroRuntime;
 	startServer: typeof startRuntimeServer;
 	startCue: typeof startHostCue;
@@ -100,6 +107,8 @@ export interface RuntimeHostDeps {
 }
 
 export interface RunningHost {
+	/** Local host controls, when composed here or supplied together by the caller. */
+	readonly managedComposition: HostManagedComposition | null;
 	readonly runtime: MaestroRuntime;
 	readonly server: RuntimeServer;
 	readonly cue: HostCue;
@@ -119,6 +128,7 @@ export interface RunningHost {
 }
 
 const defaultDeps: RuntimeHostDeps = {
+	composeManaged: composeHostManaged,
 	createRuntime: createMaestroRuntime,
 	startServer: startRuntimeServer,
 	startCue: startHostCue,
@@ -146,13 +156,32 @@ export async function startRuntimeHost(
 	if (!deps.promptsLoad(options.moduleDirectory, paths.userDataDir)) {
 		throw new HostPromptsMissingError(options.moduleDirectory);
 	}
+	if (
+		options.managedComposition &&
+		(options.managed || options.managedLifecycle || options.managedUnavailable)
+	) {
+		throw new Error('Pass managedComposition together, without separate managed options.');
+	}
+	const composition =
+		options.managedComposition ??
+		(options.managed
+			? null
+			: deps.composeManaged({
+					userDataDir: paths.userDataDir,
+					productionDataDir: paths.productionDataDir,
+					version: options.version ?? 'unknown',
+				}));
+	const managed = composition?.managed ?? options.managed;
+	const managedLifecycle = composition?.composed ? composition.lifecycle : options.managedLifecycle;
+	const managedUnavailable =
+		composition && !composition.composed ? composition.reason : options.managedUnavailable;
 
 	const started = await deps.createRuntime({
 		dataDir: paths.userDataDir,
 		productionDataDir: paths.productionDataDir,
 		mode: 'host',
 		turns: resolveRuntimeTurnOptions(options.moduleDirectory),
-		...(options.managed ? { managed: options.managed } : {}),
+		...(managed ? { managed } : {}),
 	});
 	if (!started.ok) throw new HostStartError(started.refusal);
 	const { runtime } = started;
@@ -192,7 +221,7 @@ export async function startRuntimeHost(
 			}
 			// The endpoint socket goes before the directory does; a failure here must not strand the rest.
 			try {
-				await options.managedLifecycle?.close();
+				await managedLifecycle?.close();
 			} catch (error) {
 				log(
 					`Closing the managed standing failed: ${error instanceof Error ? error.message : String(error)}`
@@ -222,7 +251,7 @@ export async function startRuntimeHost(
 		// Re-attach before anything is served: a probe that finds this host finds its standing.
 		// The outcome lives in the lifecycle's status; a dial that fails leaves the record alone.
 		try {
-			await options.managedLifecycle?.attach();
+			await managedLifecycle?.attach();
 		} catch (error) {
 			log(
 				`Re-attaching the managed standing failed: ${error instanceof Error ? error.message : String(error)}`
@@ -257,7 +286,7 @@ export async function startRuntimeHost(
 				cue: cue.state(),
 				cueRuns: cue.activeRuns(),
 				...(options.version ? { version: options.version } : {}),
-				...(options.managedUnavailable ? { managedUnavailable: options.managedUnavailable } : {}),
+				...(managedUnavailable ? { managedUnavailable } : {}),
 			}),
 		});
 		writeCliServerInfoTo(paths.userDataDir, {
@@ -271,7 +300,17 @@ export async function startRuntimeHost(
 		});
 		log(`Host serving ${paths.userDataDir} on 127.0.0.1:${server.port} (pid ${deps.pid}).`);
 		const serving = server;
-		return { runtime, server, cue, token, telemetry, work: () => serving.work(), stopped, stop };
+		return {
+			runtime,
+			server,
+			cue,
+			token,
+			telemetry,
+			managedComposition: composition,
+			work: () => serving.work(),
+			stopped,
+			stop,
+		};
 	} catch (error) {
 		await stop();
 		throw error;

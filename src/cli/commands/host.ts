@@ -397,14 +397,7 @@ async function runForeground(
 			moduleDirectory: __dirname,
 			...(cliVersion ? { version: cliVersion } : {}),
 			...(options.port !== undefined ? { port: Number(options.port) } : {}),
-			...(standing.composed
-				? { managed: standing.managed, managedLifecycle: standing.lifecycle }
-				: {
-						managedUnavailable: standing.reason,
-						// Uncomposed still hands the runtime the installation standing (MCOMP-09-04B), and
-						// the held adapter when a sealed record this process cannot open exists (MCOMP-09-03).
-						managed: standing.managed,
-					}),
+			managedComposition: standing,
 			log: (line) => console.log(line),
 		});
 	} catch (error) {

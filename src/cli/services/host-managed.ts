@@ -42,6 +42,7 @@ import { createLocalEndpointClient } from '../../main/enterprise/endpoint-client
 import {
 	createEnrollmentLifecycle,
 	type EnrollmentLifecycle,
+	type LifecycleOutcome,
 } from '../../main/enterprise/enrollment';
 import {
 	createEnterpriseIdentityStore,
@@ -144,12 +145,19 @@ export interface HostManagedLifecycle {
 	close(): Promise<void>;
 }
 
+/** Host-owned controls. Approval still happens at the endpoint, never in this process. */
+export type HostEnrollmentControl = Pick<
+	EnrollmentLifecycle,
+	'requestEnrollment' | 'connect' | 'beginRegistration' | 'completeRegistration'
+>;
+
 export type HostManagedComposition =
 	| {
 			composed: true;
 			/** `createMaestroRuntime`'s `managed`: the host adapter factory over this custody. */
 			managed: NonNullable<MaestroRuntimeOptions['managed']>;
 			lifecycle: HostManagedLifecycle;
+			control: HostEnrollmentControl;
 			identity: EnterpriseIdentityStore;
 			/** The enrollment lifecycle's standing; null until the runtime has asked for its adapter. */
 			status(): ManagedEnrollmentStatus | null;
@@ -385,12 +393,16 @@ export function createHeldHostAdapter(input: HeldHostAdapterInput): ManagedHostA
 export function composeHostManaged(deps: HostManagedDeps): HostManagedComposition {
 	const now = deps.now ?? (() => Date.now());
 	const file = path.join(deps.userDataDir, ENTERPRISE_IDENTITY_FILE_NAME);
+	// Recheck supplied primitives too: an old successful probe is not custody now.
+	const supplied = deps.custody;
 	const custody =
-		deps.custody ??
-		resolveHostCustody({
-			userDataDir: deps.userDataDir,
-			...(deps.platform ? { platform: deps.platform } : {}),
-		});
+		supplied && !supplied.ok
+			? supplied
+			: resolveHostCustody({
+					userDataDir: deps.userDataDir,
+					...(supplied?.ok ? { seal: supplied.seal, anchor: supplied.anchor } : {}),
+					...(deps.platform ? { platform: deps.platform } : {}),
+				});
 	// What this process says of the installation whether or not it composes an adapter: the
 	// binding holds its mirror to it, so an enrollment this process cannot open still counts.
 	const standing = createHostInstallationStanding({
@@ -438,8 +450,61 @@ export function composeHostManaged(deps: HostManagedDeps): HostManagedCompositio
 	// The socket the lifecycle opened last, so the adapter speaks over the same connection.
 	let port: EndpointPort | null = null;
 	let lifecycle: EnrollmentLifecycle | null = null;
+	let adapter: ManagedHostAdapter | null = null;
+	let closed = false;
+	let closing: Promise<void> | undefined;
+	const status = (): ManagedEnrollmentStatus | null => {
+		const current = lifecycle?.status() ?? null;
+		return closed && current
+			? {
+					...current,
+					authority: 'none',
+					reason: 'The managed host is closed.',
+					pendingApproval: null,
+				}
+			: current;
+	};
+
+	async function withLifecycle<T>(
+		work: (current: EnrollmentLifecycle) => Promise<LifecycleOutcome<T>>
+	): Promise<LifecycleOutcome<T>> {
+		if (closed || !lifecycle || !adapter) {
+			return {
+				status: 'unavailable',
+				message: closed ? 'The managed host is closed.' : 'The runtime has not acquired this host.',
+			};
+		}
+		const record = identity.read();
+		if (
+			record.status === 'ok' &&
+			record.record.installationId !== adapter.installation.installationId
+		) {
+			return {
+				status: 'refused',
+				reason: 'installation-mismatch',
+				message: 'The enrollment belongs to another installation; no endpoint operation was sent.',
+			};
+		}
+		return work(lifecycle);
+	}
+
+	const control: HostEnrollmentControl = {
+		requestEnrollment: (input) => withLifecycle((current) => current.requestEnrollment(input)),
+		connect: () => withLifecycle((current) => current.connect()),
+		beginRegistration: () => withLifecycle((current) => current.beginRegistration()),
+		completeRegistration: () => withLifecycle((current) => current.completeRegistration()),
+	};
 
 	const host = (installation: ManagedInstallationIdentity) => {
+		if (closed) throw new Error('The managed host is closed.');
+		if (adapter) {
+			if (adapter.installation !== installation) {
+				throw new Error(
+					'A managed composition belongs to one runtime; compose a new host for a restart.'
+				);
+			}
+			return adapter;
+		}
 		const enrollment = createEnrollmentLifecycle({
 			identity,
 			openPort: (socketPath) => {
@@ -455,15 +520,16 @@ export function composeHostManaged(deps: HostManagedDeps): HostManagedCompositio
 			now,
 		});
 		lifecycle = enrollment;
-		return createManagedHostAdapter({
+		adapter = createManagedHostAdapter({
 			installation,
 			identity: { read: () => enrollment.status().identity },
 			get endpoint() {
-				return port;
+				return closed ? null : port;
 			},
-			status: () => enrollment.status(),
+			status: () => status()!,
 			now,
 		});
+		return adapter;
 	};
 
 	return {
@@ -472,15 +538,21 @@ export function composeHostManaged(deps: HostManagedDeps): HostManagedCompositio
 		managed: { host, standing },
 		identity,
 		standing,
-		status: () => lifecycle?.status() ?? null,
+		control,
+		status,
 		lifecycle: {
 			async attach() {
 				// No sealed record, no dial: an unenrolled host never opens a socket here.
 				if (!lifecycle || identity.read().status !== 'ok') return;
-				await lifecycle.connect();
+				await control.connect();
 			},
-			close: async () => {
-				await lifecycle?.close();
+			close: () => {
+				closed = true;
+				closing ??= (async () => {
+					await lifecycle?.close();
+					port = null;
+				})();
+				return closing;
 			},
 		},
 	};
