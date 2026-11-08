@@ -4632,6 +4632,20 @@
 					"produces": []
 				},
 				{
+					"id": "MCOMP-17-03BO",
+					"label": "Compose the room participant caller credential resolver in the desktop WebServer",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/main/web-server/WebServer.ts",
+						"src/__tests__/main/web-server/WebServer.test.ts",
+						"Plans/integration-completion/program.json"
+					],
+					"outcome": "Consume MAESTRO-EFFECT-CONSUMERS-BUILD and its pinned MAESTRO-CONTRACT-INPUTS-BUILD dependency. Bounded prerequisite continuation of MCOMP-17-03 after MCOMP-17-03BN: WebServer.setGroupChatCallerSourceResolver() merges the host-only groupChatCallerSourceOf hook into the message handler callbacks like setAutoRunCallerSourceResolver, so it survives start(), never crosses the renderer, and keeps the chat and Auto Run resolvers, the lineage binder and the withdrawer in either composition order. Exercise resolution through the composed sessions callback, kind isolation, refusals, the lineage binder gate, custody loss and a mutation check. Composing the resolver in web-server-factory over ProcessManager.groupChatCallerSourceOf, and group-chat Auto Run propagation, remain pending. Reuse WORKFLOW-CONTEXT/1; no new wire capability, producer mapping or paired/provider/native qualification. Keep to three authored files and fewer than 500 changed lines.",
+					"backlog": ["M-04"],
+					"requires": ["MAESTRO-EFFECT-CONSUMERS-BUILD"],
+					"produces": []
+				},
+				{
 					"label": "Bind Auto Run Cue and nested work at dispatch",
 					"kind": "IMPLEMENT",
 					"targets": [
@@ -4674,7 +4688,7 @@
 			"produces": ["MAESTRO-WORKFLOW-CONSUMERS-BUILD"],
 			"id": "MCOMP-17",
 			"path": ".maestro/playbooks/2026-10-29-Maestro-Integration-Completion/MCOMP-17.md",
-			"taskCount": 71,
+			"taskCount": 72,
 			"stage": "S10"
 		},
 		{
@@ -6464,7 +6478,7 @@
 				"PAIR-DIRECT-EVIDENCE"
 			],
 			"nativeInputs": false,
-			"taskCount": 78
+			"taskCount": 79
 		},
 		{
 			"id": "S11",
@@ -6668,8 +6682,8 @@
 			"taskCount": 1
 		}
 	],
-	"taskCount": 391,
-	"taskCounts": { "IMPLEMENT": 282, "TEST": 49, "VERIFY": 60 },
+	"taskCount": 392,
+	"taskCounts": { "IMPLEMENT": 283, "TEST": 49, "VERIFY": 60 },
 	"artifacts": {
 		"MEGA-CONTRACTS-FOUNDATION-BUILD": {
 			"producerDocument": "GCOMP-01",
@@ -7476,6 +7490,7 @@
 			"MCOMP-17-03BL",
 			"MCOMP-17-03BM",
 			"MCOMP-17-03BN",
+			"MCOMP-17-03BO",
 			"MCOMP-17-03",
 			"MCOMP-17-04",
 			"MCOMP-17-05",

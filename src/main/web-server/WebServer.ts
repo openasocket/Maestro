@@ -62,6 +62,7 @@ import type {
 	AutoRunConsultLineageBinder,
 	CallerConsultWithdrawer,
 	CallerSourceResolver,
+	GroupChatCallerSourceResolver,
 } from './handlers/messageHandlers/commands';
 import type {
 	WebTerminalInputResult,
@@ -747,6 +748,25 @@ export class WebServer {
 			autoRunCallerSourceOf: AutoRunCallerSourceResolver;
 		} = {
 			autoRunCallerSourceOf: resolver,
+		};
+		this.messageHandler.setCallbacks(callbacks);
+	}
+
+	/**
+	 * The host-only lookup the `cross_agent_ask` handler authenticates a forwarded room
+	 * participant turn's caller credential with (MCOMP-17-03BO): the desktop composes
+	 * `ProcessManager.groupChatCallerSourceOf`. Tried after the chat and Auto Run resolvers, so no
+	 * kind of credential resolves as another. It answers a participant name, which the handler maps
+	 * to exactly one live agent through the composed sessions callback. Merged into the message
+	 * handler like `setCallerSourceResolver`, so it survives `start()` and never crosses the
+	 * renderer. Until one is composed, a room participant's credential refuses as authenticating no
+	 * live caller.
+	 */
+	setGroupChatCallerSourceResolver(resolver: GroupChatCallerSourceResolver): void {
+		const callbacks: Partial<MessageHandlerCallbacks> & {
+			groupChatCallerSourceOf: GroupChatCallerSourceResolver;
+		} = {
+			groupChatCallerSourceOf: resolver,
 		};
 		this.messageHandler.setCallbacks(callbacks);
 	}

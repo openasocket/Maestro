@@ -855,3 +855,196 @@ describe('Auto Run consult lineage binder composition (MCOMP-17-03BH)', () => {
 		await vi.waitFor(() => expect(consultAgent).toHaveBeenCalledTimes(1));
 	});
 });
+
+describe('room participant caller credential resolver composition (MCOMP-17-03BO)', () => {
+	const ROOM = 'mcc_room-participant-credential';
+	const ATTEMPT = 'mcc_auto-run-attempt-credential';
+	const CHAT = 'mcc_live-turn-credential';
+	const RECHECK_MS = 1_000;
+
+	type RoomResolver = (
+		credential: string
+	) => { groupChatId: string; participantName: string; processId: string } | null;
+
+	function compose(
+		opts: {
+			room?: RoomResolver;
+			roomFirst?: boolean;
+			withOthers?: boolean;
+			binder?: (credential: string, ticket: string) => boolean;
+			withdrawer?: (ticket: string) => void;
+			sessions?: Array<{ id: string; name: string }>;
+			pending?: boolean;
+		} = {}
+	) {
+		const server = new WebServer(0);
+		const consultAgent = opts.pending
+			? vi.fn(() => new Promise(() => {}))
+			: vi.fn().mockResolvedValue({ success: true, response: 'answer' });
+		server.setConsultAgentCallback(consultAgent as never);
+		server.setGetSessionDetailCallback(vi.fn().mockReturnValue({ state: 'idle' }) as never);
+		server.setGetSessionsCallback(
+			vi.fn(
+				() =>
+					opts.sessions ?? [
+						{ id: 'alpha-agent', name: 'Alpha' },
+						{ id: 'beta-agent', name: 'Beta' },
+					]
+			) as never
+		);
+		// Composed before start() wires the remaining callbacks, in either order relative to the
+		// other host-only hooks: no setter may drop another's hook.
+		if (opts.roomFirst && opts.room) server.setGroupChatCallerSourceResolver(opts.room);
+		if (opts.withOthers) {
+			server.setCallerSourceResolver((c) =>
+				c === CHAT ? { agentId: 'caller-1', tabId: 'tab-1' } : null
+			);
+			server.setAutoRunCallerSourceResolver((c) =>
+				c === ATTEMPT ? { agentId: 'runner-agent', processId: 'runner-agent-batch-1' } : null
+			);
+		}
+		if (opts.binder) server.setAutoRunConsultLineageBinder(opts.binder);
+		if (opts.withdrawer) server.setCallerConsultWithdrawer(opts.withdrawer);
+		if (!opts.roomFirst && opts.room) server.setGroupChatCallerSourceResolver(opts.room);
+		(server as any).setupMessageHandlerCallbacks();
+		const sent: Array<Record<string, unknown>> = [];
+		const client = {
+			id: 'cli-socket',
+			connectedAt: Date.now(),
+			cli: true,
+			socket: {
+				readyState: WebSocket.OPEN,
+				send: vi.fn((frame: string) => sent.push(JSON.parse(frame))),
+				once: vi.fn(),
+				off: vi.fn(),
+			},
+		};
+		const ask = (fields: Record<string, unknown>) =>
+			(server as any).messageHandler.handleMessage(client, {
+				type: 'cross_agent_ask',
+				sessionId: 'target-agent',
+				question: 'q',
+				requestId: 'r-1',
+				...fields,
+			});
+		const results = () => sent.filter((r) => r.type === 'cross_agent_ask_result');
+		return { consultAgent, ask, results };
+	}
+
+	const roomSource = {
+		groupChatId: 'room-1',
+		participantName: 'Alpha',
+		processId: 'group-chat-room-1-participant-Alpha-1',
+	};
+	const roomAsk = { fromSessionId: 'alpha-agent', fromTabId: 'shown-tab', callerCredential: ROOM };
+
+	it('authenticates a room participant credential as the live agent its name stands for', async () => {
+		const room = vi.fn<RoomResolver>((c) => (c === ROOM ? roomSource : null));
+		const { consultAgent, ask, results } = compose({ room });
+		ask(roomAsk);
+		await vi.waitFor(() => expect(consultAgent).toHaveBeenCalledTimes(1));
+		expect(room).toHaveBeenCalledWith(ROOM);
+		const params = consultAgent.mock.calls[0][0];
+		expect(params).toMatchObject({
+			targetSessionId: 'target-agent',
+			fromSessionId: 'alpha-agent',
+			fromTabId: 'shown-tab',
+		});
+		expect(JSON.stringify(params)).not.toContain(ROOM);
+		await vi.waitFor(() => expect(results()[0]).toMatchObject({ success: true }));
+		expect(JSON.stringify(results())).not.toContain(ROOM);
+	});
+
+	it.each([true, false])(
+		'keeps every resolver whichever is composed first (room first: %s)',
+		async (roomFirst) => {
+			const room = vi.fn<RoomResolver>((c) => (c === ROOM ? roomSource : null));
+			const { consultAgent, ask } = compose({ room, roomFirst, withOthers: true });
+			ask(roomAsk);
+			ask({
+				fromSessionId: 'caller-1',
+				fromTabId: 'tab-1',
+				callerCredential: CHAT,
+				requestId: 'r-2',
+			});
+			ask({
+				fromSessionId: 'runner-agent',
+				fromTabId: 'tab-2',
+				callerCredential: ATTEMPT,
+				requestId: 'r-3',
+			});
+			await vi.waitFor(() => expect(consultAgent).toHaveBeenCalledTimes(3));
+			expect(
+				consultAgent.mock.calls.map((c) => (c[0] as { fromSessionId: string }).fromSessionId)
+			).toEqual(['alpha-agent', 'caller-1', 'runner-agent']);
+			// Neither of the other kinds reached the room resolver.
+			expect(room).toHaveBeenCalledTimes(1);
+		}
+	);
+
+	it('refuses a room credential when no room resolver was composed', () => {
+		const { consultAgent, ask, results } = compose({ withOthers: true });
+		ask(roomAsk);
+		expect(consultAgent).not.toHaveBeenCalled();
+		expect(results()[0]).toMatchObject({ success: false, requestId: 'r-1' });
+		expect(String(results()[0].error)).toContain(
+			'authenticates no live chat turn or Auto Run attempt'
+		);
+	});
+
+	it('refuses a room credential stated for another agent', () => {
+		const { consultAgent, ask, results } = compose({ room: () => roomSource });
+		ask({ ...roomAsk, fromSessionId: 'beta-agent' });
+		expect(consultAgent).not.toHaveBeenCalled();
+		expect(String(results()[0].error)).toContain('not the group chat participant');
+	});
+
+	it('refuses a participant name the composed sessions callback lists for no live agent', () => {
+		const { consultAgent, ask, results } = compose({
+			room: () => roomSource,
+			sessions: [{ id: 'beta-agent', name: 'Beta' }],
+		});
+		ask(roomAsk);
+		expect(consultAgent).not.toHaveBeenCalled();
+		expect(String(results()[0].error)).toContain('not the group chat participant');
+	});
+
+	it('never offers a room credential to the Auto Run lineage binder', async () => {
+		const binder = vi.fn(() => false);
+		const { consultAgent, ask } = compose({ room: () => roomSource, binder });
+		ask(roomAsk);
+		await vi.waitFor(() => expect(consultAgent).toHaveBeenCalledTimes(1));
+		expect(binder).not.toHaveBeenCalled();
+	});
+
+	describe('custody', () => {
+		beforeEach(() => {
+			vi.useFakeTimers();
+		});
+		afterEach(() => {
+			vi.useRealTimers();
+		});
+
+		it('withdraws the ask through the composed withdrawer when the room turn ends', () => {
+			let live = true;
+			const withdrawer = vi.fn();
+			const { consultAgent, ask, results } = compose({
+				room: () => (live ? roomSource : null),
+				withdrawer,
+				pending: true,
+			});
+			ask(roomAsk);
+			expect(consultAgent).toHaveBeenCalledTimes(1);
+			const { dispatchTicket } = (consultAgent.mock.calls[0] as unknown[])[0] as {
+				dispatchTicket: string;
+			};
+			vi.advanceTimersByTime(RECHECK_MS);
+			expect(withdrawer).not.toHaveBeenCalled();
+			live = false;
+			vi.advanceTimersByTime(RECHECK_MS);
+			expect(withdrawer).toHaveBeenCalledWith(dispatchTicket);
+			expect(results()).toHaveLength(1);
+			expect(results()[0]).toMatchObject({ success: false, requestId: 'r-1' });
+		});
+	});
+});
