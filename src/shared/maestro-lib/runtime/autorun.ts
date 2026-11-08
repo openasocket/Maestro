@@ -203,6 +203,14 @@ export interface RuntimeAutoRun {
 	readonly api: AutoRunApi;
 	/** Host-only live custody lookup. The caller must authenticate the agent/process selection. */
 	sourceCustody(agentId: string, processId: string): ReturnType<AutoRunTurnRunner['sourceCustody']>;
+	/**
+	 * Host only: the live run's agent and batch process a caller credential
+	 * (`CALLER_CREDENTIAL_ENV_VAR`) was minted for (MCOMP-17-03AY). Held to the same liveness as
+	 * `sourceCustody`: a stopped, aborted, ended or unfenced run answers null, and so does any
+	 * credential its runner no longer resolves. The coordinates select `sourceCustody`; they are
+	 * no spawn permit, and the caller must still read custody before acting on them.
+	 */
+	callerSource(credential: string): { agentId: string; processId: string } | null;
 	activeRuns(): ActiveAutoRun[];
 	/** Does a run hold this agent's working tree (AE17)? */
 	holds(agentId: string): boolean;
@@ -215,6 +223,7 @@ export interface RuntimeAutoRun {
 interface RunHandle {
 	agentId: string;
 	sourceCustody: AutoRunTurnRunner['sourceCustody'];
+	callerSource: AutoRunTurnRunner['callerSource'];
 	kind: 'playbook' | 'goal';
 	startedAt: number;
 	controller: RunController;
@@ -870,6 +879,7 @@ export function createRuntimeAutoRun(options: RuntimeAutoRunOptions): RuntimeAut
 			{
 				agentId,
 				sourceCustody: deps.turns.sourceCustody,
+				callerSource: deps.turns.callerSource,
 				kind: 'playbook',
 				startedAt,
 				controller,
@@ -942,6 +952,7 @@ export function createRuntimeAutoRun(options: RuntimeAutoRunOptions): RuntimeAut
 			{
 				agentId,
 				sourceCustody: deps.turns.sourceCustody,
+				callerSource: deps.turns.callerSource,
 				kind: 'goal',
 				startedAt,
 				controller,
@@ -1014,6 +1025,17 @@ export function createRuntimeAutoRun(options: RuntimeAutoRunOptions): RuntimeAut
 		abort: async (agentId) => answer('autoRun.abort', agentId, 'abort'),
 	};
 
+	/** A run still standing for its agent: not stopping, not aborted, and fenced. */
+	function standing(agentId: string, run: RunHandle | undefined): run is RunHandle {
+		return (
+			run !== undefined &&
+			runs.get(agentId) === run &&
+			!run.controller.stopRequested() &&
+			!run.abort.signal.aborted &&
+			options.fence().ok
+		);
+	}
+
 	return {
 		api,
 		sourceCustody: (agentId, processId) => {
@@ -1035,6 +1057,20 @@ export function createRuntimeAutoRun(options: RuntimeAutoRunOptions): RuntimeAut
 					!run.abort.signal.aborted
 					? source
 					: null;
+			} catch {
+				return null;
+			}
+		},
+		callerSource: (credential) => {
+			try {
+				for (const [agentId, run] of runs) {
+					if (!standing(agentId, run)) continue;
+					const source = run.callerSource(credential);
+					// A runner is bound to one agent; a source naming another is no answer of this run.
+					if (!source) continue;
+					return source.agentId === agentId && standing(agentId, run) ? source : null;
+				}
+				return null;
 			} catch {
 				return null;
 			}

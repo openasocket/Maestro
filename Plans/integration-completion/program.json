@@ -4408,6 +4408,20 @@
 					"produces": []
 				},
 				{
+					"id": "MCOMP-17-03AY",
+					"label": "Resolve Auto Run caller credentials through the runtime Auto Run service",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/shared/maestro-lib/runtime/autorun.ts",
+						"src/shared/maestro-lib/runtime/__tests__/autorun.test.ts",
+						"Plans/integration-completion/program.json"
+					],
+					"outcome": "Consume MAESTRO-EFFECT-CONSUMERS-BUILD and its pinned MAESTRO-CONTRACT-INPUTS-BUILD dependency. Bounded prerequisite continuation of MCOMP-17-03 after MCOMP-17-03AX: the runtime Auto Run service exposes host-only RuntimeAutoRun.callerSource(credential), which asks each live run's turn runner and answers its agent and batch process only while that run is still standing (registered for its agent, not stopping, not aborted, fenced) both before and after the runner lookup, and only when the runner names its own agent. Stopped, shut-down, unfenced, revoked, expired, forged and standalone credentials authenticate nobody, and concurrent agents stay apart. Exercise playbook and goal runs, concurrent agents, every withdrawal, the standalone path, and a mutation check. Routing it through askAsCaller (an auto-run source kind) and the desktop equivalent, background/consult child credentials and room owner lifetime remain pending. Reuse WORKFLOW-CONTEXT/1; no new wire capability, producer mapping or paired/provider/native qualification. Keep to three authored files and fewer than 500 changed lines.",
+					"backlog": ["M-04"],
+					"requires": ["MAESTRO-EFFECT-CONSUMERS-BUILD"],
+					"produces": []
+				},
+				{
 					"label": "Bind Auto Run Cue and nested work at dispatch",
 					"kind": "IMPLEMENT",
 					"targets": [
@@ -4450,7 +4464,7 @@
 			"produces": ["MAESTRO-WORKFLOW-CONSUMERS-BUILD"],
 			"id": "MCOMP-17",
 			"path": ".maestro/playbooks/2026-10-29-Maestro-Integration-Completion/MCOMP-17.md",
-			"taskCount": 55,
+			"taskCount": 56,
 			"stage": "S10"
 		},
 		{
@@ -6240,7 +6254,7 @@
 				"PAIR-DIRECT-EVIDENCE"
 			],
 			"nativeInputs": false,
-			"taskCount": 62
+			"taskCount": 63
 		},
 		{
 			"id": "S11",
@@ -6444,8 +6458,8 @@
 			"taskCount": 1
 		}
 	],
-	"taskCount": 375,
-	"taskCounts": { "IMPLEMENT": 266, "TEST": 49, "VERIFY": 60 },
+	"taskCount": 376,
+	"taskCounts": { "IMPLEMENT": 267, "TEST": 49, "VERIFY": 60 },
 	"artifacts": {
 		"MEGA-CONTRACTS-FOUNDATION-BUILD": {
 			"producerDocument": "GCOMP-01",
@@ -7236,6 +7250,7 @@
 			"MCOMP-17-03AV",
 			"MCOMP-17-03AW",
 			"MCOMP-17-03AX",
+			"MCOMP-17-03AY",
 			"MCOMP-17-03",
 			"MCOMP-17-04",
 			"MCOMP-17-05",

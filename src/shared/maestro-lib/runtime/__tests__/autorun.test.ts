@@ -34,6 +34,7 @@ import {
 	type AdmissionRequest,
 	type HostAuthority,
 } from '../../managed/authority';
+import { CALLER_CREDENTIAL_ENV_VAR } from '../../launch/env';
 import { createManagedBinding } from '../../managed/binding';
 import type { WorkflowFenceAnswer, WorkflowFenceLifetime } from '../../managed/workflows';
 import { readHistory } from '../../store/read-history';
@@ -1041,6 +1042,89 @@ describe('runtime Auto Run', () => {
 					expect(service.sourceCustody('a1', processId)).toBeNull();
 				}
 			);
+
+			describe('caller credentials (MCOMP-17-03AY)', () => {
+				/** The caller credentials Auto Run processes were stamped with, in launch order. */
+				const stamped = () =>
+					envFiles
+						.filter((file) => fs.existsSync(file))
+						.map((file) => JSON.parse(fs.readFileSync(file, 'utf-8'))[CALLER_CREDENTIAL_ENV_VAR])
+						.filter((credential): credential is string => typeof credential === 'string');
+				async function credentialAt(index: number): Promise<string> {
+					await vi.waitFor(() => expect(stamped().length).toBeGreaterThan(index));
+					return stamped()[index];
+				}
+
+				it.each(['playbook', 'goal'] as const)(
+					'resolves a live %s credential to its agent and process without another admission',
+					async (kind) => {
+						const { processId, authority, asked, claim } = await liveSource(kind);
+						const credential = await credentialAt(0);
+						const leases = authority.live();
+						expect(service.callerSource(credential)).toEqual({ agentId: 'a1', processId });
+						for (const forged of ['', 'A'.repeat(credential.length), credential.slice(0, -1), 42])
+							expect(service.callerSource(forged as string)).toBeNull();
+						expect(asked).toHaveLength(1);
+						expect(claim).toHaveBeenCalledTimes(1);
+						expect(authority.live()).toEqual(leases);
+					}
+				);
+
+				it('mints none for a standalone run', async () => {
+					await liveSource('standalone');
+					await vi.waitFor(() => expect(envFiles.some((file) => fs.existsSync(file))).toBe(true));
+					expect(stamped()).toEqual([]);
+				});
+
+				it('keeps concurrent agents apart and withdraws only the stopped run', async () => {
+					const { runtime, processId, file } = await liveSource();
+					const first = await credentialAt(0);
+					const { agentId } = value(
+						await runtime.agents.create({
+							name: 'Beta',
+							provider: 'claude-code',
+							cwd: work,
+							autoRunFolderPath: docs,
+						})
+					);
+					const run = watchRun(runtime, agentId);
+					script = [{ text: 'Beta is working.', hang: true }];
+					value(await runtime.autoRun.launch(agentId, { documents: [{ file }] }));
+					await vi.waitFor(() => expect(run.events.some((e) => e.kind === 'output')).toBe(true));
+					const event = run.events.find((e) => e.kind === 'output');
+					if (event?.kind !== 'output') throw new Error('No concurrent process');
+					const second = await credentialAt(1);
+					expect(second).not.toBe(first);
+					expect(service.callerSource(first)).toEqual({ agentId: 'a1', processId });
+					expect(service.callerSource(second)).toEqual({ agentId, processId: event.processId });
+					value(await runtime.autoRun.stop('a1'));
+					expect(service.callerSource(first)).toBeNull();
+					expect(service.callerSource(second)).toEqual({ agentId, processId: event.processId });
+				});
+
+				it.each(['stopAll', 'fence-lost', 'fence-throws', 'revoked', 'expired'] as const)(
+					'refuses the credential after %s',
+					async (change) => {
+						const { processId, authority, lifetime } = await liveSource();
+						const credential = await credentialAt(0);
+						expect(service.callerSource(credential)).toEqual({ agentId: 'a1', processId });
+						const originalFence = config.fence;
+						let stopping: Promise<void> | undefined;
+						if (change === 'stopAll') stopping = service.stopAll();
+						if (change === 'fence-lost')
+							config.fence = () => ({ ok: false, reason: 'ownership lost' });
+						if (change === 'fence-throws')
+							config.fence = () => {
+								throw new Error('ownership unreadable');
+							};
+						if (change === 'revoked') authority.revoke(authority.live()[0].leaseId, 'revoked');
+						if (change === 'expired') lifetime.current.mockReturnValue(false);
+						expect(service.callerSource(credential)).toBeNull();
+						config.fence = originalFence;
+						await stopping;
+					}
+				);
+			});
 
 			it('returns no custody during a pending owner claim or after cancellation', async () => {
 				const file = doc('pending', tasks(1));
