@@ -180,13 +180,14 @@ export interface MaestroRuntimeOptions {
 		 */
 		backgroundParentContext?: BackgroundManagedOptions['parentContext'];
 		/**
-		 * Current caller's authenticated live chat source, supplied by the trusted host transport.
+		 * Current caller's authenticated live source, supplied by the trusted host transport.
 		 * Re-read throughout consult dispatch; null or a mismatch with the requested agent/tab
 		 * refuses the child. Coordinates from a request or environment cannot implement this port.
 		 * The runtime supplies the original bound source lease/context, never accepts one here.
-		 * Transport authentication and non-chat source custody must be composed by the host.
+		 * A processId selects exact background/consult custody; absent selects a chat turn.
+		 * Transport authentication and Auto Run source custody must be composed by the host.
 		 */
-		consultSource?(): { agentId: string; tabId: string } | null;
+		consultSource?(): { agentId: string; tabId: string; processId?: string } | null;
 		/**
 		 * The owner fence of an Auto Run's (or a hosted Cue run's) workflow, claimed on every
 		 * attempt for that attempt's run and attempt ids. Default: the runtime's own
@@ -913,6 +914,7 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 					const { fromAgentId, fromTabId } = input;
 					let active = true;
 					let required = false;
+					let selected: { processId: string | undefined } | undefined;
 					return consultSource.run(
 						{
 							// Enrollment during a wait requires custody; losing it cannot undo that.
@@ -921,7 +923,13 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 								if (!active || !fromAgentId || !fromTabId) return null;
 								const source = lookup();
 								if (source?.agentId !== fromAgentId || source.tabId !== fromTabId) return null;
-								return turns.sourceCustody(fromAgentId, fromTabId);
+								// Pin the selected process, including the chat/background distinction. A
+								// queued ask cannot transfer to another live source on the same agent/tab.
+								selected ??= { processId: source.processId };
+								if (selected.processId !== source.processId) return null;
+								return source.processId === undefined
+									? turns.sourceCustody(fromAgentId, fromTabId)
+									: background.sourceCustody(source.processId);
 							},
 						},
 						async () => {

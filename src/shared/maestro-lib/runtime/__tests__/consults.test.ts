@@ -715,7 +715,11 @@ describe('runtime consults', () => {
 		}
 
 		describe('live chat source composition', () => {
-			const callers = new AsyncLocalStorage<{ agentId: string; tabId: string }>();
+			const callers = new AsyncLocalStorage<{
+				agentId: string;
+				tabId: string;
+				processId?: string;
+			}>();
 			let readable: boolean;
 			let sourceLookup: ReturnType<
 				typeof vi.fn<NonNullable<NonNullable<MaestroRuntimeOptions['managed']>['consultSource']>>
@@ -761,6 +765,260 @@ describe('runtime consults', () => {
 				value(await runtime.turns.send('a1', 'a1-t1', { text: 'Source operation' }));
 				return runtime;
 			}
+
+			async function liveConsult(
+				readOnly = true,
+				script: FakeScript = (call) => ({
+					text: 'Nested answer',
+					hold: call.nth === 1,
+				})
+			) {
+				const runtime = await liveChat(script, readOnly);
+				const outer = callers.run({ agentId: 'a1', tabId: 'a1-t1' }, () =>
+					runtime.consults.ask({ ...input, handoffAnswer: 'Check the answer.' })
+				);
+				await vi.waitFor(() => {
+					expect(provider.calls).toHaveLength(1);
+					expect(authority.live().filter((lease) => lease.state() === 'bound')).toHaveLength(2);
+				});
+				const request = {
+					...input,
+					targetAgentId: 'a3',
+					fromAgentId: 'a2',
+					fromTabId: consultTab('a2').id as string,
+					handoffAnswer: 'Save the answer.',
+				};
+				const caller = {
+					agentId: request.fromAgentId,
+					tabId: request.fromTabId,
+					processId: provider.calls[0].processId,
+				};
+				const nested = () => callers.run(caller, () => runtime.consults.ask(request));
+				return { runtime, outer, request, caller, nested };
+			}
+
+			it.each([true, false])(
+				'composes a live consult source with readOnly=%s',
+				async (readOnly) => {
+					const { runtime, outer, nested } = await liveConsult(readOnly);
+					expect(value(await nested()).answer).toBe('Nested answer');
+					const parent = sourceAdmissions[1].context;
+					const child = lineageOf(1);
+					expect(child).toEqual(
+						childDelegationContext(delegationContextOf(parent), {
+							link: { kind: 'agent', id: 'a3' },
+							requestId: child.identity.requestId,
+							attemptId: child.identity.attemptId,
+						})
+					);
+					expect(permissionMode(provider.calls[1].spec.args)).toBe(readOnly ? 'plan' : undefined);
+					expect(sourceAdmissions).toHaveLength(3);
+					expect(authority.live()).toHaveLength(2);
+					value(await runtime.turns.interrupt('a1', 'a1-t1'));
+					await outer;
+				}
+			);
+
+			it.each([
+				'missing',
+				'blank',
+				'wrong-agent',
+				'wrong-tab',
+				'stopped',
+				'revoked',
+				'withdrawn',
+				'unreadable',
+			] as const)('refuses %s nested source custody without a child effect', async (mode) => {
+				const { runtime, outer, caller, request, nested } = await liveConsult();
+				if (mode === 'missing') caller.processId = 'not-a-live-process';
+				if (mode === 'blank') caller.processId = '';
+				if (mode === 'wrong-agent') caller.agentId = 'a3';
+				if (mode === 'wrong-tab') caller.tabId = 'a2-t1';
+				if (mode === 'stopped') {
+					value(await runtime.turns.interrupt('a1', 'a1-t1'));
+					await outer;
+				}
+				if (mode === 'revoked') authority.revoke(authority.live()[1].leaseId, 'Source revoked');
+				if (mode === 'withdrawn') readable = false;
+				if (mode === 'unreadable')
+					sourceLookup.mockImplementation(() => {
+						throw new Error('No source');
+					});
+				expect(errorOf(await nested()).message).toMatch(/custody/i);
+				expect(provider.calls).toHaveLength(1);
+				expect(consultTab(request.targetAgentId)).toBeUndefined();
+				expect(sourceAdmissions).toHaveLength(2);
+				value(await runtime.turns.interrupt('a1', 'a1-t1'));
+				await outer;
+			});
+
+			it.each(['preparation', 'admission', 'observer', 'sink'] as const)(
+				'rechecks nested custody at %s, releases unused leases and recovers',
+				async (boundary) => {
+					let withdraw = true;
+					let revokedCaller: object | undefined;
+					const setup = await liveConsult(true, (call) => {
+						if (call.nth > 1 && withdraw && boundary === 'sink') revokedCaller = callers.getStore();
+						return { text: 'Recovered', hold: call.nth === 1 };
+					});
+					const { runtime, outer, nested } = setup;
+					sourceLookup.mockImplementation(() =>
+						callers.getStore() === revokedCaller ? null : (callers.getStore() ?? null)
+					);
+					const issued: DispatchLease[] = [];
+					const admit = authority.admit.bind(authority);
+					vi.spyOn(authority, 'admit').mockImplementation(async (request) => {
+						const answer = await admit(request);
+						if (answer.state === 'admitted') issued.push(answer.lease);
+						if (withdraw && boundary === 'admission') revokedCaller = callers.getStore();
+						return answer;
+					});
+					probeBinary = async () => {
+						if (withdraw && boundary === 'preparation') revokedCaller = callers.getStore();
+						return { exists: true, path: '/fake/bin/claude' };
+					};
+					onBackgroundAdmission = (event) => {
+						if (withdraw && boundary === 'observer' && event.kind === 'admitted')
+							revokedCaller = callers.getStore();
+					};
+					expect(errorOf(await nested()).message).toMatch(/custody|lease.*released/i);
+					expect(issued).toHaveLength(boundary === 'preparation' ? 0 : 1);
+					for (const lease of issued) {
+						expect(lease.pid()).toBeUndefined();
+						expect(lease.ended()).toMatchObject({
+							state: 'released',
+							release: { outcome: 'spawn-failed' },
+						});
+					}
+					expect(authority.live()).toHaveLength(2);
+					withdraw = false;
+					revokedCaller = undefined;
+					expect(value(await nested()).answer).toBe('Recovered');
+					expect(authority.live()).toHaveLength(2);
+					value(await runtime.turns.interrupt('a1', 'a1-t1'));
+					await outer;
+				}
+			);
+
+			it('keeps a three-level nested chain bound to each original request', async () => {
+				const { runtime, outer, nested } = await liveConsult(true, (call) => ({
+					text: 'Deep answer',
+					hold: call.nth < 3,
+				}));
+				const inner = nested();
+				await vi.waitFor(() =>
+					expect(authority.live().filter((lease) => lease.state() === 'bound')).toHaveLength(3)
+				);
+				const caller = {
+					agentId: 'a3',
+					tabId: consultTab('a3').id,
+					processId: provider.calls[1].processId,
+				};
+				value(
+					await callers.run(caller, () =>
+						runtime.consults.ask({
+							targetAgentId: 'a1',
+							fromAgentId: caller.agentId,
+							fromTabId: caller.tabId,
+							question: 'Third level',
+							handoffAnswer: 'Save this.',
+						})
+					)
+				);
+				expect(lineageOf(2).identity.parentRunId).toBe(lineageOf(1).identity.requestId);
+				expect(lineageOf(2).identity.rootRunId).toBe(lineageOf(0).identity.rootRunId);
+				expect(lineageOf(2).delegation.chain).toEqual([
+					...lineageOf(1).delegation.chain,
+					{ kind: 'agent', id: 'a1' },
+				]);
+				expect(permissionMode(provider.calls[2].spec.args)).toBe('plan');
+				value(await runtime.turns.interrupt('a2', consultTab('a2').id));
+				await inner;
+				value(await runtime.turns.interrupt('a1', 'a1-t1'));
+				await outer;
+			});
+
+			it('isolates concurrent background sources and refuses a substituted process', async () => {
+				const { runtime, outer, caller, request, nested } = await liveConsult(true, (call) => ({
+					text: 'Concurrent answer',
+					hold: call.nth <= 2,
+				}));
+				const other = ask(runtime, { ...input, targetAgentId: 'a3' });
+				await vi.waitFor(() =>
+					expect(authority.live().filter((lease) => lease.state() === 'bound')).toHaveLength(3)
+				);
+				const otherCaller = {
+					agentId: 'a3',
+					tabId: consultTab('a3').id,
+					processId: provider.calls[1].processId,
+				};
+				const otherRequest = {
+					...request,
+					targetAgentId: 'a1',
+					fromAgentId: 'a3',
+					fromTabId: otherCaller.tabId,
+				};
+				const answers = await Promise.all([
+					callers.run(caller, () => runtime.consults.ask({ ...request, targetAgentId: 'a1' })),
+					callers.run(otherCaller, () => runtime.consults.ask(otherRequest)),
+				]);
+				answers.forEach(value);
+				expect(
+					[lineageOf(2).identity.parentRunId, lineageOf(3).identity.parentRunId].sort()
+				).toEqual([lineageOf(0).identity.requestId, lineageOf(1).identity.requestId].sort());
+				const original = caller.processId;
+				probeBinary = async () => {
+					caller.processId = otherCaller.processId;
+					return { exists: true, path: '/fake/bin/claude' };
+				};
+				expect(errorOf(await nested()).message).toMatch(/custody/i);
+				expect(provider.calls).toHaveLength(4);
+				probeBinary = undefined;
+				caller.processId = original;
+				value(await nested());
+				expect(lineageOf(4).identity.parentRunId).toBe(lineageOf(0).identity.requestId);
+				value(await runtime.turns.interrupt('a1', 'a1-t1'));
+				await Promise.all([outer, other]);
+			});
+
+			it('refuses queued nested work after its source is revoked', async () => {
+				const { runtime, outer, nested } = await liveConsult(true, (call) => ({
+					text: 'Waiting',
+					hold: call.nth <= 2,
+				}));
+				const first = nested();
+				await vi.waitFor(() =>
+					expect(authority.live().filter((lease) => lease.state() === 'bound')).toHaveLength(3)
+				);
+				const calls = sourceLookup.mock.calls.length;
+				const queued = nested();
+				await vi.waitFor(() => expect(sourceLookup.mock.calls.length).toBeGreaterThan(calls));
+				const leases = authority.live();
+				authority.revoke(leases[1].leaseId, 'Source revoked');
+				authority.revoke(leases[2].leaseId, 'Finish the first child');
+				await Promise.all([outer, first]);
+				expect(errorOf(await queued).message).toMatch(/custody/i);
+				expect(provider.calls).toHaveLength(2);
+				expect(authority.live()).toHaveLength(1);
+				value(await ask(runtime));
+				expect(lineageOf(2).identity.parentRunId).toBe(
+					sourceAdmissions[0].context.identity.requestId
+				);
+				value(await runtime.turns.interrupt('a1', 'a1-t1'));
+			});
+
+			it('refuses a completed background source instead of falling back to chat custody', async () => {
+				const runtime = await liveChat();
+				value(await ask(runtime));
+				const caller = { agentId: 'a1', tabId: 'a1-t1', processId: provider.calls[0].processId };
+				expect(
+					errorOf(await callers.run(caller, () => runtime.consults.ask(input))).message
+				).toMatch(/custody/i);
+				expect(provider.calls).toHaveLength(1);
+				value(await ask(runtime));
+				expect(provider.calls).toHaveLength(2);
+				value(await runtime.turns.interrupt('a1', 'a1-t1'));
+			});
 
 			it('preserves standalone consults with a configured source lookup', async () => {
 				const lookup = vi.fn(() => null);

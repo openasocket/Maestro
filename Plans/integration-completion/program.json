@@ -4086,6 +4086,20 @@
 					"produces": []
 				},
 				{
+					"id": "MCOMP-17-03AB",
+					"label": "Compose authenticated live background custody into nested consult dispatch",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/shared/maestro-lib/runtime/index.ts",
+						"src/shared/maestro-lib/runtime/__tests__/consults.test.ts",
+						"Plans/integration-completion/program.json"
+					],
+					"outcome": "Consume MAESTRO-EFFECT-CONSUMERS-BUILD and its pinned MAESTRO-CONTRACT-INPUTS-BUILD dependency. Bounded prerequisite continuation of MCOMP-17-03: compose the trusted host caller-source lookup with exact live background/consult process custody. Pin source selection for each ask, preserve original verified lineage and prepared access ceilings through nested dispatch, and recheck custody at dequeue, preparation, admission and the final process gate. Refuse missing, changed, stopped, completed, revoked or withdrawn sources without inferring authority from caller coordinates. Exercise real source and child fixture processes, concurrent source isolation, unused lease cleanup and fresh recovery. Preserve standalone and existing trusted-host seams. Transport authentication and lookup installation, Auto Run sources, desktop composition and managed room custody remain pending. Reuse WORKFLOW-CONTEXT/1; no new wire capability, producer mapping or paired/provider/native qualification. Keep to three authored files and fewer than 500 changed lines.",
+					"backlog": ["M-04"],
+					"requires": ["MAESTRO-EFFECT-CONSUMERS-BUILD"],
+					"produces": []
+				},
+				{
 					"label": "Bind Auto Run Cue and nested work at dispatch",
 					"kind": "IMPLEMENT",
 					"targets": [
@@ -4128,7 +4142,7 @@
 			"produces": ["MAESTRO-WORKFLOW-CONSUMERS-BUILD"],
 			"id": "MCOMP-17",
 			"path": ".maestro/playbooks/2026-10-29-Maestro-Integration-Completion/MCOMP-17.md",
-			"taskCount": 32,
+			"taskCount": 33,
 			"stage": "S10"
 		},
 		{
@@ -5918,7 +5932,7 @@
 				"PAIR-DIRECT-EVIDENCE"
 			],
 			"nativeInputs": false,
-			"taskCount": 39
+			"taskCount": 40
 		},
 		{
 			"id": "S11",
@@ -6122,9 +6136,9 @@
 			"taskCount": 1
 		}
 	],
-	"taskCount": 352,
+	"taskCount": 353,
 	"taskCounts": {
-		"IMPLEMENT": 243,
+		"IMPLEMENT": 244,
 		"TEST": 49,
 		"VERIFY": 60
 	},
@@ -6895,6 +6909,7 @@
 			"MCOMP-17-03Y",
 			"MCOMP-17-03Z",
 			"MCOMP-17-03AA",
+			"MCOMP-17-03AB",
 			"MCOMP-17-03",
 			"MCOMP-17-04",
 			"MCOMP-17-05",
