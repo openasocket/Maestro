@@ -24,7 +24,17 @@ import {
 	type OnCueRunParams,
 } from '../../../main/cue/cue-run-router';
 import type { CueExecutionConfig } from '../../../main/cue/cue-executor';
-import { createLocalHostAuthority } from '../../../shared/maestro-lib/managed/authority';
+import {
+	buildDispatchSnapshot,
+	createLocalHostAuthority,
+	type AdmissionOutcome,
+	type AdmissionRequest,
+	type DispatchLease,
+} from '../../../shared/maestro-lib/managed/authority';
+import {
+	leaseAdmission,
+	leaseAdmissionAuthority,
+} from '../../../shared/maestro-lib/run/start-turn';
 import { createHeadlessSpawnAuthority } from '../../../shared/maestro-lib/managed/host-adapter';
 import type { ManagedBindingState } from '../../../shared/maestro-lib/managed/binding';
 import {
@@ -55,11 +65,17 @@ function fakeResult(runId: string): CueRunResult {
 }
 
 /** The real headless port composed for a Cue engine, over a declared binding double. */
-function cuePort(standing: 'standalone' | 'enrolled' = 'enrolled'): CueSpawnAuthorityPort {
+function cuePort(
+	standing: 'standalone' | 'enrolled' = 'enrolled',
+	actorId = 'actor-registered',
+	now = () => Date.now()
+): CueSpawnAuthorityPort {
+	let leases = 0;
 	const authority = createLocalHostAuthority({
 		authorityId: 'endpoint-test',
 		decide: () => ({ decision: 'allow', policyRevision: 7 }),
 		now: () => 1_700_000_000_000,
+		newId: () => `lease-${++leases}`,
 	});
 	const binding: ManagedBindingState =
 		standing === 'standalone'
@@ -83,7 +99,8 @@ function cuePort(standing: 'standalone' | 'enrolled' = 'enrolled'): CueSpawnAuth
 		binding,
 		host: { authority, policy: () => ({ sources: [], policyRevision: 7 }) },
 		origin: 'cue',
-		actor: { kind: 'human', id: 'actor-registered' },
+		actor: { kind: 'human', id: actorId },
+		now,
 	});
 }
 
@@ -237,7 +254,8 @@ describe('executeCueRunAction under management', () => {
 		const config = deps.executeCuePrompt.mock.calls[0][0];
 		expect(config.managed).toBe(launch);
 		const admission = config.admission!;
-		expect(admission.authority).toBe(port.authority);
+		expect(admission.authority).not.toBe(port.authority);
+		expect(admission.authority.authorityId).toBe(port.authority.authorityId);
 		expect(admission.policy.policyRevision).toBe(7);
 		expect(admission.account).toBe('acct-ref');
 		const context = admission.context;
@@ -369,7 +387,8 @@ describe('a shell action under management (MRC-07-03)', () => {
 		};
 		expect(config.shellCommand).toBe('echo hi');
 		const admission = config.admission!;
-		expect(admission.authority).toBe(port.authority);
+		expect(admission.authority).not.toBe(port.authority);
+		expect(admission.authority.authorityId).toBe(port.authority.authorityId);
 		expect(admission.policy.policyRevision).toBe(7);
 		expect(admission.account).toBe('acct-ref');
 		expect(admission.context.origin).toBe('cue');
@@ -478,7 +497,8 @@ describe('a maestro-cli action under management (MRC-07-04)', () => {
 		expect(deps.executeCueCli).toHaveBeenCalledTimes(1);
 		const config = cliConfig(deps);
 		const admission = config.admission!;
-		expect(admission.authority).toBe(port.authority);
+		expect(admission.authority).not.toBe(port.authority);
+		expect(admission.authority.authorityId).toBe(port.authority.authorityId);
 		expect(admission.account).toBe('acct-ref');
 		expect(admission.context.origin).toBe('cue');
 		expect(config.delegation).toEqual(delegationContextOf(admission.context));
@@ -761,5 +781,233 @@ describe('the owner fence claimed per firing (MRC-07-06)', () => {
 		expect(result.managed).toEqual({ state: 'unavailable', code: 'capability-unsupported' });
 		expect(result.stderr).toContain('CP-03');
 		expect(deps.executeCuePrompt).not.toHaveBeenCalled();
+	});
+});
+
+describe('Cue custody across preparation, admission and the spawn gate', () => {
+	// The executor is a declared double: this exercises its real authority and lease gate,
+	// without running a provider or claiming a qualified shell/CLI route.
+	const snapshot = buildDispatchSnapshot(
+		{ command: '/fixture/claude', args: ['--print', 'review'], cwd: SESSION.projectRoot, env: {} },
+		{
+			provider: 'claude-code',
+			model: 'opus',
+			operation: 'start',
+			account: null,
+			target: { kind: 'local' },
+		}
+	);
+
+	describe.each(['prepared', 'awaiting admission', 'spawn gate'] as const)('%s', (boundary) => {
+		it.each([
+			'withdrawn',
+			'standalone',
+			'replacement',
+			'mutated',
+			'policy',
+			'sources',
+			'actor',
+			'rejected',
+			'unreadable',
+		] as const)('refuses %s custody and releases any unused lease', async (change) => {
+			const initial = cuePort();
+			const owner = initial.authority;
+			let current: CueSpawnAuthorityPort | null = initial;
+			let unreadable = false;
+			const deps = makeDeps({
+				port: () => {
+					if (unreadable) throw new Error('fixture custody read failed');
+					return current;
+				},
+				workflowFence: () => FENCE,
+			});
+			await executeCueRunAction(deps, params());
+			const admission = deps.executeCuePrompt.mock.calls[0][0].admission!;
+			const request = { context: admission.context, policy: admission.policy, snapshot };
+			const entered = Promise.withResolvers<void>();
+			const resume = Promise.withResolvers<void>();
+			const issued: DispatchLease[] = [];
+			const originalAdmit = owner.admit.bind(owner);
+			const asked = vi.spyOn(owner, 'admit').mockImplementation(async (input: AdmissionRequest) => {
+				if (boundary === 'awaiting admission') {
+					entered.resolve();
+					await resume.promise;
+				}
+				const outcome = await originalAdmit(input);
+				if (outcome.state === 'admitted') issued.push(outcome.lease);
+				return outcome;
+			});
+			const pending = boundary === 'prepared' ? null : admission.authority.admit(request);
+			if (boundary === 'awaiting admission') await entered.promise;
+			if (boundary === 'spawn gate') expect((await pending)?.state).toBe('admitted');
+
+			if (change === 'withdrawn') current = null;
+			else if (change === 'standalone') current = cuePort('standalone');
+			else if (change === 'replacement') current = cuePort();
+			else if (change === 'mutated')
+				Object.defineProperty(initial, 'authority', { value: cuePort().authority });
+			else if (change === 'policy')
+				current = { ...initial, policy: () => ({ sources: [], policyRevision: 8 }) };
+			else if (change === 'sources')
+				current = {
+					...initial,
+					policy: () => ({
+						sources: [{ id: 'new-ceiling', kind: 'endpoint', revision: 7 }],
+						policyRevision: 7,
+					}),
+				};
+			else if (change === 'actor')
+				current = { ...initial, context: cuePort('enrolled', 'other-actor').context };
+			else if (change === 'rejected')
+				current = {
+					...initial,
+					context: () => ({ ok: false, code: 'unauthenticated', problems: ['actor revoked'] }),
+				};
+			else unreadable = true;
+
+			resume.resolve();
+			if (boundary === 'spawn gate') {
+				const gate = leaseAdmission(admission.authority, issued[0]);
+				expect(gate.admit(snapshot)).toMatchObject({ ok: false, code: 'lease-invalid' });
+			} else {
+				expect(await (pending ?? admission.authority.admit(request))).toMatchObject({
+					state: 'unavailable',
+					code: 'runtime-unavailable',
+				});
+			}
+			expect(asked).toHaveBeenCalledTimes(boundary === 'prepared' ? 0 : 1);
+			expect(owner.live()).toEqual([]);
+			for (const lease of issued) {
+				expect(lease.state()).toBe('released');
+				expect(lease.ended().release).toMatchObject({ outcome: 'spawn-failed' });
+			}
+		});
+	});
+
+	it.each(['prepared', 'awaiting admission', 'spawn gate'] as const)(
+		'rejects changed request context and policy at %s even with unchanged host custody',
+		async (boundary) => {
+			for (const field of ['context', 'policy'] as const) {
+				const port = cuePort();
+				const deps = makeDeps({ port: () => port, workflowFence: () => FENCE });
+				await executeCueRunAction(deps, params());
+				const admission = deps.executeCuePrompt.mock.calls[0][0].admission!;
+				const request = { context: admission.context, policy: admission.policy, snapshot };
+				const changeRequest = () => {
+					if (field === 'context') request.context.actor.id = 'changed-request-actor';
+					else
+						request.policy.sources = [
+							{ id: 'changed-request-policy', kind: 'endpoint', revision: 7 },
+						];
+				};
+				const originalAdmit = port.authority.admit.bind(port.authority);
+				const issued: DispatchLease[] = [];
+				const asked = vi.spyOn(port.authority, 'admit').mockImplementation(async (input) => {
+					const outcome = await originalAdmit(input);
+					if (outcome.state === 'admitted') issued.push(outcome.lease);
+					if (boundary === 'awaiting admission') changeRequest();
+					return outcome;
+				});
+				if (boundary === 'prepared') changeRequest();
+				const outcome = await admission.authority.admit(request);
+				if (boundary === 'spawn gate') {
+					if (outcome.state !== 'admitted') throw new Error(`Unexpected ${outcome.state}`);
+					changeRequest();
+					const gate = leaseAdmission(admission.authority, outcome.lease);
+					expect(gate.admit(snapshot)).toMatchObject({ ok: false, code: 'lease-invalid' });
+				} else {
+					expect(outcome).toMatchObject({ state: 'unavailable', code: 'runtime-unavailable' });
+				}
+				expect(asked).toHaveBeenCalledTimes(boundary === 'prepared' ? 0 : 1);
+				expect(port.authority.live()).toEqual([]);
+				for (const lease of issued)
+					expect(lease.ended().release).toMatchObject({ outcome: 'spawn-failed' });
+			}
+		}
+	);
+
+	it.each([
+		{ state: 'unknown', code: 'outcome-unknown', message: 'Acknowledgment lost' },
+		{ state: 'denied', code: 'policy-denied', message: 'Actor revoked', policyRevision: 7 },
+		{ state: 'unavailable', code: 'runtime-unavailable', message: 'Endpoint unavailable' },
+	] satisfies AdmissionOutcome[])(
+		'preserves producer $state when custody changes during admission',
+		async (outcome) => {
+			const initial = cuePort();
+			let current: CueSpawnAuthorityPort | null = initial;
+			const deps = makeDeps({ port: () => current, workflowFence: () => FENCE });
+			await executeCueRunAction(deps, params());
+			const admission = deps.executeCuePrompt.mock.calls[0][0].admission!;
+			const entered = Promise.withResolvers<void>();
+			const answer = Promise.withResolvers<AdmissionOutcome>();
+			vi.spyOn(initial.authority, 'admit').mockImplementation(() => {
+				entered.resolve();
+				return answer.promise;
+			});
+			const pending = admission.authority.admit({ ...admission, snapshot });
+			await entered.promise;
+			current = null;
+			answer.resolve(outcome);
+			expect(await pending).toBe(outcome);
+			expect(initial.authority.live()).toEqual([]);
+		}
+	);
+
+	it('allows equivalent fresh ports and verification times while preserving producer lease custody', async () => {
+		let now = 1_700_000_000_000;
+		const initial = cuePort('enrolled', 'actor-registered', () => now);
+		const deps = makeDeps({ port: () => ({ ...initial }), workflowFence: () => FENCE });
+		await executeCueRunAction(deps, params());
+		const admission = deps.executeCuePrompt.mock.calls[0][0].admission!;
+		const request = { context: admission.context, policy: admission.policy, snapshot };
+		const asked = vi.spyOn(initial.authority, 'admit');
+		now += 1000;
+		const outcome = await admission.authority.admit(request);
+		expect(asked).toHaveBeenCalledExactlyOnceWith(request);
+		if (outcome.state !== 'admitted') throw new Error(`Unexpected ${outcome.state}`);
+		const gate = leaseAdmission(admission.authority, outcome.lease);
+		expect(leaseAdmissionAuthority(gate)).toBe(initial.authority.authorityId);
+		expect(admission.authority.live()).toEqual(initial.authority.live());
+		expect(admission.authority.live()[0]).toBe(outcome.lease);
+		now += 1000;
+		expect(gate.admit(snapshot)).toEqual({ ok: true });
+		gate.bound?.(1234);
+		expect(outcome.lease.pid()).toBe(1234);
+		const revoked = vi.fn();
+		gate.onRevoked?.(revoked);
+		expect(admission.authority.revoke(outcome.lease.leaseId, 'fixture withdrawal')).toBe(true);
+		expect(revoked).toHaveBeenCalledExactlyOnceWith('fixture withdrawal');
+		expect(initial.authority.live()).toEqual([]);
+		const second = await admission.authority.admit(request);
+		if (second.state !== 'admitted') throw new Error(`Unexpected ${second.state}`);
+		expect(admission.authority.revokeAll('fixture teardown')).toBe(1);
+		expect(second.lease.state()).toBe('revoked');
+	});
+
+	it('rebinds a fresh attempt after custody replacement without reusing the refused admission', async () => {
+		let current = cuePort();
+		let attempt = 0;
+		const workflowFence = vi.fn(() => FENCE);
+		const deps = makeDeps({ port: () => current, workflowFence, newId: () => `try-${++attempt}` });
+		await executeCueRunAction(deps, params());
+		const first = deps.executeCuePrompt.mock.calls[0][0].admission!;
+		current = cuePort();
+		expect(await first.authority.admit({ ...first, snapshot })).toMatchObject({
+			state: 'unavailable',
+		});
+		await executeCueRunAction(deps, params());
+		const retry = deps.executeCuePrompt.mock.calls[1][0].admission!;
+		expect(retry.context.identity).toMatchObject({
+			requestId: 'run-9',
+			attemptId: 'try-2',
+			rootRunId: 'root-1',
+			parentRunId: 'run-8',
+		});
+		expect(retry.context.workflow).toEqual(first.context.workflow);
+		expect(workflowFence).toHaveBeenCalledTimes(2);
+		const outcome = await retry.authority.admit({ ...retry, snapshot });
+		if (outcome.state !== 'admitted') throw new Error(`Unexpected ${outcome.state}`);
+		outcome.lease.release({ outcome: 'stopped', by: 'caller' });
+		expect(current.authority.live()).toEqual([]);
 	});
 });

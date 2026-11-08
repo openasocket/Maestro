@@ -33,6 +33,7 @@ import type {
 import type { ManagedLaunchInput } from '../../shared/maestro-lib/launch/launch-plan';
 import {
 	sha256Hex,
+	type AdmissionRequest,
 	type ContextVerification,
 	type DispatchLease,
 	type HostAuthority,
@@ -357,13 +358,14 @@ async function bindCueManagedRun(
 		);
 	}
 	const policy = current.policy();
-	const verified = current.context({
+	const contextInput = structuredClone({
 		identity: lineage.identity,
 		traceId: lineage.traceId,
 		policyRevision: policy.policyRevision,
 		workflow: cueWorkflowRef(lineage.workflow, fence),
 		delegation: lineage.delegation,
 	});
+	const verified = current.context(contextInput);
 	if (!verified.ok) {
 		return refuse(
 			'denied',
@@ -371,10 +373,77 @@ async function bindCueManagedRun(
 			`The run's context was not accepted: ${verified.problems.join('; ')}`
 		);
 	}
+	// Preparation and admission can await the host. Keep the scope the child
+	// environment was built on, rather than silently refreshing it at the sink.
+	const scopeKey = ({ context, policy }: Pick<AdmissionRequest, 'context' | 'policy'>) =>
+		canonicalJson({
+			...context,
+			verification: { ...context.verification, verifiedAt: undefined },
+			policy,
+		});
+	const boundScope = scopeKey({ context: verified.context, policy });
+	const scopeRefusal = (
+		request: Pick<AdmissionRequest, 'context' | 'policy'> = { context: verified.context, policy }
+	) => {
+		let message: string;
+		try {
+			const live = deps.port();
+			if (scopeKey(request) !== boundScope) {
+				message = 'The Cue admission no longer carries the prepared context and policy.';
+			} else if (!live || live.standing() !== 'managed' || live.authority !== authority) {
+				message = 'The Cue host standing or authority changed before dispatch.';
+			} else {
+				const livePolicy = live.policy();
+				const liveContext = live.context({
+					...structuredClone(contextInput),
+					policyRevision: livePolicy.policyRevision,
+				});
+				if (
+					liveContext.ok &&
+					scopeKey({ context: liveContext.context, policy: livePolicy }) === boundScope
+				) {
+					return null;
+				}
+				message = 'The Cue context or policy changed before dispatch.';
+			}
+		} catch (error) {
+			message = `The Cue host scope could not be rechecked: ${error instanceof Error ? error.message : String(error)}`;
+		}
+		return { state: 'unavailable', code: 'runtime-unavailable', message } as const;
+	};
+	// This facade retains the producer's lease and forwards its lifecycle. The
+	// canonical leaseAdmission gate still performs the final snapshot check.
+	const scopedAuthority: HostAuthority = {
+		get authorityId() {
+			return authority.authorityId;
+		},
+		async admit(request) {
+			const before = scopeRefusal(request);
+			if (before) return before;
+			const outcome = await authority.admit(request);
+			// A lost reply retains its reconciliation obligation even if the host
+			// changed meanwhile. Only a granted lease can progress to the sink.
+			if (outcome.state !== 'admitted') return outcome;
+			const after = scopeRefusal(request);
+			if (after) {
+				outcome.lease.release({ outcome: 'spawn-failed', message: after.message });
+				return after;
+			}
+			return outcome;
+		},
+		check(lease, digest) {
+			const refusal = scopeRefusal();
+			if (refusal) lease.release({ outcome: 'spawn-failed', message: refusal.message });
+			return authority.check(lease, digest);
+		},
+		revoke: (leaseId, reason) => authority.revoke(leaseId, reason),
+		revokeAll: (reason) => authority.revokeAll(reason),
+		live: () => authority.live(),
+	};
 	return {
 		managed: true,
 		admission: {
-			authority,
+			authority: scopedAuthority,
 			context: verified.context,
 			policy,
 			account: deps.account ?? null,
