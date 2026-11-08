@@ -75,6 +75,8 @@ vi.mock('../../../main/web-server/WebServer', () => {
 			setCallerConsultWithdrawer = vi.fn();
 			// MCOMP-17-03BD: and the Auto Run attempt credential resolver.
 			setAutoRunCallerSourceResolver = vi.fn();
+			// MCOMP-17-03BI: and the Auto Run consult lineage binder.
+			setAutoRunConsultLineageBinder = vi.fn();
 			setNoteAgentDelegationCallback = vi.fn();
 			setEnqueueCommandCallback = vi.fn();
 			setListQueueCallback = vi.fn();
@@ -232,6 +234,8 @@ vi.mock('../../../shared/cli-activity', () => ({
 // MCOMP-17-03AW: the factory hands withdrawn ask tickets to the cross-agent router.
 vi.mock('../../../main/cross-agent/cross-agent-router', () => ({
 	withdrawCrossAgentConsult: vi.fn().mockReturnValue(true),
+	// MCOMP-17-03BI: and binds an Auto Run attempt's lineage to its ask ticket.
+	bindCrossAgentConsultInitiator: vi.fn().mockReturnValue(true),
 }));
 
 vi.mock('../../../main/group-chat/group-chat-queue', () => ({
@@ -257,7 +261,10 @@ import {
 } from '../../../main/concerto-html';
 import { getSessionIdsBusyWithCli } from '../../../shared/cli-activity';
 import { steerNewMessage, steerQueuedItem } from '../../../main/group-chat/group-chat-queue';
-import { withdrawCrossAgentConsult } from '../../../main/cross-agent/cross-agent-router';
+import {
+	bindCrossAgentConsultInitiator,
+	withdrawCrossAgentConsult,
+} from '../../../main/cross-agent/cross-agent-router';
 
 describe('web-server/web-server-factory', () => {
 	let mockSettingsStore: WebServerFactoryDependencies['settingsStore'];
@@ -632,6 +639,96 @@ describe('web-server/web-server-factory', () => {
 			expect(resolver('attempt-cred')).toBeNull();
 			expect(after).toHaveBeenCalledWith('attempt-cred');
 			expect(before).toHaveBeenCalledTimes(1);
+		});
+	});
+
+	describe('Auto Run consult lineage binder composition (MCOMP-17-03BI)', () => {
+		// Opaque to the factory: it hands the manager answer to the router unchanged.
+		const lineage = {
+			identity: { runId: 'run-1', rootRunId: 'run-1' },
+			traceId: 'trace-1',
+			workflow: null,
+		};
+
+		beforeEach(() => {
+			vi.mocked(bindCrossAgentConsultInitiator).mockClear();
+			vi.mocked(bindCrossAgentConsultInitiator).mockReturnValue(true);
+		});
+
+		it('composes exactly one binder on every server it builds', () => {
+			const createWebServer = createWebServerFactory(deps);
+			const first = createWebServer() as any;
+			const second = createWebServer({ lanAccess: true }) as any;
+
+			expect(first.setAutoRunConsultLineageBinder).toHaveBeenCalledTimes(1);
+			expect(second.setAutoRunConsultLineageBinder).toHaveBeenCalledTimes(1);
+			expect(typeof first.setAutoRunConsultLineageBinder.mock.calls[0][0]).toBe('function');
+			expect(bindCrossAgentConsultInitiator).not.toHaveBeenCalled();
+		});
+
+		it('binds the lineage the manager answers for the credential to exactly that ticket', () => {
+			const autoRunCallerLineageOf = vi.fn().mockReturnValue(lineage);
+			deps.getProcessManager = vi
+				.fn()
+				.mockReturnValue({ ...mockProcessManager, autoRunCallerLineageOf } as any);
+			const server = createWebServerFactory(deps)() as any;
+			const binder = server.setAutoRunConsultLineageBinder.mock.calls[0][0];
+
+			expect(binder('attempt-cred', 'ticket-1')).toBe(true);
+			expect(autoRunCallerLineageOf).toHaveBeenCalledWith('attempt-cred');
+			expect(bindCrossAgentConsultInitiator).toHaveBeenCalledTimes(1);
+			expect(bindCrossAgentConsultInitiator).toHaveBeenCalledWith('ticket-1', lineage);
+		});
+
+		it('answers false when the router refuses the binding', () => {
+			vi.mocked(bindCrossAgentConsultInitiator).mockReturnValue(false);
+			deps.getProcessManager = vi.fn().mockReturnValue({
+				...mockProcessManager,
+				autoRunCallerLineageOf: vi.fn().mockReturnValue(lineage),
+			} as any);
+			const server = createWebServerFactory(deps)() as any;
+			const binder = server.setAutoRunConsultLineageBinder.mock.calls[0][0];
+
+			expect(binder('attempt-cred', 'spent-ticket')).toBe(false);
+			expect(bindCrossAgentConsultInitiator).toHaveBeenCalledWith('spent-ticket', lineage);
+		});
+
+		it('binds nothing when the manager holds no lineage or is absent', () => {
+			const autoRunCallerLineageOf = vi.fn().mockReturnValue(null);
+			const getProcessManager = vi
+				.fn()
+				.mockReturnValue({ ...mockProcessManager, autoRunCallerLineageOf } as any);
+			deps.getProcessManager = getProcessManager;
+			const server = createWebServerFactory(deps)() as any;
+			const binder = server.setAutoRunConsultLineageBinder.mock.calls[0][0];
+
+			expect(binder('chat-cred', 'ticket-1')).toBe(false);
+			expect(autoRunCallerLineageOf).toHaveBeenCalledWith('chat-cred');
+
+			getProcessManager.mockReturnValue(null);
+			expect(binder('attempt-cred', 'ticket-2')).toBe(false);
+			expect(bindCrossAgentConsultInitiator).not.toHaveBeenCalled();
+		});
+
+		it('re-reads the process manager on every ask instead of capturing one at build', () => {
+			const before = vi.fn().mockReturnValue(lineage);
+			const after = vi.fn().mockReturnValue(null);
+			const getProcessManager = vi
+				.fn()
+				.mockReturnValue({ ...mockProcessManager, autoRunCallerLineageOf: before } as any);
+			deps.getProcessManager = getProcessManager;
+			const server = createWebServerFactory(deps)() as any;
+			const binder = server.setAutoRunConsultLineageBinder.mock.calls[0][0];
+
+			expect(binder('attempt-cred', 'ticket-1')).toBe(true);
+			getProcessManager.mockReturnValue({
+				...mockProcessManager,
+				autoRunCallerLineageOf: after,
+			} as any);
+			expect(binder('attempt-cred', 'ticket-2')).toBe(false);
+			expect(after).toHaveBeenCalledWith('attempt-cred');
+			expect(before).toHaveBeenCalledTimes(1);
+			expect(bindCrossAgentConsultInitiator).toHaveBeenCalledTimes(1);
 		});
 	});
 

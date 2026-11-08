@@ -10,7 +10,10 @@ import { tunnelManager } from '../tunnel-manager';
 import { createRemoteHostStatusProvider } from './remote-host-status';
 import { logger } from '../utils/logger';
 import { isWebContentsAvailable } from '../utils/safe-send';
-import { withdrawCrossAgentConsult } from '../cross-agent/cross-agent-router';
+import {
+	bindCrossAgentConsultInitiator,
+	withdrawCrossAgentConsult,
+} from '../cross-agent/cross-agent-router';
 import type { ProcessManager } from '../process-manager';
 import type { SettingsStoreInterface as SettingsStore } from '../stores/types';
 import type { DebugPackageDependencies } from '../debug-package';
@@ -201,6 +204,17 @@ export function createWebServerFactory(deps: WebServerFactoryDependencies) {
 		server.setAutoRunCallerSourceResolver(
 			(credential) => deps.getProcessManager()?.autoRunCallerSourceOf(credential) ?? null
 		);
+
+		// An Auto Run attempt's ask carries the lineage the attempt was admitted on (MCOMP-17-03BI).
+		// The handler offers the attempt credential and the ask ticket it just issued; the manager
+		// answers that lineage only while it still holds the credential, and the router binds it to
+		// the ticket so the consult it starts records the asking run as its initiator. Anything
+		// short of a binding (no manager, no lineage, a ticket already bound or withdrawn) answers
+		// false, and the handler refuses the ask instead of admitting it unbound.
+		server.setAutoRunConsultLineageBinder((credential, ticket) => {
+			const lineage = deps.getProcessManager()?.autoRunCallerLineageOf(credential) ?? null;
+			return lineage !== null && bindCrossAgentConsultInitiator(ticket, lineage);
+		});
 
 		// When that caller loses custody mid-consult, the ask handler withdraws the ask and hands
 		// over the dispatch ticket it issued (MCOMP-17-03AW). The router cancels the consult the
