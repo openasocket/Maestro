@@ -20,6 +20,7 @@ export * from './managed/binding';
 export * from './managed/run-journal';
 export * from './managed/operations';
 export * from './managed/endpoint-port';
+export * from './managed/desktop-contract';
 export * from './managed/host-adapter';
 export * from './managed/provider-route';
 export * from './managed/credentials';
