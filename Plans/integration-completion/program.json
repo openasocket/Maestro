@@ -4100,6 +4100,20 @@
 					"produces": []
 				},
 				{
+					"id": "MCOMP-17-03AC",
+					"label": "Expose authenticated live Auto Run source custody",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/shared/maestro-lib/runtime/autorun-turns.ts",
+						"src/shared/maestro-lib/runtime/__tests__/autorun-turns.test.ts",
+						"Plans/integration-completion/program.json"
+					],
+					"outcome": "Consume MAESTRO-EFFECT-CONSUMERS-BUILD and its pinned MAESTRO-CONTRACT-INPUTS-BUILD dependency. Bounded prerequisite continuation of MCOMP-17-03: expose a host-only exact live Auto Run process source lookup using its original authenticated context, bound producer lease and assembled access ceiling. Reuse the dispatch scope verifier without reclaiming a workflow fence, readmitting or releasing a running lease. Refuse pending, standalone, stopped, completed, revoked, mutated, ambiguous or unavailable custody and changed authority, policy, parent or workflow lifetime. Preserve source async context, concurrent isolation, cleanup before reporting and fresh attempt recovery. Exercise real fixture processes through the existing runner harness. Authenticated transport selection and runtime lookup composition, desktop composition and managed room custody remain pending. Reuse WORKFLOW-CONTEXT/1; no new wire capability, producer mapping or paired/provider/native qualification. Keep to three authored files and fewer than 500 changed lines.",
+					"backlog": ["M-04"],
+					"requires": ["MAESTRO-EFFECT-CONSUMERS-BUILD"],
+					"produces": []
+				},
+				{
 					"label": "Bind Auto Run Cue and nested work at dispatch",
 					"kind": "IMPLEMENT",
 					"targets": [
@@ -4142,7 +4156,7 @@
 			"produces": ["MAESTRO-WORKFLOW-CONSUMERS-BUILD"],
 			"id": "MCOMP-17",
 			"path": ".maestro/playbooks/2026-10-29-Maestro-Integration-Completion/MCOMP-17.md",
-			"taskCount": 33,
+			"taskCount": 34,
 			"stage": "S10"
 		},
 		{
@@ -5932,7 +5946,7 @@
 				"PAIR-DIRECT-EVIDENCE"
 			],
 			"nativeInputs": false,
-			"taskCount": 40
+			"taskCount": 41
 		},
 		{
 			"id": "S11",
@@ -6136,9 +6150,9 @@
 			"taskCount": 1
 		}
 	],
-	"taskCount": 353,
+	"taskCount": 354,
 	"taskCounts": {
-		"IMPLEMENT": 244,
+		"IMPLEMENT": 245,
 		"TEST": 49,
 		"VERIFY": 60
 	},
@@ -6910,6 +6924,7 @@
 			"MCOMP-17-03Z",
 			"MCOMP-17-03AA",
 			"MCOMP-17-03AB",
+			"MCOMP-17-03AC",
 			"MCOMP-17-03",
 			"MCOMP-17-04",
 			"MCOMP-17-05",

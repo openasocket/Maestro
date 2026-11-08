@@ -3,6 +3,7 @@
  * once more at the agent's own effort, as the CLI and the desktop do. Each turn is the real
  * `runAgentTurn` over the fake agent, replaying a refusal or an answer.
  */
+import { AsyncLocalStorage } from 'node:async_hooks';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -88,7 +89,12 @@ describe('Auto Run turns: a refused effort, and the fence claimed per attempt', 
 
 	function runner(
 		replies: Reply[],
-		extra: Pick<AutoRunTurnRunnerOptions, 'workflow' | 'managed'> = {},
+		extra: Partial<
+			Pick<
+				AutoRunTurnRunnerOptions,
+				'workflow' | 'managed' | 'onStream' | 'statsRecorder' | 'registry'
+			>
+		> = {},
 		customEnvVars?: Record<string, string>,
 		prepare?: (options: RunAgentTurnOptions, turn: AssembledTurn) => void | Promise<void>
 	) {
@@ -101,7 +107,6 @@ describe('Auto Run turns: a refused effort, and the fence claimed per attempt', 
 			customEnvVars,
 		} as unknown as AgentRecord;
 		return createAutoRunTurnRunner({
-			...extra,
 			agentId: 'a1',
 			paths: resolveMaestroPaths({ env: { MAESTRO_USER_DATA: dir } }),
 			repository: { getAgent: () => record },
@@ -146,6 +151,7 @@ describe('Auto Run turns: a refused effort, and the fence claimed per attempt', 
 				},
 			},
 			onStream: () => undefined,
+			...extra,
 		});
 	}
 
@@ -275,6 +281,348 @@ describe('Auto Run turns: a refused effort, and the fence claimed per attempt', 
 				if (!parent.ok) throw new Error(parent.problems.join('; '));
 				return parent;
 			}
+
+			describe('live Auto Run source custody', () => {
+				it.each([
+					'unchanged',
+					'standalone',
+					'policy',
+					'authority',
+					'context',
+					'mutated context',
+					'parent',
+					'fence',
+					'unreadable',
+					'revoked',
+					'cancelled',
+					'registry stop',
+					'revoked while reading',
+					'cancelled while reading',
+				] as const)('rechecks %s custody without readmitting or releasing it', async (change) => {
+					const { port, authority } = await managedPort();
+					const parent = parentOf(port);
+					const parentContext = vi.fn(() => parent);
+					const controller = new AbortController();
+					const owner = new AbortController();
+					const lifetime = {
+						signal: owner.signal,
+						current: vi.fn(() => true),
+						finish: vi.fn().mockResolvedValue(undefined),
+					};
+					const fence = vi.fn(() => ({ ...FENCE, lifetime }));
+					const onAdmission = vi.fn();
+					const onStream = vi.fn();
+					const registry = createProcessRegistry({ waitMs: 2_000 });
+					let launch!: RunAgentTurnOptions;
+					const source = runner(
+						['hold', 'hold'],
+						{ workflow, managed: { port, fence, parentContext, onAdmission }, onStream, registry },
+						undefined,
+						(options) => {
+							launch = options;
+						}
+					);
+					const running = source.run({
+						purpose: 'task',
+						prompt: 'source',
+						signal: controller.signal,
+					});
+					try {
+						await vi.waitFor(() => expect(onStream).toHaveBeenCalled());
+						const id = launch.sessionId;
+						const context = launch.managed!.context;
+						const custody = source.sourceCustody(id);
+						expect(custody?.context).toBe(context);
+						expect(custody).toMatchObject({
+							writable: true,
+							context: {
+								workflow: parent.context.workflow,
+								delegation: { grantRef: 'source-grant' },
+							},
+						});
+						expect(source.sourceCustody('missing')).toBeNull();
+						const lease = authority.live()[0];
+						const release = vi.spyOn(lease, 'release');
+						if (change === 'standalone') vi.spyOn(port, 'standing').mockReturnValue('standalone');
+						if (change === 'policy')
+							vi.spyOn(port, 'policy').mockReturnValue({ sources: [], policyRevision: 2 });
+						if (change === 'authority')
+							Object.defineProperty(port, 'authority', {
+								value: { ...authority },
+								configurable: true,
+							});
+						if (change === 'context')
+							vi.spyOn(port, 'context').mockReturnValue({
+								ok: false,
+								code: 'invalid-input',
+								problems: ['withdrawn'],
+							});
+						if (change === 'mutated context') context.identity.attemptId = 'mutated';
+						if (change === 'parent') parent.context.delegation!.grantRef = 'withdrawn-grant';
+						if (change === 'fence') lifetime.current.mockReturnValue(false);
+						if (change === 'unreadable')
+							vi.spyOn(port, 'policy').mockImplementation(() => {
+								throw new Error('offline');
+							});
+						if (change === 'revoked') authority.revoke(lease.leaseId, 'withdrawn');
+						if (change === 'cancelled') controller.abort();
+						if (change === 'registry stop') void registry.stopAgent('a1');
+						if (change.endsWith('while reading'))
+							parentContext.mockImplementation(() => {
+								if (change === 'revoked while reading')
+									authority.revoke(lease.leaseId, 'withdrawn');
+								else controller.abort();
+								return parent;
+							});
+						const observed = source.sourceCustody(id);
+						if (change === 'unchanged') {
+							expect(observed).toEqual(custody);
+							const child = runner(['answer'], {
+								workflow,
+								managed: {
+									port,
+									fence: () => FENCE,
+									parentContext: () => {
+										const live = source.sourceCustody(id);
+										return live
+											? { ok: true, context: live.context }
+											: { ok: false, code: 'invalid-input', problems: ['source withdrawn'] };
+									},
+								},
+							});
+							expect(await child.run({ purpose: 'task', prompt: 'nested task' })).toMatchObject({
+								success: true,
+							});
+							const nested = readDelegationContextEnv(
+								JSON.parse(fs.readFileSync(path.join(dir, 'env-2.json'), 'utf8'))
+							);
+							expect(nested).toMatchObject({
+								status: 'ok',
+								context: {
+									identity: { parentRunId: context.identity.runId },
+									workflow: context.workflow,
+									delegation: { grantRef: 'source-grant' },
+								},
+							});
+						} else expect(observed).toBeNull();
+						expect(fence).toHaveBeenCalledTimes(1);
+						expect(onAdmission).toHaveBeenCalledTimes(1);
+						expect(release).not.toHaveBeenCalled();
+					} finally {
+						controller.abort();
+						await running;
+					}
+					expect(source.sourceCustody(launch.sessionId)).toBeNull();
+					expect(authority.live()).toHaveLength(0);
+				});
+
+				it.each(['standalone', 'pending', 'completed'] as const)(
+					'exposes no %s process custody',
+					async (state) => {
+						const { port, authority } = await managedPort();
+						const onStream = vi.fn();
+						const controller = new AbortController();
+						let launch!: RunAgentTurnOptions;
+						let finish!: () => void;
+						const gate = new Promise<void>((resolve) => {
+							finish = resolve;
+						});
+						const recordQuery = vi.fn(async () => {
+							await gate;
+							return { ok: true as const, id: 'q1' };
+						});
+						const source = runner(
+							[state === 'completed' ? 'answer' : 'hold'],
+							{
+								...(state === 'standalone'
+									? {}
+									: { workflow, managed: { port, fence: () => FENCE } }),
+								onStream,
+								statsRecorder: { recordQuery },
+							},
+							undefined,
+							async (options) => {
+								launch = options;
+								if (state === 'pending') await gate;
+							}
+						);
+						const running = source.run({
+							purpose: 'task',
+							prompt: 'source',
+							signal: controller.signal,
+						});
+						try {
+							await vi.waitFor(() => expect(launch).toBeDefined());
+							if (state === 'standalone')
+								await vi.waitFor(() => expect(onStream).toHaveBeenCalled());
+							if (state === 'completed')
+								await vi.waitFor(() => expect(recordQuery).toHaveBeenCalled());
+							expect(source.sourceCustody(launch.sessionId)).toBeNull();
+							if (state === 'pending') expect(startedProcesses()).toBe(0);
+						} finally {
+							finish();
+							controller.abort();
+							await running;
+						}
+						expect(authority.live()).toHaveLength(0);
+					}
+				);
+
+				it('exposes no custody when the native spawn has no PID', async () => {
+					const { port, authority } = await managedPort();
+					const registry = createProcessRegistry({ waitMs: 2_000 });
+					let launch!: RunAgentTurnOptions;
+					const source = runner(
+						['answer'],
+						{ workflow, managed: { port, fence: () => FENCE }, registry },
+						undefined,
+						(options, turn) => {
+							launch = options;
+							turn.launch.cwd = path.join(dir, 'absent-directory');
+						}
+					);
+					const register = registry.register.bind(registry);
+					const observed = vi.spyOn(registry, 'register').mockImplementation((...args) => {
+						expect(authority.live()[0].pid()).toBeUndefined();
+						expect(source.sourceCustody(launch.sessionId)).toBeNull();
+						return register(...args);
+					});
+					expect(await source.run({ purpose: 'task', prompt: 'source' })).toMatchObject({
+						success: false,
+					});
+					expect(observed).toHaveBeenCalledOnce();
+					expect(startedProcesses()).toBe(0);
+					expect(authority.live()).toHaveLength(0);
+				});
+
+				it('reauthorizes a fresh attempt after revocation without reviving the old source', async () => {
+					const { port, authority } = await managedPort();
+					const onStream = vi.fn();
+					const fence = vi.fn(() => FENCE);
+					let launch!: RunAgentTurnOptions;
+					const source = runner(
+						['hold', 'hold'],
+						{ workflow, managed: { port, fence }, onStream },
+						undefined,
+						(options) => {
+							launch = options;
+						}
+					);
+					const first = source.run({ purpose: 'task', prompt: 'first' });
+					let previousId!: string;
+					let previous!: ReturnType<typeof source.sourceCustody>;
+					try {
+						await vi.waitFor(() => expect(onStream).toHaveBeenCalled());
+						previousId = launch.sessionId;
+						previous = source.sourceCustody(previousId);
+					} finally {
+						authority.revokeAll('withdrawn');
+						await first;
+					}
+					onStream.mockClear();
+					const stop = new AbortController();
+					const second = source.run({ purpose: 'task', prompt: 'second', signal: stop.signal });
+					try {
+						await vi.waitFor(() => expect(onStream).toHaveBeenCalled());
+						expect(source.sourceCustody(previousId)).toBeNull();
+						const fresh = source.sourceCustody(launch.sessionId);
+						expect(fresh).not.toBeNull();
+						expect(fresh!.context.identity.attemptId).not.toBe(
+							previous!.context.identity.attemptId
+						);
+						expect(fence).toHaveBeenCalledTimes(2);
+					} finally {
+						stop.abort();
+						await second;
+					}
+				});
+
+				it('rechecks concurrent sources in their original async contexts', async () => {
+					const { port } = await managedPort();
+					const a = parentOf(port),
+						b = parentOf(port);
+					b.context.identity.runId = 'other-source';
+					const context = new AsyncLocalStorage<ContextVerification>();
+					const onStream = vi.fn();
+					const ids: string[] = [];
+					const source = runner(
+						['hold', 'hold'],
+						{
+							workflow,
+							managed: { port, fence: () => FENCE, parentContext: () => context.getStore()! },
+							onStream,
+						},
+						undefined,
+						(options) => {
+							ids.push(options.sessionId);
+						}
+					);
+					const stopA = new AbortController(),
+						stopB = new AbortController();
+					const first = context.run(a, () =>
+						source.run({ purpose: 'task', prompt: 'a', signal: stopA.signal })
+					);
+					await vi.waitFor(() => expect(onStream).toHaveBeenCalled());
+					onStream.mockClear();
+					const second = context.run(b, () =>
+						source.run({ purpose: 'task', prompt: 'b', signal: stopB.signal })
+					);
+					try {
+						await vi.waitFor(() => expect(onStream).toHaveBeenCalled());
+						expect(
+							context.run(b, () => source.sourceCustody(ids[0]))?.context.identity.parentRunId
+						).toBe('cue-run');
+						expect(source.sourceCustody(ids[1])?.context.identity.parentRunId).toBe('other-source');
+						a.context.delegation!.grantRef = 'withdrawn';
+						expect(source.sourceCustody(ids[0])).toBeNull();
+						expect(source.sourceCustody(ids[1])).not.toBeNull();
+					} finally {
+						stopA.abort();
+						stopB.abort();
+						await Promise.all([first, second]);
+					}
+				});
+
+				it.each(['managed', 'standalone'] as const)(
+					'keeps a collision with a %s source ambiguous until both exit',
+					async (mode) => {
+						const { port } = await managedPort();
+						const standing = vi.spyOn(port, 'standing').mockReturnValue(mode);
+						const onStream = vi.fn();
+						const ids: string[] = [];
+						const source = runner(
+							['hold', 'hold'],
+							{ workflow, managed: { port, fence: () => FENCE }, onStream },
+							undefined,
+							(options) => {
+								ids.push(options.sessionId);
+							}
+						);
+						const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.now());
+						const stopA = new AbortController(),
+							stopB = new AbortController();
+						const first = source.run({ purpose: 'task', prompt: 'a', signal: stopA.signal });
+						let second: ReturnType<typeof source.run> | undefined;
+						try {
+							await vi.waitFor(() => expect(onStream).toHaveBeenCalledTimes(2));
+							standing.mockReturnValue('managed');
+							second = source.run({ purpose: 'task', prompt: 'b', signal: stopB.signal });
+							await vi.waitFor(() => expect(onStream).toHaveBeenCalledTimes(4));
+							expect(ids).toHaveLength(2);
+							expect(ids[0]).toBe(ids[1]);
+							expect(source.sourceCustody(ids[0])).toBeNull();
+							stopA.abort();
+							await first;
+							expect(source.sourceCustody(ids[0])).toBeNull();
+						} finally {
+							clock.mockRestore();
+							stopA.abort();
+							stopB.abort();
+							await Promise.all([first, second]);
+						}
+					}
+				);
+			});
 
 			it.each(['synopsis', 'goal-handoff'] as const)(
 				'preserves incoming custody through an effort retry and %s in real child environments',

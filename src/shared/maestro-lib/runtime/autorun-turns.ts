@@ -40,6 +40,7 @@
  * unacknowledged settlement never becomes a reported success.
  */
 
+import { AsyncResource } from 'node:async_hooks';
 import { getClaudeTokenSourceFields, type ClaudeTokenSourceFields } from '../../claudeTokenMode';
 import { usageStatsToTurnFields } from '../../turnUsageLedger';
 import { canonicalJson } from '../../canonicalJson';
@@ -62,6 +63,7 @@ import {
 	isVerifiedContext,
 	type AdmissionRequest,
 	type ContextVerification,
+	type DispatchLease,
 	type HostAuthority,
 	type PolicySourceSet,
 } from '../managed/authority';
@@ -96,7 +98,7 @@ import type { StatsRecorder } from '../turns/stats';
 import { createTurnEventMapper } from '../turns/turn-events';
 import type { ProcessRegistry } from './processes';
 import { createSshRemoteStore } from './ssh-store';
-import type { RuntimeTurnDeps, RuntimeTurnOptions } from './turns';
+import type { RuntimeTurnDeps, RuntimeTurnOptions, RuntimeTurns } from './turns';
 
 const LOG_CONTEXT = '[AutoRunTurns]';
 
@@ -190,6 +192,8 @@ export interface AutoRunTurnRunnerOptions {
 
 export interface AutoRunTurnRunner {
 	run(request: AutoRunTurnRequest): Promise<AutoRunTurnResult>;
+	/** Host-only live process custody. The selector authenticates nobody and grants no spawn permit. */
+	sourceCustody(processId: string): ReturnType<RuntimeTurns['sourceCustody']>;
 }
 
 function minutesSetting(value: unknown, fallback: number): number {
@@ -241,7 +245,7 @@ function managedStateOf(reason: RunAgentTurnRefusal): AutoRunManagedState | null
 /** What one attempt runs under, decided afresh for every attempt. */
 type ManagedTurn =
 	| { managed: false }
-	| { managed: true; authority: ManagedTurnAuthority }
+	| { managed: true; authority: ManagedTurnAuthority; scopeCurrent(): boolean }
 	| { managed: true; refusal: AutoRunAttempt };
 
 export function createAutoRunTurnRunner(options: AutoRunTurnRunnerOptions): AutoRunTurnRunner {
@@ -250,6 +254,14 @@ export function createAutoRunTurnRunner(options: AutoRunTurnRunnerOptions): Auto
 	const startTurn = deps.runAgentTurn ?? runAgentTurn;
 	/** The task turn each provider session came from, so a synopsis hangs under the turn it resumes. */
 	const turnsBySession = new Map<string, AutoRunTurnAttribution>();
+	const sources = new Map<
+		string,
+		{
+			read: () => ReturnType<AutoRunTurnRunner['sourceCustody']>;
+			count: number;
+			ambiguous: boolean;
+		}
+	>();
 	// Losing enrollment during this run must not turn its next attempt into standalone work.
 	let requiresManagedAdmission = false;
 
@@ -534,6 +546,7 @@ export function createAutoRunTurnRunner(options: AutoRunTurnRunnerOptions): Auto
 		};
 		return {
 			managed: true,
+			scopeCurrent: () => scopeRefusal() === null,
 			authority: {
 				authority: scopedAuthority,
 				context: verified.context,
@@ -650,6 +663,9 @@ export function createAutoRunTurnRunner(options: AutoRunTurnRunnerOptions): Auto
 		}
 
 		const sessionId = `${agentId}-batch-${deps.now()}`;
+		const admitted: { lease?: DispatchLease } = {};
+		const contextKey = managedTurn.managed ? canonicalJson(managedTurn.authority.context) : null;
+		const writable = !turn.readOnly;
 		// Once handed to the executor, a thrown/lost reply cannot prove no effect.
 		noteEffect('uncertain');
 		const started = await startTurn(turn, {
@@ -658,7 +674,17 @@ export function createAutoRunTurnRunner(options: AutoRunTurnRunnerOptions): Auto
 			claudeTokenSource: getClaudeTokenSourceFields(record as ClaudeTokenSourceFields),
 			maestroPBinPath: host.maestroPBinPath ?? null,
 			...(request.signal ? { signal: request.signal } : {}),
-			...(managedTurn.managed ? { managed: managedTurn.authority } : {}),
+			...(managedTurn.managed
+				? {
+						managed: {
+							...managedTurn.authority,
+							onLease: (lease: DispatchLease) => {
+								admitted.lease = lease;
+								managedTurn.authority.onLease?.(lease);
+							},
+						},
+					}
+				: {}),
 		});
 		if (!started.ok) {
 			const state = managedStateOf(started.reason);
@@ -669,6 +695,46 @@ export function createAutoRunTurnRunner(options: AutoRunTurnRunnerOptions): Auto
 		}
 		const process = started.run;
 		const startedAt = deps.now();
+		let readSource: () => ReturnType<AutoRunTurnRunner['sourceCustody']> = () => null;
+		if (managedTurn.managed && admitted.lease) {
+			const { authority, context } = managedTurn.authority;
+			const lease = admitted.lease;
+			// A nested caller must recheck the source's async parent, not its own request's parent.
+			readSource = AsyncResource.bind(() => {
+				try {
+					if (request.signal?.aborted || process.stopRequested() || !managedTurn.scopeCurrent())
+						return null;
+					if (
+						request.signal?.aborted ||
+						process.stopRequested() ||
+						!isVerifiedContext(context) ||
+						canonicalJson(context) !== contextKey ||
+						lease.state() !== 'bound' ||
+						!authority.live().includes(lease) ||
+						process.pid === undefined ||
+						lease.pid() !== process.pid ||
+						lease.runId !== context.identity.runId ||
+						lease.attemptId !== context.identity.attemptId ||
+						lease.policyRevision !== context.policyRevision ||
+						canonicalJson(lease.actor) !== canonicalJson(context.actor)
+					)
+						return null;
+					return { context, writable };
+				} catch {
+					// Unreadable custody cannot authorize a child; this read never releases the lease.
+					return null;
+				}
+			});
+		}
+		// Count standalone processes too. A collision stays ambiguous until its whole cohort exits.
+		const source = sources.get(sessionId) ?? { read: readSource, count: 0, ambiguous: false };
+		source.ambiguous ||= source.count > 0;
+		source.count++;
+		sources.set(sessionId, source);
+		const forget = () => {
+			if (--source.count === 0 && sources.get(sessionId) === source) sources.delete(sessionId);
+		};
+		process.result.then(forget, forget);
 
 		// The watchdog is the run's own: one budget for silence, one for the whole turn. A turn it
 		// gives up on is killed, and the result says why (the stall guard reads that).
@@ -790,5 +856,11 @@ export function createAutoRunTurnRunner(options: AutoRunTurnRunnerOptions): Auto
 		};
 	}
 
-	return { run };
+	return {
+		run,
+		sourceCustody: (processId) => {
+			const source = sources.get(processId);
+			return source && !source.ambiguous ? source.read() : null;
+		},
+	};
 }
