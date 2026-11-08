@@ -39,10 +39,12 @@ vi.mock('../../../main/agents/probeRemoteMaestroP', () => ({
 }));
 
 import {
+	bindCrossAgentConsultInitiator,
 	cancelCrossAgentRequestsForSource,
 	consultLineage,
 	consultRefusal,
 	getCrossAgentConsultParties,
+	MAX_BOUND_CONSULT_INITIATORS,
 	MAX_WITHDRAWN_CONSULT_TICKETS,
 	resolveConsultInitiator,
 	startCrossAgentRequest,
@@ -480,5 +482,149 @@ describe('withdrawing a consult by its ask ticket (MCOMP-17-03AT)', () => {
 		await dispatch({ requestId: 'r-at8' }, { dispatchTicket: 'ticket-cap-0' });
 		expect(spawned).toHaveLength(1);
 		expect(chunks.at(-1)).toMatchObject({ requestId: 'r-at8', done: true, canceled: true });
+	});
+});
+
+describe('binding the asking run to its ask ticket (MCOMP-17-03BF)', () => {
+	/** The record an admitted Auto Run attempt was verified on: its run, trace and fenced workflow. */
+	const autoRunLineage = (): ManagedDelegationContext => ({
+		contractVersion: MANAGED_CONTRACT_VERSION,
+		identity: {
+			requestId: 'attempt-req-1',
+			idempotencyKey: 'attempt-req-1',
+			attemptId: 'attempt-1',
+			runId: 'run-attempt-1',
+			rootRunId: 'run-root',
+			parentRunId: 'run-root',
+		},
+		traceId: 'trace-run-root',
+		workflow: {
+			workflowId: 'playbook:/work/.maestro/playbooks/release',
+			version: 'docs-2-0badf00d',
+			triggerEventId: 'operator:1700000000000',
+			ownerEpoch: 'epoch-1',
+			fencingToken: 'fence-1',
+		},
+		delegation: { chain: [{ kind: 'agent', id: 'src' }], grantRef: null },
+		policyRevision: 1,
+	});
+
+	it('binds the consult its ticket starts as a child of the bound run, on its fenced workflow', async () => {
+		const port = fakeSpawnPort();
+		const { spawned, chunks, dispatch } = harness(port);
+		expect(bindCrossAgentConsultInitiator('ticket-bf1', autoRunLineage())).toBe(true);
+		await dispatch({ requestId: 'r-bf1' }, { dispatchTicket: 'ticket-bf1' });
+		expect(chunks).toEqual([]);
+		expect(spawned).toHaveLength(1);
+		expect(spawned[0].delegation).toEqual(autoRunLineage());
+		const stamped = stampedOn(spawned[0]);
+		expect(stamped).toEqual(
+			childDelegationContext(autoRunLineage(), {
+				link: { kind: 'agent', id: 'cross-agent-r-bf1' },
+				requestId: 'r-bf1',
+				attemptId: 'r-bf1',
+			})
+		);
+		expect(stamped.identity.parentRunId).toBe('run-attempt-1');
+		expect(stamped.identity.rootRunId).toBe('run-root');
+		expect(stamped.workflow).toEqual(autoRunLineage().workflow);
+		expect(port.asked[0].context.workflow).toEqual(autoRunLineage().workflow);
+		expect(port.asked[0].context.delegation.chain).toEqual(stamped.delegation.chain);
+	});
+
+	it('uses a binding once: a replay of the ticket falls back to the plain ask lineage', async () => {
+		const { spawned, dispatch } = harness(fakeSpawnPort());
+		bindCrossAgentConsultInitiator('ticket-bf2', autoRunLineage());
+		await dispatch({ requestId: 'r-bf2' }, { dispatchTicket: 'ticket-bf2' });
+		await dispatch({ requestId: 'r-bf3' }, { dispatchTicket: 'ticket-bf2' });
+		expect(spawned).toHaveLength(2);
+		expect(stampedOn(spawned[0]).identity.parentRunId).toBe('run-attempt-1');
+		expect(stampedOn(spawned[1]).identity.parentRunId).toBe('ask:src:r-bf3');
+		expect(stampedOn(spawned[1]).workflow).toBeNull();
+	});
+
+	it('the first binding holds: a second one is refused, never merged or replaced', async () => {
+		const { spawned, dispatch } = harness(fakeSpawnPort());
+		expect(bindCrossAgentConsultInitiator('ticket-bf4', autoRunLineage())).toBe(true);
+		expect(
+			bindCrossAgentConsultInitiator('ticket-bf4', { ...managedInitiator(), policyRevision: 1 })
+		).toBe(false);
+		await dispatch({ requestId: 'r-bf4' }, { dispatchTicket: 'ticket-bf4' });
+		expect(stampedOn(spawned[0]).identity.rootRunId).toBe('run-root');
+	});
+
+	it('copies the record in and out: changing the caller object never reaches the consult', async () => {
+		const { spawned, dispatch } = harness(fakeSpawnPort());
+		const record = autoRunLineage();
+		bindCrossAgentConsultInitiator('ticket-bf5', record);
+		record.workflow!.fencingToken = 'forged';
+		record.delegation.chain.push({ kind: 'agent', id: 'intruder' });
+		await dispatch({ requestId: 'r-bf5' }, { dispatchTicket: 'ticket-bf5' });
+		const stamped = stampedOn(spawned[0]);
+		expect(stamped.workflow!.fencingToken).toBe('fence-1');
+		expect(stamped.delegation.chain).toEqual([
+			{ kind: 'agent', id: 'src' },
+			{ kind: 'agent', id: 'cross-agent-r-bf5' },
+		]);
+	});
+
+	it('a record the caller named outranks the binding, which is still spent', async () => {
+		const { spawned, dispatch } = harness(fakeSpawnPort());
+		bindCrossAgentConsultInitiator('ticket-bf6', autoRunLineage());
+		await dispatch(
+			{ requestId: 'r-bf6' },
+			{
+				dispatchTicket: 'ticket-bf6',
+				initiator: { delegation: { ...managedInitiator(), policyRevision: 1 }, writable: null },
+			}
+		);
+		await dispatch({ requestId: 'r-bf7' }, { dispatchTicket: 'ticket-bf6' });
+		expect(stampedOn(spawned[0]).identity.parentRunId).toBe('cue-run-1');
+		expect(stampedOn(spawned[1]).identity.parentRunId).toBe('ask:src:r-bf7');
+	});
+
+	it('a consult without the ticket, or with another, never picks the binding up', async () => {
+		const { spawned, dispatch } = harness(fakeSpawnPort());
+		bindCrossAgentConsultInitiator('ticket-bf8', autoRunLineage());
+		await dispatch({ requestId: 'r-bf8' });
+		await dispatch({ requestId: 'r-bf9' }, { dispatchTicket: 'ticket-other' });
+		await dispatch({ requestId: 'r-bf10' }, { dispatchTicket: 'ticket-bf8' });
+		expect(stampedOn(spawned[0]).identity.parentRunId).toBe('ask:src:r-bf8');
+		expect(stampedOn(spawned[1]).identity.parentRunId).toBe('ask:src:r-bf9');
+		expect(stampedOn(spawned[2]).identity.parentRunId).toBe('run-attempt-1');
+	});
+
+	it('a withdrawn ticket drops its binding and binds nothing more; the consult is refused', async () => {
+		const { spawned, chunks, dispatch } = harness(fakeSpawnPort());
+		bindCrossAgentConsultInitiator('ticket-bf11', autoRunLineage());
+		withdrawCrossAgentConsult('ticket-bf11');
+		expect(bindCrossAgentConsultInitiator('ticket-bf11', autoRunLineage())).toBe(false);
+		await dispatch({ requestId: 'r-bf11' }, { dispatchTicket: 'ticket-bf11' });
+		expect(spawned).toHaveLength(0);
+		expect(chunks.at(-1)).toMatchObject({ requestId: 'r-bf11', done: true, canceled: true });
+	});
+
+	it('refuses an empty ticket or a missing record', () => {
+		expect(bindCrossAgentConsultInitiator('', autoRunLineage())).toBe(false);
+		expect(bindCrossAgentConsultInitiator('ticket-bf12', null as never)).toBe(false);
+	});
+
+	it('expires a binding with its ticket', async () => {
+		const { spawned, dispatch } = harness(fakeSpawnPort());
+		bindCrossAgentConsultInitiator('ticket-bf13', autoRunLineage());
+		vi.setSystemTime(Date.now() + DISPATCH_TICKET_TTL_MS + 1);
+		await dispatch({ requestId: 'r-bf13' }, { dispatchTicket: 'ticket-bf13' });
+		expect(stampedOn(spawned[0]).identity.parentRunId).toBe('ask:src:r-bf13');
+	});
+
+	it('remembers at most the cap of bindings, forgetting the oldest first', async () => {
+		const { spawned, dispatch } = harness(fakeSpawnPort());
+		bindCrossAgentConsultInitiator('ticket-bf-oldest', autoRunLineage());
+		for (let i = 0; i < MAX_BOUND_CONSULT_INITIATORS; i++)
+			bindCrossAgentConsultInitiator(`ticket-bf-cap-${i}`, autoRunLineage());
+		await dispatch({ requestId: 'r-bf14' }, { dispatchTicket: 'ticket-bf-oldest' });
+		await dispatch({ requestId: 'r-bf15' }, { dispatchTicket: 'ticket-bf-cap-0' });
+		expect(stampedOn(spawned[0]).identity.parentRunId).toBe('ask:src:r-bf14');
+		expect(stampedOn(spawned[1]).identity.parentRunId).toBe('run-attempt-1');
 	});
 });

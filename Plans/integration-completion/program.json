@@ -4506,6 +4506,20 @@
 					"produces": []
 				},
 				{
+					"id": "MCOMP-17-03BF",
+					"label": "Bind the asking run record to the ask dispatch ticket so the desktop consult it starts is that run child",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/main/cross-agent/cross-agent-router.ts",
+						"src/__tests__/main/cross-agent/cross-agent-router.managed.test.ts",
+						"Plans/integration-completion/program.json"
+					],
+					"outcome": "Consume MAESTRO-EFFECT-CONSUMERS-BUILD and its pinned MAESTRO-CONTRACT-INPUTS-BUILD dependency. Bounded prerequisite continuation of MCOMP-17-03 after MCOMP-17-03BE: the cross-agent router exports bindCrossAgentConsultInitiator(dispatchTicket, delegation), which holds a copy of the asking operation record (an Auto Run attempt admitted lineage) against the ticket the ask carried, once, first binding wins, refused for a withdrawn ticket, expiring with the ticket TTL and capped at MAX_BOUND_CONSULT_INITIATORS; startCrossAgentRequest takes it when the caller named no initiator, so the consult is stamped, admitted and refused as that run child on its fenced workflow. Exercise the bound child lineage, single use, first-wins, copy isolation, named-initiator precedence, other and absent tickets, withdrawal, expiry, the cap, and a mutation check. Calling the binder from the ask handler for an auto-run caller (commands.ts hook, WebServer setter, factory composing autoRunCallerLineageOf), background/consult child credentials and room owner lifetime remain pending. Reuse WORKFLOW-CONTEXT/1; no new wire capability, producer mapping or paired/provider/native qualification. Keep to three authored files and fewer than 500 changed lines.",
+					"backlog": ["M-04"],
+					"requires": ["MAESTRO-EFFECT-CONSUMERS-BUILD"],
+					"produces": []
+				},
+				{
 					"label": "Bind Auto Run Cue and nested work at dispatch",
 					"kind": "IMPLEMENT",
 					"targets": [
@@ -4548,7 +4562,7 @@
 			"produces": ["MAESTRO-WORKFLOW-CONSUMERS-BUILD"],
 			"id": "MCOMP-17",
 			"path": ".maestro/playbooks/2026-10-29-Maestro-Integration-Completion/MCOMP-17.md",
-			"taskCount": 62,
+			"taskCount": 63,
 			"stage": "S10"
 		},
 		{
@@ -6338,7 +6352,7 @@
 				"PAIR-DIRECT-EVIDENCE"
 			],
 			"nativeInputs": false,
-			"taskCount": 69
+			"taskCount": 70
 		},
 		{
 			"id": "S11",
@@ -6542,8 +6556,8 @@
 			"taskCount": 1
 		}
 	],
-	"taskCount": 382,
-	"taskCounts": { "IMPLEMENT": 273, "TEST": 49, "VERIFY": 60 },
+	"taskCount": 383,
+	"taskCounts": { "IMPLEMENT": 274, "TEST": 49, "VERIFY": 60 },
 	"artifacts": {
 		"MEGA-CONTRACTS-FOUNDATION-BUILD": {
 			"producerDocument": "GCOMP-01",
@@ -7341,6 +7355,7 @@
 			"MCOMP-17-03BC",
 			"MCOMP-17-03BD",
 			"MCOMP-17-03BE",
+			"MCOMP-17-03BF",
 			"MCOMP-17-03",
 			"MCOMP-17-04",
 			"MCOMP-17-05",

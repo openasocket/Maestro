@@ -115,6 +115,7 @@ export function withdrawCrossAgentConsult(dispatchTicket: string, now = Date.now
 	}
 	withdrawnTickets.delete(dispatchTicket);
 	withdrawnTickets.set(dispatchTicket, now + DISPATCH_TICKET_TTL_MS);
+	initiatorsByTicket.delete(dispatchTicket);
 	while (withdrawnTickets.size > MAX_WITHDRAWN_CONSULT_TICKETS) {
 		withdrawnTickets.delete(withdrawnTickets.keys().next().value as string);
 	}
@@ -126,6 +127,63 @@ export function withdrawCrossAgentConsult(dispatchTicket: string, now = Date.now
 		logger.info('Withdrew a consult whose asking turn lost custody', LOG_CONTEXT, { requestId });
 	}
 	return stopped;
+}
+
+/**
+ * The asking operation's record for a credentialed ask, by the dispatch ticket the ask carried
+ * (MCOMP-17-03BF). The renderer hop drops everything but the ticket, so the ask handler binds
+ * the record it verified for the caller (an Auto Run attempt's admitted lineage) to the ticket,
+ * and the consult that arrives with that ticket is bound as its child. Each binding is used once,
+ * expires with the ticket, and is bounded by {@link MAX_BOUND_CONSULT_INITIATORS}.
+ */
+const initiatorsByTicket = new Map<
+	string,
+	{ delegation: ManagedDelegationContext; expiresAt: number }
+>();
+
+/** The most ticket-bound initiators remembered at once; the oldest is forgotten first. */
+export const MAX_BOUND_CONSULT_INITIATORS = 1024;
+
+/**
+ * Bind the record of the operation asking under a dispatch ticket, so the consult the ticket
+ * starts is that operation's child (MCOMP-17-03BF). The first binding of a ticket holds: a
+ * second one is refused, never merged or replaced, and a withdrawn ticket binds nothing. The
+ * record is copied in and copied out, so the caller's object never reaches the consult.
+ *
+ * @returns Whether the record was bound.
+ */
+export function bindCrossAgentConsultInitiator(
+	dispatchTicket: string,
+	delegation: ManagedDelegationContext,
+	now = Date.now()
+): boolean {
+	if (typeof dispatchTicket !== 'string' || dispatchTicket.length === 0) return false;
+	if (!delegation || typeof delegation !== 'object') return false;
+	for (const [ticket, bound] of initiatorsByTicket) {
+		if (bound.expiresAt <= now) initiatorsByTicket.delete(ticket);
+	}
+	if (initiatorsByTicket.has(dispatchTicket)) return false;
+	if (isConsultTicketWithdrawn(dispatchTicket, now)) return false;
+	initiatorsByTicket.set(dispatchTicket, {
+		delegation: delegationContextOf(delegation),
+		expiresAt: now + DISPATCH_TICKET_TTL_MS,
+	});
+	while (initiatorsByTicket.size > MAX_BOUND_CONSULT_INITIATORS) {
+		initiatorsByTicket.delete(initiatorsByTicket.keys().next().value as string);
+	}
+	return true;
+}
+
+/** The initiator bound to a ticket, taken (a binding is used once), or undefined. */
+function takeBoundConsultInitiator(
+	dispatchTicket: string,
+	now = Date.now()
+): ConsultInitiator | undefined {
+	const bound = initiatorsByTicket.get(dispatchTicket);
+	if (!bound) return undefined;
+	initiatorsByTicket.delete(dispatchTicket);
+	if (bound.expiresAt <= now) return undefined;
+	return { delegation: delegationContextOf(bound.delegation), writable: null };
 }
 
 /** Whether an ask carrying this ticket was withdrawn (and the ticket has not expired). */
@@ -207,7 +265,8 @@ export interface StartCrossAgentRequestOptions {
 	actor?: ProcessSpawnActor;
 	/**
 	 * The asking operation's own record, for a caller that can name it. Absent
-	 * (every caller today): the consult the asker is itself answering, else a
+	 * (every caller today): the record bound to `dispatchTicket`
+	 * ({@link bindCrossAgentConsultInitiator}), else the consult the asker is itself answering, else a
 	 * lineage of this ask with the asking agent as the chain (workflow null, no
 	 * policy generation), as `createRuntimeConsults()` derives it headless.
 	 */
@@ -361,18 +420,21 @@ export async function startCrossAgentRequest(
 ): Promise<void> {
 	// The lineage first: who is asking, as a record the sink can bind, and what the consult is
 	// a child of. Access is the narrower of what the initiator may do and what the settings
-	// allow this consult.
-	const initiator = resolveConsultInitiator(request, opts.initiator);
+	// allow this consult. A record bound to the ask's ticket (MCOMP-17-03BF) stands for the
+	// asker when the caller named none; it is taken either way, so it is never used twice.
+	const dispatchTicket =
+		typeof opts.dispatchTicket === 'string' && opts.dispatchTicket.length > 0
+			? opts.dispatchTicket
+			: undefined;
+	const ticketInitiator =
+		dispatchTicket !== undefined ? takeBoundConsultInitiator(dispatchTicket) : undefined;
+	const initiator = resolveConsultInitiator(request, opts.initiator ?? ticketInitiator);
 	const { dispatchedBy, child } = consultLineage(request, initiator);
 	const writable = delegatedWritable(initiator.writable, opts.writable ?? false);
 
 	// Refused (or not) on the host's standing now, before a listener attaches, a tab is written
 	// or a process starts: a refused consult leaves nothing on the target and names why.
 	const target = opts.getTargetSession(request.targetSessionId);
-	const dispatchTicket =
-		typeof opts.dispatchTicket === 'string' && opts.dispatchTicket.length > 0
-			? opts.dispatchTicket
-			: undefined;
 	if (dispatchTicket !== undefined && isConsultTicketWithdrawn(dispatchTicket)) {
 		// The ask was withdrawn while the consult was on its way here: nothing runs.
 		withdrawnTickets.delete(dispatchTicket);
