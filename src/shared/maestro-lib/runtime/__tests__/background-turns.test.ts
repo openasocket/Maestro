@@ -33,10 +33,16 @@ import { getAgentDefinition, type AgentConfig } from '../../providers/definition
 import { resolveMaestroPaths } from '../../paths/resolve';
 import { groupChatTurnContext } from '../../groupchat/spawn';
 import type { GroupChatSpawn } from '../../groupchat/types';
-import { createLocalHostAuthority, type AdmissionRequest } from '../../managed/authority';
+import {
+	createLocalHostAuthority,
+	type AdmissionRequest,
+	type ContextVerification,
+} from '../../managed/authority';
 import type { ManagedBindingState } from '../../managed/binding';
 import {
 	MANAGED_DELEGATION_ENV_VAR,
+	childDelegationContext,
+	delegationContextOf,
 	delegationContextEnv,
 	readDelegationContextEnv,
 	type ManagedDelegationContext,
@@ -47,6 +53,7 @@ import {
 	createBackgroundTurns,
 	groupChatOwner,
 	type BackgroundAdmissionEvent,
+	type BackgroundManagedOptions,
 	type BackgroundSpawnAuthorityPort,
 	type GroupChatRunnerHandlers,
 } from '../background-turns';
@@ -506,7 +513,8 @@ describe('background turns', () => {
 			script: FakeScript,
 			authority: ReturnType<typeof authorityOf> | null,
 			account: string | null = null,
-			readPort?: () => BackgroundSpawnAuthorityPort
+			readPort?: () => BackgroundSpawnAuthorityPort,
+			managed: Partial<BackgroundManagedOptions> = {}
 		) {
 			const provider = createFakeGroupChatProvider(dir, script);
 			const port = portOf(authority);
@@ -520,6 +528,7 @@ describe('background turns', () => {
 					port: readPort ?? (() => port),
 					account,
 					onAdmission: (event) => admissions.push(event),
+					...managed,
 				},
 			});
 			return { background, provider };
@@ -559,6 +568,211 @@ describe('background turns', () => {
 			asked = [];
 			admissions = [];
 			leases = 0;
+		});
+
+		describe('authenticated background parents', () => {
+			function parent(authority: ReturnType<typeof authorityOf>, actorId = 'source', change = '') {
+				const record = carried(7);
+				record.workflow = {
+					workflowId: 'nightly',
+					version: 'v1',
+					triggerEventId: 'cue:1',
+					ownerEpoch: 'epoch-1',
+					fencingToken: 'fence-1',
+				};
+				record.delegation.grantRef = change === 'grant' ? 'grant-2' : 'grant-1';
+				if (change === 'fence') record.workflow.fencingToken = 'fence-2';
+				if (change === 'policy') record.policyRevision = 8;
+				const verified = portOf(authority, actorId, 7).context(record);
+				if (!verified.ok) throw new Error(verified.problems.join('; '));
+				return verified;
+			}
+
+			it.each([MODERATOR, PARTICIPANT, 'consult-1'])(
+				'preserves the authenticated source and target scope for %s',
+				async (processId) => {
+					const authority = authorityOf(() => 'allow');
+					const source = parent(authority);
+					const expected = childDelegationContext(delegationContextOf(source.context), {
+						link: source.context.actor,
+						requestId: processId,
+						attemptId: processId,
+					});
+					const readParent = vi.fn(() => parent(authority));
+					const { background, provider } = managedTurns(
+						() => ({ text: 'ok' }),
+						authority,
+						null,
+						undefined,
+						{ parentContext: readParent }
+					);
+					const spawn = spawnOf({
+						processId,
+						...(processId === 'consult-1' ? { delegation: expected } : {}),
+						customEnvVars: delegationContextEnv(carried(null)),
+					});
+					const started =
+						processId === 'consult-1'
+							? await background.consultRunner().start(spawn, {
+									onActivity: vi.fn(),
+									onSessionId: vi.fn(),
+									onEnd: vi.fn(),
+								})
+							: await background.groupChatRunner(handlers).start(spawn);
+					expect(started).toMatchObject({ success: true });
+					await background.whenSettled(() => true);
+					expect(stampedOn(provider.calls[0].spec.env)).toEqual({ ...expected, policyRevision: 3 });
+					expect(asked[0].context).toMatchObject({ ...expected, policyRevision: 3, actor });
+					expect(readParent).toHaveBeenCalledWith(processId);
+					expect(readParent.mock.calls.length).toBeGreaterThanOrEqual(4);
+					expect(authority.live()).toEqual([]);
+				}
+			);
+
+			it.each(['copied', 'missing', 'rejected', 'throw', 'depth', 'standalone'] as const)(
+				'refuses a %s parent without preparing a child',
+				async (mode) => {
+					const authority = authorityOf(() => 'allow');
+					const source = parent(authority);
+					const readParent = () => {
+						if (mode === 'throw') throw new Error('parent disconnected');
+						if (mode === 'missing') return undefined as never;
+						if (mode === 'copied') return structuredClone(source);
+						if (mode === 'rejected')
+							return {
+								ok: false as const,
+								code: 'unauthenticated' as const,
+								problems: ['revoked'],
+							};
+						if (mode === 'depth') {
+							const record = delegationContextOf(source.context);
+							record.delegation.chain = Array.from({ length: 16 }, (_, i) => ({
+								kind: 'agent' as const,
+								id: `agent-${i}`,
+							}));
+							return portOf(authority, 'source', 7).context(record);
+						}
+						return source;
+					};
+					const { background, provider } = managedTurns(
+						() => ({ text: 'never' }),
+						mode === 'standalone' ? null : authority,
+						null,
+						undefined,
+						{ parentContext: readParent }
+					);
+					await expect(
+						background.groupChatRunner(handlers).start(spawnOf())
+					).resolves.toMatchObject({ success: false });
+					expect(asked).toEqual([]);
+					expect(provider.calls).toEqual([]);
+					expect(registry.size()).toBe(0);
+				}
+			);
+
+			it.each(['workflow', 'grant', 'root', 'chain'] as const)(
+				'refuses an explicit child with a different %s',
+				async (field) => {
+					const authority = authorityOf(() => 'allow');
+					const source = parent(authority);
+					const delegation = childDelegationContext(delegationContextOf(source.context), {
+						link: source.context.actor,
+						requestId: 'ask-2',
+						attemptId: 'try-1',
+					});
+					if (field === 'workflow') delegation.workflow!.fencingToken = 'forged';
+					if (field === 'grant') delegation.delegation.grantRef = 'forged';
+					if (field === 'root') delegation.identity.rootRunId = 'forged';
+					if (field === 'chain') delegation.delegation.chain = [];
+					const { background, provider } = managedTurns(
+						() => ({ text: 'never' }),
+						authority,
+						null,
+						undefined,
+						{ parentContext: () => source }
+					);
+					await expect(
+						background.groupChatRunner(handlers).start(spawnOf({ delegation }))
+					).resolves.toMatchObject({
+						success: false,
+						managed: { state: 'denied' },
+					});
+					expect(asked).toEqual([]);
+					expect(provider.calls).toEqual([]);
+				}
+			);
+
+			describe.each(['preparation', 'admission', 'observer', 'sink'] as const)(
+				'%s source custody',
+				(boundary) => {
+					it.each(['actor', 'withdrawal', 'copied', 'throw', 'fence', 'grant', 'policy'] as const)(
+						'refuses %s drift and admits a fresh attempt',
+						async (changeKind) => {
+							const authority = authorityOf(() => 'allow');
+							let source: ContextVerification = parent(authority);
+							let unreadable = false;
+							const change = () => {
+								if (changeKind === 'throw') unreadable = true;
+								else if (changeKind === 'withdrawal')
+									source = { ok: false, code: 'unauthenticated', problems: ['withdrawn'] };
+								else if (changeKind === 'copied') source = structuredClone(source);
+								else
+									source = parent(
+										authority,
+										changeKind === 'actor' ? 'replaced-source' : 'source',
+										changeKind
+									);
+							};
+							let changed = false;
+							const changeOnce = () => {
+								if (!changed) {
+									changed = true;
+									change();
+								}
+							};
+							const { background, provider } = managedTurns(
+								() => {
+									if (boundary === 'sink') changeOnce();
+									return { text: 'ok' };
+								},
+								authority,
+								null,
+								undefined,
+								{
+									parentContext: () => {
+										if (unreadable) throw new Error('parent disconnected');
+										return source;
+									},
+									onAdmission: (event) => {
+										admissions.push(event);
+										if (boundary === 'observer') changeOnce();
+									},
+								}
+							);
+							const admit = authority.admit.bind(authority);
+							vi.spyOn(authority, 'admit').mockImplementationOnce(async (request) => {
+								const result = await admit(request);
+								if (boundary === 'admission') change();
+								return result;
+							});
+							const runner = background.groupChatRunner(handlers);
+							const pending = runner.start(spawnOf());
+							if (boundary === 'preparation') change();
+							await expect(pending).resolves.toMatchObject({ success: false });
+							await background.whenSettled(() => true);
+							expect(reported).toEqual([]);
+							expect(authority.live()).toEqual([]);
+							expect(registry.size()).toBe(0);
+							if (boundary !== 'sink') expect(provider.calls).toEqual([]);
+							source = parent(authority, 'replaced-source');
+							unreadable = false;
+							await expect(runner.start(spawnOf())).resolves.toMatchObject({ success: true });
+							await background.whenSettled(() => true);
+							expect(asked.at(-1)!.context.delegation.chain.at(-1)!.id).toBe('replaced-source');
+						}
+					);
+				}
+			);
 		});
 
 		it.each([

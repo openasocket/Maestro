@@ -3932,6 +3932,20 @@
 					"produces": []
 				},
 				{
+					"id": "MCOMP-17-03Q",
+					"label": "Bind background turns to authenticated parent custody",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/shared/maestro-lib/runtime/background-turns.ts",
+						"src/shared/maestro-lib/runtime/__tests__/background-turns.test.ts",
+						"Plans/integration-completion/program.json"
+					],
+					"outcome": "Consume MAESTRO-EFFECT-CONSUMERS-BUILD and its pinned MAESTRO-CONTRACT-INPUTS-BUILD dependency. Bounded continuation of MCOMP-17-03 at the shared background runner: accept an initiating context only through a trusted host verification callback, derive group-chat and consult child lineage without dropping workflow, trigger, owner fence, root/parent, principal chain or grant, and retain the target actor and current target policy. Reject conflicting carried context, copied authentication and excessive delegation depth. Re-read source custody across preparation, admission, observers and the final lease gate; release unused leases on withdrawal or changed scope and admit fresh attempts independently. Exercise these paths through the existing real fixture-process harness. Retain MCOMP-17-03 unchecked for desktop/headless Auto Run consumer composition, incoming transport authentication, desktop composition and managed room custody across turns. Reuse WORKFLOW-CONTEXT/1; no new wire definition, external capability, producer mapping or paired/provider/native qualification is supplied. Keep to three authored files and fewer than 500 changed lines.",
+					"backlog": ["M-04"],
+					"requires": ["MAESTRO-EFFECT-CONSUMERS-BUILD"],
+					"produces": []
+				},
+				{
 					"label": "Bind Auto Run Cue and nested work at dispatch",
 					"kind": "IMPLEMENT",
 					"targets": [
@@ -3974,7 +3988,7 @@
 			"produces": ["MAESTRO-WORKFLOW-CONSUMERS-BUILD"],
 			"id": "MCOMP-17",
 			"path": ".maestro/playbooks/2026-10-29-Maestro-Integration-Completion/MCOMP-17.md",
-			"taskCount": 21,
+			"taskCount": 22,
 			"stage": "S10"
 		},
 		{
@@ -5764,7 +5778,7 @@
 				"PAIR-DIRECT-EVIDENCE"
 			],
 			"nativeInputs": false,
-			"taskCount": 28
+			"taskCount": 29
 		},
 		{
 			"id": "S11",
@@ -5968,8 +5982,8 @@
 			"taskCount": 1
 		}
 	],
-	"taskCount": 341,
-	"taskCounts": { "IMPLEMENT": 232, "TEST": 49, "VERIFY": 60 },
+	"taskCount": 342,
+	"taskCounts": { "IMPLEMENT": 233, "TEST": 49, "VERIFY": 60 },
 	"artifacts": {
 		"MEGA-CONTRACTS-FOUNDATION-BUILD": {
 			"producerDocument": "GCOMP-01",
@@ -6726,6 +6740,7 @@
 			"MCOMP-17-03N",
 			"MCOMP-17-03O",
 			"MCOMP-17-03P",
+			"MCOMP-17-03Q",
 			"MCOMP-17-03",
 			"MCOMP-17-04",
 			"MCOMP-17-05",

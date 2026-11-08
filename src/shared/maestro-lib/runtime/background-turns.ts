@@ -42,13 +42,17 @@ import { createOutputParser } from '../parsers/parser-factory';
 import type { MaestroPaths } from '../paths/resolve';
 import {
 	buildDispatchSnapshot,
+	isVerifiedContext,
+	type ContextVerification,
 	type DispatchLease,
 	type HostAuthority,
 	type PolicySourceSet,
 } from '../managed/authority';
 import {
+	childDelegationContext,
 	delegationContextEnv,
 	delegationContextOf,
+	delegationContextProblems,
 	intersectDelegationScope,
 	type ManagedDelegationContext,
 } from '../managed/delegation';
@@ -129,6 +133,11 @@ export type BackgroundAdmissionEvent =
 export interface BackgroundManagedOptions {
 	/** The host's port, read on every turn: standing, policy and authority as they are NOW. */
 	port(): BackgroundSpawnAuthorityPort;
+	/** Trusted host verification of this turn's initiating operation, re-read through dispatch.
+	 * Environment or renderer JSON is attribution only and cannot authenticate a parent.
+	 * Once supplied, an absent or withdrawn source refuses the turn without a standalone fallback.
+	 */
+	parentContext?(processId: string): ContextVerification;
 	/** An opaque account reference for the snapshot; never a credential. */
 	account?: string | null;
 	onAdmission?(event: BackgroundAdmissionEvent): void;
@@ -273,7 +282,8 @@ export function createBackgroundTurns(options: BackgroundTurnsOptions): Backgrou
 	 */
 	function managedTurnFor(
 		processId: string,
-		delegation: ManagedDelegationContext | null
+		delegation: ManagedDelegationContext | null,
+		explicit: boolean
 	): ManagedTurn {
 		const refuse = (state: BackgroundManagedState, code: ManagedDenialCode, message: string) =>
 			({
@@ -282,6 +292,12 @@ export function createBackgroundTurns(options: BackgroundTurnsOptions): Backgrou
 			}) as const;
 		const port = options.managed?.port() ?? null;
 		if (!port || port.standing() === 'standalone') {
+			if (options.managed?.parentContext)
+				return refuse(
+					'unavailable',
+					'runtime-unavailable',
+					'This background parent requires managed host standing.'
+				);
 			if (!delegation) return { managed: false };
 			const scope = intersectDelegationScope(delegation, {
 				standing: 'standalone',
@@ -295,6 +311,45 @@ export function createBackgroundTurns(options: BackgroundTurnsOptions): Backgrou
 				'runtime-unavailable',
 				`${processId} belongs to no room and carries no record, so a managed host cannot bind it, and does not run it unmanaged in its place.`
 			);
+		}
+		let parentKey: string | undefined;
+		if (options.managed?.parentContext) {
+			try {
+				const source = options.managed.parentContext(processId);
+				if (source && !source.ok) return refuse('denied', source.code, source.problems.join('; '));
+				if (!source?.ok || !isVerifiedContext(source.context))
+					return refuse(
+						'unavailable',
+						'runtime-unavailable',
+						'The background parent is unavailable.'
+					);
+				const parent = source.context;
+				parentKey = canonicalJson({
+					...parent,
+					verification: { ...parent.verification, verifiedAt: undefined },
+				});
+				const child = childDelegationContext(delegationContextOf(parent), {
+					link: parent.actor,
+					requestId: delegation.identity.requestId,
+					attemptId: delegation.identity.attemptId,
+					idempotencyKey: delegation.identity.idempotencyKey,
+				});
+				const problems = delegationContextProblems(child);
+				if (problems.length) return refuse('denied', 'policy-denied', problems.join('; '));
+				if (explicit && canonicalJson(child) !== canonicalJson(delegation))
+					return refuse(
+						'denied',
+						'policy-denied',
+						'The background turn does not match its authenticated parent.'
+					);
+				delegation = child;
+			} catch (error) {
+				return refuse(
+					'unavailable',
+					'runtime-unavailable',
+					`The background parent could not be verified: ${errorText(error)}`
+				);
+			}
 		}
 		const policy = port.policy();
 		const scope = intersectDelegationScope(delegation, {
@@ -323,6 +378,7 @@ export function createBackgroundTurns(options: BackgroundTurnsOptions): Backgrou
 			policy,
 			// Compare the bound scope across awaits, excluding only the time of re-verification.
 			bindingKey: canonicalJson({
+				parentKey,
 				...verified.context,
 				verification: { ...verified.context.verification, verifiedAt: undefined },
 				policy,
@@ -386,7 +442,8 @@ export function createBackgroundTurns(options: BackgroundTurnsOptions): Backgrou
 		// what the agent itself asks or dispatches from its shell carries the chain one link deeper.
 		// Stamped BEFORE the SSH wrap, so it reaches the remote agent and not only the ssh client.
 		const delegation = groupChatTurnContext(spawn);
-		const managedTurn = managedTurnFor(spawn.processId, delegation);
+		const explicit = spawn.delegation !== undefined;
+		const managedTurn = managedTurnFor(spawn.processId, delegation, explicit);
 		if (managedTurn.managed && 'refusal' in managedTurn) return managedTurn.refusal;
 		const boundDelegation = managedTurn.managed
 			? delegationContextOf(managedTurn.context)
@@ -403,7 +460,7 @@ export function createBackgroundTurns(options: BackgroundTurnsOptions): Backgrou
 			if (cancelled) return cancelled;
 			let current: ManagedTurn;
 			try {
-				current = managedTurnFor(spawn.processId, delegation);
+				current = managedTurnFor(spawn.processId, delegation, explicit);
 			} catch (error) {
 				return managedRefusal(
 					spawn.processId,
@@ -516,7 +573,16 @@ export function createBackgroundTurns(options: BackgroundTurnsOptions): Backgrou
 				return admissionRefusal;
 			}
 			lease = admitted.lease;
-			const gate: DispatchAdmission = leaseAdmission(managedTurn.authority, admitted.lease);
+			// Keep the canonical gate and producer lease, with source custody checked at the sink.
+			const authority = managedTurn.authority;
+			const scopedAuthority: Pick<HostAuthority, 'check'> = {
+				check(held, digest) {
+					const refusal = recheckBinding();
+					if (refusal) held.release({ outcome: 'spawn-failed', message: refusal.error! });
+					return authority.check(held, digest);
+				},
+			};
+			const gate: DispatchAdmission = leaseAdmission(scopedAuthority, admitted.lease);
 			admission = { gate, attribution };
 		}
 
@@ -530,11 +596,11 @@ export function createBackgroundTurns(options: BackgroundTurnsOptions): Backgrou
 					leaseId: lease.leaseId,
 				});
 			}
-			const cancelled = cancellation();
-			if (cancelled) {
-				lease?.release({ outcome: 'spawn-failed', message: cancelled.error! });
+			const refusal = recheckBinding();
+			if (refusal) {
+				lease?.release({ outcome: 'spawn-failed', message: refusal.error! });
 				removeTempFiles(plan.tempFiles);
-				return cancelled;
+				return refusal;
 			}
 			turn = deps.runTurn(
 				plan.spec,
