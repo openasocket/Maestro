@@ -205,6 +205,14 @@ export function createWebServerFactory(deps: WebServerFactoryDependencies) {
 			(credential) => deps.getProcessManager()?.autoRunCallerSourceOf(credential) ?? null
 		);
 
+		// A forwarded room participant credential authenticates through the manager's group chat
+		// lookup only (MCOMP-17-03BP). It answers the room, the participant name and the process,
+		// never an agent: the handler maps the name to a live agent, after the chat and Auto Run
+		// resolvers, so no kind of credential ever resolves as another.
+		server.setGroupChatCallerSourceResolver(
+			(credential) => deps.getProcessManager()?.groupChatCallerSourceOf(credential) ?? null
+		);
+
 		// An Auto Run attempt's ask carries the lineage the attempt was admitted on (MCOMP-17-03BI).
 		// The handler offers the attempt credential and the ask ticket it just issued; the manager
 		// answers that lineage only while it still holds the credential, and the router binds it to

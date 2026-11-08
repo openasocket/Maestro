@@ -77,6 +77,8 @@ vi.mock('../../../main/web-server/WebServer', () => {
 			setAutoRunCallerSourceResolver = vi.fn();
 			// MCOMP-17-03BI: and the Auto Run consult lineage binder.
 			setAutoRunConsultLineageBinder = vi.fn();
+			// MCOMP-17-03BP: and the room participant credential resolver.
+			setGroupChatCallerSourceResolver = vi.fn();
 			setNoteAgentDelegationCallback = vi.fn();
 			setEnqueueCommandCallback = vi.fn();
 			setListQueueCallback = vi.fn();
@@ -638,6 +640,100 @@ describe('web-server/web-server-factory', () => {
 			} as any);
 			expect(resolver('attempt-cred')).toBeNull();
 			expect(after).toHaveBeenCalledWith('attempt-cred');
+			expect(before).toHaveBeenCalledTimes(1);
+		});
+	});
+
+	describe('room participant caller credential resolver composition (MCOMP-17-03BP)', () => {
+		const room = {
+			groupChatId: 'gc-1',
+			participantName: 'Alpha',
+			processId: 'gc-1-participant-Alpha-1',
+		};
+
+		it('composes exactly one room resolver on every server it builds', () => {
+			const createWebServer = createWebServerFactory(deps);
+			const first = createWebServer() as any;
+			const second = createWebServer({ lanAccess: true }) as any;
+
+			expect(first.setGroupChatCallerSourceResolver).toHaveBeenCalledTimes(1);
+			expect(second.setGroupChatCallerSourceResolver).toHaveBeenCalledTimes(1);
+			expect(typeof first.setGroupChatCallerSourceResolver.mock.calls[0][0]).toBe('function');
+		});
+
+		it('resolves through the manager room lookup only and returns its source unchanged', () => {
+			const groupChatCallerSourceOf = vi.fn().mockReturnValue(room);
+			const callerSourceOf = vi.fn().mockReturnValue({ agentId: 'agent-x', tabId: 'tab-x' });
+			const autoRunCallerSourceOf = vi
+				.fn()
+				.mockReturnValue({ agentId: 'agent-a', processId: 'agent-a-batch-1' });
+			deps.getProcessManager = vi.fn().mockReturnValue({
+				...mockProcessManager,
+				callerSourceOf,
+				autoRunCallerSourceOf,
+				groupChatCallerSourceOf,
+			} as any);
+			const server = createWebServerFactory(deps)() as any;
+			const resolver = server.setGroupChatCallerSourceResolver.mock.calls[0][0];
+
+			expect(resolver('room-cred')).toEqual(room);
+			expect(groupChatCallerSourceOf).toHaveBeenCalledWith('room-cred');
+			expect(callerSourceOf).not.toHaveBeenCalled();
+			expect(autoRunCallerSourceOf).not.toHaveBeenCalled();
+		});
+
+		it('keeps the chat and Auto Run resolvers off the room lookup', () => {
+			const groupChatCallerSourceOf = vi.fn().mockReturnValue(room);
+			const callerSourceOf = vi.fn().mockReturnValue(null);
+			const autoRunCallerSourceOf = vi.fn().mockReturnValue(null);
+			deps.getProcessManager = vi.fn().mockReturnValue({
+				...mockProcessManager,
+				callerSourceOf,
+				autoRunCallerSourceOf,
+				groupChatCallerSourceOf,
+			} as any);
+			const server = createWebServerFactory(deps)() as any;
+			const chat = server.setCallerSourceResolver.mock.calls[0][0];
+			const autoRun = server.setAutoRunCallerSourceResolver.mock.calls[0][0];
+
+			expect(chat('room-cred')).toBeNull();
+			expect(autoRun('room-cred')).toBeNull();
+			expect(groupChatCallerSourceOf).not.toHaveBeenCalled();
+		});
+
+		it('authenticates nobody when the manager refuses or is absent', () => {
+			const groupChatCallerSourceOf = vi.fn().mockReturnValue(null);
+			const getProcessManager = vi
+				.fn()
+				.mockReturnValue({ ...mockProcessManager, groupChatCallerSourceOf } as any);
+			deps.getProcessManager = getProcessManager;
+			const server = createWebServerFactory(deps)() as any;
+			const resolver = server.setGroupChatCallerSourceResolver.mock.calls[0][0];
+
+			expect(resolver('revoked')).toBeNull();
+			expect(groupChatCallerSourceOf).toHaveBeenCalledWith('revoked');
+
+			getProcessManager.mockReturnValue(null);
+			expect(resolver('room-cred')).toBeNull();
+		});
+
+		it('re-reads the process manager on every ask instead of capturing one at build', () => {
+			const before = vi.fn().mockReturnValue(room);
+			const after = vi.fn().mockReturnValue(null);
+			const getProcessManager = vi
+				.fn()
+				.mockReturnValue({ ...mockProcessManager, groupChatCallerSourceOf: before } as any);
+			deps.getProcessManager = getProcessManager;
+			const server = createWebServerFactory(deps)() as any;
+			const resolver = server.setGroupChatCallerSourceResolver.mock.calls[0][0];
+
+			expect(resolver('room-cred')).toEqual(room);
+			getProcessManager.mockReturnValue({
+				...mockProcessManager,
+				groupChatCallerSourceOf: after,
+			} as any);
+			expect(resolver('room-cred')).toBeNull();
+			expect(after).toHaveBeenCalledWith('room-cred');
 			expect(before).toHaveBeenCalledTimes(1);
 		});
 	});
