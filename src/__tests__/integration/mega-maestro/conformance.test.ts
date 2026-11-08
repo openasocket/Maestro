@@ -10,9 +10,21 @@
  * missing run answered ok) fails by step id. The fixture is read as published:
  * a mismatch is a facade or fixture repair, never a loosened expectation.
  */
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import fs from 'node:fs';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 
+import coverage from '../../../../Plans/integration-completion/contract-coverage.json';
+import { readPin } from '../../../../scripts/import-mega-maestro.mjs';
+import { inspectContractsDir } from '../../../../scripts/check-mega-contract-vectors.mjs';
+import { createLocalEndpointClient } from '../../../main/enterprise/endpoint-client';
+import { startFakeEndpoint } from '../../main/enterprise/fakeEndpoint';
+import {
+	effectGranted,
+	unavailableEffectAuthority,
+} from '../../../shared/maestro-lib/managed/effects';
+import { projectPolicyStatus } from '../../../shared/maestro-lib/managed/host-adapter';
 import vectors from '../../fixtures/mega-maestro/contract-vectors.json';
 import * as lib from '../../../shared/maestro-lib/index';
 import { sha256Hex } from '../../../shared/maestro-lib/managed/authority';
@@ -32,6 +44,11 @@ import {
 	CONFORMANCE_OPERATION_CAPABILITY,
 	RUNTIME_CONFORMANCE_FILE,
 	conformanceEnvelope,
+	brokerReceipt,
+	pairIdentityRecord,
+	pairStanding,
+	PAIR_T0,
+	PAIR_INSTALLATION,
 	readAdapterConformance,
 	subsetProblems,
 	type ConformanceStep,
@@ -102,6 +119,235 @@ describe('the public adapter conformance fixture', () => {
 			if ('code' in step.expect) expect(CODES, step.id).toContain(step.expect.code);
 			for (const capability of step.caps ?? []) expect(MANAGED_CAPABILITIES).toContain(capability);
 		}
+	});
+});
+
+// MCOMP-00-02: imported public schemas are a required input, never a live
+// authority. Missing/tampered imports fail explicitly; no paired proof is emitted.
+describe('pinned public schemas and existing endpoint fixtures', () => {
+	let endpoint: typeof import('../../../../vendor/mega-maestro/contracts/dist/local-endpoint.js');
+	let protocol: typeof import('../../../../vendor/mega-maestro/contracts/dist/protocol.js');
+	let execution: typeof import('../../../../vendor/mega-maestro/contracts/dist/execution.js');
+	const contractsDir = path.resolve('vendor/mega-maestro/contracts');
+	const attach = {
+		...fixture.host.installation,
+		components: [{ id: 'maestro', kind: 'maestro' as const, version: '1.1.0-RC' }],
+		supportedProtocols: [1],
+		supportedCapabilities: ['attachment', 'execution'],
+		requiredCapabilities: [],
+	};
+	const request = {
+		requestId: 'request-fixture',
+		attemptId: 'attempt-fixture',
+		runId: 'run-fixture',
+		source: 'headless',
+		operation: 'start',
+		arguments: [],
+		resources: fixture.host.approvedResourceIds,
+		provider: fixture.host.defaultSubmit.providerId,
+		model: 'unspecified',
+		policyRevision: fixture.host.policyRevision,
+	};
+	beforeAll(async () => {
+		const pin = readPin(path.resolve(coverage.archive.pin));
+		expect(pin.sha256).toBe(coverage.archive.sha256);
+		const checked = inspectContractsDir({ contractsDir, expectedSha256: pin.payloadDigest });
+		expect(checked.sourceRevision).toBe(pin.sourceRevision);
+		const dependency = JSON.parse(
+			fs.readFileSync(path.join(contractsDir, 'node_modules/zod/package.json'), 'utf8')
+		);
+		expect(dependency.version).toBe(pin.dependencies.zod);
+		[endpoint, protocol, execution] = await Promise.all([
+			import('../../../../vendor/mega-maestro/contracts/dist/local-endpoint.js'),
+			import('../../../../vendor/mega-maestro/contracts/dist/protocol.js'),
+			import('../../../../vendor/mega-maestro/contracts/dist/execution.js'),
+		]);
+	});
+
+	it('maps every consumer to real published schemas, owned ports and follow-up tasks', async () => {
+		const program = JSON.parse(
+			fs.readFileSync('Plans/integration-completion/program.json', 'utf8')
+		);
+		const tasks = program.documents.flatMap((doc: { tasks: { id: string }[] }) =>
+			doc.tasks.map((task) => task.id)
+		);
+		for (const family of coverage.schemaFamilies) {
+			const schemas = await import(
+				pathToFileURL(path.join(contractsDir, `dist/${family.module.slice(2)}.js`)).href
+			);
+			for (const name of family.exports)
+				expect(name in schemas, `${family.family}: ${name}`).toBe(true);
+			expect(fs.existsSync(family.consumerPort), family.consumerPort).toBe(true);
+			for (const task of family.pairedVerification) expect(tasks).toContain(task);
+		}
+		for (const proposal of coverage.extensionProposals) {
+			expect(proposal.status).toBe('proposed-not-negotiated');
+			for (const task of proposal.implementationTasks) expect(tasks).toContain(task);
+		}
+	});
+
+	it('refuses unsupported versions and unpublished operations without downgrading v2', () => {
+		const offer = {
+			supportedProtocols: [2],
+			supportedCapabilities: ['execution'],
+			requiredCapabilities: ['execution'],
+		};
+		expect(
+			protocol.negotiateLocalProtocol(offer, [{ protocol: 1, capabilities: ['execution'] }])
+		).toEqual({ outcome: 'denied', reason: 'unsupported_version' });
+		expect(protocol.negotiateLocalProtocol(offer, [{ protocol: 2, capabilities: [] }])).toEqual({
+			outcome: 'denied',
+			reason: 'unsupported_capability',
+		});
+		for (const operation of ['execution_prepare', 'effect_authorize']) {
+			expect(operation in protocol.localEndpointContractsV2).toBe(false);
+			expect(
+				protocol.localRequestEnvelopeV2.safeParse({
+					schemaVersion: 2,
+					correlationId: 'c1',
+					operation,
+					payload: request,
+				}).success
+			).toBe(false);
+		}
+		expect(
+			endpoint.localRequestEnvelope.safeParse({
+				schemaVersion: 2,
+				correlationId: 'c1',
+				operation: 'execution',
+				payload: request,
+			}).success
+		).toBe(false);
+	});
+
+	it('rejects actor assertions and fleet approval substituted for runtime use', () => {
+		const registration = {
+			version: 2,
+			purpose: 'runtime_use',
+			tenantId: '11111111-1111-4111-8111-111111111111',
+			orgId: '22222222-2222-4222-8222-222222222222',
+			enrollmentId: '33333333-3333-4333-8333-333333333333',
+			...fixture.host.installation,
+			bindingDigest: 'a'.repeat(64),
+			processBirthDigest: 'b'.repeat(64),
+			challengeId: '44444444-4444-4444-8444-444444444444',
+			challengeDigest: 'c'.repeat(64),
+		};
+		expect(endpoint.runtimeUseReferenceV2.safeParse(registration).success).toBe(true);
+		expect(
+			endpoint.runtimeUseReferenceV2.safeParse({ ...registration, actorId: 'forged' }).success
+		).toBe(false);
+		expect(
+			endpoint.runtimeUseReferenceV2.safeParse({ ...registration, purpose: 'fleet_management' })
+				.success
+		).toBe(false);
+	});
+
+	it.each([
+		'unsupported_version',
+		'unsupported_capability',
+		'unauthenticated',
+		'replay',
+		'expired',
+	] as const)('preserves the %s refusal through the real endpoint client', async (reason) => {
+		const fake = await startFakeEndpoint({
+			capabilities: ['execution'],
+			operations: { execution: () => endpoint.denied.parse({ outcome: 'denied', reason }) },
+		});
+		const port = createLocalEndpointClient({
+			socketPath: fake.socketPath,
+			...(reason === 'replay' ? { newCorrelationId: () => 'same-id' } : {}),
+		});
+		try {
+			expect((await port.attach(endpoint.attachmentRequest.parse(attach))).status).toBe('ok');
+			if (reason === 'unauthenticated') fake.options.peerAuthenticated = false;
+			if (reason === 'unsupported_version') fake.options.schemaVersion = 2;
+			expect(await port.invoke('execution', endpoint.executionRequest.parse(request))).toEqual({
+				status: 'denied',
+				reason,
+			});
+			for (const call of fake.calls)
+				expect(endpoint.localRequestEnvelope.safeParse(call.body).success).toBe(true);
+		} finally {
+			await port.close();
+			await fake.close();
+		}
+	});
+
+	it('holds admission after registration expiry even with a fresh policy observation', async () => {
+		const fake = await startFakeEndpoint({ capabilities: ['execution'] });
+		const port = createLocalEndpointClient({ socketPath: fake.socketPath });
+		try {
+			await port.registration.challenge(PAIR_INSTALLATION);
+			await port.registration.redeem();
+			expect((await port.attach({ ...attach, ...PAIR_INSTALLATION })).status).toBe('ok');
+			const record = pairIdentityRecord(fake.socketPath, PAIR_T0);
+			const standing = pairStanding(port, { status: 'ok', reason: null, message: null, record });
+			expect(projectPolicyStatus({ standing, now: PAIR_T0 }).admission.possible).toBe(true);
+			record.registration!.expiresAt = new Date(PAIR_T0).toISOString();
+			const expired = projectPolicyStatus({ standing, now: PAIR_T0 });
+			expect(expired).toMatchObject({
+				freshness: 'fresh',
+				registration: { state: 'expired' },
+				admission: { possible: false },
+			});
+			expect(expired.admission.reasons).toContain('The actor registration has lapsed.');
+		} finally {
+			await port.close();
+			await fake.close();
+		}
+	});
+
+	it('keeps a lost execution response unknown and does not resend it', async () => {
+		const fake = await startFakeEndpoint({ capabilities: ['execution'] });
+		const port = createLocalEndpointClient({ socketPath: fake.socketPath });
+		fake.options.operations = {
+			execution: (payload) => {
+				fake.dropConnections();
+				return endpoint.dispatchReceipt.parse(
+					brokerReceipt(payload as Record<string, unknown>, 'decision-fixture')
+				);
+			},
+		};
+		try {
+			expect((await port.attach(attach)).status).toBe('ok');
+			expect(
+				await port.invoke('execution', endpoint.executionRequest.parse(request))
+			).toMatchObject({ status: 'unknown' });
+			// An unknown outcome requires reconciliation, never a second execution call.
+			expect(
+				fake.calls.filter((call) => (call.body as { operation: string }).operation === 'execution')
+			).toHaveLength(1);
+		} finally {
+			await port.close();
+			await fake.close();
+		}
+	});
+
+	it('distinguishes dispatch receipts from prepared schemas and unavailable effect authority', async () => {
+		const receipt = endpoint.dispatchReceipt.parse(brokerReceipt(request, 'decision-fixture'));
+		for (const schema of [
+			execution.executionBinding,
+			execution.executionConsumption,
+			execution.executionCompletion,
+		]) {
+			expect(schema.safeParse(receipt).success).toBe(false);
+		}
+		const authority = unavailableEffectAuthority('No published per-effect wire operation');
+		const decision = await authority.decide(
+			{ kind: 'tool-call', tool: 'fixture', input: {} },
+			{
+				leaseId: 'not-a-permit',
+				actor: fixture.host.actor,
+				provider: fixture.host.defaultSubmit.providerId,
+				threadId: null,
+				turnId: null,
+				requestId: request.requestId,
+			},
+			new AbortController().signal
+		);
+		expect(decision.decision).toBe('unavailable');
+		expect(effectGranted(decision)).toBe(false);
 	});
 });
 

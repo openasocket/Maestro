@@ -1,7 +1,7 @@
 {
 	"schemaVersion": 1,
-	"task": "MCOMP-00-01",
-	"status": "public-contract-inputs-pinned",
+	"task": "MCOMP-00-02",
+	"status": "consumer-coverage-mapped-external-bindings-unqualified",
 	"owner": "maestro",
 	"foundation": {
 		"artifactId": "MEGA-CONTRACTS-FOUNDATION-BUILD",
@@ -103,7 +103,8 @@
 			"version": 2,
 			"consumerPort": "src/main/enterprise/endpoint-client.ts",
 			"binding": "pending",
-			"note": "Purpose-bound runtime_use and fleet_management remain distinct; imported schemas do not supply registration authority."
+			"note": "V2 purpose-bound runtime_use approval is distinct from fleet_management. Existing v1 registration does not persist purpose or an authenticated actor. Bind in MCOMP-07/MCOMP-13; no schema grants authority.",
+			"pairedVerification": ["MCOMP-14-01"]
 		},
 		{
 			"family": "desktop-policy",
@@ -111,7 +112,9 @@
 			"exports": ["desktopPolicyBinding", "desktopPolicyProjection", "desktopPolicyResult"],
 			"version": 1,
 			"binding": "pending",
-			"note": "Projection schemas constrain authoring; signature, identity and freshness checks remain consumer obligations."
+			"note": "Projection shape exists; endpoint delivery and authenticated mutation-time policy/catalog binding remain pending (DESKTOP-LOCAL/1).",
+			"consumerPort": "src/main/enterprise/settings-policy.ts",
+			"pairedVerification": ["MCOMP-16-01", "MCOMP-24-01"]
 		},
 		{
 			"family": "workflow",
@@ -127,7 +130,138 @@
 			"version": 2,
 			"consumerPort": "src/shared/maestro-lib/managed/workflows.ts",
 			"binding": "pending",
-			"note": "Published v2 ownerEpoch is an opaque string; the existing v1 consumer uses numeric epochs. No coercion or v2 negotiation is enabled by importing."
+			"note": "V2 publishes workflow_claim/renew/settle/release and opaque ownerEpoch. Existing WorkflowOwnerPort has claim only and numeric epochs. MCOMP-17 must implement lifecycle and preserve delegation; never coerce or strip.",
+			"pairedVerification": ["MCOMP-18-01"]
+		},
+		{
+			"family": "negotiation",
+			"module": "./protocol",
+			"exports": ["protocolNegotiationRequest", "negotiateLocalProtocol"],
+			"version": 2,
+			"consumerPort": "src/shared/maestro-lib/managed/endpoint-port.ts",
+			"binding": "pending",
+			"pairedVerification": ["MCOMP-14-01"],
+			"note": "V1 transport remains selected. V2 /v2/invoke requires explicit availability negotiation; importing schemas enables nothing."
+		},
+		{
+			"family": "prepared-execution",
+			"module": "./execution",
+			"exports": ["executionBinding", "executionConsumption", "executionCompletion"],
+			"version": 1,
+			"consumerPort": "src/shared/maestro-lib/managed/host-adapter.ts",
+			"binding": "pending",
+			"pairedVerification": ["MCOMP-14-01"],
+			"note": "No prepare/consume/settle/reconcile local operation. Existing decide() converts broker_dispatched to allow and a local lease: an OPEN defect, not qualified authority. Repair in MCOMP-13-01/03/05 (PREPARED/1)."
+		},
+		{
+			"family": "per-effect",
+			"module": "./execution",
+			"exports": ["executionBinding"],
+			"version": 1,
+			"consumerPort": "src/shared/maestro-lib/managed/effects.ts",
+			"binding": "pending",
+			"pairedVerification": ["MCOMP-14-01", "MCOMP-32-01"],
+			"note": "No request/decision schema for ManagedEffect plus ManagedEffectBinding. Existing unavailableEffectAuthority refuses every effect; EFFECT/1 is only a proposal."
+		},
+		{
+			"family": "delegation",
+			"module": "./protocol",
+			"exports": ["delegationReference", "operationAuthorityReferences", "executionRequestV2"],
+			"version": 2,
+			"consumerPort": "src/shared/maestro-lib/managed/delegation.ts",
+			"binding": "pending",
+			"pairedVerification": ["MCOMP-18-01"],
+			"note": "V2 grant UUID/digest chains differ from local principal chains/grantRef. Resolve authenticated custody and preserve root/parent lineage in MCOMP-17; legacy host refuses nonempty delegation."
+		},
+		{
+			"family": "commands",
+			"module": "./protocol",
+			"exports": ["commandRequestV2", "commandReceiptV2", "localExchangeV2"],
+			"version": 2,
+			"consumerPort": "src/shared/maestro-lib/managed/commands.ts",
+			"binding": "pending",
+			"pairedVerification": ["MCOMP-30-01"],
+			"note": "Signed command correlation exists; v1 cancel/refresh/status cannot carry v2 pause/resume acquisition and settlement. MCOMP-29 binds existing commands.ts journal; no operator_prompt authority."
+		},
+		{
+			"family": "notices",
+			"module": "./local-endpoint",
+			"exports": ["noticeListResult", "inboxRequest", "deviceInboxRecoveryResult"],
+			"version": 1,
+			"consumerPort": "src/main/enterprise/inbox.ts",
+			"binding": "pending",
+			"pairedVerification": ["MCOMP-30-01"],
+			"note": "Reuse endpointInboxPort and private receipt journal. Device recovery schemas exist but no local receipt-recovery operation (RECOVERY-LOCAL/1); notices retain agentInput:false."
+		},
+		{
+			"family": "usage-lifecycle",
+			"module": "./events",
+			"exports": ["runtimeUsageReport", "lifecycleObservation", "spoolCommitReceipt"],
+			"version": 1,
+			"consumerPort": "src/main/enterprise/telemetry.ts",
+			"binding": "pending",
+			"pairedVerification": ["MCOMP-28-01"],
+			"note": "Reuse usage.ts, event-journal.ts and telemetry spool; MCOMP-27 binds real observations and durable receipts without inventing metering."
+		},
+		{
+			"family": "content-evidence",
+			"module": "./content",
+			"exports": ["contentUploadReference", "contentUploadStatus", "traceEvidenceBinding"],
+			"version": 1,
+			"consumerPort": "src/main/enterprise/content.ts",
+			"binding": "pending",
+			"pairedVerification": ["MCOMP-28-01"],
+			"note": "Signed content roles and central HTTP upload schemas exist. Local contentDeliveryStanding remains unavailable; bounded local capture/upload/status transport is missing (CONTENT-LOCAL/1)."
+		},
+		{
+			"family": "fleet-vibes",
+			"module": "./fleet",
+			"exports": ["incomingFleetEvent", "fleetLineage", "fleetGap"],
+			"version": 1,
+			"consumerPort": "src/main/enterprise/vibes.ts",
+			"binding": "pending",
+			"pairedVerification": ["MCOMP-28-01"],
+			"note": "MCOMP-27 maps lifecycle and content provenance via existing metadata/event spool; central TRACE/governance derivation is not a new desktop authority."
+		},
+		{
+			"family": "policy-offline",
+			"module": "./desktop-policy",
+			"exports": ["offlineChoiceResult", "desktopPolicyProjection"],
+			"version": 1,
+			"consumerPort": "src/main/enterprise/policy-status.ts",
+			"binding": "pending",
+			"pairedVerification": ["MCOMP-16-01", "MCOMP-26-01"],
+			"note": "Reuse signed policy and rollback/freshness checks; local approved offline-choice projection operation missing (DESKTOP-LOCAL/1). No schema proves current time or signatures."
+		},
+		{
+			"family": "budget-routing",
+			"module": "./local-endpoint",
+			"exports": ["budgetRequest", "budgetReceipt", "modelInvocationRequest"],
+			"version": 1,
+			"consumerPort": "src/shared/maestro-lib/managed/host-adapter.ts",
+			"binding": "pending",
+			"pairedVerification": ["MCOMP-14-01", "MCOMP-26-01"],
+			"note": "Existing endpoint operations plus finance offlineAllowance and routing modelRoute schemas; prepared consumer must bind reservation, price revision, exact route and credential references (PREPARED/1)."
+		},
+		{
+			"family": "credentials-residual-effects",
+			"module": "./policy",
+			"exports": ["policyConstraints", "signedContentPermissions"],
+			"version": 1,
+			"consumerPort": "src/main/enterprise/credential-custody.ts",
+			"binding": "pending",
+			"pairedVerification": ["MCOMP-20-01", "MCOMP-22-01"],
+			"note": "Reuse credentials.ts and browser/shell/plugin/install/local-effects policy ports. Published general constraints do not define their authenticated local ceiling delivery (DESKTOP-LOCAL/1); no permissive defaults."
+		},
+		{
+			"family": "provider-native",
+			"module": "./execution",
+			"exports": ["providerRouteQualificationPayload", "signedProviderRouteQualification"],
+			"version": 1,
+			"consumerPort": "src/shared/maestro-lib/managed/provider-route.ts",
+			"binding": "pending",
+			"pairedVerification": ["MCOMP-32-01"],
+			"note": "Route receipts bind binary/version/transport/OS/backend; parsing is not verification. Native authenticated peer transport and prepared confinement still need actual platform/provider proofs (PREPARED/1)."
 		}
 	],
 	"validation": {
@@ -150,15 +284,90 @@
 		}
 	},
 	"remainingWork": {
-		"consumerCoverageAndNegativeCases": "MCOMP-00-02",
 		"inputBuildReceipt": "MCOMP-00-03",
-		"scope": "Inventory and schema compatibility only; complete consumer-family mapping and wire extension proposals remain in MCOMP-00-02.",
-		"executionAuthority": "broker_dispatched is a dispatch receipt, never a local spawn permit or per-effect authorization."
+		"scope": "Internal Maestro behavior proceeds through existing typed ports in the named implementation tasks. All new external mappings stay pending/unqualified until published definitions and paired verification agree; proposal operation names are never sent.",
+		"executionAuthority": "broker_dispatched records broker dispatch only; no local spawn permit or per-effect authorization. Existing conversion in host-adapter.ts still requires MCOMP-13 repair."
 	},
 	"qualification": {
 		"paired": false,
 		"provider": false,
 		"native": false,
 		"production": false
+	},
+	"extensionProposals": [
+		{
+			"id": "PREPARED/1",
+			"status": "proposed-not-negotiated",
+			"owner": "mega-maestro",
+			"version": "new versioned capability on protocol 2; package version to be agreed",
+			"operations": "Propose execution_prepare, execution_consume, execution_settle, execution_reconcile; none is shipped.",
+			"missing": "Prepare binds registration/delegation/workflow, request/attempt/run, exact argv/env/cwd/resources and digests, provider/model/route/credential, policy/DLP/budget/egress/backend. Return single-use expiring grant/handle and bindingDigest; consume/settle/reconcile preserve durable unknown outcomes and process/descendant ownership.",
+			"implementationTasks": ["MCOMP-13-01", "MCOMP-13-03", "MCOMP-13-05"],
+			"pairedVerification": ["MCOMP-14-01", "MCOMP-32-01"]
+		},
+		{
+			"id": "EFFECT/1",
+			"status": "proposed-not-negotiated",
+			"owner": "mega-maestro",
+			"version": "new versioned capability on protocol 2; package version to be agreed",
+			"operations": "Propose effect_authorize, effect_settle, effect_reconcile; none is shipped.",
+			"missing": "Exact command/file/permission/tool input plus leaseId, authenticated actor reference, provider/thread/turn/request IDs, effect digest, policy revision, expiry, revocation and idempotency. Correlated allow/deny/unavailable/unknown must remain distinct; a launch/dispatch receipt cannot grant an effect.",
+			"implementationTasks": ["MCOMP-13-02", "MCOMP-13-05"],
+			"pairedVerification": ["MCOMP-14-01", "MCOMP-32-01"]
+		},
+		{
+			"id": "DESKTOP-LOCAL/1",
+			"status": "proposed-not-negotiated",
+			"owner": "mega-maestro",
+			"version": "local delivery extension for desktop-policy schema 1",
+			"operations": "Propose desktop_policy, offline_choices and typed ceiling delivery; no corresponding local endpoint operations are published.",
+			"missing": "Authenticated registration/policy digest and revision, projection freshness, approved provider/model/account/workspace/tool/credential references, and explicit browser/shell/plugin/install/egress/listener/custody constraints. Published UI projection alone cannot authorize host mutations or effects.",
+			"implementationTasks": ["MCOMP-15-01", "MCOMP-15-02", "MCOMP-15-03"],
+			"pairedVerification": [
+				"MCOMP-16-01",
+				"MCOMP-20-01",
+				"MCOMP-22-01",
+				"MCOMP-24-01",
+				"MCOMP-26-01"
+			]
+		},
+		{
+			"id": "CONTENT-LOCAL/1",
+			"status": "proposed-not-negotiated",
+			"owner": "mega-maestro",
+			"version": "local delivery extension for content schema 1",
+			"operations": "Propose content_capture, content_upload_status and content_revoke at the endpoint; central HTTP upload definitions already exist.",
+			"missing": "Signed role/representation/sensitivity permissions, registration/run/policy binding, bounded chunk digest and residency, upload reference, durable acceptance, deletion/revocation and lost-response status. Pending bytes never imply uploaded evidence.",
+			"implementationTasks": ["MCOMP-27-02", "MCOMP-27-04"],
+			"pairedVerification": ["MCOMP-28-01"]
+		},
+		{
+			"id": "RECOVERY-LOCAL/1",
+			"status": "proposed-not-negotiated",
+			"owner": "mega-maestro",
+			"version": "local delivery extension for deviceInboxRecovery schema 1",
+			"operations": "Propose inbox_recover over the local endpoint; central deviceInboxRecoveryInput/Result already exist.",
+			"missing": "Registration-bound campaign/message/idempotency/requestDigest lookup and receipt custody; missing/unbound returns unavailable. No actor selector or automatic replay of private replies.",
+			"implementationTasks": ["MCOMP-29-02", "MCOMP-29-03"],
+			"pairedVerification": ["MCOMP-30-01"]
+		}
+	],
+	"localTestBoundary": {
+		"suite": "src/__tests__/integration/mega-maestro/conformance.test.ts",
+		"inputs": "Required verified extracted contracts and exact Zod dependency; absence/tampering fails before schema loading.",
+		"fixtures": [
+			"src/__tests__/main/enterprise/fakeEndpoint.ts",
+			"Plans/integration-completion/runtime-conformance.json"
+		],
+		"cases": "Public exports/ports/tasks, unsupported version/operation, forged actor/fleet purpose, actual transport replay, expired registration with fresh policy, endpoint denials, lost execution response with no retry, receipt versus permit, absent effect authority; existing public facade conformance remains exercised.",
+		"limits": "Endpoint is a declared local double; denial parsing is not policy enforcement. No provider process, signed production policy, live actor authentication or paired/native security receipt. Legacy broker-receipt-to-lease defect remains OPEN under MCOMP-13.",
+		"results": {
+			"command": "npm test -- src/__tests__/integration/mega-maestro/conformance.test.ts src/__tests__/shared/maestro-lib/managed/contracts.test.ts src/__tests__/shared/maestro-lib/managed/contract-vectors.test.ts src/__tests__/main/enterprise/endpoint-client.test.ts",
+			"passed": 85,
+			"failed": 0,
+			"skipped": 0,
+			"newCases": 11,
+			"evidenceDirectory": ".maestro/playbooks/Working/MCOMP-00-02"
+		}
 	}
 }
