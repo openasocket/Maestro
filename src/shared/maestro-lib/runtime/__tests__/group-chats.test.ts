@@ -10,6 +10,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -329,13 +330,18 @@ describe('runtime group chats', () => {
 				policy: () => ({ sources: [], policyRevision: custody.revision }),
 				backgroundParentContext: parentContext,
 			});
-			const parent = (grant = 'grant-1', fencingToken = 'fence-1') =>
+			const parent = (
+				grant = 'grant-1',
+				fencingToken = 'fence-1',
+				actor = 'source-operator',
+				runId = 'cue-run'
+			) =>
 				createHeadlessSpawnAuthority({
 					installation: runtime.installation,
 					binding: runtime.managedBinding.state(),
 					host: { authority, policy: () => ({ sources: [], policyRevision: 7 }) },
 					origin: 'cue',
-					actor: { kind: 'human', id: 'source-operator' },
+					actor: { kind: 'human', id: actor },
 				}).context({
 					traceId: 'cue-trace',
 					policyRevision: 7,
@@ -343,7 +349,7 @@ describe('runtime group chats', () => {
 						requestId: 'cue-request',
 						idempotencyKey: 'cue-request',
 						attemptId: 'cue-attempt',
-						runId: 'cue-run',
+						runId,
 						rootRunId: 'root-run',
 						parentRunId: 'root-run',
 					},
@@ -440,6 +446,121 @@ describe('runtime group chats', () => {
 				).toBe(true);
 			}
 		);
+
+		describe.each(['participants', 'synthesis'] as const)('round custody at %s', (boundary) => {
+			it.each(['grant', 'fence', 'actor', 'run'] as const)(
+				'refuses a replacement %s until a fresh round',
+				async (change) => {
+					const { runtime, parent, parentContext, asked, authority } = await enrolled();
+					const replacement = parent(
+						change === 'grant' ? 'grant-2' : 'grant-1',
+						change === 'fence' ? 'fence-2' : 'fence-1',
+						change === 'actor' ? 'other-operator' : 'source-operator',
+						change === 'run' ? 'other-run' : 'cue-run'
+					);
+					let firstProcess: string | undefined;
+					parentContext.mockImplementation((processId) => {
+						firstProcess ??= processId;
+						return processId !== firstProcess &&
+							(boundary === 'participants' || roleOf(processId).role !== 'participant')
+							? replacement
+							: parent();
+					});
+					const chat = watch(runtime);
+					const chatId = await startChat(runtime);
+					await chat.idle();
+					const effects = boundary === 'participants' ? 1 : 3;
+					expect(provider.calls).toHaveLength(effects);
+					expect(asked).toHaveLength(effects);
+					expect(authority.live()).toEqual([]);
+					parentContext.mockImplementation(() => replacement);
+					value(await runtime.groupChats.send(chatId, 'Start a fresh round.'));
+					await chat.idle(2);
+					expect(provider.calls).toHaveLength(effects + 4);
+					expect(asked.slice(effects)).toHaveLength(4);
+					if (!replacement.ok) throw new Error('Expected verified fixture parent.');
+					for (const request of asked.slice(effects)) {
+						expect(request.context.workflow).toEqual(replacement.context.workflow);
+						expect(request.context.delegation.grantRef).toBe(
+							replacement.context.delegation.grantRef
+						);
+						expect(request.context.identity.parentRunId).toBe(replacement.context.identity.runId);
+						expect(request.context.delegation.chain).toContainEqual(replacement.context.actor);
+					}
+					expect(authority.live()).toEqual([]);
+				}
+			);
+		});
+
+		it.each(['substitution', 'withdrawal', 'copy', 'read failure'] as const)(
+			'keeps a round refused after a transient parent %s',
+			async (change) => {
+				const { runtime, parent, parentContext, asked } = await enrolled();
+				let substituted = false;
+				parentContext.mockImplementation((processId) => {
+					if (!substituted && roleOf(processId).role === 'participant') {
+						substituted = true;
+						if (change === 'withdrawal')
+							return { ok: false, code: 'unauthenticated', problems: ['Parent withdrawn.'] };
+						if (change === 'copy') return structuredClone(parent());
+						if (change === 'read failure') throw new Error('Fixture parent unreadable.');
+						return parent('other-grant');
+					}
+					return parent();
+				});
+				const chat = watch(runtime);
+				const chatId = await startChat(runtime);
+				await chat.idle();
+				expect(substituted).toBe(true);
+				expect(provider.calls).toHaveLength(1);
+				expect(asked).toHaveLength(1);
+				value(await runtime.groupChats.send(chatId, 'Retry with the original parent.'));
+				await chat.idle(2);
+				expect(provider.calls).toHaveLength(5);
+			}
+		);
+
+		it('accepts re-verification and current policy without changing the round parent', async () => {
+			const { runtime, custody, parent, parentContext, asked } = await enrolled();
+			parentContext.mockImplementation((processId) => {
+				if (roleOf(processId).role === 'participant') custody.revision = 4;
+				return parent();
+			});
+			const chat = watch(runtime);
+			await startChat(runtime);
+			await chat.idle();
+			expect(provider.calls).toHaveLength(4);
+			expect(asked.map((request) => request.context.policyRevision)).toEqual([3, 4, 4, 4]);
+		});
+
+		it('isolates concurrent rounds with different authenticated parents', async () => {
+			const { runtime, parent, parentContext, asked, authority } = await enrolled();
+			const callers = new AsyncLocalStorage<ContextVerification>();
+			parentContext.mockImplementation(
+				() => callers.getStore() ?? { ok: false, code: 'unauthenticated', problems: ['No caller.'] }
+			);
+			const chat = watch(runtime);
+			const [first, second] = await Promise.all([
+				callers.run(parent('room-one'), () => startChat(runtime)),
+				callers.run(parent('room-two'), () => startChat(runtime)),
+			]);
+			await chat.idle(2);
+			expect(provider.calls).toHaveLength(8);
+			expect(asked).toHaveLength(8);
+			for (const [chatId, grant] of [
+				[first, 'room-one'],
+				[second, 'room-two'],
+			]) {
+				const requests = asked.filter((request) =>
+					request.context.identity.requestId.includes(chatId)
+				);
+				expect(requests).toHaveLength(4);
+				expect(requests.every((request) => request.context.delegation.grantRef === grant)).toBe(
+					true
+				);
+			}
+			expect(authority.live()).toEqual([]);
+		});
 
 		it.each(['participants', 'synthesis'] as const)(
 			'rechecks custody before %s and reauthorizes a fresh round',

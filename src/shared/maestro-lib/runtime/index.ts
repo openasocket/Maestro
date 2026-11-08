@@ -19,6 +19,7 @@ import * as fs from 'fs/promises';
 import { AsyncLocalStorage } from 'node:async_hooks';
 
 import { createSleepTracker } from '../../sleepTracking';
+import { canonicalJson } from '../../canonicalJson';
 import { createAgentRepository } from '../agents/repository';
 import type { RepositoryLoadFailure } from '../agents/repository';
 import type { RuleContext, TabDefaults } from '../agents/rules';
@@ -44,6 +45,7 @@ import * as os from 'os';
 import { generateUUID } from '../../uuid';
 import {
 	createContextVerifier,
+	isVerifiedContext,
 	type HostAuthority,
 	type PolicySourceSet,
 } from '../managed/authority';
@@ -725,6 +727,13 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 		required(): boolean;
 		processId?: string;
 	}>();
+	// A user round owns one parent scope across all moderator/participant callbacks. A fresh
+	// create/send gets its own scope; process-specific lookups still run at every launch gate.
+	const groupChatSource = new AsyncLocalStorage<{
+		lookup?: BackgroundManagedOptions['parentContext'];
+		key?: string;
+		invalid?: boolean;
+	}>();
 
 	// Group chats and consults: the processes a round and a question are made of (GD20). The metrics are
 	// one instance because the spawn path starts a turn's clock and the engine finishes it.
@@ -742,7 +751,41 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 		managed: {
 			port: backgroundSpawnPort,
 			get parentContext() {
-				if (!consultSource.getStore()?.required()) return options.managed?.backgroundParentContext;
+				if (!consultSource.getStore()?.required()) {
+					const round = groupChatSource.getStore();
+					const lookup = options.managed?.backgroundParentContext;
+					if (!round || (!round.lookup && !lookup)) return lookup;
+					return (processId: string) => {
+						const refuse = () => {
+							round.invalid = true;
+							return {
+								ok: false,
+								code: 'unauthenticated',
+								problems: ['The group chat parent custody changed; start a fresh round.'],
+							} as const;
+						};
+						if (round.invalid || !lookup || (round.lookup && round.lookup !== lookup))
+							return refuse();
+						round.lookup = lookup;
+						try {
+							const source = lookup(processId);
+							if (!source?.ok || !isVerifiedContext(source.context)) {
+								round.invalid = true;
+								return source;
+							}
+							const parent = source.context;
+							const key = canonicalJson({
+								...parent,
+								verification: { ...parent.verification, verifiedAt: undefined },
+							});
+							round.key ??= key;
+							return round.key === key ? source : refuse();
+						} catch (error) {
+							round.invalid = true;
+							throw error;
+						}
+					};
+				}
 				return (processId: string) => {
 					const source = consultSource.getStore();
 					const custody = source?.processId === processId ? source.read() : null;
@@ -911,7 +954,17 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 		listProviders,
 		turns: turns.api,
 		autoRun: autoRun.api,
-		groupChats: groupChats.api,
+		groupChats: {
+			...groupChats.api,
+			create: (input) =>
+				groupChatSource.run({ lookup: options.managed?.backgroundParentContext }, () =>
+					groupChats.api.create(input)
+				),
+			send: (chatId, text) =>
+				groupChatSource.run({ lookup: options.managed?.backgroundParentContext }, () =>
+					groupChats.api.send(chatId, text)
+				),
+		},
 		consults: {
 			api: {
 				ask: (input) => {
