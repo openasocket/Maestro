@@ -42,13 +42,17 @@ import {
 import {
 	describeCredentialRefusals,
 	isApprovedCredentialSet,
+	managedAccountRef,
 	type ApprovedCredentialSet,
+	type CredentialLaunchBinding,
 } from '../managed/credentials';
 import {
 	applyManagedEnvCeiling,
 	buildAgentEnvironment,
 	managedArgsProblems,
 	managedPermissionModeProblem,
+	managedRouteProblems,
+	PROVIDER_ROUTE_ENV_NAMES,
 	resolveAgentEnvVars,
 	type AgentEnvSurface,
 	type LaunchPermissionMode,
@@ -65,6 +69,7 @@ import {
 	type SshLaunchTarget,
 	type SshRemoteSettingsStore,
 } from './ssh-remote-resolver';
+import { getAgentDefinition } from '../providers/definitions';
 
 /** The parts of a provider definition a launch plan reads. */
 export interface LaunchPlanAgent extends PromptDeliveryAgent {
@@ -176,6 +181,11 @@ export interface ManagedLaunchInput {
 	 * literal, a cast) is refused as unbound.
 	 */
 	credentials?: ApprovedCredentialSet;
+	/** Current authenticated host consumer, read anew for this launch, never copied from a ref. */
+	credentialConsumer?: Pick<
+		CredentialLaunchBinding,
+		'tenantId' | 'actorId' | 'agentId' | 'policyRevision'
+	>;
 	/** The launch instant, epoch milliseconds, for the expiry re-check. Defaults to `Date.now()`. */
 	now?: number;
 }
@@ -328,6 +338,27 @@ function managedCredentialsFor(
 	}
 	// Bound earlier, launched now: a reference that lapsed in between is as refused as one that never bound.
 	const now = managed.now ?? Date.now();
+	const consumer = managed.credentialConsumer;
+	const route = managed.route;
+	if (
+		!Number.isFinite(now) ||
+		now < Date.parse(set.boundAt) ||
+		!consumer ||
+		(['tenantId', 'actorId', 'agentId', 'policyRevision'] as const).some(
+			(key) => consumer[key] !== set.binding[key]
+		) ||
+		set.binding.providerId !== route.providerId ||
+		set.binding.destination !== route.baseUrl ||
+		set.binding.accountRef !==
+			(route.accountDir === null ? null : managedAccountRef(route.providerId, route.accountDir))
+	) {
+		return {
+			ok: false,
+			reason: 'managed-credential-refused',
+			error:
+				'The credential binding no longer matches the current consumer, policy, route, account or launch time.',
+		};
+	}
 	const lapsed = set.approved.filter((entry) => now >= Date.parse(entry.expiresAt));
 	if (lapsed.length > 0) {
 		return {
@@ -335,6 +366,15 @@ function managedCredentialsFor(
 			reason: 'managed-credential-refused',
 			error: `A credential reference for this launch expired before it started - ${lapsed.map((entry) => `${entry.refId} (${entry.expiresAt})`).join(', ')}`,
 		};
+	}
+	for (const entry of set.approved) {
+		if (!PROVIDER_ROUTE_ENV_NAMES[route.providerId]?.credential.includes(entry.envVar)) {
+			return {
+				ok: false,
+				reason: 'managed-route-refused',
+				error: `${entry.envVar} is not a credential variable ${route.providerId} reads.`,
+			};
+		}
 	}
 	return { ok: true, set };
 }
@@ -380,6 +420,15 @@ export function buildAgentLaunchPlan(input: AgentLaunchInput): AgentLaunchPlanRe
 	if (target.kind === 'unresolved') {
 		return { ok: false, reason: target.reason, error: target.message };
 	}
+	if (input.managed) {
+		const problems = managedRouteProblems(input.managed.route);
+		if (problems.length)
+			return {
+				ok: false,
+				reason: 'managed-route-refused',
+				error: `The managed route is invalid - ${problems.join('; ')}`,
+			};
+	}
 	const managedCredentials = managedCredentialsFor(input.managed);
 	if (!managedCredentials.ok) return managedCredentials;
 	const approvedCredentials = managedCredentials.set;
@@ -395,11 +444,11 @@ export function buildAgentLaunchPlan(input: AgentLaunchInput): AgentLaunchPlanRe
 	const route = input.managed?.route;
 	const requestedMode = defaultLaunchPermissionMode(input);
 	if (route) {
-		if (agent?.id !== undefined && agent.id !== route.providerId) {
+		if (agent?.id !== route.providerId) {
 			return {
 				ok: false,
 				reason: 'managed-route-refused',
-				error: `The policy routes this launch to ${route.providerId}, not ${agent.id}.`,
+				error: `The policy routes this launch to ${route.providerId}, not ${agent?.id ?? 'an unknown provider'}.`,
 			};
 		}
 		// The mode itself, before the flags that ask for it: a provider whose
@@ -441,7 +490,8 @@ export function buildAgentLaunchPlan(input: AgentLaunchInput): AgentLaunchPlanRe
 		// policy's pins are there. Credential values are never in it.
 		const shown: NodeJS.ProcessEnv = { ...envVars };
 		applyManagedEnvCeiling(shown, { ceiling: route, credentialEnvVars: {} });
-		Object.assign(shown, input.maestroEnvVars ?? {});
+		for (const [key, value] of Object.entries(input.maestroEnvVars ?? {}))
+			if (key.startsWith('MAESTRO_')) shown[key] = value;
 		const kept: Record<string, string> = {};
 		for (const [key, value] of Object.entries(shown)) if (value !== undefined) kept[key] = value;
 		envVars = Object.keys(kept).length > 0 ? kept : undefined;
@@ -461,9 +511,10 @@ export function buildAgentLaunchPlan(input: AgentLaunchInput): AgentLaunchPlanRe
 			: undefined;
 
 	const knowledgeDirectory = envVars?.[TRANSLATION_KNOWLEDGE_ENV_VAR];
+	const modelArgs = agent?.modelArgs ?? (route && getAgentDefinition(route.providerId)?.modelArgs);
 	const pinnedModelArgs =
-		route?.model && agent?.modelArgs && !input.args.some((arg) => arg === '--model' || arg === '-m')
-			? agent.modelArgs(route.model)
+		route?.model && modelArgs && !input.args.some((arg) => /^(--model|-m)(=|$)/.test(arg))
+			? modelArgs(route.model)
 			: [];
 	const launchArgs =
 		target.kind === 'local' && agent?.id === 'claude-code' && knowledgeDirectory
@@ -474,6 +525,15 @@ export function buildAgentLaunchPlan(input: AgentLaunchInput): AgentLaunchPlanRe
 					JSON.stringify({ autoMemoryDirectory: path.join(knowledgeDirectory, 'memory') }),
 				]
 			: [...input.args, ...pinnedModelArgs];
+	if (route) {
+		const problems = managedArgsProblems(launchArgs, route);
+		if (problems.length)
+			return {
+				ok: false,
+				reason: 'managed-route-refused',
+				error: `The final launch arguments route around the policy - ${problems.join('; ')}`,
+			};
+	}
 	const effectivePrompt =
 		target.kind === 'local'
 			? bindTranslationKnowledge(input.prompt, envVars?.[TRANSLATION_KNOWLEDGE_ENV_VAR])

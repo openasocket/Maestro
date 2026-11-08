@@ -7,7 +7,7 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
 	bindApprovedCredentials,
@@ -23,7 +23,11 @@ import {
 	isManagedLaunchRefusal,
 	type AgentLaunchInput,
 } from '../../../../shared/maestro-lib/launch/launch-plan';
-import type { ManagedRouteCeiling } from '../../../../shared/maestro-lib/launch/env';
+import {
+	managedArgsProblems,
+	type ManagedRouteCeiling,
+} from '../../../../shared/maestro-lib/launch/env';
+import { buildAgentArgs } from '../../../../shared/maestro-lib/launch/agent-args';
 import { MANAGED_CONTRACT_VERSION } from '../../../../shared/maestro-lib/managed/types';
 import { getAgentDefinition } from '../../../../shared/maestro-lib/providers/definitions';
 import { getAgentCapabilities } from '../../../../shared/maestro-lib/providers/capabilities';
@@ -136,6 +140,21 @@ describe('bindApprovedCredentials', () => {
 		expect(describeCredentialRefusals(set.refused)).toContain(reason);
 	});
 
+	it('freezes credential entries as well as the set and rejects invalid validity windows', () => {
+		const set = bindApprovedCredentials(
+			[ref(), ref({ refId: 'bad', status: 'revoked' })],
+			binding()
+		);
+		expect(Object.isFrozen(set.approved[0])).toBe(true);
+		expect(Object.isFrozen(set.refused[0])).toBe(true);
+		expect(() => {
+			set.approved[0].secretName = 'OTHER';
+		}).toThrow();
+		expect(managedCredentialRefProblems(ref({ expiresAt: ref().issuedAt }))).not.toEqual([]);
+		expect(managedCredentialRefProblems(ref({ policyRevision: -1 }))).not.toEqual([]);
+		expect(() => bindApprovedCredentials([ref()], binding({ now: NaN }))).toThrow(RangeError);
+	});
+
 	it('answers every reference, refuses a second value for one variable, and never carries a value', () => {
 		const set = bindApprovedCredentials(
 			[
@@ -197,6 +216,19 @@ describe('the launch plan under management', () => {
 		sessionCustomEnvVars: { ANTHROPIC_API_KEY: 'personal-key-on-the-agent' },
 		secretLookup: { env: { ANTHROPIC_API_KEY: 'stale-shell-key' }, runSecretsDir: runSecrets },
 		...overrides,
+		...(overrides.managed
+			? {
+					managed: {
+						credentialConsumer: {
+							tenantId: 'tenant-a',
+							actorId: 'actor-1',
+							agentId: 'agent-1',
+							policyRevision: 7,
+						},
+						...overrides.managed,
+					},
+				}
+			: {}),
 	});
 
 	it('delivers an approved reference under its env var, over the user layers, on the desktop surface too', () => {
@@ -342,5 +374,237 @@ describe('the launch plan under management', () => {
 			expect(result.reason).toBe('managed-credential-remote');
 			expect(result.error).not.toContain(CANARY);
 		}
+	});
+	it.each([
+		{ tenantId: 'other' },
+		{ actorId: 'other' },
+		{ agentId: 'other' },
+		{ policyRevision: 8 },
+		{ policyRevision: null },
+	])('rechecks the current authenticated consumer before secret lookup: %j', (changed) => {
+		const lookup = vi.fn(() => {
+			throw new Error('must not read secrets');
+		});
+		const result = buildAgentLaunchPlan(
+			input({
+				secretLookup: { env: new Proxy({}, { get: lookup }), runSecretsDir: null },
+				managed: {
+					route: ROUTE,
+					credentials: bindApprovedCredentials([ref()], binding()),
+					now: NOW,
+					credentialConsumer: { ...binding(), ...changed },
+				},
+			})
+		);
+		expect(result).toMatchObject({ ok: false, reason: 'managed-credential-refused' });
+		expect(lookup).not.toHaveBeenCalled();
+	});
+
+	it.each([NaN, Infinity, NOW - 1])('refuses an invalid or reversed launch clock: %s', (now) => {
+		expect(
+			buildAgentLaunchPlan(
+				input({
+					managed: {
+						route: ROUTE,
+						credentials: bindApprovedCredentials([ref()], binding()),
+						now,
+					},
+				})
+			)
+		).toMatchObject({ ok: false, reason: 'managed-credential-refused' });
+	});
+
+	it('requires current consumer context independently of the bound reference', () => {
+		expect(
+			buildAgentLaunchPlan(
+				input({
+					managed: {
+						route: ROUTE,
+						credentials: bindApprovedCredentials([ref()], binding()),
+						now: NOW,
+						credentialConsumer: undefined,
+					},
+				})
+			)
+		).toMatchObject({ ok: false, reason: 'managed-credential-refused' });
+	});
+
+	it('binds account and destination to the actual route and isolates two account launches', () => {
+		for (const name of ['one', 'two']) {
+			const accountDir = path.join(tmp, name);
+			const accountRef = managedAccountRef('claude-code', accountDir);
+			const destination = `https://${name}.example`;
+			const source = {
+				kind: 'server-secret' as const,
+				secretName: `KEY_${name}`,
+				envVar: 'ANTHROPIC_API_KEY',
+			};
+			fs.writeFileSync(path.join(runSecrets, source.secretName), `value-${name}`);
+			const credentials = bindApprovedCredentials(
+				[
+					ref({
+						accountRef,
+						audience: {
+							providerId: 'claude-code',
+							destination,
+						},
+						source,
+					}),
+				],
+				binding({ accountRef, destination })
+			);
+			const route = { ...ROUTE, accountDir, baseUrl: destination };
+			const result = buildAgentLaunchPlan(input({ managed: { route, credentials, now: NOW } }));
+			if (!result.ok) throw new Error(result.error);
+			expect(result.plan.env?.ANTHROPIC_API_KEY).toBe(`value-${name}`);
+			expect(result.plan.env?.CLAUDE_CONFIG_DIR).toBe(accountDir);
+			for (const changed of [
+				{ accountDir: path.join(tmp, 'other') },
+				{ baseUrl: 'https://other.example' },
+			]) {
+				expect(
+					buildAgentLaunchPlan(
+						input({
+							managed: {
+								route: { ...route, ...changed },
+								credentials,
+								now: NOW,
+							},
+						})
+					)
+				).toMatchObject({ ok: false, reason: 'managed-credential-refused' });
+			}
+		}
+	});
+
+	it.each(['desktop', 'cli', 'cue'] as const)('bounds every environment layer on %s', (surface) => {
+		const overrides = {
+			CLAUDE_CODE_OAUTH_TOKEN: 'personal-oauth',
+			ANTHROPIC_BASE_URL: 'https://evil.example',
+			OPENCODE_CONFIG_CONTENT: '{"permission":"allow"}',
+			CODEX_AUTH_JSON: 'personal',
+			ENGINE_ONLY_SECRET: 'engine-secret',
+			NODE_OPTIONS: '--require=evil',
+			https_proxy: 'https://evil.example',
+			CLAUDE_CODE_USE_BEDROCK: '1',
+		};
+		try {
+			for (const [key, value] of Object.entries(overrides)) vi.stubEnv(key, value);
+			const result = buildAgentLaunchPlan(
+				input({
+					surface,
+					agentCustomEnvVars: overrides,
+					sessionCustomEnvVars: overrides,
+					maestroEnvVars: { ...overrides, MAESTRO_CALLER_AGENT_ID: 'agent-1' },
+					managed: {
+						route: ROUTE,
+						credentials: bindApprovedCredentials([ref()], binding()),
+						now: NOW,
+					},
+				})
+			);
+			if (!result.ok) throw new Error(result.error);
+			for (const key of Object.keys(overrides)) {
+				expect(result.plan.env?.[key]).toBeUndefined();
+				expect(result.plan.envVars?.[key]).toBeUndefined();
+			}
+			expect(result.plan.env?.ANTHROPIC_API_KEY).toBe(CANARY);
+			expect(result.plan.env?.MAESTRO_CALLER_AGENT_ID).toBe('agent-1');
+			const { env: _env, ...shown } = result.plan;
+			expect(JSON.stringify(shown)).not.toContain(CANARY);
+		} finally {
+			vi.unstubAllEnvs();
+		}
+	});
+
+	it.each([
+		{ providerId: 'unknown' },
+		{ permissionMode: 'invalid' },
+		{ login: 'invalid' },
+		{ baseUrl: 'file:///secret' },
+		{ baseUrl: 'https://user:password@example.com' },
+		{ model: '' },
+		{ accountDir: '' },
+	])('rejects invalid routes before resolving credentials: %j', (changed) => {
+		expect(
+			buildAgentLaunchPlan(
+				input({
+					managed: {
+						route: { ...ROUTE, ...changed } as ManagedRouteCeiling,
+						now: NOW,
+					},
+				})
+			)
+		).toMatchObject({ ok: false, reason: 'managed-route-refused' });
+	});
+
+	it('builds a permitted standard Codex batch with a pinned model without bypass or read-only flags', () => {
+		const agent = {
+			...getAgentDefinition('codex')!,
+			capabilities: getAgentCapabilities('codex'),
+			available: true,
+		};
+		const route: ManagedRouteCeiling = {
+			...ROUTE,
+			providerId: 'codex',
+			model: 'approved-model',
+			login: 'provider-login',
+			permissionMode: 'standard',
+		};
+		const args = buildAgentArgs(agent, {
+			baseArgs: [],
+			forceBatchMode: true,
+			permissionMode: 'standard',
+			managedCeiling: route,
+		});
+		expect(args).toContain('--skip-git-repo-check');
+		expect(args).not.toContain('--dangerously-bypass-approvals-and-sandbox');
+		expect(args).not.toContain('read-only');
+		const result = buildAgentLaunchPlan(
+			input({ agent, args, permissionMode: 'standard', managed: { route } })
+		);
+		if (!result.ok) throw new Error(result.error);
+		expect(result.plan.permission).toEqual({ requested: 'standard', ceiling: 'standard' });
+		expect(result.plan.args).toEqual(expect.arrayContaining(['-m', 'approved-model']));
+		const explicit = buildAgentArgs(agent, {
+			baseArgs: ['--dangerously-bypass-approvals-and-sandbox'],
+			forceBatchMode: true,
+			permissionMode: 'standard',
+			managedCeiling: route,
+		});
+		expect(
+			buildAgentLaunchPlan(input({ agent, args: explicit, managed: { route } }))
+		).toMatchObject({ ok: false, reason: 'managed-route-refused' });
+		expect(
+			buildAgentArgs(agent, { baseArgs: [], forceBatchMode: true, permissionMode: 'standard' })
+		).toContain('--dangerously-bypass-approvals-and-sandbox');
+	});
+
+	it.each(
+		[
+			['-cmodel_provider="other"'],
+			['--config', '"model_providers".evil.base_url="https://evil.example"'],
+			['-pother'],
+			['--oss'],
+			['--config', 'approval_policy="never"'],
+			['-sdanger-full-access'],
+			['--dangerously-bypass-approvals-and-sandbox=true'],
+		].map((args) => [args])
+	)('refuses route or permission overrides: %j', (args) => {
+		expect(
+			managedArgsProblems(args, { ...ROUTE, providerId: 'codex', permissionMode: 'standard' })
+		).not.toEqual([]);
+	});
+
+	it('refuses conflicting read-only duplicates and accepts standard mode flags unchanged', () => {
+		expect(
+			managedArgsProblems(['--permission-mode', 'plan', '--permission-mode', 'default'], {
+				...ROUTE,
+				permissionMode: 'readonly',
+			})
+		).not.toEqual([]);
+		const args = ['--permission-mode', 'default'];
+		expect(managedArgsProblems(args, { ...ROUTE, permissionMode: 'standard' })).toEqual([]);
+		expect(args).toEqual(['--permission-mode', 'default']);
 	});
 });

@@ -48,6 +48,19 @@ function input(overrides: Partial<AgentLaunchInput> = {}): AgentLaunchInput {
 		prompt: 'fix the bug',
 		isWindowsHost: false,
 		...overrides,
+		...(overrides.managed
+			? {
+					managed: {
+						credentialConsumer: {
+							tenantId: 't',
+							actorId: 'a',
+							agentId: 'agent-1',
+							policyRevision: 1,
+						},
+						...overrides.managed,
+					},
+				}
+			: {}),
 	};
 }
 

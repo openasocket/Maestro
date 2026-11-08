@@ -242,7 +242,16 @@ export function buildAgentArgs(
 		// that conflict with read-only intent, regardless of whether the agent has
 		// CLI-enforced read-only mode or prompt-only enforcement.
 		if (!isReadOnly) {
-			finalArgs = [...finalArgs, ...agent.batchModeArgs];
+			// Standard managed turns keep the provider's prompting mode. Only
+			// remove bypass defaults we introduce here; caller args stay intact
+			// so the launch guard can refuse an explicit widening request.
+			const batchArgs =
+				options.managedCeiling && !isFullAccess
+					? filterYoloArgs(agent.batchModeArgs, {
+							yoloModeArgs: agent.fullAccessArgs ?? agent.yoloModeArgs,
+						})
+					: agent.batchModeArgs;
+			finalArgs = [...finalArgs, ...batchArgs];
 		}
 	}
 

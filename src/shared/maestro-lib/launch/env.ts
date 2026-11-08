@@ -4,7 +4,7 @@ import { buildExpandedPath, detectNodeVersionManagerBinPaths } from '../../pathU
 import { isWindows } from '../../platformDetection';
 import { DEFAULT_QUERY_SOURCE, QUERY_SOURCE_ENV_VAR, type QuerySource } from '../../querySource';
 import { buildSpawnPath, STANDARD_UNIX_PATHS } from './spawn-path';
-import { isBlankEnvKey, isBlankEnvValue } from '../../agentEnvironment';
+import { isBlankEnvKey, isBlankEnvValue, isSecretEnvKey } from '../../agentEnvironment';
 import { CALLER_AGENT_ID_ENV_VAR, CALLER_TAB_ID_ENV_VAR } from '../../agentDelegation';
 import { PROVIDER_ENV_VAR_SUGGESTIONS } from '../../envVarCatalog';
 import { MANAGED_DELEGATION_ENV_VAR } from '../managed/delegation';
@@ -508,14 +508,25 @@ export interface BuildAgentEnvironmentOptions extends AgentEnvLayers {
  * surface that launches it (see {@link AgentEnvSurface}).
  */
 export function buildAgentEnvironment(options: BuildAgentEnvironmentOptions): NodeJS.ProcessEnv {
+	let env: NodeJS.ProcessEnv;
 	switch (options.surface) {
 		case 'cli':
-			return buildCliAgentEnvironment(options);
+			env = buildCliAgentEnvironment(options);
+			break;
 		case 'cue':
-			return buildCueAgentEnvironment(options);
+			env = buildCueAgentEnvironment(options);
+			break;
 		default:
-			return buildDesktopAgentEnvironment(options);
+			env = buildDesktopAgentEnvironment(options);
 	}
+	if (options.managed) {
+		// Even the display/facts layer may contain collected user env. Bound it last.
+		applyManagedEnvCeiling(env, options.managed);
+		for (const [key, value] of Object.entries(options.maestroEnvVars ?? {}))
+			if (key.startsWith('MAESTRO_')) env[key] = value;
+		env[QUERY_SOURCE_ENV_VAR] = options.querySource ?? DEFAULT_QUERY_SOURCE;
+	}
+	return env;
 }
 
 /**
@@ -530,22 +541,6 @@ export function buildAgentEnvironment(options: BuildAgentEnvironmentOptions): No
  * `buildChildProcessEnv`). A blank value unsets the variable and `~/` expands.
  */
 function buildDesktopAgentEnvironment(options: BuildAgentEnvironmentOptions): NodeJS.ProcessEnv {
-	if (options.managed) {
-		// The user layers first (as below), the ceiling over them, then
-		// Maestro's facts: the ceiling must see what the user set and must not
-		// be able to touch what Maestro states afterwards.
-		const env = buildChildProcessEnv(
-			resolveAgentEnvVars(options) ?? {},
-			options.isResuming,
-			options.globalShellEnvVars,
-			options.extraPathDirs,
-			options.querySource
-		);
-		applyManagedEnvCeiling(env, options.managed);
-		Object.assign(env, options.maestroEnvVars ?? {});
-		env[QUERY_SOURCE_ENV_VAR] = options.querySource ?? DEFAULT_QUERY_SOURCE;
-		return env;
-	}
 	const record = {
 		...(resolveAgentEnvVars(options) ?? {}),
 		...(options.maestroEnvVars ?? {}),
@@ -594,7 +589,6 @@ function buildCliAgentEnvironment(options: BuildAgentEnvironmentOptions): NodeJS
 	}
 	Object.assign(env, options.sessionCustomEnvVars ?? options.agentCustomEnvVars ?? {});
 	Object.assign(env, options.readOnlyEnvOverrides ?? {});
-	if (options.managed) applyManagedEnvCeiling(env, options.managed);
 	Object.assign(env, options.maestroEnvVars ?? {});
 	env[QUERY_SOURCE_ENV_VAR] = options.querySource ?? DEFAULT_QUERY_SOURCE;
 	return env;
@@ -626,7 +620,6 @@ function buildCueAgentEnvironment(options: BuildAgentEnvironmentOptions): NodeJS
 		PATH: buildSpawnPath(options.extraPathDirs),
 		...(resolveAgentEnvVars(options) ?? {}),
 	};
-	if (options.managed) applyManagedEnvCeiling(env, options.managed);
 	Object.assign(env, options.maestroEnvVars ?? {});
 	env[QUERY_SOURCE_ENV_VAR] = options.querySource ?? DEFAULT_QUERY_SOURCE;
 	return env;
@@ -651,12 +644,7 @@ export interface ProviderRouteEnvNames {
 
 export const PROVIDER_ROUTE_ENV_NAMES: Readonly<Record<string, ProviderRouteEnvNames>> = {
 	'claude-code': {
-		credential: [
-			'ANTHROPIC_API_KEY',
-			'ANTHROPIC_AUTH_TOKEN',
-			'CLAUDE_CODE_USE_BEDROCK',
-			'CLAUDE_CODE_USE_VERTEX',
-		],
+		credential: ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN'],
 		baseUrl: 'ANTHROPIC_BASE_URL',
 		model: 'ANTHROPIC_MODEL',
 		accountDir: 'CLAUDE_CONFIG_DIR',
@@ -689,6 +677,32 @@ export const PROVIDER_ROUTE_ENV_NAMES: Readonly<Record<string, ProviderRouteEnvN
 
 /** Every route-controlling name of every provider, once. */
 export const ALL_ROUTE_ENV_NAMES: readonly string[] = [
+	'CLAUDE_CODE_USE_BEDROCK',
+	'CLAUDE_CODE_USE_VERTEX',
+	'CLAUDE_CODE_USE_FOUNDRY',
+	'CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR',
+	'CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR',
+	'OPENCODE_CONFIG',
+	'OPENCODE_CONFIG_CONTENT',
+	'OPENCODE_CONFIG_DIR',
+	'OPENCODE_PERMISSION',
+	'CODEX_AUTH_JSON',
+	'CODEX_API_KEY',
+	'CODEX_CONFIG',
+	'CODEX_CONFIG_PATH',
+	'ANTHROPIC_CUSTOM_HEADERS',
+	'ANTHROPIC_DEFAULT_SONNET_MODEL',
+	'ANTHROPIC_DEFAULT_OPUS_MODEL',
+	'ANTHROPIC_DEFAULT_HAIKU_MODEL',
+	'HTTP_PROXY',
+	'HTTPS_PROXY',
+	'ALL_PROXY',
+	'NODE_OPTIONS',
+	'NODE_EXTRA_CA_CERTS',
+	'NODE_TLS_REJECT_UNAUTHORIZED',
+	'AWS_PROFILE',
+	'AWS_CONFIG_FILE',
+	'GOOGLE_APPLICATION_CREDENTIALS',
 	...new Set(
 		Object.values(PROVIDER_ROUTE_ENV_NAMES).flatMap((names) => [
 			...names.credential,
@@ -844,7 +858,11 @@ export function applyManagedEnvCeiling(
 	for (const name of ALL_ROUTE_ENV_NAMES) strip(name);
 	for (const name of MANAGED_AUTHORITY_ENV_NAMES) strip(name);
 	for (const key of Object.keys(env)) {
-		if (key.toUpperCase().startsWith(MANAGED_AUTHORITY_ENV_PREFIX)) {
+		if (
+			key.toUpperCase().startsWith(MANAGED_AUTHORITY_ENV_PREFIX) ||
+			isSecretEnvKey(key) ||
+			['http_proxy', 'https_proxy', 'all_proxy'].includes(key)
+		) {
 			delete env[key];
 			removed.add(key);
 		}
@@ -862,13 +880,15 @@ export function applyManagedEnvCeiling(
 		env[name] = value;
 		pinned.push(name);
 	};
-	pin(names?.model ?? null, ceiling.model, 'model');
+	// Some providers pin their model through argv instead of an environment variable.
+	if (names?.model || !getAgentDefinition(ceiling.providerId)?.modelArgs)
+		pin(names?.model ?? null, ceiling.model, 'model');
 	pin(names?.baseUrl ?? null, ceiling.baseUrl, 'base URL');
 	pin(names?.accountDir ?? null, ceiling.accountDir, 'account home');
 
 	const delivered = Object.keys(credentialEnvVars).sort();
 	for (const name of delivered) {
-		if (names && !names.credential.includes(name)) {
+		if (!names?.credential.includes(name)) {
 			problems.push(`${name} is not a credential variable ${ceiling.providerId} reads`);
 			continue;
 		}
@@ -914,6 +934,7 @@ const FULL_ACCESS_MODE_VALUES: Readonly<Record<string, readonly string[]>> = {
 	'--permission-mode': ['bypassPermissions'],
 	'--approval-mode': ['yolo'],
 	'--sandbox': ['danger-full-access'],
+	'-s': ['danger-full-access'],
 	'--ask-for-approval': ['never'],
 	'-a': ['never'],
 };
@@ -967,11 +988,15 @@ function carriesReadOnlyArgs(args: readonly string[], readOnlyArgs: readonly str
 		const next = readOnlyArgs[i + 1];
 		const value = next !== undefined && !next.startsWith('-') ? next : null;
 		if (value !== null) i += 1;
-		const present = args.some((arg, index) => {
-			if (value === null) return arg === flag;
-			return arg === `${flag}=${value}` || (arg === flag && args[index + 1] === value);
+		const occurrences = args.flatMap((arg, index) => {
+			const candidate =
+				flag === '--sandbox'
+					? arg.replace(/^-s(?==|$)/, '--sandbox').replace(/^-s([^=].*)$/, '--sandbox=$1')
+					: arg;
+			if (candidate === flag) return [value === null ? null : args[index + 1]];
+			return candidate.startsWith(`${flag}=`) ? [candidate.slice(flag.length + 1)] : [];
 		});
-		if (!present) return false;
+		if (!occurrences.length || occurrences.some((entry) => entry !== value)) return false;
 	}
 	return true;
 }
@@ -992,7 +1017,7 @@ export function managedPermissionModeProblem(
 
 /** Codex `-c key=value` keys that choose the provider, the origin or the credential. */
 const CODEX_ROUTE_CONFIG_KEYS =
-	/^(model|model_provider|model_providers\b.*|base_url|openai_base_url|api_key|chatgpt_base_url|experimental_use_.*auth.*)\s*=/i;
+	/^(model|model_provider|model_providers\b.*|profiles\b.*|base_url|openai_base_url|api_key|chatgpt_base_url|experimental_use_.*auth.*|forced_login_method|cli_auth_credentials_store|approval_policy|sandbox_mode|sandbox_workspace_write\b.*)\s*=/i;
 /** Claude `--settings` keys that choose the credential, the model or the environment. */
 const CLAUDE_ROUTE_SETTINGS_KEYS = [
 	'env',
@@ -1000,7 +1025,38 @@ const CLAUDE_ROUTE_SETTINGS_KEYS = [
 	'model',
 	'awsAuthRefresh',
 	'awsCredentialExport',
+	'permissions',
+	'disableAllHooks',
 ];
+
+/** Validate a host route before a launch resolves any credential. */
+export function managedRouteProblems(ceiling: ManagedRouteCeiling): string[] {
+	if (!ceiling || typeof ceiling !== 'object') return ['the managed route is missing'];
+	if (!Object.prototype.hasOwnProperty.call(PROVIDER_ROUTE_ENV_NAMES, ceiling.providerId))
+		return ['the provider has no managed route environment mapping'];
+	if (
+		!['approved-credential', 'provider-login'].includes(ceiling.login) ||
+		(ceiling.permissionMode !== null &&
+			!Object.prototype.hasOwnProperty.call(PERMISSION_MODE_WIDTH, ceiling.permissionMode)) ||
+		[ceiling.model, ceiling.baseUrl, ceiling.accountDir].some(
+			(value) =>
+				value !== null && (typeof value !== 'string' || !value.trim() || value.includes('\0'))
+		)
+	)
+		return ['the managed route is malformed'];
+	if (ceiling.accountDir !== null && !path.isAbsolute(ceiling.accountDir))
+		return ['the managed account home must be resolved to an absolute path'];
+	if (ceiling.baseUrl !== null) {
+		try {
+			const url = new URL(ceiling.baseUrl);
+			if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.hash)
+				return ['the managed route has an invalid gateway URL'];
+		} catch {
+			return ['the managed route has an invalid gateway URL'];
+		}
+	}
+	return [];
+}
 
 /**
  * Arguments that would route around the ceiling. Checked by name, not by
@@ -1027,18 +1083,32 @@ export function managedArgsProblems(
 ): string[] {
 	const problems: string[] = [];
 	const modelFlags = new Set(['--model', '-m']);
-	const forbiddenFlags = new Set(['--api-key', '--base-url', '--profile', '--auth-token']);
+	const forbiddenFlags = new Set([
+		'--api-key',
+		'--base-url',
+		'--profile',
+		'--auth-token',
+		'--config-dir',
+		'--settings-file',
+		'--oss',
+		'--local-provider',
+	]);
+	if (ceiling.providerId === 'codex') forbiddenFlags.add('-p');
 	const pinnedMode = ceiling.permissionMode;
 	const vocabulary = permissionVocabularyOf(ceiling.providerId);
 	const fullAccess = new Set(vocabulary.fullAccessFlags);
 	const forbidsFull = pinnedMode !== null && !permissionModeWithinCeiling('full', pinnedMode);
 	for (let i = 0; i < args.length; i += 1) {
-		const arg = args[i];
+		const raw = args[i];
+		const arg =
+			ceiling.providerId === 'codex' && /^-[cmspa][^=]/.test(raw)
+				? `${raw.slice(0, 2)}=${raw.slice(2)}`
+				: raw;
 		const eq = arg.indexOf('=');
 		const inline = eq > 0 && arg.startsWith('-');
 		const flag = inline ? arg.slice(0, eq) : arg;
 		const value = inline ? arg.slice(eq + 1) : args[i + 1];
-		if (forbidsFull && fullAccess.has(arg)) {
+		if (forbidsFull && fullAccess.has(flag)) {
 			problems.push(
 				`${arg} asks for full access but the policy's ceiling allows at most "${pinnedMode}" for ${ceiling.providerId}`
 			);
@@ -1055,7 +1125,7 @@ export function managedArgsProblems(
 			continue;
 		}
 		if (modelFlags.has(flag)) {
-			if (ceiling.model !== null && value !== ceiling.model) {
+			if (value === undefined || ceiling.model === null || value !== ceiling.model) {
 				problems.push(`${flag} names ${value ?? '(nothing)'} but the policy pins ${ceiling.model}`);
 			}
 			continue;
@@ -1065,7 +1135,7 @@ export function managedArgsProblems(
 			continue;
 		}
 		if ((flag === '-c' || flag === '--config') && typeof value === 'string') {
-			if (CODEX_ROUTE_CONFIG_KEYS.test(value.trim())) {
+			if (CODEX_ROUTE_CONFIG_KEYS.test(value.trim().replace(/["']/g, ''))) {
 				const key = value.split('=')[0].trim();
 				const named = value
 					.slice(value.indexOf('=') + 1)
@@ -1085,7 +1155,9 @@ export function managedArgsProblems(
 				problems.push('--settings names a file or unparsable JSON, which cannot be checked');
 				continue;
 			}
-			if (settings && typeof settings === 'object') {
+			if (!settings || typeof settings !== 'object' || Array.isArray(settings)) {
+				problems.push('--settings must be an object');
+			} else {
 				for (const key of CLAUDE_ROUTE_SETTINGS_KEYS) {
 					if (key in (settings as Record<string, unknown>)) {
 						problems.push(`--settings sets ${key}, which is not allowed under management`);

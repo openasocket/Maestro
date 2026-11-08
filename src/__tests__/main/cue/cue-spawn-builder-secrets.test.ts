@@ -18,7 +18,10 @@ import type { SessionInfo } from '../../../shared/types';
 import { getAgentDefinition } from '../../../shared/maestro-lib/providers/definitions';
 import { getAgentCapabilities } from '../../../shared/maestro-lib/providers/capabilities';
 import { formatJsonLogLine } from '../../../shared/jsonLogLine';
-import { bindApprovedCredentials } from '../../../shared/maestro-lib/managed/credentials';
+import {
+	bindApprovedCredentials,
+	managedAccountRef,
+} from '../../../shared/maestro-lib/managed/credentials';
 import { MANAGED_CONTRACT_VERSION } from '../../../shared/maestro-lib/managed/types';
 
 vi.mock('../../../main/agents', () => ({
@@ -151,6 +154,7 @@ describe('a managed Cue run', () => {
 			login: 'approved-credential',
 			permissionMode: null,
 		},
+		credentialConsumer: { tenantId: 't', actorId: 'a', agentId: 'agent-1', policyRevision: 1 },
 		credentials: bindApprovedCredentials(
 			[
 				{
@@ -160,7 +164,7 @@ describe('a managed Cue run', () => {
 					actorId: 'a',
 					agentId: 'agent-1',
 					audience: { providerId: 'codex', destination: null },
-					accountRef: null,
+					accountRef: managedAccountRef('codex', '/srv/accounts/codex-team'),
 					policyRevision: 1,
 					issuedAt: '2026-10-21T00:00:00Z',
 					expiresAt: '2026-10-22T00:00:00Z',
@@ -174,7 +178,7 @@ describe('a managed Cue run', () => {
 				agentId: 'agent-1',
 				providerId: 'codex',
 				destination: null,
-				accountRef: null,
+				accountRef: managedAccountRef('codex', '/srv/accounts/codex-team'),
 				policyRevision: 1,
 				now: NOW,
 			}

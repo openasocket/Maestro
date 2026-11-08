@@ -23,7 +23,10 @@ import {
 	applyManagedEnvCeiling,
 	type ManagedRouteCeiling,
 } from '../../../../shared/maestro-lib/launch/env';
-import { bindApprovedCredentials } from '../../../../shared/maestro-lib/managed/credentials';
+import {
+	bindApprovedCredentials,
+	managedAccountRef,
+} from '../../../../shared/maestro-lib/managed/credentials';
 import { MANAGED_CONTRACT_VERSION } from '../../../../shared/maestro-lib/managed/types';
 
 const SENTINEL = 'sentinel-7f3a91c2-do-not-leak';
@@ -61,6 +64,19 @@ function input(overrides: Partial<AgentLaunchInput> = {}): AgentLaunchInput {
 		isWindowsHost: false,
 		secretLookup: { env: {}, runSecretsDir: runSecrets },
 		...overrides,
+		...(overrides.managed
+			? {
+					managed: {
+						credentialConsumer: {
+							tenantId: 't',
+							actorId: 'a',
+							agentId: 'agent-1',
+							policyRevision: 1,
+						},
+						...overrides.managed,
+					},
+				}
+			: {}),
 	};
 }
 
@@ -198,7 +214,7 @@ describe('the managed route ceiling', () => {
 		permissionMode: null,
 		...overrides,
 	});
-	const approved = (envVar = 'ANTHROPIC_API_KEY', secretName = 'GITHUB_TOKEN') =>
+	const approved = (envVar = 'ANTHROPIC_API_KEY', secretName = 'GITHUB_TOKEN', pinned = route()) =>
 		bindApprovedCredentials(
 			[
 				{
@@ -207,7 +223,7 @@ describe('the managed route ceiling', () => {
 					tenantId: 't',
 					actorId: 'a',
 					agentId: 'agent-1',
-					audience: { providerId: 'claude-code', destination: null },
+					audience: { providerId: 'claude-code', destination: pinned.baseUrl },
 					accountRef: null,
 					policyRevision: 1,
 					issuedAt: '2026-10-21T00:00:00Z',
@@ -221,8 +237,8 @@ describe('the managed route ceiling', () => {
 				actorId: 'a',
 				agentId: 'agent-1',
 				providerId: 'claude-code',
-				destination: null,
-				accountRef: null,
+				destination: pinned.baseUrl,
+				accountRef: pinned.accountDir ? managedAccountRef('claude-code', pinned.accountDir) : null,
 				policyRevision: 1,
 				now: NOW,
 			}
@@ -297,7 +313,11 @@ describe('the managed route ceiling', () => {
 						baseUrl: 'https://gateway.corp.example',
 						accountDir: '/srv/accounts/team',
 					}),
-					credentials: approved(),
+					credentials: approved(
+						'ANTHROPIC_API_KEY',
+						'GITHUB_TOKEN',
+						route({ baseUrl: 'https://gateway.corp.example', accountDir: '/srv/accounts/team' })
+					),
 					now: NOW,
 				},
 			})

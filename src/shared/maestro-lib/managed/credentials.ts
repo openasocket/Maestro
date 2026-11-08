@@ -35,6 +35,7 @@ import { createHash } from 'node:crypto';
 
 import { canonicalJson } from '../../canonicalJson';
 import { isValidSecretName } from '../../serverSecrets';
+import { isWindows } from '../../platformDetection';
 import { MANAGED_CONTRACT_VERSION, type ManagedContractVersion } from './types';
 
 /** Where a host finds a credential's value. One kind in this build: a named server secret. */
@@ -174,9 +175,16 @@ export function managedCredentialRefProblems(value: unknown): string[] {
 	if (value.accountRef !== null && !isId(value.accountRef)) {
 		problems.push('accountRef is not an id or null');
 	}
-	if (!Number.isInteger(value.policyRevision)) problems.push('policyRevision is not an integer');
+	if (!Number.isSafeInteger(value.policyRevision) || (value.policyRevision as number) < 0)
+		problems.push('policyRevision is not an integer');
 	if (!isIsoDate(value.issuedAt)) problems.push('issuedAt is not a date');
 	if (!isIsoDate(value.expiresAt)) problems.push('expiresAt is not a date');
+	if (
+		isIsoDate(value.issuedAt) &&
+		isIsoDate(value.expiresAt) &&
+		Date.parse(value.expiresAt) <= Date.parse(value.issuedAt)
+	)
+		problems.push('expiresAt must follow issuedAt');
 	if (value.status !== 'active' && value.status !== 'revoked') {
 		problems.push('status is not active or revoked');
 	}
@@ -209,6 +217,8 @@ export function bindApprovedCredentials(
 	refs: readonly unknown[],
 	binding: CredentialLaunchBinding
 ): ApprovedCredentialSet {
+	if (!Number.isFinite(binding.now) || !Number.isFinite(new Date(binding.now).getTime()))
+		throw new RangeError('A credential binding needs a finite launch instant.');
 	const approved: ApprovedCredential[] = [];
 	const refused: CredentialRefusal[] = [];
 	const envVars = new Set<string>();
@@ -257,10 +267,10 @@ export function bindApprovedCredentials(
 				'policy-revision-mismatch',
 				`the reference was issued on policy revision ${ref.policyRevision}, the launch is on ${binding.policyRevision ?? 'none'}`
 			);
-		} else if (envVars.has(ref.source.envVar)) {
+		} else if (envVars.has(isWindows() ? ref.source.envVar.toUpperCase() : ref.source.envVar)) {
 			refuse('duplicate-env-var', `${ref.source.envVar} is already delivered by another reference`);
 		} else {
-			envVars.add(ref.source.envVar);
+			envVars.add(isWindows() ? ref.source.envVar.toUpperCase() : ref.source.envVar);
 			approved.push({
 				refId: ref.refId,
 				secretName: ref.source.secretName,
@@ -274,8 +284,8 @@ export function bindApprovedCredentials(
 
 	const { now, ...bound } = binding;
 	const set: ApprovedCredentialSet = Object.freeze({
-		approved: Object.freeze(approved),
-		refused: Object.freeze(refused),
+		approved: Object.freeze(approved.map((entry) => Object.freeze(entry))),
+		refused: Object.freeze(refused.map((entry) => Object.freeze(entry))),
 		binding: Object.freeze(bound),
 		boundAt: new Date(now).toISOString(),
 		digest: createHash('sha256')
