@@ -239,5 +239,30 @@
 		"qualificationReceiptCreated": false,
 		"blockedAttemptOnly": true,
 		"git": "Commit/push result is recorded in the local playbook; no remote publication claimed here."
-	}
+	},
+	"followUpReadinessChecks": [
+		{
+			"run": 8,
+			"recordedAt": "2026-11-08T10:18:26.796Z",
+			"observedRevision": "e60fb1c2299404d550c3958e8a95c32408e2ce58",
+			"command": "st node .maestro/playbooks/Working/mcomp-14-01/readiness.mjs",
+			"exitCode": 2,
+			"status": "blocked",
+			"evidence": {
+				"path": ".maestro/playbooks/Working/mcomp-14-01/readiness-MCOMP-14-01-2026-11-08T10-18-26-796Z.json",
+				"sha256": "35dda35794894255b538f1840d5192983271cf7c7126b12a7000c6fcd1d57359"
+			},
+			"unchanged": [
+				"inputs",
+				"requirements",
+				"pendingExtensions",
+				"siblingEvidence",
+				"qualification"
+			],
+			"observations": "Same three missing S03 BUILD receipts and four proposed-not-negotiated extensions as run 7. No downstream pair command was retried. Prior archive and contract checks above are historical run 7 results, not new observations.",
+			"validation": "Compared the current manifest and coverage hashes, required receipt inventory, extension statuses and sibling evidence inventory with run 7; all unchanged. No application source changed or application/qualification test was run.",
+			"taskCompleted": false,
+			"imagesAnalyzed": 0
+		}
+	]
 }
