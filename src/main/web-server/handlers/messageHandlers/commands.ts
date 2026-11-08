@@ -483,6 +483,60 @@ export function handleSelectSession(
 }
 
 /**
+ * The host-only lookup from a caller credential to the live chat turn it was stamped on
+ * (`ProcessManager.callerSourceOf`, MCOMP-17-03AO). Null for anything that authenticates
+ * nobody: unknown, malformed, killed, replaced or revoked.
+ */
+export type CallerSourceResolver = (
+	credential: string
+) => { agentId: string; tabId: string } | null;
+
+/** The resolver the desktop composed for the ask handler, when it composed one. */
+function callerSourceResolverOf(ctx: MessageHandlerContext): CallerSourceResolver | undefined {
+	const { callerSourceOf } = ctx.callbacks as MessageHandlerContext['callbacks'] & {
+		callerSourceOf?: CallerSourceResolver;
+	};
+	return typeof callerSourceOf === 'function' ? callerSourceOf : undefined;
+}
+
+/**
+ * Authenticate a forwarded caller credential (MCOMP-17-03AP): the exact agent and tab it names,
+ * or the refusal that leaves nothing asked. The stated ids must both be present and be exactly
+ * that source, so a credential never lends one turn's standing to another agent or tab.
+ */
+export function resolveForwardedCaller(
+	ctx: MessageHandlerContext,
+	credential: unknown,
+	stated: { fromSessionId?: string; fromTabId?: string }
+): { ok: true; agentId: string; tabId: string } | { ok: false; error: string } {
+	if (typeof credential !== 'string') {
+		return { ok: false, error: 'callerCredential must be a string; nothing was asked.' };
+	}
+	const resolve = callerSourceResolverOf(ctx);
+	if (!resolve) {
+		return {
+			ok: false,
+			error: 'This host cannot authenticate a caller credential; nothing was asked.',
+		};
+	}
+	const source = credential ? resolve(credential) : null;
+	if (!source) {
+		return {
+			ok: false,
+			error: 'The caller credential authenticates no live chat turn; nothing was asked.',
+		};
+	}
+	if (stated.fromSessionId !== source.agentId || stated.fromTabId !== source.tabId) {
+		return {
+			ok: false,
+			error:
+				'The stated caller is not the chat turn the caller credential names; nothing was asked.',
+		};
+	}
+	return { ok: true, agentId: source.agentId, tabId: source.tabId };
+}
+
+/**
  * Handle cross_agent_ask - consult another agent and return its answer
  * (`maestro-cli ask`).
  *
@@ -500,11 +554,11 @@ export function handleCrossAgentAsk(
 ): void {
 	const targetSessionId = typeof message.sessionId === 'string' ? message.sessionId : '';
 	const question = typeof message.question === 'string' ? message.question : '';
-	const fromSessionId =
+	const statedFromSessionId =
 		typeof message.fromSessionId === 'string' ? message.fromSessionId : undefined;
 	// The asking agent's own tab, stamped into its shell at spawn. Lets the
 	// renderer put the consult pill in the conversation that asked.
-	const fromTabId = typeof message.fromTabId === 'string' ? message.fromTabId : undefined;
+	const statedFromTabId = typeof message.fromTabId === 'string' ? message.fromTabId : undefined;
 	const withContext = message.withContext === true;
 	const timeoutMs =
 		typeof message.timeoutMs === 'number' && Number.isFinite(message.timeoutMs)
@@ -525,19 +579,24 @@ export function handleCrossAgentAsk(
 		return;
 	}
 	// A forwarded caller credential (MCOMP-17-03AL) is a managed chat turn's proof of which
-	// turn is asking; the stated from ids are only claims. Only a host runtime that minted it
-	// can resolve it (`askAsCaller`, MCOMP-17-03AK), and the desktop does not yet compose one.
-	// Dropping it would fall back to the claimed ids, so it refuses before any ticket is
+	// turn is asking; the stated from ids are only claims. It is resolved by the host that
+	// minted it (`callerSourceOf`, MCOMP-17-03AO/AP), never dropped: dropping it would fall
+	// back to the claimed ids. Absent a resolver, an unknown, stale or withdrawn credential, or
+	// stated ids that are not exactly the source it names, the ask refuses before any ticket is
 	// issued or the target is touched, with the shared host's wording. Never echoed or logged.
+	let fromSessionId = statedFromSessionId;
+	let fromTabId = statedFromTabId;
 	if ('callerCredential' in message) {
-		reply({
-			success: false,
-			error:
-				typeof message.callerCredential === 'string'
-					? 'This host cannot authenticate a caller credential; nothing was asked.'
-					: 'callerCredential must be a string; nothing was asked.',
+		const caller = resolveForwardedCaller(ctx, message.callerCredential, {
+			fromSessionId: statedFromSessionId,
+			fromTabId: statedFromTabId,
 		});
-		return;
+		if (!caller.ok) {
+			reply({ success: false, error: caller.error });
+			return;
+		}
+		fromSessionId = caller.agentId;
+		fromTabId = caller.tabId;
 	}
 	if (!ctx.callbacks.getSessionDetail?.(targetSessionId)) {
 		reply({ success: false, error: 'Agent not found' });

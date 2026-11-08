@@ -704,6 +704,90 @@ describe('WebSocketMessageHandler', () => {
 				expect(lastReply().error).toContain('must be a string');
 			});
 
+			describe('resolved by the host that minted it (MCOMP-17-03AP)', () => {
+				const LIVE = 'mcc_live-turn-credential';
+				let callerSourceOf: ReturnType<typeof vi.fn>;
+				const ask = (fields: Record<string, unknown>) =>
+					handler.handleMessage(
+						{ ...client, cli: true },
+						{
+							type: 'cross_agent_ask',
+							sessionId: 'session-1',
+							question: 'q',
+							requestId: 'r-cred',
+							...fields,
+						}
+					);
+
+				beforeEach(() => {
+					callerSourceOf = vi.fn((credential: string) =>
+						credential === LIVE ? { agentId: 'caller-1', tabId: 'caller-tab' } : null
+					);
+					handler.setCallbacks({ callerSourceOf } as Partial<MessageHandlerCallbacks>);
+				});
+
+				it('consults as exactly the source the credential names', async () => {
+					ask({ fromSessionId: 'caller-1', fromTabId: 'caller-tab', callerCredential: LIVE });
+					await vi.waitFor(() => expect(callbacks.consultAgent).toHaveBeenCalled());
+					expect(callerSourceOf).toHaveBeenCalledWith(LIVE);
+					const params = vi.mocked(callbacks.consultAgent).mock.calls[0][0];
+					expect(params).toMatchObject({ fromSessionId: 'caller-1', fromTabId: 'caller-tab' });
+					// The credential is the host's to resolve; it never travels on to the renderer.
+					expect(params).not.toHaveProperty('callerCredential');
+					expect(JSON.stringify(params)).not.toContain(LIVE);
+					expect(lastReply()).toMatchObject({ success: true, requestId: 'r-cred' });
+					expect(JSON.stringify(lastReply())).not.toContain(LIVE);
+				});
+
+				it.each([
+					[
+						'an unknown credential',
+						'mcc_forged',
+						'caller-1',
+						'caller-tab',
+						'authenticates no live',
+					],
+					['a blank credential', '', 'caller-1', 'caller-tab', 'authenticates no live'],
+					['another agent', LIVE, 'caller-2', 'caller-tab', 'is not the chat turn'],
+					['another tab', LIVE, 'caller-1', 'other-tab', 'is not the chat turn'],
+					['no stated agent', LIVE, undefined, 'caller-tab', 'is not the chat turn'],
+					['no stated tab', LIVE, 'caller-1', undefined, 'is not the chat turn'],
+				])(
+					'refuses %s before any ticket, lookup or consult',
+					(_label, callerCredential, fromSessionId, fromTabId, reason) => {
+						ask({
+							...(fromSessionId ? { fromSessionId } : {}),
+							...(fromTabId ? { fromTabId } : {}),
+							callerCredential,
+						});
+						expect(callbacks.consultAgent).not.toHaveBeenCalled();
+						expect(callbacks.getSessionDetail).not.toHaveBeenCalled();
+						expect(callbacks.executeCommand).not.toHaveBeenCalled();
+						const response = lastReply();
+						expect(response).toMatchObject({ success: false, requestId: 'r-cred' });
+						expect(response.error).toContain(reason);
+						expect(response.error).toContain('nothing was asked');
+						expect(JSON.stringify(response)).not.toContain(LIVE);
+					}
+				);
+
+				it('re-resolves on every ask, so a withdrawn credential stops authenticating', async () => {
+					ask({ fromSessionId: 'caller-1', fromTabId: 'caller-tab', callerCredential: LIVE });
+					await vi.waitFor(() => expect(callbacks.consultAgent).toHaveBeenCalledTimes(1));
+					// The turn was killed or revoked: the host's lookup now names nobody.
+					callerSourceOf.mockReturnValue(null);
+					ask({ fromSessionId: 'caller-1', fromTabId: 'caller-tab', callerCredential: LIVE });
+					expect(callbacks.consultAgent).toHaveBeenCalledTimes(1);
+					expect(lastReply().error).toContain('authenticates no live chat turn');
+				});
+
+				it('a non-string credential is refused before the resolver is asked', () => {
+					ask({ fromSessionId: 'caller-1', fromTabId: 'caller-tab', callerCredential: 42 });
+					expect(callerSourceOf).not.toHaveBeenCalled();
+					expect(lastReply().error).toContain('must be a string');
+				});
+			});
+
 			it('a request without the field keeps the existing consult path', async () => {
 				handler.handleMessage(client, {
 					type: 'cross_agent_ask',
