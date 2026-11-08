@@ -39,6 +39,7 @@
 
 import { getClaudeTokenSourceFields, type ClaudeTokenSourceFields } from '../../claudeTokenMode';
 import { usageStatsToTurnFields } from '../../turnUsageLedger';
+import { canonicalJson } from '../../canonicalJson';
 import type { UsageStats } from '../../types';
 import type { AgentRepository } from '../agents/repository';
 import {
@@ -54,7 +55,12 @@ import type { AutoRunTurnResult, AutoRunTurnRequest } from '../autorun/engine-ty
 import { createIdleWatchdog } from '../control/idle-watchdog';
 import { logger } from '../host';
 import type { ManagedLaunchInput } from '../launch/launch-plan';
-import type { ContextVerification, HostAuthority, PolicySourceSet } from '../managed/authority';
+import type {
+	AdmissionRequest,
+	ContextVerification,
+	HostAuthority,
+	PolicySourceSet,
+} from '../managed/authority';
 import { delegationContextEnv, delegationContextOf } from '../managed/delegation';
 import type { HeadlessSpawnContextInput } from '../managed/host-adapter';
 import type { ManagedDenialCode } from '../managed/types';
@@ -349,12 +355,13 @@ export function createAutoRunTurnRunner(options: AutoRunTurnRunnerOptions): Auto
 			);
 		}
 		const policy = managed.port.policy();
-		const verified = managed.port.context({
+		const contextInput = structuredClone({
 			identity: autoRunRunIdentity(attribution),
 			traceId: autoRunTraceId(attribution),
 			policyRevision: policy.policyRevision,
 			workflow: autoRunWorkflowRef(attribution.workflow, fence),
 		});
+		const verified = managed.port.context(structuredClone(contextInput));
 		if (!verified.ok) {
 			return refuse(
 				'denied',
@@ -362,10 +369,77 @@ export function createAutoRunTurnRunner(options: AutoRunTurnRunnerOptions): Auto
 				`The run's context was not accepted: ${verified.problems.join('; ')}`
 			);
 		}
+		// Keep the scope stamped into the child environment through awaited preparation and
+		// admission. A fresh verification timestamp is expected; every other field must match.
+		const scopeKey = ({ context, policy }: Pick<AdmissionRequest, 'context' | 'policy'>) =>
+			canonicalJson({
+				...context,
+				verification: { ...context.verification, verifiedAt: undefined },
+				policy,
+			});
+		const boundScope = scopeKey({ context: verified.context, policy });
+		const scopeRefusal = (
+			request: Pick<AdmissionRequest, 'context' | 'policy'> = { context: verified.context, policy }
+		) => {
+			let message: string;
+			try {
+				if (fence.lifetime && (!fence.lifetime.current() || fence.lifetime.signal.aborted)) {
+					message = 'The Auto Run workflow owner fence is no longer current.';
+				} else if (scopeKey(request) !== boundScope) {
+					message = 'The Auto Run admission no longer carries the prepared context and policy.';
+				} else if (managed.port.standing() !== 'managed' || managed.port.authority !== authority) {
+					message = 'The Auto Run host standing or authority changed before dispatch.';
+				} else {
+					const livePolicy = managed.port.policy();
+					const liveContext = managed.port.context({
+						...structuredClone(contextInput),
+						policyRevision: livePolicy.policyRevision,
+					});
+					if (
+						liveContext.ok &&
+						scopeKey({ context: liveContext.context, policy: livePolicy }) === boundScope
+					) {
+						return null;
+					}
+					message = 'The Auto Run authenticated context or policy changed before dispatch.';
+				}
+			} catch (error) {
+				message = `The Auto Run scope could not be rechecked: ${error instanceof Error ? error.message : String(error)}`;
+			}
+			return { state: 'unavailable', code: 'runtime-unavailable', message } as const;
+		};
+		// Retain the original producer lease. runAgentTurn still uses leaseAdmission for the
+		// final snapshot check, pid binding, exit release and running revocation.
+		const scopedAuthority: HostAuthority = {
+			get authorityId() {
+				return authority.authorityId;
+			},
+			async admit(request) {
+				const before = scopeRefusal(request);
+				if (before) return before;
+				const outcome = await authority.admit(request);
+				// A lost reply still needs reconciliation, even if the prepared scope changed.
+				if (outcome.state !== 'admitted') return outcome;
+				const after = scopeRefusal(request);
+				if (after) {
+					outcome.lease.release({ outcome: 'spawn-failed', message: after.message });
+					return after;
+				}
+				return outcome;
+			},
+			check(lease, digest) {
+				const refusal = scopeRefusal();
+				if (refusal) lease.release({ outcome: 'spawn-failed', message: refusal.message });
+				return authority.check(lease, digest);
+			},
+			revoke: (leaseId, reason) => authority.revoke(leaseId, reason),
+			revokeAll: (reason) => authority.revokeAll(reason),
+			live: () => authority.live(),
+		};
 		return {
 			managed: true,
 			authority: {
-				authority,
+				authority: scopedAuthority,
 				context: verified.context,
 				policy,
 				account: managed.account ?? null,

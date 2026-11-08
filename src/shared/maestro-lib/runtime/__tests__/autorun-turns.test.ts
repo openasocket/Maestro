@@ -16,8 +16,11 @@ import {
 import { getEffortRejection, resetEffortRejections } from '../../../effortRejection';
 import type { AutoRunOwnerFence, AutoRunWorkflowIdentity } from '../../autorun/attribution';
 import {
+	createContextVerifier,
 	createLocalHostAuthority,
+	type AdmissionOutcome,
 	type AdmissionRequest,
+	type DispatchLease,
 	type PolicyDecision,
 } from '../../managed/authority';
 import { createManagedBinding } from '../../managed/binding';
@@ -30,7 +33,7 @@ import { createHeadlessSpawnAuthority, installationIdentity } from '../../manage
 import { resolveMaestroPaths } from '../../paths/resolve';
 import type { AgentRecord } from '../../store/records';
 import type { AssembledTurn } from '../../turns/assemble';
-import { runAgentTurn } from '../../turns/run-agent-turn';
+import { runAgentTurn, type RunAgentTurnOptions } from '../../turns/run-agent-turn';
 import {
 	createAutoRunTurnRunner,
 	type AutoRunAdmissionEvent,
@@ -77,7 +80,8 @@ describe('Auto Run turns: a refused effort, and the fence claimed per attempt', 
 	function runner(
 		replies: Reply[],
 		extra: Pick<AutoRunTurnRunnerOptions, 'workflow' | 'managed'> = {},
-		customEnvVars?: Record<string, string>
+		customEnvVars?: Record<string, string>,
+		prepare?: (options: RunAgentTurnOptions) => void | Promise<void>
 	) {
 		const record = {
 			id: 'a1',
@@ -98,8 +102,9 @@ describe('Auto Run turns: a refused effort, and the fence claimed per attempt', 
 			deps: {
 				now: () => Date.now(),
 				probeBinary: async (binaryName) => ({ exists: true, path: `/fake/bin/${binaryName}` }),
-				runAgentTurn: (turn: AssembledTurn, options) => {
+				runAgentTurn: async (turn: AssembledTurn, options) => {
 					efforts.push(turn.settings.effort);
+					await prepare?.(options);
 					const reply = replies.shift() ?? 'answer';
 					const recording = writeFakeTurn(
 						dir,
@@ -353,6 +358,211 @@ describe('Auto Run turns: a refused effort, and the fence claimed per attempt', 
 				expect(startedProcesses()).toBe(0);
 			}
 		);
+
+		describe.each(['preparation', 'admission', 'spawn gate'] as const)(
+			'%s scope recheck',
+			(boundary) => {
+				it.each([
+					'standing',
+					'authority',
+					'policy',
+					'sources',
+					'actor',
+					'rejected',
+					'unreadable',
+					'context mutation',
+					'policy mutation',
+					'fence',
+					'owner signal',
+				] as const)(
+					'refuses %s drift without starting a process or keeping an unused lease',
+					async (change) => {
+						const { port, authority } = await managedPort();
+						const mutablePort = { ...port };
+						const issued: DispatchLease[] = [];
+						const owner = new AbortController();
+						let held = true;
+						let launch: RunAgentTurnOptions | undefined;
+						const mutate = () => {
+							if (change === 'standing') mutablePort.standing = () => 'standalone';
+							else if (change === 'authority') mutablePort.authority = { ...authority };
+							else if (change === 'policy')
+								mutablePort.policy = () => ({ sources: [], policyRevision: 2 });
+							else if (change === 'sources')
+								mutablePort.policy = () => ({
+									sources: [{ id: 'new-ceiling', kind: 'endpoint', revision: 1 }],
+									policyRevision: 1,
+								});
+							else if (change === 'actor')
+								mutablePort.context = (input) => {
+									const verified = port.context(input);
+									if (!verified.ok) return verified;
+									return createContextVerifier({
+										...verified.context.verification,
+										now: Date.now,
+										accept: () => [],
+									}).verify({ ...verified.context, actor: { kind: 'human', id: 'replacement' } });
+								};
+							else if (change === 'rejected')
+								mutablePort.context = () => ({
+									ok: false,
+									code: 'unauthenticated',
+									problems: ['actor revoked'],
+								});
+							else if (change === 'unreadable')
+								mutablePort.policy = () => {
+									throw new Error('read failed');
+								};
+							else if (change === 'context mutation')
+								launch!.managed!.context.actor.id = 'changed-request';
+							else if (change === 'policy mutation')
+								launch!.managed!.policy.sources = [
+									{ id: 'changed-request', kind: 'endpoint', revision: 1 },
+								];
+							else if (change === 'fence') held = false;
+							else owner.abort();
+						};
+						const original = authority.admit.bind(authority);
+						const asked = vi.spyOn(authority, 'admit').mockImplementation(async (input) => {
+							const outcome = await original(input);
+							if (outcome.state === 'admitted') issued.push(outcome.lease);
+							if (boundary === 'admission') mutate();
+							return outcome;
+						});
+						const result = await runner(
+							['answer'],
+							{
+								workflow,
+								managed: {
+									port: mutablePort,
+									fence: () => ({
+										...FENCE,
+										lifetime: {
+											signal: owner.signal,
+											current: () => held,
+											finish: async () => undefined,
+										},
+									}),
+									onAdmission: (event) => {
+										if (event.kind === 'admitted' && boundary === 'spawn gate') mutate();
+									},
+								},
+							},
+							undefined,
+							(options) => {
+								launch = options;
+								if (boundary === 'preparation') mutate();
+							}
+						).run({ purpose: 'task', prompt: 'work', effort: 'minimal' });
+						expect(result).toMatchObject({
+							success: false,
+							managed: { state: boundary === 'spawn gate' ? 'denied' : 'unavailable' },
+						});
+						expect(asked).toHaveBeenCalledTimes(boundary === 'preparation' ? 0 : 1);
+						expect(efforts).toHaveLength(1);
+						expect(startedProcesses()).toBe(0);
+						expect(authority.live()).toEqual([]);
+						for (const lease of issued) {
+							expect(lease.pid()).toBeUndefined();
+							expect(lease.ended().release).toMatchObject({ outcome: 'spawn-failed' });
+						}
+					}
+				);
+			}
+		);
+
+		it.each([
+			{ state: 'unknown', code: 'outcome-unknown', message: 'Acknowledgment lost' },
+			{ state: 'denied', code: 'policy-denied', message: 'Actor revoked', policyRevision: 1 },
+			{ state: 'unavailable', code: 'runtime-unavailable', message: 'Endpoint unavailable' },
+		] satisfies AdmissionOutcome[])(
+			'preserves a late producer $state when standing changes',
+			async (outcome) => {
+				const { port, authority } = await managedPort();
+				const entered = Promise.withResolvers<void>();
+				const answer = Promise.withResolvers<AdmissionOutcome>();
+				vi.spyOn(authority, 'admit').mockImplementation(() => {
+					entered.resolve();
+					return answer.promise;
+				});
+				const result = runner(['answer'], { workflow, managed: { port, fence: () => FENCE } }).run({
+					purpose: 'task',
+					prompt: 'work',
+					effort: 'minimal',
+				});
+				await entered.promise;
+				port.standing = () => 'standalone';
+				answer.resolve(outcome);
+				expect(await result).toMatchObject({
+					success: false,
+					error: `[managed-${outcome.state}] ${outcome.message}`,
+					managed: { state: outcome.state, code: outcome.code },
+				});
+				expect(startedProcesses()).toBe(0);
+				expect(authority.live()).toEqual([]);
+			}
+		);
+
+		it('accepts fresh verification timestamps and retains the original producer lease', async () => {
+			const { port, authority } = await managedPort();
+			const originalContext = port.context.bind(port);
+			let now = 1_700_000_000_000;
+			const timestamps: string[] = [];
+			port.context = (input) => {
+				const result = originalContext(input);
+				if (!result.ok) return result;
+				const verified = createContextVerifier({
+					...result.context.verification,
+					now: () => now++,
+					accept: () => [],
+				}).verify(result.context);
+				if (verified.ok) timestamps.push(verified.context.verification.verifiedAt);
+				return verified;
+			};
+			let lease: DispatchLease | undefined;
+			const result = await runner(['answer'], {
+				workflow,
+				managed: {
+					port,
+					fence: () => FENCE,
+					onAdmission: (event) => {
+						if (event.kind === 'admitted') lease = authority.live()[0];
+					},
+				},
+			}).run({ purpose: 'task', prompt: 'work' });
+			expect(result.success).toBe(true);
+			expect(new Set(timestamps).size).toBeGreaterThanOrEqual(4);
+			expect(lease?.pid()).toBeTypeOf('number');
+			expect(lease?.state()).toBe('released');
+			expect(authority.live()).toEqual([]);
+			expect(startedProcesses()).toBe(1);
+		});
+
+		it('claims and admits a fresh attempt after a prior preparation changed scope', async () => {
+			const { port, authority } = await managedPort();
+			let revision = 1;
+			port.policy = () => ({ sources: [], policyRevision: revision });
+			const fence = vi.fn(() => FENCE);
+			const asked = vi.spyOn(authority, 'admit');
+			const turns = runner(
+				['answer', 'answer'],
+				{ workflow, managed: { port, fence } },
+				undefined,
+				() => {
+					if (efforts.length === 1) revision = 2;
+				}
+			);
+			expect(await turns.run({ purpose: 'task', prompt: 'first' })).toMatchObject({
+				success: false,
+				managed: { state: 'unavailable' },
+			});
+			expect((await turns.run({ purpose: 'task', prompt: 'retry' })).success).toBe(true);
+			expect(fence).toHaveBeenCalledTimes(2);
+			expect(fence.mock.calls[0]).not.toEqual(fence.mock.calls[1]);
+			expect(asked).toHaveBeenCalledTimes(1);
+			expect(asked.mock.calls[0][0].context.policyRevision).toBe(2);
+			expect(startedProcesses()).toBe(1);
+		});
 
 		it('does not downgrade an already managed run after it loses enrollment', async () => {
 			const { port } = await managedPort();

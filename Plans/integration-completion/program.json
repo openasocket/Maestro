@@ -3834,6 +3834,20 @@
 					"id": "MCOMP-17-03I"
 				},
 				{
+					"label": "Recheck shared Auto Run scope through launch admission",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/shared/maestro-lib/runtime/autorun-turns.ts",
+						"src/shared/maestro-lib/runtime/__tests__/autorun-turns.test.ts",
+						"Plans/integration-completion/program.json"
+					],
+					"outcome": "Consume MAESTRO-EFFECT-CONSUMERS-BUILD and its pinned MAESTRO-CONTRACT-INPUTS-BUILD dependency. Bounded continuation of MCOMP-17-03: retain each shared Auto Run attempt's verified scope through asynchronous launch preparation and admission. Recheck host standing, authority identity, authenticated context, policy and current workflow ownership before and after admission and at the canonical final lease gate. Release unused late leases on scope drift, preserve unknown producer outcomes and the original producer lease, and admit retries afresh. Re-verification time alone is not scope drift. Exercise zero-child-effect refusals and positive real fixture processes through the existing Auto Run harness. Retain MCOMP-17-03 unchecked for Cue Auto Run actions, incoming authenticated delegation, desktop composition, managed room custody across turns and remaining shared turn cancellation/observer cleanup. No new wire definition, external capability, producer mapping or paired/provider/native qualification is supplied. Keep to three authored files and fewer than 500 changed lines.",
+					"backlog": ["M-04"],
+					"requires": ["MAESTRO-EFFECT-CONSUMERS-BUILD"],
+					"produces": [],
+					"id": "MCOMP-17-03J"
+				},
+				{
 					"label": "Bind Auto Run Cue and nested work at dispatch",
 					"kind": "IMPLEMENT",
 					"targets": [
@@ -3876,7 +3890,7 @@
 			"produces": ["MAESTRO-WORKFLOW-CONSUMERS-BUILD"],
 			"id": "MCOMP-17",
 			"path": ".maestro/playbooks/2026-10-29-Maestro-Integration-Completion/MCOMP-17.md",
-			"taskCount": 14,
+			"taskCount": 15,
 			"stage": "S10"
 		},
 		{
@@ -5666,7 +5680,7 @@
 				"PAIR-DIRECT-EVIDENCE"
 			],
 			"nativeInputs": false,
-			"taskCount": 21
+			"taskCount": 22
 		},
 		{
 			"id": "S11",
@@ -5870,9 +5884,9 @@
 			"taskCount": 1
 		}
 	],
-	"taskCount": 334,
+	"taskCount": 335,
 	"taskCounts": {
-		"IMPLEMENT": 225,
+		"IMPLEMENT": 226,
 		"TEST": 49,
 		"VERIFY": 60
 	},
@@ -6627,6 +6641,7 @@
 			"MCOMP-17-03G",
 			"MCOMP-17-03H",
 			"MCOMP-17-03I",
+			"MCOMP-17-03J",
 			"MCOMP-17-03",
 			"MCOMP-17-04",
 			"MCOMP-17-05",
