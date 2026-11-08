@@ -88,6 +88,7 @@ describe('runtime consults', () => {
 	/** Every admission the background runner decided at the spawn (MRC-07-05). */
 	let backgroundAdmissions: BackgroundAdmissionEvent[];
 	let initiator: RuntimeDeps['consults']['initiator'];
+	let probeBinary: RuntimeDeps['probeBinary'] | undefined;
 
 	function deps(): Partial<RuntimeDeps> {
 		let id = 0;
@@ -102,7 +103,10 @@ describe('runtime consults', () => {
 			checkCwd: () => null,
 			readTabDefaults: async () => DEFAULT_TAB_DEFAULTS,
 			watchDirectory: () => ({ close: () => undefined }),
-			probeBinary: async (binaryName) => ({ exists: true, path: `/fake/bin/${binaryName}` }),
+			probeBinary: async (binaryName, customPath) =>
+				probeBinary
+					? probeBinary(binaryName, customPath)
+					: { exists: true, path: `/fake/bin/${binaryName}` },
 			background: {
 				runTurn: provider.runTurn,
 				onAdmission: (event) => backgroundAdmissions.push(event),
@@ -166,6 +170,7 @@ describe('runtime consults', () => {
 		admissions = [];
 		backgroundAdmissions = [];
 		initiator = undefined;
+		probeBinary = undefined;
 	});
 	afterEach(async () => {
 		for (const runtime of open) await runtime.connection.close();
@@ -647,8 +652,10 @@ describe('runtime consults', () => {
 		/** An enrolled runtime over `authority`: the fleet authority a desktop or host would have enrolled with. */
 		async function startEnrolled(
 			decide: (request: AdmissionRequest) => 'allow' | 'deny',
-			asked: AdmissionRequest[]
+			asked: AdmissionRequest[],
+			script: FakeScript = ANSWER
 		): Promise<MaestroRuntime> {
+			let leaseId = 0;
 			const authority = createLocalHostAuthority({
 				authorityId: 'fleet-authority',
 				decide: (request) => {
@@ -658,7 +665,7 @@ describe('runtime consults', () => {
 						: { decision: 'deny', reason: 'the policy says no', policyRevision: 1 };
 				},
 				now: () => Date.now(),
-				newId: () => 'lease-1',
+				newId: () => `lease-${++leaseId}`,
 				leaseTtlMs: 60_000,
 			});
 			const enroller = await start();
@@ -678,10 +685,165 @@ describe('runtime consults', () => {
 			if (!enrolled.ok) throw new Error(enrolled.message);
 			await enroller.connection.close();
 			open.splice(open.indexOf(enroller), 1);
-			const runtime = await start(ANSWER, undefined, {}, { authority });
+			const runtime = await start(script, undefined, {}, { authority });
 			expect(runtime.managedBinding.state().state).toBe('enrolled');
 			return runtime;
 		}
+
+		describe('trusted consult source custody', () => {
+			let current: ReturnType<NonNullable<typeof initiator>>;
+			let unreadable: boolean;
+			beforeEach(() => {
+				current = namedInitiator(1, true)({ agentId: 'a1' })!;
+				current.delegation.workflow = {
+					workflowId: 'workflow-1',
+					version: 'v1',
+					triggerEventId: 'trigger-1',
+					ownerEpoch: 'epoch-1',
+					fencingToken: 'fence-1',
+				};
+				current.delegation.delegation.grantRef = 'grant-1';
+				unreadable = false;
+				initiator = vi.fn(() => {
+					if (unreadable) throw new Error('source custody unavailable');
+					return current;
+				});
+			});
+
+			it.each(['missing', 'unreadable', 'malformed'] as const)(
+				'refuses %s initial custody without an inferred fallback, then recovers',
+				async (change) => {
+					const asked: AdmissionRequest[] = [];
+					const runtime = await startEnrolled(() => 'allow', asked);
+					const saved = structuredClone(current);
+					if (change === 'missing') current = null;
+					if (change === 'unreadable') unreadable = true;
+					if (change === 'malformed') current!.delegation.identity.requestId = '';
+					const input = {
+						targetAgentId: 'a2',
+						fromAgentId: 'a1',
+						fromTabId: 'a1-t1',
+						question: 'Why?',
+					};
+					expect(errorOf(await runtime.consults.ask(input)).message).toMatch(/initiator|custody/i);
+					expect(provider.calls).toEqual([]);
+					expect(asked).toEqual([]);
+					expect(consultTab('a2')).toBeUndefined();
+					current = saved;
+					unreadable = false;
+					value(await runtime.consults.ask(input));
+					expect(initiator).toHaveBeenCalledWith({ agentId: 'a1', tabId: 'a1-t1' });
+					expect(lineageOf(0)).toMatchObject({
+						workflow: saved!.delegation.workflow,
+						delegation: {
+							grantRef: 'grant-1',
+							chain: [
+								{ kind: 'agent', id: 'a1' },
+								{ kind: 'agent', id: 'a2' },
+							],
+						},
+						identity: { parentRunId: 'run-7', rootRunId: 'run-7' },
+					});
+				}
+			);
+
+			it.each(['missing', 'unreadable', 'grant', 'fence', 'policy', 'access', 'run'] as const)(
+				'refuses %s custody after queueing and authorizes a fresh request',
+				async (change) => {
+					const asked: AdmissionRequest[] = [];
+					const runtime = await startEnrolled(
+						() => 'allow',
+						asked,
+						(call) => ({ text: `answer ${call.nth}`, hold: call.nth === 1 })
+					);
+					const input = { targetAgentId: 'a2', fromAgentId: 'a1', question: 'First' };
+					const first = runtime.consults.ask(input);
+					await vi.waitFor(() => expect(provider.callsFor('consult')).toHaveLength(1));
+					const queued = runtime.consults.ask({ ...input, question: 'Queued with old custody' });
+					expect(runtime.consultsInFlight()).toBe(2);
+					const saved = structuredClone(current);
+					if (change === 'missing') current = null;
+					if (change === 'unreadable') unreadable = true;
+					if (change === 'grant') current!.delegation.delegation.grantRef = 'grant-2';
+					if (change === 'fence') current!.delegation.workflow!.fencingToken = 'fence-2';
+					if (change === 'policy') current!.delegation.policyRevision = 2;
+					if (change === 'access') current!.writable = false;
+					if (change === 'run') current!.delegation.identity.runId = 'new-source-run';
+					value(await runtime.turns.interrupt('a1', 'a1-t1'));
+					expect(errorOf(await first).code).toBe('rejected');
+					expect(errorOf(await queued).message).toMatch(/initiator|custody/i);
+					expect(provider.callsFor('consult')).toHaveLength(1);
+					expect(asked).toHaveLength(1);
+					expect(
+						consultTab('a2').logs.some(
+							(log: { text: string }) => log.text === 'Queued with old custody'
+						)
+					).toBe(false);
+					if (!current) current = saved;
+					unreadable = false;
+					value(
+						await runtime.consults.ask({ ...input, question: 'Fresh', handoffAnswer: 'Do this' })
+					);
+					expect(provider.callsFor('consult')).toHaveLength(2);
+					expect(asked).toHaveLength(2);
+					expect(lineageOf(1)).toMatchObject({
+						workflow: current!.delegation.workflow,
+						delegation: { grantRef: current!.delegation.delegation.grantRef },
+						identity: { parentRunId: current!.delegation.identity.runId },
+					});
+					expect(permissionMode(provider.callsFor('consult')[1].spec.args)).toBe(
+						change === 'access' ? 'plan' : undefined
+					);
+					expect(
+						provider.callsFor('consult')[1].spec.args.includes('--dangerously-skip-permissions')
+					).toBe(change !== 'access');
+				}
+			);
+
+			it('refuses custody withdrawn while preparing the consult before runner handoff', async () => {
+				const asked: AdmissionRequest[] = [];
+				const runtime = await startEnrolled(() => 'allow', asked);
+				const entered = Promise.withResolvers<void>();
+				const proceed = Promise.withResolvers<void>();
+				probeBinary = async () => {
+					entered.resolve();
+					await proceed.promise;
+					return { exists: true, path: '/fake/bin/claude' };
+				};
+				const input = { targetAgentId: 'a2', fromAgentId: 'a1', question: 'Prepare this' };
+				const pending = runtime.consults.ask(input);
+				await entered.promise;
+				const saved = current;
+				current = null;
+				proceed.resolve();
+				expect(errorOf(await pending).message).toMatch(/initiator|custody/i);
+				expect(provider.calls).toEqual([]);
+				expect(asked).toEqual([]);
+				expect(consultTab('a2').logs.at(-1).source).toBe('error');
+				current = saved;
+				value(await runtime.consults.ask(input));
+				expect(provider.callsFor('consult')).toHaveLength(1);
+			});
+
+			it('requires a known source when the host supplies an initiator lookup', async () => {
+				const asked: AdmissionRequest[] = [];
+				const runtime = await startEnrolled(() => 'allow', asked);
+				for (const fromAgentId of [undefined, 'unknown']) {
+					expect(
+						errorOf(
+							await runtime.consults.ask({
+								targetAgentId: 'a2',
+								question: 'Unattributed',
+								fromAgentId,
+							})
+						).message
+					).toMatch(/initiator|custody/i);
+				}
+				expect(provider.calls).toEqual([]);
+				expect(asked).toEqual([]);
+				expect(consultTab('a2')).toBeUndefined();
+			});
+		});
 
 		it('on an enrolled runtime binds the consult under the host’s generation and admits its process on a lease over the final spec (MRC-07-05)', async () => {
 			const asked: AdmissionRequest[] = [];

@@ -42,6 +42,7 @@ import {
 	type CrossAgentTranscriptEntry,
 } from '../../crossAgentTypes';
 import { createKeyedWriteQueue } from '../../keyedWriteQueue';
+import { canonicalJson } from '../../canonicalJson';
 import type { ToolType } from '../../types';
 import { createConsultService, type CrossAgentTargetSession } from '../agents/consult';
 import {
@@ -65,6 +66,7 @@ import {
 	delegatedWritable,
 	delegationContextOf,
 	intersectDelegationScope,
+	isManagedDelegationContext,
 	type ManagedDelegationContext,
 } from '../managed/delegation';
 import type { ManagedDenialCode } from '../managed/types';
@@ -119,6 +121,9 @@ export interface RuntimeConsultsManagedOptions {
 	 * admitted). Default none: the runtime's chat turns expose no running turn's context yet, so
 	 * the initiator is the consult the asker is itself answering, else a lineage with the asker as
 	 * the chain (workflow null, no policy generation).
+	 * Once supplied, this trusted host lookup must return current custody. Null or unreadable
+	 * custody refuses the ask; it never falls back to inferred lineage. It is re-read at dequeue
+	 * and runner handoff. The background runner's parentContext still owns final sink verification.
 	 */
 	initiator?(asker: { agentId: string; tabId?: string }): ConsultInitiator | null;
 	onAdmission?(event: ConsultAdmissionEvent): void;
@@ -267,13 +272,20 @@ export function createRuntimeConsults(options: RuntimeConsultsOptions): RuntimeC
 	function initiatorFor(
 		source: AgentRecord | undefined,
 		tabId: string | undefined
-	): ConsultInitiator {
-		if (source) {
-			const named = options.managed?.initiator?.({
+	): ConsultInitiator | null {
+		if (options.managed?.initiator) {
+			if (!source) return null;
+			const named = options.managed.initiator({
 				agentId: source.id,
 				...(tabId ? { tabId } : {}),
 			});
-			if (named) return named;
+			return named &&
+				isManagedDelegationContext(named.delegation) &&
+				(named.writable === null || typeof named.writable === 'boolean')
+				? named
+				: null;
+		}
+		if (source) {
 			const answering = [...running.values()].filter((entry) => entry.targetId === source.id);
 			const newest = answering.at(-1);
 			if (newest) {
@@ -445,12 +457,44 @@ export function createRuntimeConsults(options: RuntimeConsultsOptions): RuntimeC
 		// The consult is a child of the asking operation: the chain one link deeper (the target),
 		// this request as the child run, the workflow and generation carried as they are. Access
 		// is the narrower of what the initiator may do and what the settings allow this consult.
-		const initiator = initiatorFor(source, input.fromTabId);
+		let initiator: ConsultInitiator | null;
+		let initiatorKey: string;
+		try {
+			initiator = initiatorFor(source, input.fromTabId);
+			if (!initiator)
+				return fail(method, 'host-unavailable', 'The consult initiator custody is unavailable.');
+			initiatorKey = canonicalJson(initiator);
+			// Host records may be mutable. Keep this request's scope intact across all awaits.
+			initiator = structuredClone(initiator);
+		} catch {
+			return fail(method, 'host-unavailable', 'The consult initiator custody could not be read.');
+		}
 		const delegation = childDelegationContext(initiator.delegation, {
 			link: { kind: 'agent', id: target.id },
 			requestId,
 			attemptId: requestId,
 		});
+		const recheckInitiator = (): ConsultRefusal | null => {
+			if (!options.managed?.initiator) return null;
+			let message: string;
+			try {
+				const current = initiatorFor(
+					source ? repository.getAgent(source.id) : undefined,
+					input.fromTabId
+				);
+				if (current && canonicalJson(current) === initiatorKey) return null;
+				message = 'The consult initiator custody changed or was withdrawn; submit a fresh request.';
+			} catch {
+				message = 'The consult initiator custody could not be rechecked.';
+			}
+			const refusal: ConsultRefusal = {
+				state: 'unavailable',
+				code: 'runtime-unavailable',
+				message,
+			};
+			options.managed?.onAdmission?.({ kind: 'refused', delegation, ...refusal });
+			return refusal;
+		};
 		const writable = delegatedWritable(initiator.writable, writableFor(isHandoff));
 		const timer: { expired: boolean; handle?: ReturnType<typeof setTimeout> } = { expired: false };
 		timer.handle = setTimeout(() => {
@@ -475,7 +519,7 @@ export function createRuntimeConsults(options: RuntimeConsultsOptions): RuntimeC
 
 				// Bound (or refused) when it is its turn, on the host's standing NOW, before the target
 				// hears of it: a refused consult leaves nothing on the target. The lease comes at the spawn.
-				const refusal = admitConsult(initiator.delegation, delegation);
+				const refusal = recheckInitiator() ?? admitConsult(initiator.delegation, delegation);
 				if (refusal) {
 					logger.warn(
 						`${target.name} was not consulted (${refusal.state}, ${refusal.code}): ${refusal.message}`,
@@ -531,11 +575,26 @@ export function createRuntimeConsults(options: RuntimeConsultsOptions): RuntimeC
 				};
 
 				running.set(requestId, { targetId: target.id, delegation, writable });
+				const runner = background.consultRunner();
 				let chunk: CrossAgentResponseChunk;
 				try {
 					chunk = await new Promise<CrossAgentResponseChunk>((resolve) => {
 						void service.start(request, {
-							runner: background.consultRunner(),
+							runner: {
+								...runner,
+								start: async (spawn, observer) => {
+									// Provider and system-prompt preparation can yield after dequeue.
+									const refusal =
+										recheckInitiator() ?? admitConsult(initiator.delegation, delegation);
+									return refusal
+										? {
+												success: false,
+												error: refusal.message,
+												managed: { state: refusal.state, code: refusal.code },
+											}
+										: runner.start(spawn, observer);
+								},
+							},
 							resolveAgent: (providerId) => background.resolveAgent(providerId),
 							sshStore: background.sshStore,
 							getTargetSession: (id) => {
