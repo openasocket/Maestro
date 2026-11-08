@@ -129,6 +129,20 @@ export interface CueRunActionDeps {
 		event: CueEvent;
 		autoRun?: CueAutoRunConfig;
 	}) => Promise<CueRunResult>;
+	/**
+	 * Trusted host consumer for a managed Auto Run. Carry this admission context
+	 * into the child workflow, reauthorize each task/retry at its actual sink, and
+	 * honor the signal until termination. Resolve with the run's terminal result,
+	 * not a launcher acknowledgement: the router retains ownership until then.
+	 * The legacy renderer handoff cannot carry this custody and is never a fallback.
+	 */
+	onManagedAutoRun?: (
+		params: Parameters<NonNullable<CueRunActionDeps['onAutoRun']>>[0] & {
+			admission: CueManagedAdmission;
+			managed?: ManagedLaunchInput;
+			signal?: AbortSignal;
+		}
+	) => Promise<CueRunResult>;
 	getAppendSystemPrompt?: (sessionId: string) => Promise<string | undefined>;
 	getOnRunTranscript?: (sessionId: string) => ((run: CueRunTranscript) => void) | undefined;
 	/**
@@ -561,6 +575,9 @@ async function executeBoundCueRunAction(
 	// agent's Auto Run folder, so repointing that folder between
 	// scheduling and firing cannot swap the run out from under the user.
 	if (action === 'autorun') {
+		// An awaited claim must not let a caller replace the document list or
+		// settings after the owner bound its version. Keep one captured payload.
+		autoRun = autoRun ? structuredClone(autoRun) : undefined;
 		const subscription = {
 			name: subscriptionName,
 			event: event.type,
@@ -569,9 +586,11 @@ async function executeBoundCueRunAction(
 			action,
 			auto_run: autoRun,
 			agent_id: storedSession.id,
+			pipeline_name: pipelineName ?? undefined,
 		};
-		if (!deps.onAutoRun) {
-			const reason = 'action=autorun is not supported in this runner mode';
+		if (!autoRun || autoRun.documents.length === 0) {
+			const reason =
+				'no documents on the run - the captured Auto Run payload did not survive the queue';
 			deps.onLog('error', `[CUE] Auto Run "${subscriptionName}" did not start: ${reason}`);
 			const startedAt = new Date().toISOString();
 			return {
@@ -589,9 +608,46 @@ async function executeBoundCueRunAction(
 				endedAt: startedAt,
 			};
 		}
-		if (!autoRun || autoRun.documents.length === 0) {
-			const reason =
-				'no documents on the run - the captured Auto Run payload did not survive the queue';
+		const binding = await bindCueManagedRun(
+			deps.managed,
+			cueRunLineage({
+				runId,
+				chainRootId,
+				parentEventId,
+				pipelineName,
+				subscriptionName,
+				prompt: canonicalJson({ prompt, autoRun }),
+				action,
+				event,
+				ownerAgentId: storedSession.id,
+				attemptId: deps.managed?.newId?.() ?? generateUUID(),
+			}),
+			signal
+		);
+		if (!binding || isLaunchCancelled(signal)) return stoppedResult();
+		if (binding.managed && 'refusal' in binding) return managedRefusalResult(binding.refusal);
+		if (binding.managed) {
+			if (!deps.onManagedAutoRun) {
+				return managedRefusalResult({
+					state: 'unavailable',
+					code: 'runtime-unavailable',
+					message: 'This host has no managed Auto Run consumer for Cue workflow custody.',
+				});
+			}
+			onDispatch?.();
+			return deps.onManagedAutoRun({
+				runId,
+				session: sessionInfo,
+				subscription,
+				event,
+				autoRun,
+				admission: binding.admission,
+				...(binding.launch ? { managed: binding.launch } : {}),
+				signal,
+			});
+		}
+		if (!deps.onAutoRun) {
+			const reason = 'action=autorun is not supported in this runner mode';
 			deps.onLog('error', `[CUE] Auto Run "${subscriptionName}" did not start: ${reason}`);
 			const startedAt = new Date().toISOString();
 			return {

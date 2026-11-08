@@ -117,6 +117,10 @@ function makeDeps(managed?: CueManagedDeps) {
 		getAgentConfigValues: vi.fn(() => ({}) as Record<string, unknown>),
 		onLog: vi.fn(),
 		onNotify: vi.fn(async (p: { runId: string }) => fakeResult(p.runId)),
+		onAutoRun: vi.fn(async (p: { runId: string }) => fakeResult(p.runId)),
+		onManagedAutoRun: vi.fn<NonNullable<CueRunActionDeps['onManagedAutoRun']>>(async (p) =>
+			fakeResult(p.runId)
+		),
 		...(managed ? { managed } : {}),
 	};
 	return deps as unknown as CueRunActionDeps & typeof deps;
@@ -1032,8 +1036,158 @@ describe('Cue workflow fence lifetime', () => {
 		return { controller, lifetime, port, workflowFence, deps };
 	}
 
+	describe('Auto Run handoff', () => {
+		const autoRun = { documents: ['/fixture/playbook.md'], prompt: 'run tasks', model: 'opus' };
+		const overrides = { action: 'autorun', autoRun } as const;
+
+		it('requires a bound host callback instead of dropping custody into the legacy launcher', async () => {
+			const { deps, lifetime } = fixture();
+			const { onManagedAutoRun: _unused, ...legacy } = deps;
+			const result = await executeCueRunAction(legacy, params(overrides));
+			expect(result).toMatchObject({
+				status: 'failed',
+				executionStarted: false,
+				managed: { state: 'unavailable', code: 'runtime-unavailable' },
+			});
+			expect(deps.onAutoRun).not.toHaveBeenCalled();
+			expect(lifetime.finish).toHaveBeenCalledExactlyOnceWith('no_effect');
+		});
+
+		it('keeps standalone Auto Runs on their existing launcher', async () => {
+			const deps = makeDeps({ port: () => cuePort('standalone') });
+			await executeCueRunAction(deps, params(overrides));
+			expect(deps.onAutoRun).toHaveBeenCalledOnce();
+			expect(deps.onManagedAutoRun).not.toHaveBeenCalled();
+		});
+
+		it('preserves verified lineage, current policy and the captured configuration across a claim', async () => {
+			const { deps, port, workflowFence, lifetime } = fixture();
+			const captured = structuredClone(autoRun);
+			const input = structuredClone(autoRun);
+			const launch = { route: { provider: 'claude-code' } } as never;
+			deps.managed!.launch = launch;
+			deps.managed!.newId = () => 'auto-attempt';
+			workflowFence.mockImplementationOnce(async () => {
+				input.documents[0] = '/fixture/swapped.md';
+				input.model = 'other';
+				return { ...FENCE, lifetime };
+			});
+			await executeCueRunAction(deps, params({ action: 'autorun', autoRun: input }));
+			const call = deps.onManagedAutoRun.mock.calls[0][0];
+			expect(call.autoRun).toEqual(captured);
+			expect(call.subscription.auto_run).toBe(call.autoRun);
+			expect(call.subscription.pipeline_name).toBe('Nightly QA');
+			expect(call.managed).toBe(launch);
+			expect(call.admission.policy).toEqual(port.policy());
+			expect(call.admission.context).toMatchObject({
+				identity: {
+					requestId: 'run-9',
+					attemptId: 'auto-attempt',
+					rootRunId: 'root-1',
+					parentRunId: 'run-8',
+				},
+				workflow: {
+					workflowId: 'cue-pipeline:Nightly QA',
+					triggerEventId: 'time.scheduled:evt-1',
+					...FENCE,
+				},
+				delegation: {
+					chain: [
+						{ kind: 'service', id: 'cue-subscription:nightly' },
+						{ kind: 'agent', id: 'agent-1' },
+					],
+					grantRef: null,
+				},
+			});
+			expect(deps.onAutoRun).not.toHaveBeenCalled();
+			expect(deps.resolveAgentPath).not.toHaveBeenCalled();
+			expect(lifetime.finish).toHaveBeenCalledExactlyOnceWith('uncertain');
+		});
+
+		it('versions document/config edits and reclaims custody on each firing', async () => {
+			const { deps, workflowFence } = fixture();
+			let attempt = 0;
+			deps.managed!.newId = () => `attempt-${++attempt}`;
+			for (const config of [
+				autoRun,
+				{ ...autoRun, documents: ['/fixture/other.md'] },
+				{ ...autoRun, model: 'other' },
+			]) {
+				await executeCueRunAction(
+					deps,
+					params({ action: 'autorun', autoRun: config, runId: `retry-${attempt}` })
+				);
+			}
+			expect(new Set(workflowFence.mock.calls.map(([workflow]) => workflow.version)).size).toBe(3);
+			expect(workflowFence.mock.calls.map(([, run]) => run.attemptId)).toEqual([
+				'attempt-1',
+				'attempt-2',
+				'attempt-3',
+			]);
+		});
+
+		it.each(['denied', 'unavailable', 'unknown'] as const)(
+			'retains an owner %s result without dispatch',
+			async (state) => {
+				const { deps, workflowFence } = fixture();
+				workflowFence.mockResolvedValueOnce({
+					fence: null,
+					state,
+					code: 'runtime-unavailable',
+					message: `fixture ${state}`,
+				});
+				const result = await executeCueRunAction(deps, params(overrides));
+				expect(result.managed?.state).toBe(state);
+				expect(result.stderr).toContain(`fixture ${state}`);
+				expect(deps.onManagedAutoRun).not.toHaveBeenCalled();
+				expect(deps.onAutoRun).not.toHaveBeenCalled();
+			}
+		);
+
+		it.each(['withdrawn', 'replaced', 'actor', 'policy'] as const)(
+			'refuses %s scope at the bound host admission',
+			async (change) => {
+				const { deps, port } = fixture();
+				let live: CueSpawnAuthorityPort | null = port;
+				deps.managed!.port = () => live;
+				deps.onManagedAutoRun.mockImplementationOnce(async ({ admission, runId }) => {
+					if (change === 'withdrawn') live = null;
+					if (change === 'replaced') live = cuePort();
+					if (change === 'actor')
+						live = { ...port, context: cuePort('enrolled', 'other-actor').context };
+					if (change === 'policy')
+						live = { ...port, policy: () => ({ sources: [], policyRevision: 8 }) };
+					const outcome = await admission.authority.admit({
+						context: admission.context,
+						policy: admission.policy,
+						snapshot: buildDispatchSnapshot(
+							{ command: '/fixture/provider', args: [], env: {} },
+							{
+								provider: 'claude-code',
+								model: null,
+								operation: 'start',
+								account: null,
+								target: { kind: 'local' },
+							}
+						),
+					});
+					expect(outcome.state).toBe('unavailable');
+					return { ...fakeResult(runId), status: 'failed', executionStarted: false };
+				});
+				await executeCueRunAction(deps, params(overrides));
+				expect(deps.onManagedAutoRun).toHaveBeenCalledOnce();
+				expect(port.authority.live()).toHaveLength(0);
+			}
+		);
+	});
+
 	describe.each([
 		{ name: 'prompt', executor: 'executeCuePrompt', overrides: {} },
+		{
+			name: 'autorun',
+			executor: 'onManagedAutoRun',
+			overrides: { action: 'autorun', autoRun: { documents: ['/fixture/playbook.md'] } },
+		},
 		{
 			name: 'shell',
 			executor: 'executeCueShell',
@@ -1052,7 +1206,7 @@ describe('Cue workflow fence lifetime', () => {
 		},
 	] satisfies {
 		name: string;
-		executor: 'executeCuePrompt' | 'executeCueShell' | 'executeCueCli';
+		executor: 'executeCuePrompt' | 'executeCueShell' | 'executeCueCli' | 'onManagedAutoRun';
 		overrides: Partial<OnCueRunParams>;
 	}[])('$name', ({ executor, overrides }) => {
 		it.each([
@@ -1320,53 +1474,61 @@ describe('Cue workflow fence lifetime', () => {
 		expect(next.lifetime.finish).toHaveBeenCalledExactlyOnceWith('applied');
 	});
 
-	it('fences an actual fixture process through the existing Cue Stop registry', async () => {
-		const { runProcess, stopProcess, getActiveProcessMap } =
-			await import('../../../main/cue/cue-process-lifecycle');
-		const { deps, controller, lifetime, port } = fixture();
-		const runId = 'workflow-lifetime-process';
-		deps.stopCueRun.mockImplementation(stopProcess);
-		deps.executeCuePrompt.mockImplementationOnce(async (config) => ({
-			...fakeResult(runId),
-			...(await runProcess(
-				runId,
-				{
-					command: process.execPath,
-					args: ['-e', 'setInterval(() => {}, 1000)'],
-					cwd: process.cwd(),
-					env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
-				},
-				{
-					toolType: 'terminal',
-					timeoutMs: 10_000,
-					onLog: vi.fn(),
-					signal: config.signal,
-					managed: {
-						...config.admission!,
-						attribution: {
-							provider: 'terminal',
-							model: null,
-							operation: 'start',
-							account: null,
-							target: { kind: 'local' },
+	it.each(['prompt', 'autorun'] as const)(
+		'fences an actual %s fixture process through the existing Cue Stop registry',
+		async (action) => {
+			const { runProcess, stopProcess, getActiveProcessMap } =
+				await import('../../../main/cue/cue-process-lifecycle');
+			const { deps, controller, lifetime, port } = fixture();
+			const runId = `workflow-lifetime-${action}-process`;
+			deps.stopCueRun.mockImplementation(stopProcess);
+			deps[action === 'autorun' ? 'onManagedAutoRun' : 'executeCuePrompt'].mockImplementationOnce(
+				async (config) => ({
+					...fakeResult(runId),
+					...(await runProcess(
+						runId,
+						{
+							command: process.execPath,
+							args: ['-e', 'setInterval(() => {}, 1000)'],
+							cwd: process.cwd(),
+							env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
 						},
-					},
-				}
-			)),
-		}));
-		const pending = executeCueRunAction(deps, params({ runId }));
-		try {
-			await vi.waitFor(() => expect(getActiveProcessMap().has(runId)).toBe(true));
-			expect(port.authority.live()).toHaveLength(1);
-			controller.abort();
-			expect(await pending).toMatchObject({ status: 'stopped', executionStarted: true });
-			expect(deps.stopCueRun).toHaveBeenCalledExactlyOnceWith(runId);
-			expect(getActiveProcessMap().has(runId)).toBe(false);
-			expect(port.authority.live()).toHaveLength(0);
-			expect(lifetime.finish).toHaveBeenCalledExactlyOnceWith('uncertain');
-		} finally {
-			stopProcess(runId);
-			await pending;
+						{
+							toolType: 'terminal',
+							timeoutMs: 10_000,
+							onLog: vi.fn(),
+							signal: config.signal,
+							managed: {
+								...config.admission!,
+								attribution: {
+									provider: 'terminal',
+									model: null,
+									operation: 'start',
+									account: null,
+									target: { kind: 'local' },
+								},
+							},
+						}
+					)),
+				})
+			);
+			const pending = executeCueRunAction(
+				deps,
+				params({ runId, action, autoRun: { documents: ['/fixture/playbook.md'] } })
+			);
+			try {
+				await vi.waitFor(() => expect(getActiveProcessMap().has(runId)).toBe(true));
+				expect(port.authority.live()).toHaveLength(1);
+				controller.abort();
+				expect(await pending).toMatchObject({ status: 'stopped', executionStarted: true });
+				expect(deps.stopCueRun).toHaveBeenCalledExactlyOnceWith(runId);
+				expect(getActiveProcessMap().has(runId)).toBe(false);
+				expect(port.authority.live()).toHaveLength(0);
+				expect(lifetime.finish).toHaveBeenCalledExactlyOnceWith('uncertain');
+			} finally {
+				stopProcess(runId);
+				await pending;
+			}
 		}
-	});
+	);
 });

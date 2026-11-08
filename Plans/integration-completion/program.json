@@ -3890,6 +3890,20 @@
 					"produces": []
 				},
 				{
+					"id": "MCOMP-17-03N",
+					"label": "Bind Cue Auto Run handoffs to workflow custody",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/main/cue/cue-run-router.ts",
+						"src/__tests__/main/cue/cue-run-router.managed.test.ts",
+						"Plans/integration-completion/program.json"
+					],
+					"outcome": "Consume MAESTRO-EFFECT-CONSUMERS-BUILD and its pinned MAESTRO-CONTRACT-INPUTS-BUILD dependency. Bounded continuation of MCOMP-17-03 at the shared Cue router: bind Auto Run actions on their captured document/configuration version, workflow trigger, root/parent lineage, verified delegation and current policy. Route managed work only to an explicit trusted host consumer carrying the existing admission and cancellation signal; never drop custody into the legacy renderer launch acknowledgement. Keep owner custody through terminal completion and settlement, refuse absent consumers without effects, and exercise cancellation, changed scope, retries and settlement failures through the existing managed router harness. Retain MCOMP-17-03 unchecked for desktop/headless Auto Run consumer composition, incoming authenticated delegation, desktop composition and managed room custody across turns. Reuse the recorded WORKFLOW-CONTEXT/1 gap; no new wire definition, external capability, producer mapping or paired/provider/native qualification is supplied. Keep to three authored files and fewer than 500 changed lines.",
+					"backlog": ["M-04"],
+					"requires": ["MAESTRO-EFFECT-CONSUMERS-BUILD"],
+					"produces": []
+				},
+				{
 					"label": "Bind Auto Run Cue and nested work at dispatch",
 					"kind": "IMPLEMENT",
 					"targets": [
@@ -3932,7 +3946,7 @@
 			"produces": ["MAESTRO-WORKFLOW-CONSUMERS-BUILD"],
 			"id": "MCOMP-17",
 			"path": ".maestro/playbooks/2026-10-29-Maestro-Integration-Completion/MCOMP-17.md",
-			"taskCount": 18,
+			"taskCount": 19,
 			"stage": "S10"
 		},
 		{
@@ -5722,7 +5736,7 @@
 				"PAIR-DIRECT-EVIDENCE"
 			],
 			"nativeInputs": false,
-			"taskCount": 25
+			"taskCount": 26
 		},
 		{
 			"id": "S11",
@@ -5926,8 +5940,8 @@
 			"taskCount": 1
 		}
 	],
-	"taskCount": 338,
-	"taskCounts": { "IMPLEMENT": 229, "TEST": 49, "VERIFY": 60 },
+	"taskCount": 339,
+	"taskCounts": { "IMPLEMENT": 230, "TEST": 49, "VERIFY": 60 },
 	"artifacts": {
 		"MEGA-CONTRACTS-FOUNDATION-BUILD": {
 			"producerDocument": "GCOMP-01",
@@ -6681,6 +6695,7 @@
 			"MCOMP-17-03I",
 			"MCOMP-17-03J",
 			"MCOMP-17-03L",
+			"MCOMP-17-03N",
 			"MCOMP-17-03",
 			"MCOMP-17-04",
 			"MCOMP-17-05",
