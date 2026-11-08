@@ -28,6 +28,7 @@
  */
 
 import type { UsageStats } from '../../types';
+import { canonicalJson } from '../../canonicalJson';
 import { BACKGROUND_STOP_GRACE_MS } from '../control/termination';
 import { guardTurn, type GuardedTurnStops } from '../control/turn-guard';
 import type { ConsultObserver, ConsultRunner } from '../agents/consult';
@@ -46,6 +47,7 @@ import {
 } from '../managed/authority';
 import {
 	delegationContextEnv,
+	delegationContextOf,
 	intersectDelegationScope,
 	type ManagedDelegationContext,
 } from '../managed/delegation';
@@ -155,6 +157,7 @@ type ManagedTurn =
 			authority: HostAuthority;
 			context: ManagedAuthenticatedContext;
 			policy: PolicySourceSet;
+			bindingKey: string;
 	  }
 	| { managed: true; refusal: GroupChatTurnStart };
 
@@ -313,7 +316,18 @@ export function createBackgroundTurns(options: BackgroundTurnsOptions): Backgrou
 				`The turn's context was not accepted: ${verified.problems.join('; ')}`
 			);
 		}
-		return { managed: true, authority: port.authority, context: verified.context, policy };
+		return {
+			managed: true,
+			authority: port.authority,
+			context: verified.context,
+			policy,
+			// Compare the bound scope across awaits, excluding only the time of re-verification.
+			bindingKey: canonicalJson({
+				...verified.context,
+				verification: { ...verified.context.verification, verifiedAt: undefined },
+				policy,
+			}),
+		};
 	}
 
 	/**
@@ -334,9 +348,43 @@ export function createBackgroundTurns(options: BackgroundTurnsOptions): Backgrou
 		const delegation = groupChatTurnContext(spawn);
 		const managedTurn = managedTurnFor(spawn.processId, delegation);
 		if (managedTurn.managed && 'refusal' in managedTurn) return managedTurn.refusal;
-		const customEnvVars = delegation
-			? { ...(spawn.customEnvVars ?? {}), ...delegationContextEnv(delegation) }
+		const boundDelegation = managedTurn.managed
+			? delegationContextOf(managedTurn.context)
+			: delegation;
+		const customEnvVars = boundDelegation
+			? { ...(spawn.customEnvVars ?? {}), ...delegationContextEnv(boundDelegation) }
 			: spawn.customEnvVars;
+		const recheckBinding = (): GroupChatTurnStart | null => {
+			let current: ManagedTurn;
+			try {
+				current = managedTurnFor(spawn.processId, delegation);
+			} catch (error) {
+				return managedRefusal(
+					spawn.processId,
+					boundDelegation,
+					'unavailable',
+					'runtime-unavailable',
+					`The host scope could not be rechecked; no process was started: ${errorText(error)}`
+				);
+			}
+			if (current.managed && 'refusal' in current) return current.refusal;
+			if (
+				current.managed !== managedTurn.managed ||
+				(current.managed &&
+					managedTurn.managed &&
+					(current.authority !== managedTurn.authority ||
+						current.bindingKey !== managedTurn.bindingKey))
+			) {
+				return managedRefusal(
+					spawn.processId,
+					boundDelegation,
+					'unavailable',
+					'runtime-unavailable',
+					'The host standing, authority or bound scope changed while preparing this turn; no process was started.'
+				);
+			}
+			return null;
+		};
 
 		// System prompt first, so every later step (maestro-p rewrite, SSH wrap, Windows stdin)
 		// sees the final args and prompt, as on the desktop (`spawnGroupChatAgent`).
@@ -388,7 +436,12 @@ export function createBackgroundTurns(options: BackgroundTurnsOptions): Backgrou
 		// spawned, and the lease it grants is checked again inside `startTurn` against the spec that
 		// reaches `spawn`, so a replaced spec fails there rather than running.
 		let admission: RunTurnOptions['admission'];
-		if (managedTurn.managed && delegation) {
+		const preparationRefusal = recheckBinding();
+		if (preparationRefusal) {
+			removeTempFiles(plan.tempFiles);
+			return preparationRefusal;
+		}
+		if (managedTurn.managed && boundDelegation) {
 			const attribution = groupChatTurnAttribution(
 				spawn,
 				spawn.cwd,
@@ -409,10 +462,16 @@ export function createBackgroundTurns(options: BackgroundTurnsOptions): Backgrou
 					admitted.message
 				);
 			}
+			const admissionRefusal = recheckBinding();
+			if (admissionRefusal) {
+				admitted.lease.release({ outcome: 'spawn-failed', message: admissionRefusal.error! });
+				removeTempFiles(plan.tempFiles);
+				return admissionRefusal;
+			}
 			options.managed?.onAdmission?.({
 				kind: 'admitted',
 				processId: spawn.processId,
-				delegation,
+				delegation: boundDelegation,
 				leaseId: admitted.lease.leaseId,
 			});
 			const gate: DispatchAdmission = leaseAdmission(managedTurn.authority, admitted.lease);

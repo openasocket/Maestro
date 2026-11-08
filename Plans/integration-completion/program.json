@@ -3722,6 +3722,20 @@
 					"id": "MCOMP-17-03A"
 				},
 				{
+					"label": "Preserve bound background lineage across asynchronous dispatch",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/shared/maestro-lib/runtime/background-turns.ts",
+						"src/shared/maestro-lib/runtime/__tests__/background-turns.test.ts",
+						"Plans/integration-completion/program.json"
+					],
+					"outcome": "Consume MAESTRO-EFFECT-CONSUMERS-BUILD and its pinned MAESTRO-CONTRACT-INPUTS-BUILD dependency. Bounded continuation of MCOMP-17-03: stamp the verified context and current policy into shared background/group-chat/consult child plans before local or SSH wrapping. Recheck standing, authority, actor, verification and policy after asynchronous preparation and admission; release an unbound lease and start no process on changed scope. Exercise workflow/grant preservation and transition refusals through the existing fake-provider harness. Retain MCOMP-17-03 unchecked for incoming authenticated delegation, Cue, desktop composition, managed room custody across turns and cancellation while a background launch is pending. No external capability, producer mapping or paired/provider/native qualification is supplied. Keep to three authored files and fewer than 500 changed lines.",
+					"backlog": ["M-04"],
+					"requires": ["MAESTRO-EFFECT-CONSUMERS-BUILD"],
+					"produces": [],
+					"id": "MCOMP-17-03B"
+				},
+				{
 					"label": "Bind Auto Run Cue and nested work at dispatch",
 					"kind": "IMPLEMENT",
 					"targets": [
@@ -3764,7 +3778,7 @@
 			"produces": ["MAESTRO-WORKFLOW-CONSUMERS-BUILD"],
 			"id": "MCOMP-17",
 			"path": ".maestro/playbooks/2026-10-29-Maestro-Integration-Completion/MCOMP-17.md",
-			"taskCount": 6,
+			"taskCount": 7,
 			"stage": "S10"
 		},
 		{
@@ -5554,7 +5568,7 @@
 				"PAIR-DIRECT-EVIDENCE"
 			],
 			"nativeInputs": false,
-			"taskCount": 13
+			"taskCount": 14
 		},
 		{
 			"id": "S11",
@@ -5758,9 +5772,9 @@
 			"taskCount": 1
 		}
 	],
-	"taskCount": 326,
+	"taskCount": 327,
 	"taskCounts": {
-		"IMPLEMENT": 217,
+		"IMPLEMENT": 218,
 		"TEST": 49,
 		"VERIFY": 60
 	},
@@ -6507,6 +6521,7 @@
 			"MCOMP-17-01",
 			"MCOMP-17-02",
 			"MCOMP-17-03A",
+			"MCOMP-17-03B",
 			"MCOMP-17-03",
 			"MCOMP-17-04",
 			"MCOMP-17-05",

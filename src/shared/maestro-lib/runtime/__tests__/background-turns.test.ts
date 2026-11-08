@@ -452,7 +452,9 @@ describe('background turns', () => {
 
 		/** The headless spawn port of a host enrolled with `authority`, or of a standalone one. */
 		const portOf = (
-			authority: ReturnType<typeof authorityOf> | null
+			authority: ReturnType<typeof authorityOf> | null,
+			actorId: string = actor.id,
+			policyRevision = 3
 		): BackgroundSpawnAuthorityPort => {
 			const binding: ManagedBindingState = authority
 				? {
@@ -461,23 +463,24 @@ describe('background turns', () => {
 						record: {
 							authorityId: 'fleet',
 							policySources: [],
-							policyRevision: 3,
+							policyRevision,
 						} as unknown as Extract<ManagedBindingState, { state: 'enrolled' }>['record'],
 					}
 				: { state: 'standalone', files: [] };
 			return createHeadlessSpawnAuthority({
 				installation,
 				binding,
-				host: authority ? { authority, policy: () => ({ sources: [], policyRevision: 3 }) } : null,
+				host: authority ? { authority, policy: () => ({ sources: [], policyRevision }) } : null,
 				origin: 'headless',
-				actor,
+				actor: { ...actor, id: actorId },
 			});
 		};
 
 		function managedTurns(
 			script: FakeScript,
 			authority: ReturnType<typeof authorityOf> | null,
-			account: string | null = null
+			account: string | null = null,
+			readPort?: () => BackgroundSpawnAuthorityPort
 		) {
 			const provider = createFakeGroupChatProvider(dir, script);
 			const port = portOf(authority);
@@ -488,7 +491,7 @@ describe('background turns', () => {
 				beginTurn,
 				deps: { runTurn: provider.runTurn },
 				managed: {
-					port: () => port,
+					port: readPort ?? (() => port),
 					account,
 					onAdmission: (event) => admissions.push(event),
 				},
@@ -532,6 +535,140 @@ describe('background turns', () => {
 			leases = 0;
 		});
 
+		it.each(['local', 'ssh'] as const)(
+			'carries the bound workflow, grant and current policy through the %s launch plan',
+			async (target) => {
+				fs.mkdirSync(path.dirname(paths().settingsFile), { recursive: true });
+				fs.writeFileSync(
+					paths().settingsFile,
+					JSON.stringify({
+						sshRemotes: [
+							{
+								id: 'r1',
+								name: 'Fixture',
+								host: 'build.example.com',
+								port: 22,
+								username: 'dev',
+								privateKeyPath: '',
+								enabled: true,
+							},
+						],
+					})
+				);
+				const authority = authorityOf(() => 'allow');
+				const { background, provider } = managedTurns(() => ({ text: 'ok' }), authority);
+				const record = carried(7);
+				record.workflow = {
+					workflowId: 'playbook:nightly',
+					version: 'v1',
+					triggerEventId: 'timer:1',
+					ownerEpoch: 'opaque:epoch',
+					fencingToken: 'fence-1',
+				};
+				record.delegation.grantRef = 'grant-1';
+				const bound = { ...record, policyRevision: 3 };
+				const started = await background.groupChatRunner(handlers).start(
+					spawnOf({
+						delegation: record,
+						customEnvVars: delegationContextEnv(carried(null)),
+						...(target === 'ssh'
+							? {
+									sshRemoteConfig: { enabled: true, remoteId: 'r1' },
+									prompt: 'x'.repeat(5000),
+								}
+							: {}),
+					})
+				);
+				expect(started.success).toBe(true);
+				expect(asked[0].context).toMatchObject(bound);
+				expect(asked[0].context.actor).toEqual(actor);
+				if (target === 'local') {
+					expect(stampedOn(provider.calls[0].spec.env)).toEqual(bound);
+				} else {
+					expect(provider.calls[0].spec.command).toMatch(/ssh/);
+					expect(provider.calls[0].spec.stdin).toContain(
+						delegationContextEnv(bound)[MANAGED_DELEGATION_ENV_VAR]
+					);
+				}
+				expect(admissions[0]).toMatchObject({ kind: 'admitted', delegation: bound });
+				await vi.waitFor(() => expect(authority.live()).toEqual([]));
+			}
+		);
+
+		it.each([
+			['preparation', 'enrollment-loss'],
+			['preparation', 'enrollment-gain'],
+			['preparation', 'authority'],
+			['preparation', 'policy'],
+			['preparation', 'actor'],
+			['preparation', 'context-error'],
+			['admission', 'enrollment-loss'],
+			['admission', 'authority'],
+			['admission', 'policy'],
+			['admission', 'actor'],
+			['admission', 'withdrawal'],
+			['admission', 'context-error'],
+		])('refuses %s when %s changes, with no child or outstanding lease', async (phase, change) => {
+			const authority = authorityOf(() => 'allow');
+			let current = portOf(change === 'enrollment-gain' ? null : authority);
+			const { background, provider } = managedTurns(
+				() => ({ text: 'never' }),
+				authority,
+				null,
+				() => current
+			);
+			const changeScope = () => {
+				if (change === 'enrollment-loss') current = portOf(null);
+				else if (change === 'authority') current = portOf(authorityOf(() => 'allow'));
+				else if (change === 'policy') current = portOf(authority, actor.id, 4);
+				else if (change === 'actor') current = portOf(authority, 'operator:other');
+				else if (change === 'withdrawal')
+					current = {
+						...current,
+						context: () => ({ ok: false, code: 'unauthenticated', problems: ['actor withdrawn'] }),
+					};
+				else if (change === 'context-error')
+					current = {
+						...current,
+						context: () => {
+							throw new Error('host disconnected');
+						},
+					};
+				else current = portOf(authority);
+			};
+			let issued: ReturnType<typeof authority.live> = [];
+			if (phase === 'preparation') beginTurn.mockImplementationOnce(changeScope);
+			else {
+				const admit = authority.admit.bind(authority);
+				vi.spyOn(authority, 'admit').mockImplementationOnce(async (request) => {
+					const result = await admit(request);
+					issued = authority.live();
+					changeScope();
+					return result;
+				});
+			}
+			const started = await background.groupChatRunner(handlers).start(spawnOf());
+			expect(started).toMatchObject({
+				success: false,
+				managed: {
+					state: change === 'withdrawal' ? 'denied' : 'unavailable',
+					code: change === 'withdrawal' ? 'unauthenticated' : 'runtime-unavailable',
+				},
+			});
+			expect(provider.calls).toEqual([]);
+			expect(registry.size()).toBe(0);
+			expect(reported).toEqual([]);
+			expect(asked).toHaveLength(phase === 'preparation' ? 0 : 1);
+			expect(admissions).toHaveLength(1);
+			expect(admissions[0].kind).toBe('refused');
+			expect(authority.live()).toEqual([]);
+			if (phase === 'admission')
+				expect(issued[0].ended()).toMatchObject({
+					state: 'released',
+					release: { outcome: 'spawn-failed' },
+				});
+		});
+
 		it('admits a room turn as the room’s child on a lease over the final spec, stamps the record, and releases the lease when the turn ends', async () => {
 			const authority = authorityOf(() => 'allow');
 			const { background, provider } = managedTurns(
@@ -570,9 +707,14 @@ describe('background turns', () => {
 				resourceIds: [`dir:${os.tmpdir()}`],
 			});
 			// The process carries the record the admission bound.
-			expect(stampedOn(provider.calls[0].spec.env)).toEqual(turn);
+			expect(stampedOn(provider.calls[0].spec.env)).toEqual({ ...turn, policyRevision: 3 });
 			expect(admissions).toEqual([
-				{ kind: 'admitted', processId: PARTICIPANT, delegation: turn, leaseId: 'lease-1' },
+				{
+					kind: 'admitted',
+					processId: PARTICIPANT,
+					delegation: { ...turn, policyRevision: 3 },
+					leaseId: 'lease-1',
+				},
 			]);
 			// The lease lives with the process and is released with its exit.
 			await vi.waitFor(() => expect(reported).toHaveLength(3));
@@ -609,6 +751,49 @@ describe('background turns', () => {
 			expect(reported).toEqual([]);
 		});
 
+		it('refuses a nested child from an enrolled room on a standalone host', async () => {
+			const { background, provider } = managedTurns(
+				() => ({ text: 'ok' }),
+				authorityOf(() => 'allow')
+			);
+			expect((await background.groupChatRunner(handlers).start(spawnOf())).success).toBe(true);
+			await vi.waitFor(() => expect(background.activeCount()).toBe(0));
+			const nested = managedTurns(() => ({ text: 'never' }), null);
+			const started = await nested.background.groupChatRunner(handlers).start(
+				spawnOf({
+					processId: MODERATOR,
+					delegation: stampedOn(provider.calls[0].spec.env),
+				})
+			);
+			expect(started).toMatchObject({
+				success: false,
+				managed: { state: 'unavailable', code: 'runtime-unavailable' },
+			});
+			expect(nested.provider.calls).toEqual([]);
+		});
+
+		it('detects an in-place policy source change across preparation', async () => {
+			const authority = authorityOf(() => 'allow');
+			const source = { id: 'policy-1', kind: 'endpoint' as const, revision: 3 };
+			const policy = { sources: [source], policyRevision: 3 };
+			const port = { ...portOf(authority), policy: () => policy };
+			const { background, provider } = managedTurns(
+				() => ({ text: 'never' }),
+				authority,
+				null,
+				() => port
+			);
+			beginTurn.mockImplementationOnce(() => {
+				source.id = 'policy-2';
+			});
+			expect(await background.groupChatRunner(handlers).start(spawnOf())).toMatchObject({
+				success: false,
+				managed: { state: 'unavailable' },
+			});
+			expect(asked).toEqual([]);
+			expect(provider.calls).toEqual([]);
+		});
+
 		it('binds a consult under the record it carries, as it is, and never as a fresh turn of the target', async () => {
 			const { background, provider } = managedTurns(
 				() => ({ text: 'The answer.' }),
@@ -634,7 +819,7 @@ describe('background turns', () => {
 				// The host's generation decides, not the initiator's claim.
 				policyRevision: 3,
 			});
-			expect(stampedOn(provider.calls[0].spec.env)).toEqual(record);
+			expect(stampedOn(provider.calls[0].spec.env)).toEqual({ ...record, policyRevision: 3 });
 		});
 
 		it('refuses a consult that carries no record on a managed host: nothing to bind, nothing run unmanaged', async () => {
@@ -842,16 +1027,17 @@ describe('background turns', () => {
 
 				expect(asked).toHaveLength(1);
 				expect(asked[0].context.delegation).toEqual(record.delegation);
-				expect(stampedOn(provider.calls[0].spec.env)).toEqual(record);
+				expect(stampedOn(provider.calls[0].spec.env)).toEqual({ ...record, policyRevision: 3 });
 				expect(stampedOn(provider.calls[0].spec.env)).not.toEqual(planted);
 
 				// The same for a room turn: the room's child, never what the spawn's env claimed.
 				const runner = background.groupChatRunner(handlers);
 				await runner.start(spawnOf({ customEnvVars: delegationContextEnv(planted) }));
 				await vi.waitFor(() => expect(background.activeCount()).toBe(0));
-				expect(stampedOn(provider.calls[1].spec.env)).toEqual(
-					groupChatTurnContext({ processId: PARTICIPANT })
-				);
+				expect(stampedOn(provider.calls[1].spec.env)).toEqual({
+					...groupChatTurnContext({ processId: PARTICIPANT }),
+					policyRevision: 3,
+				});
 			});
 		});
 	});
