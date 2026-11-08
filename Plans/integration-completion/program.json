@@ -4114,6 +4114,20 @@
 					"produces": []
 				},
 				{
+					"id": "MCOMP-17-03AD",
+					"label": "Expose Auto Run service source custody to authenticated hosts",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/shared/maestro-lib/runtime/autorun.ts",
+						"src/shared/maestro-lib/runtime/__tests__/autorun.test.ts",
+						"Plans/integration-completion/program.json"
+					],
+					"outcome": "Consume MAESTRO-EFFECT-CONSUMERS-BUILD and its pinned MAESTRO-CONTRACT-INPUTS-BUILD dependency. Bounded prerequisite continuation of MCOMP-17-03: expose exact agent/process source custody through the existing Auto Run service and run handles. Delegate to the original runner verifier, refuse stopped or ended runs and lost or unreadable data-directory ownership, and recheck service lifetime after the custody read. Preserve original verified lineage and access without claiming a fence, readmitting or releasing a running lease. Exercise real playbook and goal fixture processes, pending claims, concurrent agents, graceful stop, shutdown, completion, revocation and fresh recovery. Authenticated transport selection and runtime consult composition, desktop composition and managed room custody remain pending. Reuse WORKFLOW-CONTEXT/1; no new wire capability, producer mapping or paired/provider/native qualification. Keep to three authored files and fewer than 500 changed lines.",
+					"backlog": ["M-04"],
+					"requires": ["MAESTRO-EFFECT-CONSUMERS-BUILD"],
+					"produces": []
+				},
+				{
 					"label": "Bind Auto Run Cue and nested work at dispatch",
 					"kind": "IMPLEMENT",
 					"targets": [
@@ -4156,7 +4170,7 @@
 			"produces": ["MAESTRO-WORKFLOW-CONSUMERS-BUILD"],
 			"id": "MCOMP-17",
 			"path": ".maestro/playbooks/2026-10-29-Maestro-Integration-Completion/MCOMP-17.md",
-			"taskCount": 34,
+			"taskCount": 35,
 			"stage": "S10"
 		},
 		{
@@ -5946,7 +5960,7 @@
 				"PAIR-DIRECT-EVIDENCE"
 			],
 			"nativeInputs": false,
-			"taskCount": 41
+			"taskCount": 42
 		},
 		{
 			"id": "S11",
@@ -6150,9 +6164,9 @@
 			"taskCount": 1
 		}
 	],
-	"taskCount": 354,
+	"taskCount": 355,
 	"taskCounts": {
-		"IMPLEMENT": 245,
+		"IMPLEMENT": 246,
 		"TEST": 49,
 		"VERIFY": 60
 	},
@@ -6925,6 +6939,7 @@
 			"MCOMP-17-03AA",
 			"MCOMP-17-03AB",
 			"MCOMP-17-03AC",
+			"MCOMP-17-03AD",
 			"MCOMP-17-03",
 			"MCOMP-17-04",
 			"MCOMP-17-05",

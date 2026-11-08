@@ -121,6 +121,7 @@ import {
 	type AutoRunAdmissionEvent,
 	type AutoRunSpawnAuthorityPort,
 	type AutoRunStreamEvent,
+	type AutoRunTurnRunner,
 } from './autorun-turns';
 import type { DataDirVerdict } from './data-dir-lock';
 import { commitAll, isGitRepository, readGitBranch } from './git';
@@ -200,6 +201,8 @@ export interface RuntimeAutoRunOptions {
 
 export interface RuntimeAutoRun {
 	readonly api: AutoRunApi;
+	/** Host-only live custody lookup. The caller must authenticate the agent/process selection. */
+	sourceCustody(agentId: string, processId: string): ReturnType<AutoRunTurnRunner['sourceCustody']>;
 	activeRuns(): ActiveAutoRun[];
 	/** Does a run hold this agent's working tree (AE17)? */
 	holds(agentId: string): boolean;
@@ -211,6 +214,7 @@ export interface RuntimeAutoRun {
 
 interface RunHandle {
 	agentId: string;
+	sourceCustody: AutoRunTurnRunner['sourceCustody'];
 	kind: 'playbook' | 'goal';
 	startedAt: number;
 	controller: RunController;
@@ -510,7 +514,7 @@ export function createRuntimeAutoRun(options: RuntimeAutoRunOptions): RuntimeAut
 		agentId: string,
 		controller: RunController,
 		workflow: AutoRunWorkflowIdentity
-	): AutoRunDeps {
+	): AutoRunDeps & { turns: AutoRunTurnRunner } {
 		const managed = options.managed;
 		const turns = createAutoRunTurnRunner({
 			agentId,
@@ -594,7 +598,7 @@ export function createRuntimeAutoRun(options: RuntimeAutoRunOptions): RuntimeAut
 			return text;
 		};
 		return {
-			turns: { run: (request) => turns.run(request) },
+			turns,
 			documents,
 			history: {
 				append: async (entry) => {
@@ -861,9 +865,11 @@ export function createRuntimeAutoRun(options: RuntimeAutoRunOptions): RuntimeAut
 			documents: names,
 			startedAt,
 		});
+		const deps = buildDeps(agentId, controller, workflow);
 		startRun(
 			{
 				agentId,
+				sourceCustody: deps.turns.sourceCustody,
 				kind: 'playbook',
 				startedAt,
 				controller,
@@ -895,7 +901,7 @@ export function createRuntimeAutoRun(options: RuntimeAutoRunOptions): RuntimeAut
 					...(input.ignoreModelHints ? { ignoreModelHints: true } : {}),
 					signal: abort.signal,
 				},
-				buildDeps(agentId, controller, workflow)
+				deps
 			)
 		);
 		return ok(undefined);
@@ -931,9 +937,11 @@ export function createRuntimeAutoRun(options: RuntimeAutoRunOptions): RuntimeAut
 			documents: [goalConfig.goal, goalConfig.exitCriteria],
 			startedAt,
 		});
+		const deps = buildDeps(agentId, controller, workflow);
 		startRun(
 			{
 				agentId,
+				sourceCustody: deps.turns.sourceCustody,
 				kind: 'goal',
 				startedAt,
 				controller,
@@ -963,7 +971,7 @@ export function createRuntimeAutoRun(options: RuntimeAutoRunOptions): RuntimeAut
 					...(input.effort ? { effort: input.effort } : {}),
 					signal: abort.signal,
 				},
-				buildDeps(agentId, controller, workflow)
+				deps
 			)
 		);
 		// The runtime has no tab to name.
@@ -1008,6 +1016,29 @@ export function createRuntimeAutoRun(options: RuntimeAutoRunOptions): RuntimeAut
 
 	return {
 		api,
+		sourceCustody: (agentId, processId) => {
+			try {
+				const run = runs.get(agentId);
+				if (
+					!run ||
+					run.controller.stopRequested() ||
+					run.abort.signal.aborted ||
+					!options.fence().ok
+				)
+					return null;
+				// The runner owns the authenticated context, bound lease and access ceiling. Reading
+				// custody neither claims ownership again nor admits or releases a running process.
+				const source = run.sourceCustody(processId);
+				return options.fence().ok &&
+					runs.get(agentId) === run &&
+					!run.controller.stopRequested() &&
+					!run.abort.signal.aborted
+					? source
+					: null;
+			} catch {
+				return null;
+			}
+		},
 		activeRuns: () =>
 			[...runs.values()].map((run) => ({
 				agentId: run.agentId,

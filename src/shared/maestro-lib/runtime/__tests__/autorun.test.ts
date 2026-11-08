@@ -41,6 +41,7 @@ import { AUTO_RUN_SESSION_COLUMNS, AUTO_RUN_TASK_COLUMNS } from '../../stats/aut
 import { QUERY_EVENT_COLUMNS } from '../../stats/query-event-insert';
 import { runAgentTurn } from '../../turns/run-agent-turn';
 import { outcomeOfEngineEvent } from '../autorun';
+import * as autoRunService from '../autorun';
 import {
 	createMaestroRuntime,
 	type MaestroRuntime,
@@ -870,6 +871,225 @@ describe('runtime Auto Run', () => {
 			await run.ended();
 			expect(run.outcome()).toEqual({ status: 'stopped' });
 			expect(runLaunches).toEqual([]);
+		});
+
+		describe('service source custody', () => {
+			let service: autoRunService.RuntimeAutoRun;
+			let config: autoRunService.RuntimeAutoRunOptions;
+
+			beforeEach(() => {
+				const create = autoRunService.createRuntimeAutoRun;
+				// Observe the real service composed by the runtime; keep its runner and processes real.
+				vi.spyOn(autoRunService, 'createRuntimeAutoRun').mockImplementation((options) => {
+					config = options;
+					service = create(options);
+					return service;
+				});
+			});
+			afterEach(() => vi.restoreAllMocks());
+
+			async function liveSource(kind: 'playbook' | 'goal' | 'standalone' = 'playbook') {
+				const file = doc('source', tasks(1));
+				const { authority, asked } = fleetAuthority();
+				const owner = new AbortController();
+				const lifetime = {
+					signal: owner.signal,
+					current: vi.fn(() => true),
+					finish: vi.fn<WorkflowFenceLifetime['finish']>().mockResolvedValue(undefined),
+				};
+				const claim = vi.fn(() => ({ ownerEpoch: 'epoch-1', fencingToken: 'fence-1', lifetime }));
+				const runtime =
+					kind === 'standalone' ? await start() : await startEnrolled(authority, claim);
+				const run = watchRun(runtime);
+				script = [{ text: 'Source is working.', hang: true }];
+				value<unknown>(
+					await (kind === 'goal'
+						? runtime.autoRun.launchGoal('a1', { goal: 'Work', maxIterations: 1 })
+						: runtime.autoRun.launch('a1', { documents: [{ file }] }))
+				);
+				await vi.waitFor(() => expect(run.events.some((e) => e.kind === 'output')).toBe(true));
+				const event = run.events.find((e) => e.kind === 'output');
+				if (event?.kind !== 'output') throw new Error('No source process output');
+				return {
+					runtime,
+					run,
+					processId: event.processId,
+					authority,
+					asked,
+					claim,
+					owner,
+					lifetime,
+					file,
+				};
+			}
+
+			it.each(['playbook', 'goal'] as const)(
+				'exposes original live %s custody without another admission or claim',
+				async (kind) => {
+					const { processId, authority, asked, claim, lifetime } = await liveSource(kind);
+					const leases = authority.live();
+					expect(service.sourceCustody('a1', processId)).toEqual({
+						context: asked[0].context,
+						writable: true,
+					});
+					expect(service.sourceCustody('a1', processId)?.context).toBe(asked[0].context);
+					expect(service.sourceCustody('other', processId)).toBeNull();
+					expect(service.sourceCustody('a1', 'wrong-process')).toBeNull();
+					expect(asked[0].context.identity.runId).toEqual(expect.any(String));
+					expect(service.sourceCustody('a1', asked[0].context.identity.runId ?? '')).toBeNull();
+					expect(asked).toHaveLength(1);
+					expect(claim).toHaveBeenCalledTimes(1);
+					expect(lifetime.finish).not.toHaveBeenCalled();
+					expect(authority.live()).toEqual(leases);
+					expect(leases[0].state()).toBe('bound');
+				}
+			);
+
+			it('returns no custody for a real standalone process', async () => {
+				const { processId, asked, claim } = await liveSource('standalone');
+				expect(service.sourceCustody('a1', processId)).toBeNull();
+				expect(asked).toEqual([]);
+				expect(claim).not.toHaveBeenCalled();
+			});
+
+			it('isolates concurrent agents and keeps the other source live after a stop', async () => {
+				const { runtime, processId, file, asked } = await liveSource();
+				const { agentId } = value(
+					await runtime.agents.create({
+						name: 'Beta',
+						provider: 'claude-code',
+						cwd: work,
+						autoRunFolderPath: docs,
+					})
+				);
+				const run = watchRun(runtime, agentId);
+				script = [{ text: 'Beta is working.', hang: true }];
+				value(await runtime.autoRun.launch(agentId, { documents: [{ file }] }));
+				await vi.waitFor(() => expect(run.events.some((e) => e.kind === 'output')).toBe(true));
+				const event = run.events.find((e) => e.kind === 'output');
+				if (event?.kind !== 'output') throw new Error('No concurrent process');
+				expect(service.sourceCustody('a1', processId)?.context).toBe(asked[0].context);
+				expect(service.sourceCustody(agentId, event.processId)?.context).toBe(asked[1].context);
+				expect(service.sourceCustody('a1', event.processId)).toBeNull();
+				expect(service.sourceCustody(agentId, processId)).toBeNull();
+				value(await runtime.autoRun.stop('a1'));
+				expect(service.sourceCustody('a1', processId)).toBeNull();
+				expect(service.sourceCustody(agentId, event.processId)?.context).toBe(asked[1].context);
+			});
+
+			it('withdraws on graceful stop while the source process is still alive', async () => {
+				const { runtime, processId, authority } = await liveSource();
+				expect(service.sourceCustody('a1', processId)).not.toBeNull();
+				value(await runtime.autoRun.stop('a1'));
+				expect(service.sourceCustody('a1', processId)).toBeNull();
+				expect(authority.live()[0].state()).toBe('bound');
+			});
+
+			it('withdraws on shutdown and independently authorizes a fresh run', async () => {
+				const { runtime, processId, asked, file } = await liveSource();
+				const stopping = service.stopAll();
+				expect(service.sourceCustody('a1', processId)).toBeNull();
+				await stopping;
+				const run = watchRun(runtime);
+				script = [{ text: 'Fresh source.', hang: true }];
+				value(await runtime.autoRun.launch('a1', { documents: [{ file }] }));
+				await vi.waitFor(() => expect(run.events.some((e) => e.kind === 'output')).toBe(true));
+				const event = run.events.find((e) => e.kind === 'output');
+				if (event?.kind !== 'output') throw new Error('No fresh process');
+				expect(event.processId).not.toBe(processId);
+				expect(service.sourceCustody('a1', processId)).toBeNull();
+				expect(service.sourceCustody('a1', event.processId)?.context).toBe(asked[1].context);
+				expect(asked[1].context.identity).not.toEqual(asked[0].context.identity);
+			});
+
+			it.each(['lost', 'throws', 'during-read', 'stop-during-read'] as const)(
+				'refuses %s service custody',
+				async (change) => {
+					const { processId, authority, lifetime } = await liveSource();
+					const originalFence = config.fence;
+					if (change === 'lost') config.fence = () => ({ ok: false, reason: 'ownership lost' });
+					if (change === 'throws')
+						config.fence = () => {
+							throw new Error('ownership unreadable');
+						};
+					if (change === 'during-read') {
+						lifetime.current.mockImplementation(() => {
+							config.fence = () => ({ ok: false, reason: 'ownership lost during lookup' });
+							return true;
+						});
+					}
+					if (change === 'stop-during-read') {
+						lifetime.current.mockImplementation(() => {
+							void service.api.stop('a1');
+							return true;
+						});
+					}
+					expect(service.sourceCustody('a1', processId)).toBeNull();
+					expect(authority.live()[0].state()).toBe('bound');
+					expect(lifetime.finish).not.toHaveBeenCalled();
+					config.fence = originalFence;
+				}
+			);
+
+			it.each(['revoked', 'expired', 'mutated'] as const)(
+				'preserves the runner refusal for %s custody',
+				async (change) => {
+					const { processId, authority, asked, lifetime } = await liveSource();
+					if (change === 'revoked') authority.revoke(authority.live()[0].leaseId, 'revoked');
+					if (change === 'expired') lifetime.current.mockReturnValue(false);
+					if (change === 'mutated') asked[0].context.identity.attemptId = 'changed';
+					expect(service.sourceCustody('a1', processId)).toBeNull();
+				}
+			);
+
+			it('returns no custody during a pending owner claim or after cancellation', async () => {
+				const file = doc('pending', tasks(1));
+				const { authority, asked } = fleetAuthority();
+				const pending = Promise.withResolvers<WorkflowFenceAnswer>();
+				const claim = vi.fn(() => pending.promise);
+				const runtime = await startEnrolled(authority, claim);
+				value(await runtime.autoRun.launch('a1', { documents: [{ file }] }));
+				await vi.waitFor(() => expect(claim).toHaveBeenCalledTimes(1));
+				expect(service.sourceCustody('a1', 'pending')).toBeNull();
+				const stopping = service.stopAll();
+				pending.resolve(null);
+				await stopping;
+				expect(service.sourceCustody('a1', 'pending')).toBeNull();
+				expect(asked).toEqual([]);
+				expect(runLaunches).toEqual([]);
+			});
+
+			it('removes custody before reporting successful completion and settlement', async () => {
+				const file = doc('completed', tasks(1));
+				const { authority } = fleetAuthority();
+				let processId = '';
+				const finish = vi.fn<WorkflowFenceLifetime['finish']>(async () => {
+					expect(processId).not.toBe('');
+					expect(service.sourceCustody('a1', processId)).toBeNull();
+				});
+				const runtime = await startEnrolled(authority, () => ({
+					ownerEpoch: 'epoch-1',
+					fencingToken: 'fence-1',
+					lifetime: { signal: new AbortController().signal, current: () => true, finish },
+				}));
+				const run = watchRun(runtime);
+				const ended = vi.fn(() => expect(service.sourceCustody('a1', processId)).toBeNull());
+				runtime.events.subscribe(
+					(event) => {
+						if (event.type === 'autorun' && event.event.kind === 'output')
+							processId = event.event.processId;
+						if (event.type === 'autorun.ended') ended();
+					},
+					{ types: ['autorun', 'autorun.ended'] }
+				);
+				script = [{ text: 'Finished the task.', tick: file }];
+				value(await runtime.autoRun.launch('a1', { documents: [{ file }] }));
+				await run.ended();
+				expect(run.outcome()).toEqual({ status: 'completed' });
+				expect(finish).toHaveBeenCalledWith('applied');
+				expect(ended).toHaveBeenCalledOnce();
+				expect(service.sourceCustody('a1', processId)).toBeNull();
+			});
 		});
 
 		describe('workflow settlement', () => {
