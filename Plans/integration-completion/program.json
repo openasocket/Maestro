@@ -4226,6 +4226,20 @@
 					"produces": []
 				},
 				{
+					"id": "MCOMP-17-03AL",
+					"label": "Refuse forwarded caller credentials the desktop ask handler cannot resolve",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/main/web-server/handlers/messageHandlers/commands.ts",
+						"src/__tests__/main/web-server/handlers/messageHandlers.test.ts",
+						"Plans/integration-completion/program.json"
+					],
+					"outcome": "Consume MAESTRO-EFFECT-CONSUMERS-BUILD and its pinned MAESTRO-CONTRACT-INPUTS-BUILD dependency. Bounded prerequisite continuation of MCOMP-17-03 after MCOMP-17-03AK: the desktop WebSocket cross_agent_ask handler, which is not the shared host request handler and cannot resolve a per-process caller credential, refuses any request carrying a callerCredential field (string, blank or not a string) with the shared host wording, before a dispatch ticket is issued, the target is looked up or the consult is sent, so the CLI can forward the credential without a desktop silently falling back to the stated fromSessionId/fromTabId. A request without the field keeps the existing consult path, and no reply or log carries the credential. Exercise the real handler and a mutation check. The CLI reading MAESTRO_MANAGED_CALLER_CREDENTIAL and forwarding it, desktop credential composition, background/consult and Auto Run child credentials and room owner lifetime remain pending. Reuse WORKFLOW-CONTEXT/1; no new wire capability, producer mapping or paired/provider/native qualification. Keep to three authored files and fewer than 500 changed lines.",
+					"backlog": ["M-04"],
+					"requires": ["MAESTRO-EFFECT-CONSUMERS-BUILD"],
+					"produces": []
+				},
+				{
 					"label": "Bind Auto Run Cue and nested work at dispatch",
 					"kind": "IMPLEMENT",
 					"targets": [
@@ -4268,7 +4282,7 @@
 			"produces": ["MAESTRO-WORKFLOW-CONSUMERS-BUILD"],
 			"id": "MCOMP-17",
 			"path": ".maestro/playbooks/2026-10-29-Maestro-Integration-Completion/MCOMP-17.md",
-			"taskCount": 42,
+			"taskCount": 43,
 			"stage": "S10"
 		},
 		{
@@ -6058,7 +6072,7 @@
 				"PAIR-DIRECT-EVIDENCE"
 			],
 			"nativeInputs": false,
-			"taskCount": 49
+			"taskCount": 50
 		},
 		{
 			"id": "S11",
@@ -6262,8 +6276,8 @@
 			"taskCount": 1
 		}
 	],
-	"taskCount": 362,
-	"taskCounts": { "IMPLEMENT": 253, "TEST": 49, "VERIFY": 60 },
+	"taskCount": 363,
+	"taskCounts": { "IMPLEMENT": 254, "TEST": 49, "VERIFY": 60 },
 	"artifacts": {
 		"MEGA-CONTRACTS-FOUNDATION-BUILD": {
 			"producerDocument": "GCOMP-01",
@@ -7041,6 +7055,7 @@
 			"MCOMP-17-03AI",
 			"MCOMP-17-03AJ",
 			"MCOMP-17-03AK",
+			"MCOMP-17-03AL",
 			"MCOMP-17-03",
 			"MCOMP-17-04",
 			"MCOMP-17-05",

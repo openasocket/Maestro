@@ -524,6 +524,21 @@ export function handleCrossAgentAsk(
 		reply({ success: false, error: 'Missing target agent or question' });
 		return;
 	}
+	// A forwarded caller credential (MCOMP-17-03AL) is a managed chat turn's proof of which
+	// turn is asking; the stated from ids are only claims. Only a host runtime that minted it
+	// can resolve it (`askAsCaller`, MCOMP-17-03AK), and the desktop does not yet compose one.
+	// Dropping it would fall back to the claimed ids, so it refuses before any ticket is
+	// issued or the target is touched, with the shared host's wording. Never echoed or logged.
+	if ('callerCredential' in message) {
+		reply({
+			success: false,
+			error:
+				typeof message.callerCredential === 'string'
+					? 'This host cannot authenticate a caller credential; nothing was asked.'
+					: 'callerCredential must be a string; nothing was asked.',
+		});
+		return;
+	}
 	if (!ctx.callbacks.getSessionDetail?.(targetSessionId)) {
 		reply({ success: false, error: 'Agent not found' });
 		return;

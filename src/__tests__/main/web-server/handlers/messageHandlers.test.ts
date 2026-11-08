@@ -646,6 +646,79 @@ describe('WebSocketMessageHandler', () => {
 			expect(response.error).toContain('not found');
 		});
 
+		describe('forwarded caller credentials (MCOMP-17-03AL)', () => {
+			const lastReply = () => {
+				const calls = vi.mocked(client.socket.send).mock.calls;
+				return JSON.parse(String(calls[calls.length - 1][0]));
+			};
+
+			it.each([
+				['a well-formed credential', 'mcc_live-turn-credential', 'cannot authenticate'],
+				['a blank credential', '', 'cannot authenticate'],
+				['a non-string credential', 42, 'must be a string'],
+				['a null credential', null, 'must be a string'],
+				['an object credential', { forged: true }, 'must be a string'],
+			])(
+				'refuses %s before any ticket or consult, even with valid stated ids',
+				(_label, callerCredential, reason) => {
+					handler.handleMessage(
+						{ ...client, cli: true },
+						{
+							type: 'cross_agent_ask',
+							sessionId: 'session-1',
+							question: 'q',
+							fromSessionId: 'caller-1',
+							fromTabId: 'caller-tab',
+							requestId: 'r-cred',
+							callerCredential,
+						}
+					);
+
+					// Refused synchronously: nothing reached the renderer, so no ticket was issued
+					// and the target was never looked up or written.
+					expect(callbacks.consultAgent).not.toHaveBeenCalled();
+					expect(callbacks.getSessionDetail).not.toHaveBeenCalled();
+					expect(callbacks.executeCommand).not.toHaveBeenCalled();
+					const response = lastReply();
+					expect(response).toMatchObject({
+						type: 'cross_agent_ask_result',
+						success: false,
+						requestId: 'r-cred',
+					});
+					expect(response.error).toContain(reason);
+					expect(response.error).toContain('nothing was asked');
+					// The reply never carries the credential back.
+					expect(JSON.stringify(response)).not.toContain('mcc_live-turn-credential');
+					expect(response).not.toHaveProperty('callerCredential');
+				}
+			);
+
+			it('an undefined-valued credential field is still a credential, not an absence', () => {
+				handler.handleMessage(client, {
+					type: 'cross_agent_ask',
+					sessionId: 'session-1',
+					question: 'q',
+					callerCredential: undefined,
+				});
+				expect(callbacks.consultAgent).not.toHaveBeenCalled();
+				expect(lastReply().error).toContain('must be a string');
+			});
+
+			it('a request without the field keeps the existing consult path', async () => {
+				handler.handleMessage(client, {
+					type: 'cross_agent_ask',
+					sessionId: 'session-1',
+					question: 'q',
+					fromSessionId: 'caller-1',
+				});
+				await vi.waitFor(() => expect(callbacks.consultAgent).toHaveBeenCalled());
+				expect(vi.mocked(callbacks.consultAgent).mock.calls[0][0]).not.toHaveProperty(
+					'callerCredential'
+				);
+				expect(lastReply()).toMatchObject({ success: true });
+			});
+		});
+
 		it('clamps an absurd timeout instead of holding a process for a day', async () => {
 			handler.handleMessage(client, {
 				type: 'cross_agent_ask',
