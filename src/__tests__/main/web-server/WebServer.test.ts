@@ -1048,3 +1048,154 @@ describe('room participant caller credential resolver composition (MCOMP-17-03BO
 		});
 	});
 });
+
+describe('room participant consult lineage binder composition (MCOMP-17-03BS)', () => {
+	const ROOM = 'mcc_room-participant-credential';
+	const ATTEMPT = 'mcc_auto-run-attempt-credential';
+	const CHAT = 'mcc_live-turn-credential';
+
+	type Binder = (credential: string, ticket: string) => boolean;
+
+	const roomSource = {
+		groupChatId: 'room-1',
+		participantName: 'Alpha',
+		processId: 'group-chat-room-1-participant-Alpha-1',
+	};
+
+	function compose(
+		opts: {
+			binder?: Binder;
+			binderFirst?: boolean;
+			autoRunBinder?: Binder;
+			withOthers?: boolean;
+			withdrawer?: (ticket: string) => void;
+		} = {}
+	) {
+		const server = new WebServer(0);
+		const consultAgent = vi.fn().mockResolvedValue({ success: true, response: 'answer' });
+		server.setConsultAgentCallback(consultAgent as never);
+		server.setGetSessionDetailCallback(vi.fn().mockReturnValue({ state: 'idle' }) as never);
+		server.setGetSessionsCallback(
+			vi.fn(() => [
+				{ id: 'alpha-agent', name: 'Alpha' },
+				{ id: 'beta-agent', name: 'Beta' },
+			]) as never
+		);
+		// Composed before start() wires the remaining callbacks, in either order relative to the
+		// other host-only hooks: no setter may drop another's hook.
+		if (opts.binderFirst && opts.binder) server.setGroupChatConsultLineageBinder(opts.binder);
+		if (opts.withOthers) {
+			server.setCallerSourceResolver((c) =>
+				c === CHAT ? { agentId: 'caller-1', tabId: 'tab-1' } : null
+			);
+			server.setAutoRunCallerSourceResolver((c) =>
+				c === ATTEMPT ? { agentId: 'runner-agent', processId: 'runner-agent-batch-1' } : null
+			);
+		}
+		server.setGroupChatCallerSourceResolver((c) => (c === ROOM ? roomSource : null));
+		if (opts.autoRunBinder) server.setAutoRunConsultLineageBinder(opts.autoRunBinder);
+		if (opts.withdrawer) server.setCallerConsultWithdrawer(opts.withdrawer);
+		if (!opts.binderFirst && opts.binder) server.setGroupChatConsultLineageBinder(opts.binder);
+		(server as any).setupMessageHandlerCallbacks();
+		const sent: Array<Record<string, unknown>> = [];
+		const client = {
+			id: 'cli-socket',
+			connectedAt: Date.now(),
+			cli: true,
+			socket: {
+				readyState: WebSocket.OPEN,
+				send: vi.fn((frame: string) => sent.push(JSON.parse(frame))),
+				once: vi.fn(),
+				off: vi.fn(),
+			},
+		};
+		const ask = (fields: Record<string, unknown>) =>
+			(server as any).messageHandler.handleMessage(client, {
+				type: 'cross_agent_ask',
+				sessionId: 'target-agent',
+				question: 'q',
+				requestId: 'r-1',
+				...fields,
+			});
+		const results = () => sent.filter((r) => r.type === 'cross_agent_ask_result');
+		return { consultAgent, ask, results };
+	}
+
+	const roomAsk = { fromSessionId: 'alpha-agent', fromTabId: 'shown-tab', callerCredential: ROOM };
+
+	it('binds the room credential to the ticket the consult is dispatched with', async () => {
+		const binder = vi.fn<Binder>(() => true);
+		const { consultAgent, ask, results } = compose({ binder });
+		ask(roomAsk);
+		await vi.waitFor(() => expect(consultAgent).toHaveBeenCalledTimes(1));
+		expect(binder).toHaveBeenCalledTimes(1);
+		const { dispatchTicket } = consultAgent.mock.calls[0][0] as { dispatchTicket: string };
+		expect(binder).toHaveBeenCalledWith(ROOM, dispatchTicket);
+		expect(JSON.stringify(consultAgent.mock.calls[0][0])).not.toContain(ROOM);
+		await vi.waitFor(() => expect(results()[0]).toMatchObject({ success: true }));
+		expect(JSON.stringify(results())).not.toContain(ROOM);
+	});
+
+	it.each([true, false])(
+		'keeps the binder and every resolver whichever is composed first (binder first: %s)',
+		async (binderFirst) => {
+			const binder = vi.fn<Binder>(() => true);
+			const { consultAgent, ask } = compose({ binder, binderFirst, withOthers: true });
+			ask(roomAsk);
+			ask({
+				fromSessionId: 'caller-1',
+				fromTabId: 'tab-1',
+				callerCredential: CHAT,
+				requestId: 'r-2',
+			});
+			await vi.waitFor(() => expect(consultAgent).toHaveBeenCalledTimes(2));
+			expect(
+				consultAgent.mock.calls.map((c) => (c[0] as { fromSessionId: string }).fromSessionId)
+			).toEqual(['alpha-agent', 'caller-1']);
+			expect(binder).toHaveBeenCalledTimes(1);
+			expect(binder).toHaveBeenCalledWith(ROOM, expect.any(String));
+		}
+	);
+
+	it('refuses the ask before any consult starts when the composed binder cannot hold the binding', () => {
+		const binder = vi.fn<Binder>(() => false);
+		const withdrawer = vi.fn();
+		const { consultAgent, ask, results } = compose({ binder, withdrawer });
+		ask(roomAsk);
+		expect(binder).toHaveBeenCalledTimes(1);
+		// The ticket is withdrawn before any consult starts, so there is no consult to stop.
+		expect(withdrawer).not.toHaveBeenCalled();
+		expect(consultAgent).not.toHaveBeenCalled();
+		expect(results()).toHaveLength(1);
+		expect(results()[0]).toMatchObject({ success: false, requestId: 'r-1' });
+		expect(String(results()[0].error)).toContain(
+			'group chat participant turn has no lineage this host can bind'
+		);
+		expect(JSON.stringify(results())).not.toContain(ROOM);
+	});
+
+	it('never offers a chat or Auto Run credential to the room binder, nor a room credential to the Auto Run binder', async () => {
+		const binder = vi.fn<Binder>(() => false);
+		const autoRunBinder = vi.fn<Binder>(() => true);
+		const { consultAgent, ask } = compose({ binder, autoRunBinder, withOthers: true });
+		ask({ fromSessionId: 'caller-1', fromTabId: 'tab-1', callerCredential: CHAT });
+		ask({
+			fromSessionId: 'runner-agent',
+			fromTabId: 'tab-2',
+			callerCredential: ATTEMPT,
+			requestId: 'r-2',
+		});
+		await vi.waitFor(() => expect(consultAgent).toHaveBeenCalledTimes(2));
+		expect(binder).not.toHaveBeenCalled();
+		expect(autoRunBinder).toHaveBeenCalledTimes(1);
+		expect(autoRunBinder).toHaveBeenCalledWith(ATTEMPT, expect.any(String));
+	});
+
+	it('asks unbound when no room binder was composed', async () => {
+		const autoRunBinder = vi.fn<Binder>(() => false);
+		const { consultAgent, ask } = compose({ autoRunBinder });
+		ask(roomAsk);
+		await vi.waitFor(() => expect(consultAgent).toHaveBeenCalledTimes(1));
+		expect(autoRunBinder).not.toHaveBeenCalled();
+	});
+});

@@ -63,6 +63,7 @@ import type {
 	CallerConsultWithdrawer,
 	CallerSourceResolver,
 	GroupChatCallerSourceResolver,
+	GroupChatConsultLineageBinder,
 } from './handlers/messageHandlers/commands';
 import type {
 	WebTerminalInputResult,
@@ -785,6 +786,25 @@ export class WebServer {
 			bindAutoRunConsultLineage: AutoRunConsultLineageBinder;
 		} = {
 			bindAutoRunConsultLineage: binder,
+		};
+		this.messageHandler.setCallbacks(callbacks);
+	}
+
+	/**
+	 * The host-only hook that binds an asking room participant turn's admitted lineage to the
+	 * dispatch ticket its `cross_agent_ask` issued (MCOMP-17-03BS): the desktop composes
+	 * `ProcessManager.groupChatCallerLineageOf` with `bindCrossAgentConsultInitiator`, so the
+	 * consult the ticket starts is admitted as that room turn's child. Only a room participant's
+	 * credential reaches it; the Auto Run binder never sees one. Merged into the message handler
+	 * like `setAutoRunConsultLineageBinder`, so it survives `start()` and never crosses the
+	 * renderer. A composed binder that does not answer true refuses the ask; until one is composed,
+	 * a room participant's ask is admitted as the transport that asked.
+	 */
+	setGroupChatConsultLineageBinder(binder: GroupChatConsultLineageBinder): void {
+		const callbacks: Partial<MessageHandlerCallbacks> & {
+			bindGroupChatConsultLineage: GroupChatConsultLineageBinder;
+		} = {
+			bindGroupChatConsultLineage: binder,
 		};
 		this.messageHandler.setCallbacks(callbacks);
 	}
