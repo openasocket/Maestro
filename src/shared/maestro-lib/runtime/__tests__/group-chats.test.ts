@@ -20,7 +20,14 @@ import {
 import { DEFAULT_TAB_DEFAULTS } from '../../agents/rules';
 import type { ClientResult } from '../../client/types';
 import type { GroupChatEvent, GroupChatRecord } from '../../groupchat/chat';
-import { createMaestroRuntime, type MaestroRuntime, type RuntimeDeps } from '../index';
+import { createLocalHostAuthority, type AdmissionRequest } from '../../managed/authority';
+import { createManagedBinding } from '../../managed/binding';
+import {
+	createMaestroRuntime,
+	type MaestroRuntime,
+	type MaestroRuntimeOptions,
+	type RuntimeDeps,
+} from '../index';
 
 const T0 = Date.parse('2026-10-04T12:00:00Z');
 const BUNDLED_PROMPTS = path.resolve(__dirname, '../../../../prompts');
@@ -98,7 +105,8 @@ describe('runtime group chats', () => {
 			agentRecord('a2', 'Beta', work),
 			agentRecord('a3', 'Gamma', work),
 			agentRecord('a4', 'Shell', work, { toolType: 'terminal' }),
-		]
+		],
+		managed?: MaestroRuntimeOptions['managed']
 	): Promise<MaestroRuntime> {
 		provider = createFakeGroupChatProvider(work, script);
 		fs.writeFileSync(
@@ -110,6 +118,7 @@ describe('runtime group chats', () => {
 			mode: 'tui',
 			deps: deps(),
 			turns: { bundledPromptsDir: BUNDLED_PROMPTS },
+			...(managed ? { managed } : {}),
 		});
 		if (!started.ok) throw new Error(`refused: ${started.refusal.message}`);
 		open.push(started.runtime);
@@ -178,6 +187,102 @@ describe('runtime group chats', () => {
 		for (const runtime of open) await runtime.connection.close();
 		fs.rmSync(dir, { recursive: true, force: true });
 		fs.rmSync(work, { recursive: true, force: true });
+	});
+
+	describe('managed moderator refusal recovery', () => {
+		it.each(['denied', 'unavailable', 'unknown'] as const)(
+			'recovers an initial %s moderator without starting its process',
+			async (state) => {
+				await refusedRound('moderator', state);
+			}
+		);
+		it.each(['denied', 'unavailable', 'unknown'] as const)(
+			'recovers a %s synthesis without starting its process',
+			async (state) => {
+				await refusedRound('synthesis', state);
+			}
+		);
+
+		async function refusedRound(
+			role: 'moderator' | 'synthesis',
+			state: 'denied' | 'unavailable' | 'unknown'
+		) {
+			const asked: AdmissionRequest[] = [];
+			let refuse = true;
+			let leases = 0;
+			const authority = createLocalHostAuthority({
+				authorityId: 'fleet',
+				decide: (request) => {
+					asked.push(request);
+					if (refuse && asked.length === (role === 'moderator' ? 1 : 4)) {
+						return state === 'denied'
+							? { decision: 'deny', reason: 'Fixture parent revoked.', policyRevision: 3 }
+							: { decision: state, reason: 'Fixture custody unanswered.' };
+					}
+					return { decision: 'allow', policyRevision: 3 };
+				},
+				newId: () => `lease-${++leases}`,
+				now: () => Date.now(),
+				leaseTtlMs: 60_000,
+			});
+			const enroller = await start();
+			const binding = createManagedBinding({
+				paths: { userDataDir: dir, productionDataDir: dir },
+				fence: () => ({ ok: true }),
+				authority,
+				now: () => T0,
+			});
+			const enrollment = await binding.enroll({
+				installationId: enroller.installation.installationId,
+				authorityId: 'fleet',
+				endpointRef: 'fixture-endpoint',
+				policySources: [],
+				policyRevision: 3,
+			});
+			if (!enrollment.ok) throw new Error(enrollment.message);
+			await enroller.connection.close();
+			open.splice(open.indexOf(enroller), 1);
+			const runtime = await start(ROUND, undefined, { authority });
+			const chat = watch(runtime);
+			const created = await runtime.groupChats.create({
+				name: 'Managed review',
+				participantIds: ['a1', 'a2'],
+			});
+			if (role === 'moderator') {
+				expect(errorOf(created)).toMatchObject({
+					code: 'failed',
+					message: expect.stringContaining(`[managed-${state}]`),
+				});
+			} else value(created);
+			await chat.idle();
+			const [room] = value(await runtime.groupChats.list());
+			expect(room.state).toBe('idle');
+			if (role === 'synthesis') {
+				const history = fs.readFileSync(
+					path.join(dir, 'group-chats', room.id, 'history.jsonl'),
+					'utf-8'
+				);
+				expect(history).toContain(`[managed-${state}]`);
+			}
+			expect(provider.calls).toHaveLength(role === 'moderator' ? 0 : 3);
+			const refusedAttempt = asked.at(-1)!.context.identity.attemptId;
+			expect(provider.calls.every((call) => call.processId !== refusedAttempt)).toBe(true);
+			await vi.waitFor(() => expect(authority.live()).toEqual([]));
+
+			refuse = false;
+			const admittedBeforeRetry = asked.length;
+			value(await runtime.groupChats.send(room.id, 'Retry with current authority.'));
+			await chat.idle(2);
+			expect(asked).toHaveLength(admittedBeforeRetry + 4);
+			expect(provider.calls).toHaveLength(role === 'moderator' ? 4 : 7);
+			expect(
+				asked
+					.slice(admittedBeforeRetry)
+					.every((request) => request.context.identity.attemptId !== refusedAttempt)
+			).toBe(true);
+			expect(chat.lines()).toContain('moderator: Both agree it is ready.');
+			expect((await readChat(runtime, room.id)).state).toBe('idle');
+		}
 	});
 
 	describe('a round (GC-1, GC-2)', () => {

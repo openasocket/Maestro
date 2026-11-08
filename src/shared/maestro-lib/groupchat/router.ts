@@ -1432,6 +1432,10 @@ ${readOnly ? 'READ-ONLY MODE is active. You and all participants can only inspec
 					});
 
 					logger.debug(`[GroupChat:Debug] Spawn result: ${JSON.stringify(spawnResult)}`);
+					// A refused start has no process whose exit can clear the room's pending turn.
+					if (spawnResult?.success === false) {
+						throw new Error(spawnResult.error ?? 'Could not start moderator');
+					}
 					logger.debug(`[GroupChat:Debug] Moderator process spawned successfully`);
 					logger.debug(
 						`[GroupChat:Debug] promptArgs: ${agent.promptArgs ? 'defined' : 'undefined'}`
@@ -2692,6 +2696,9 @@ Review the agent responses above. Either:
 			});
 
 			logger.debug(`[GroupChat:Debug] Synthesis spawn result: ${JSON.stringify(spawnResult)}`);
+			if (spawnResult?.success === false) {
+				throw new Error(spawnResult.error ?? 'Could not start synthesis moderator');
+			}
 			logger.debug(`[GroupChat:Debug] Synthesis moderator process spawned successfully`);
 			logger.debug(`[GroupChat:Debug] promptArgs: ${agent.promptArgs ? 'defined' : 'undefined'}`);
 			logger.debug(`[GroupChat:Debug] noPromptSeparator: ${agent.noPromptSeparator ?? false}`);
@@ -2710,6 +2717,7 @@ Review the agent responses above. Either:
 			await recordGroupChatHistory(groupChatId, {
 				timestamp: Date.now(),
 				summary: 'Synthesis round failed to start.',
+				fullResponse: error instanceof Error ? error.message : String(error),
 				participantName: 'Moderator',
 				participantColor: '#808080',
 				type: 'error',
