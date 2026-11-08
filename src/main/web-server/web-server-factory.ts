@@ -186,6 +186,14 @@ export function createWebServerFactory(deps: WebServerFactoryDependencies) {
 			}
 		});
 
+		// A forwarded caller credential (`maestro-cli ask` run from inside a chat turn)
+		// authenticates only through the process manager that minted it (MCOMP-17-03AR).
+		// Re-read the manager on every ask: with none (startup, shutdown) the credential
+		// authenticates nobody, and the ask refuses before anything is dispatched.
+		server.setCallerSourceResolver(
+			(credential) => deps.getProcessManager()?.callerSourceOf(credential) ?? null
+		);
+
 		registerSessionCallbacks(server, deps);
 		registerThemeCallbacks(server, deps);
 

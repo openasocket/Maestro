@@ -4310,6 +4310,20 @@
 					"produces": []
 				},
 				{
+					"id": "MCOMP-17-03AR",
+					"label": "Compose ProcessManager caller sources into the desktop web server factory",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/main/web-server/web-server-factory.ts",
+						"src/__tests__/main/web-server/web-server-factory.test.ts",
+						"Plans/integration-completion/program.json"
+					],
+					"outcome": "Consume MAESTRO-EFFECT-CONSUMERS-BUILD and its pinned MAESTRO-CONTRACT-INPUTS-BUILD dependency. Bounded prerequisite continuation of MCOMP-17-03 after MCOMP-17-03AQ: the desktop web server factory composes server.setCallerSourceResolver on every server it builds, resolving a forwarded callerCredential through ProcessManager.callerSourceOf and re-reading the process manager on every ask, so the cross_agent_ask handler authenticates a credential minted by the desktop and refuses it when the process manager refuses or is absent. Exercise one composition per built server, the resolved source returned unchanged, null for a refused credential and for an absent process manager, re-reading on every ask, and a mutation check. Consult source custody on the desktop consult path, background/consult and Auto Run child credentials and room owner lifetime remain pending. Reuse WORKFLOW-CONTEXT/1; no new wire capability, producer mapping or paired/provider/native qualification. Keep to three authored files and fewer than 500 changed lines.",
+					"backlog": ["M-04"],
+					"requires": ["MAESTRO-EFFECT-CONSUMERS-BUILD"],
+					"produces": []
+				},
+				{
 					"label": "Bind Auto Run Cue and nested work at dispatch",
 					"kind": "IMPLEMENT",
 					"targets": [
@@ -4352,7 +4366,7 @@
 			"produces": ["MAESTRO-WORKFLOW-CONSUMERS-BUILD"],
 			"id": "MCOMP-17",
 			"path": ".maestro/playbooks/2026-10-29-Maestro-Integration-Completion/MCOMP-17.md",
-			"taskCount": 48,
+			"taskCount": 49,
 			"stage": "S10"
 		},
 		{
@@ -6142,7 +6156,7 @@
 				"PAIR-DIRECT-EVIDENCE"
 			],
 			"nativeInputs": false,
-			"taskCount": 55
+			"taskCount": 56
 		},
 		{
 			"id": "S11",
@@ -6346,8 +6360,8 @@
 			"taskCount": 1
 		}
 	],
-	"taskCount": 368,
-	"taskCounts": { "IMPLEMENT": 259, "TEST": 49, "VERIFY": 60 },
+	"taskCount": 369,
+	"taskCounts": { "IMPLEMENT": 260, "TEST": 49, "VERIFY": 60 },
 	"artifacts": {
 		"MEGA-CONTRACTS-FOUNDATION-BUILD": {
 			"producerDocument": "GCOMP-01",
@@ -7131,6 +7145,7 @@
 			"MCOMP-17-03AO",
 			"MCOMP-17-03AP",
 			"MCOMP-17-03AQ",
+			"MCOMP-17-03AR",
 			"MCOMP-17-03",
 			"MCOMP-17-04",
 			"MCOMP-17-05",

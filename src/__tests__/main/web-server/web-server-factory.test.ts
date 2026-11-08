@@ -69,6 +69,8 @@ vi.mock('../../../main/web-server/WebServer', () => {
 			setReadTerminalTabCallback = vi.fn();
 			setNewAITabWithPromptCallback = vi.fn();
 			setConsultAgentCallback = vi.fn();
+			// MCOMP-17-03AR: the factory composes the caller credential resolver on every build.
+			setCallerSourceResolver = vi.fn();
 			setNoteAgentDelegationCallback = vi.fn();
 			setEnqueueCommandCallback = vi.fn();
 			setListQueueCallback = vi.fn();
@@ -478,6 +480,63 @@ describe('web-server/web-server-factory', () => {
 			expect(storedToken).toMatch(
 				/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 			);
+		});
+	});
+
+	describe('caller credential resolver composition (MCOMP-17-03AR)', () => {
+		it('composes exactly one resolver on every server it builds', () => {
+			const createWebServer = createWebServerFactory(deps);
+			const first = createWebServer() as any;
+			const second = createWebServer({ lanAccess: true }) as any;
+
+			expect(first.setCallerSourceResolver).toHaveBeenCalledTimes(1);
+			expect(second.setCallerSourceResolver).toHaveBeenCalledTimes(1);
+			expect(typeof first.setCallerSourceResolver.mock.calls[0][0]).toBe('function');
+		});
+
+		it('resolves through the live process manager and returns its source unchanged', () => {
+			const callerSourceOf = vi.fn().mockReturnValue({ agentId: 'agent-a', tabId: 'tab-a' });
+			deps.getProcessManager = vi
+				.fn()
+				.mockReturnValue({ ...mockProcessManager, callerSourceOf } as any);
+			const server = createWebServerFactory(deps)() as any;
+			const resolver = server.setCallerSourceResolver.mock.calls[0][0];
+
+			expect(resolver('cred-1')).toEqual({ agentId: 'agent-a', tabId: 'tab-a' });
+			expect(callerSourceOf).toHaveBeenCalledWith('cred-1');
+		});
+
+		it('authenticates nobody when the process manager refuses or is absent', () => {
+			const callerSourceOf = vi.fn().mockReturnValue(null);
+			const getProcessManager = vi
+				.fn()
+				.mockReturnValue({ ...mockProcessManager, callerSourceOf } as any);
+			deps.getProcessManager = getProcessManager;
+			const server = createWebServerFactory(deps)() as any;
+			const resolver = server.setCallerSourceResolver.mock.calls[0][0];
+
+			expect(resolver('revoked')).toBeNull();
+			expect(callerSourceOf).toHaveBeenCalledWith('revoked');
+
+			getProcessManager.mockReturnValue(null);
+			expect(resolver('cred-1')).toBeNull();
+		});
+
+		it('re-reads the process manager on every ask instead of capturing one at build', () => {
+			const before = vi.fn().mockReturnValue({ agentId: 'agent-a', tabId: 'tab-a' });
+			const after = vi.fn().mockReturnValue(null);
+			const getProcessManager = vi
+				.fn()
+				.mockReturnValue({ ...mockProcessManager, callerSourceOf: before } as any);
+			deps.getProcessManager = getProcessManager;
+			const server = createWebServerFactory(deps)() as any;
+			const resolver = server.setCallerSourceResolver.mock.calls[0][0];
+
+			expect(resolver('cred-1')).toEqual({ agentId: 'agent-a', tabId: 'tab-a' });
+			getProcessManager.mockReturnValue({ ...mockProcessManager, callerSourceOf: after } as any);
+			expect(resolver('cred-1')).toBeNull();
+			expect(after).toHaveBeenCalledWith('cred-1');
+			expect(before).toHaveBeenCalledTimes(1);
 		});
 	});
 
