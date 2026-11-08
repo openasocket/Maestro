@@ -4730,6 +4730,20 @@
 					"produces": []
 				},
 				{
+					"id": "MCOMP-17-03BV",
+					"label": "Launch a host-only nested Auto Run under an authenticated parent",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/shared/maestro-lib/runtime/autorun.ts",
+						"src/shared/maestro-lib/runtime/__tests__/autorun.test.ts",
+						"Plans/integration-completion/program.json"
+					],
+					"outcome": "Consume MAESTRO-EFFECT-CONSUMERS-BUILD and its pinned MAESTRO-CONTRACT-INPUTS-BUILD dependency. Bounded prerequisite continuation of MCOMP-17-03 after MCOMP-17-03BU and the second slice of group-chat Auto Run propagation: the shared Auto Run runtime gains a host-only launchNested(agentId, input, parentContext) that feeds the host's live parent reader to the run's turn runner, so every attempt carries the parent chain, grant and root run under the run's own workflow and fence; it is refused before anything starts when the runtime admits no turns or the parent is not verified at launch, and the public launch never takes a parent. Exercise the nested lineage in the admitted context, refused, unverified and unreadable parents at launch, a parent withdrawn after launch refusing the next dispatch, the public launch ignoring a parent, a runtime with no admission, and a mutation check. Still pending: replacing the room Auto Run refusal in runtime/index.ts. Reuse WORKFLOW-CONTEXT/1; no new wire capability, producer mapping or paired/provider/native qualification. Keep to three authored files and fewer than 500 changed lines.",
+					"backlog": ["M-04"],
+					"requires": ["MAESTRO-EFFECT-CONSUMERS-BUILD"],
+					"produces": []
+				},
+				{
 					"label": "Bind Auto Run Cue and nested work at dispatch",
 					"kind": "IMPLEMENT",
 					"targets": [
@@ -4772,7 +4786,7 @@
 			"produces": ["MAESTRO-WORKFLOW-CONSUMERS-BUILD"],
 			"id": "MCOMP-17",
 			"path": ".maestro/playbooks/2026-10-29-Maestro-Integration-Completion/MCOMP-17.md",
-			"taskCount": 78,
+			"taskCount": 79,
 			"stage": "S10"
 		},
 		{
@@ -6562,7 +6576,7 @@
 				"PAIR-DIRECT-EVIDENCE"
 			],
 			"nativeInputs": false,
-			"taskCount": 85
+			"taskCount": 86
 		},
 		{
 			"id": "S11",
@@ -6766,8 +6780,8 @@
 			"taskCount": 1
 		}
 	],
-	"taskCount": 398,
-	"taskCounts": { "IMPLEMENT": 289, "TEST": 49, "VERIFY": 60 },
+	"taskCount": 399,
+	"taskCounts": { "IMPLEMENT": 290, "TEST": 49, "VERIFY": 60 },
 	"artifacts": {
 		"MEGA-CONTRACTS-FOUNDATION-BUILD": {
 			"producerDocument": "GCOMP-01",
@@ -7581,6 +7595,7 @@
 			"MCOMP-17-03BS",
 			"MCOMP-17-03BT",
 			"MCOMP-17-03BU",
+			"MCOMP-17-03BV",
 			"MCOMP-17-03",
 			"MCOMP-17-04",
 			"MCOMP-17-05",

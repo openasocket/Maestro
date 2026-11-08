@@ -30,10 +30,13 @@ import { autoRunWorkflowVersion } from '../../autorun/attribution';
 import type { AutoRunRunEvent } from '../../autorun/run-tracker';
 import type { AutoRunOutcome, ClientResult, MaestroEvent } from '../../client/types';
 import {
+	createContextVerifier,
 	createLocalHostAuthority,
 	type AdmissionRequest,
+	type ContextVerification,
 	type HostAuthority,
 } from '../../managed/authority';
+import type { ManagedAuthenticatedContext } from '../../managed/types';
 import { CALLER_CREDENTIAL_ENV_VAR } from '../../launch/env';
 import { createManagedBinding } from '../../managed/binding';
 import type { WorkflowFenceAnswer, WorkflowFenceLifetime } from '../../managed/workflows';
@@ -1124,6 +1127,161 @@ describe('runtime Auto Run', () => {
 						await stopping;
 					}
 				);
+			});
+
+			describe('a nested launch (MCOMP-17-03BV)', () => {
+				/** A verified parent that owns no workflow (a room turn), on the source's own verification. */
+				function roomParent(source: ManagedAuthenticatedContext): ContextVerification {
+					const { verification, ...context } = source;
+					const parent = createContextVerifier({
+						...verification,
+						now: Date.now,
+						accept: () => [],
+					}).verify({
+						...structuredClone(context),
+						identity: {
+							...context.identity,
+							runId: 'room-run',
+							rootRunId: 'room-root',
+						},
+						workflow: null,
+						actor: { kind: 'agent', id: 'room-participant' },
+						delegation: { chain: [{ kind: 'human', id: 'room-human' }], grantRef: 'room-grant' },
+					});
+					if (!parent.ok) throw new Error(parent.problems.join('; '));
+					return parent;
+				}
+				async function beta(runtime: MaestroRuntime): Promise<string> {
+					const { agentId } = value(
+						await runtime.agents.create({
+							name: 'Beta',
+							provider: 'claude-code',
+							cwd: work,
+							autoRunFolderPath: docs,
+						})
+					);
+					return agentId;
+				}
+
+				it('admits the nested run under the parent lineage with its own workflow and fence', async () => {
+					const { runtime, file, asked, claim } = await liveSource();
+					const parent = roomParent(asked[0].context);
+					const parentContext = vi.fn(() => parent);
+					const agentId = await beta(runtime);
+					const run = watchRun(runtime, agentId);
+					script = [{ text: 'Nested is working.', hang: true }];
+					value(await service.launchNested(agentId, { documents: [{ file }] }, parentContext));
+					await vi.waitFor(() => expect(run.events.some((e) => e.kind === 'output')).toBe(true));
+					expect(asked).toHaveLength(2);
+					const { context } = asked[1];
+					if (!parent.ok) throw new Error('unreachable');
+					expect(context.identity.parentRunId).toBe('room-run');
+					expect(context.identity.rootRunId).toBe('room-root');
+					expect(context.delegation).toEqual({
+						chain: [
+							{ kind: 'human', id: 'room-human' },
+							{ kind: 'agent', id: 'room-participant' },
+						],
+						grantRef: 'room-grant',
+					});
+					expect(context.workflow).toMatchObject({
+						workflowId: expect.stringContaining(`runtime-${agentId}-`),
+						ownerEpoch: 'epoch-1',
+						fencingToken: 'fence-1',
+					});
+					expect(claim).toHaveBeenCalledTimes(2);
+					// Read at launch, then by the runner on its attempt and again before dispatch.
+					expect(parentContext.mock.calls.length).toBeGreaterThanOrEqual(3);
+					// The source run is untouched: its own context still has no parent run.
+					expect(asked[0].context.identity.parentRunId).not.toBe('room-run');
+				});
+
+				it.each(['refused', 'unverified', 'throws'] as const)(
+					'refuses a %s parent at launch and starts nothing',
+					async (change) => {
+						const { runtime, file, asked, claim } = await liveSource();
+						const verified = roomParent(asked[0].context);
+						if (!verified.ok) throw new Error('unreachable');
+						const parentContext = vi.fn((): ContextVerification => {
+							if (change === 'throws') throw new Error('room custody unreadable');
+							return change === 'refused'
+								? { ok: false, code: 'unauthenticated', problems: ['room withdrawn'] }
+								: ({ ok: true, context: { ...verified.context } } as ContextVerification);
+						});
+						const agentId = await beta(runtime);
+						const launched = await service.launchNested(
+							agentId,
+							{ documents: [{ file }] },
+							parentContext
+						);
+						expect(errorOf(launched)).toMatchObject({
+							code: 'rejected',
+							message: expect.stringMatching(
+								change === 'refused'
+									? /room withdrawn/
+									: change === 'throws'
+										? /room custody unreadable/
+										: /not verified/
+							),
+						});
+						expect(service.holds(agentId)).toBe(false);
+						expect(asked).toHaveLength(1);
+						expect(claim).toHaveBeenCalledTimes(1);
+						expect(runLaunches).toHaveLength(1);
+					}
+				);
+
+				it('refuses the next dispatch once the parent is withdrawn after launch', async () => {
+					const { runtime, file, asked } = await liveSource();
+					const parent = roomParent(asked[0].context);
+					let reads = 0;
+					// Verified at launch, withdrawn before the runner reads it for the attempt.
+					const parentContext = vi.fn(
+						(): ContextVerification =>
+							++reads === 1
+								? parent
+								: { ok: false, code: 'unauthenticated', problems: ['room withdrawn'] }
+					);
+					const agentId = await beta(runtime);
+					const run = watchRun(runtime, agentId);
+					value(await service.launchNested(agentId, { documents: [{ file }] }, parentContext));
+					await run.paused();
+					expect(
+						run
+							.frames()
+							.filter((frame) => frame.pause)
+							.pop()?.pause
+					).toMatchObject({ message: expect.stringContaining('room withdrawn') });
+					expect(asked).toHaveLength(1);
+					expect(runLaunches).toHaveLength(1);
+					value(await runtime.autoRun.abort(agentId));
+					await run.ended();
+				});
+
+				it('keeps the public launch free of a parent', async () => {
+					const { runtime, file, asked } = await liveSource();
+					const parentContext = vi.fn(() => roomParent(asked[0].context));
+					const agentId = await beta(runtime);
+					const run = watchRun(runtime, agentId);
+					script = [{ text: 'Plain is working.', hang: true }];
+					const launch = service.api.launch as (...args: unknown[]) => Promise<ClientResult<void>>;
+					value(await launch(agentId, { documents: [{ file }] }, parentContext));
+					await vi.waitFor(() => expect(run.events.some((e) => e.kind === 'output')).toBe(true));
+					expect(parentContext).not.toHaveBeenCalled();
+					expect(asked[1].context.identity.parentRunId).not.toBe('room-run');
+				});
+
+				it('refuses a nested launch on a runtime that admits no turns', async () => {
+					const { runtime, file, asked } = await liveSource();
+					const parentContext = vi.fn(() => roomParent(asked[0].context));
+					const agentId = await beta(runtime);
+					const bare = autoRunService.createRuntimeAutoRun({ ...config, managed: undefined });
+					expect(
+						errorOf(await bare.launchNested(agentId, { documents: [{ file }] }, parentContext))
+					).toMatchObject({ code: 'rejected', message: expect.stringContaining('admits no') });
+					expect(bare.holds(agentId)).toBe(false);
+					expect(runLaunches).toHaveLength(1);
+				});
 			});
 
 			it('returns no custody during a pending owner claim or after cancellation', async () => {

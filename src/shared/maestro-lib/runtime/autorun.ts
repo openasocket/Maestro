@@ -92,6 +92,7 @@ import type {
 	ClientResult,
 } from '../client/types';
 import { logger } from '../host';
+import { isVerifiedContext, type ContextVerification } from '../managed/authority';
 import type { ManagedBinding } from '../managed/binding';
 import type { ManagedIdentityPort } from '../managed/endpoint-port';
 import {
@@ -211,6 +212,20 @@ export interface RuntimeAutoRun {
 	 * no spawn permit, and the caller must still read custody before acting on them.
 	 */
 	callerSource(credential: string): { agentId: string; processId: string } | null;
+	/**
+	 * Host only (MCOMP-17-03BV): launch a playbook run nested under an authenticated parent, such
+	 * as the room turn that asked for it. `parentContext` is the host's live reader of that
+	 * parent's verified context, never caller JSON or environment. The runner reads it on every
+	 * attempt and again before dispatch, so the run carries the parent's chain, grant and root run
+	 * and stops dispatching once the parent is withdrawn or changes. The run still needs its own
+	 * workflow owner fence. Refused before anything starts when this runtime admits no turns, or
+	 * when the parent is not verified at launch.
+	 */
+	launchNested(
+		agentId: string,
+		input: AutoRunLaunchInput,
+		parentContext: () => ContextVerification
+	): Promise<ClientResult<void>>;
 	activeRuns(): ActiveAutoRun[];
 	/** Does a run hold this agent's working tree (AE17)? */
 	holds(agentId: string): boolean;
@@ -522,7 +537,8 @@ export function createRuntimeAutoRun(options: RuntimeAutoRunOptions): RuntimeAut
 	function buildDeps(
 		agentId: string,
 		controller: RunController,
-		workflow: AutoRunWorkflowIdentity
+		workflow: AutoRunWorkflowIdentity,
+		parentContext?: () => ContextVerification
 	): AutoRunDeps & { turns: AutoRunTurnRunner } {
 		const managed = options.managed;
 		const turns = createAutoRunTurnRunner({
@@ -545,6 +561,7 @@ export function createRuntimeAutoRun(options: RuntimeAutoRunOptions): RuntimeAut
 				? {
 						managed: {
 							port: spawnPort(managed),
+							...(parentContext ? { parentContext } : {}),
 							fence: async (attempt) => {
 								const answer = (await managed.workflowFence?.(workflow, attempt)) ?? null;
 								if (answer && !isWorkflowFenceRefusal(answer) && answer.lifetime) {
@@ -793,7 +810,11 @@ export function createRuntimeAutoRun(options: RuntimeAutoRunOptions): RuntimeAut
 	const isRefusal = (value: unknown): value is ClientResult<never> =>
 		typeof value === 'object' && value !== null && 'ok' in value;
 
-	async function launch(agentId: string, raw: AutoRunLaunchInput): Promise<ClientResult<void>> {
+	async function launch(
+		agentId: string,
+		raw: AutoRunLaunchInput,
+		parentContext?: () => ContextVerification
+	): Promise<ClientResult<void>> {
 		const method: ClientMethod = 'autoRun.launch';
 		const checked = validateAutoRunLaunch(raw);
 		if (!checked.ok) return fail(method, 'invalid', checked.reason);
@@ -803,17 +824,48 @@ export function createRuntimeAutoRun(options: RuntimeAutoRunOptions): RuntimeAut
 		// Held from the check to the run being registered, with nothing awaited in between.
 		launching.add(agentId);
 		try {
-			return await startPlaybookRun(method, agentId, refused.session, input);
+			return await startPlaybookRun(method, agentId, refused.session, input, parentContext);
 		} finally {
 			launching.delete(agentId);
 		}
+	}
+
+	/** Why a nested launch cannot carry its parent's lineage, or null when it can (MCOMP-17-03BV). */
+	function nestedRefusal(parentContext: () => ContextVerification): string | null {
+		// With no admission there is nothing to carry the lineage into: the run would start bare.
+		if (!options.managed) {
+			return 'This runtime admits no Auto Run turns, so a nested run cannot carry its parent.';
+		}
+		try {
+			const source = parentContext();
+			if (source.ok && isVerifiedContext(source.context)) return null;
+			return source.ok
+				? 'The nested Auto Run parent is not verified.'
+				: `The nested Auto Run parent is refused: ${source.problems.join('; ')}`;
+		} catch (error) {
+			return `The nested Auto Run parent could not be verified: ${errorText(error)}`;
+		}
+	}
+
+	async function launchNested(
+		agentId: string,
+		raw: AutoRunLaunchInput,
+		parentContext: () => ContextVerification
+	): Promise<ClientResult<void>> {
+		if (typeof parentContext !== 'function') {
+			return fail('autoRun.launch', 'invalid', 'A nested Auto Run needs its parent reader.');
+		}
+		const why = nestedRefusal(parentContext);
+		if (why) return fail('autoRun.launch', 'rejected', why);
+		return launch(agentId, raw, parentContext);
 	}
 
 	async function startPlaybookRun(
 		method: ClientMethod,
 		agentId: string,
 		session: SessionInfo,
-		input: AutoRunLaunchInput
+		input: AutoRunLaunchInput,
+		parentContext?: () => ContextVerification
 	): Promise<ClientResult<void>> {
 		const folder = resolveAutoRunFolder(session);
 		if (!folder) return fail(method, 'rejected', 'The agent has no Auto Run folder.');
@@ -874,7 +926,7 @@ export function createRuntimeAutoRun(options: RuntimeAutoRunOptions): RuntimeAut
 			documents: names,
 			startedAt,
 		});
-		const deps = buildDeps(agentId, controller, workflow);
+		const deps = buildDeps(agentId, controller, workflow, parentContext);
 		startRun(
 			{
 				agentId,
@@ -1010,7 +1062,8 @@ export function createRuntimeAutoRun(options: RuntimeAutoRunOptions): RuntimeAut
 	}
 
 	const api: AutoRunApi = {
-		launch,
+		// The public launch takes no parent: only the host-only launchNested may pass one.
+		launch: (agentId, raw) => launch(agentId, raw),
 		launchGoal,
 		stop: async (agentId) => {
 			const run = runs.get(agentId);
@@ -1061,6 +1114,7 @@ export function createRuntimeAutoRun(options: RuntimeAutoRunOptions): RuntimeAut
 				return null;
 			}
 		},
+		launchNested,
 		callerSource: (credential) => {
 			try {
 				for (const [agentId, run] of runs) {
