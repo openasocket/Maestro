@@ -1316,6 +1316,99 @@ describe('WebSocketMessageHandler', () => {
 					expect(lastReply().error).toContain('no group chat participant');
 				});
 
+				describe('binding the room turn lineage to the ask ticket (MCOMP-17-03BR)', () => {
+					let bindGroupChatConsultLineage: ReturnType<typeof vi.fn>;
+					let boundTickets: string[];
+
+					beforeEach(() => {
+						boundTickets = [];
+						bindGroupChatConsultLineage = vi.fn((_credential: string, ticket: string) => {
+							// The consult must not have been dispatched yet when the binding is made.
+							expect(callbacks.consultAgent).not.toHaveBeenCalled();
+							boundTickets.push(ticket);
+							return true;
+						});
+						handler.setCallbacks({
+							bindGroupChatConsultLineage,
+						} as Partial<MessageHandlerCallbacks>);
+					});
+
+					it('binds the credential to exactly the ticket the consult then carries, before dispatch', async () => {
+						roomAsk();
+						await vi.waitFor(() => expect(callbacks.consultAgent).toHaveBeenCalled());
+						expect(bindGroupChatConsultLineage).toHaveBeenCalledTimes(1);
+						expect(bindGroupChatConsultLineage).toHaveBeenCalledWith(ROOM, ticketSent());
+						expect(boundTickets).toEqual([ticketSent()]);
+						expect(bindAutoRunConsultLineage).not.toHaveBeenCalled();
+						const params = vi.mocked(callbacks.consultAgent).mock.calls[0][0];
+						expect(JSON.stringify(params)).not.toContain(ROOM);
+						expect(lastReply()).toMatchObject({ success: true, requestId: 'r-room' });
+					});
+
+					it.each([
+						['refuses', false],
+						['answers no boolean', undefined],
+					])('a binder that %s refuses the ask and withdraws the ticket', (_label, answer) => {
+						bindGroupChatConsultLineage.mockImplementation((_c: string, ticket: string) => {
+							boundTickets.push(ticket);
+							return answer;
+						});
+						roomAsk();
+						expect(callbacks.consultAgent).not.toHaveBeenCalled();
+						const response = lastReply();
+						expect(response).toMatchObject({ success: false, requestId: 'r-room' });
+						expect(response.error).toContain('group chat participant turn has no lineage');
+						expect(response.error).toContain('nothing was asked');
+						expect(JSON.stringify(response)).not.toContain(ROOM);
+						expect(boundTickets).toHaveLength(1);
+						expect(
+							claimDispatchTicket(boundTickets[0], { agentId: 'session-2', tabId: 'x' })
+						).toBeUndefined();
+					});
+
+					it('a refusing Auto Run binder never refuses a room ask', async () => {
+						bindAutoRunConsultLineage.mockReturnValue(false);
+						roomAsk();
+						await vi.waitFor(() => expect(callbacks.consultAgent).toHaveBeenCalled());
+						expect(lastReply()).toMatchObject({ success: true });
+					});
+
+					it.each([
+						['chat', CHAT],
+						['Auto Run', RUN],
+					])('a %s credential is never offered to the room binder', async (_label, credential) => {
+						ask({
+							fromSessionId: 'session-1',
+							fromTabId: 'room-tab',
+							callerCredential: credential,
+						});
+						await vi.waitFor(() => expect(callbacks.consultAgent).toHaveBeenCalled());
+						expect(bindGroupChatConsultLineage).not.toHaveBeenCalled();
+						expect(lastReply()).toMatchObject({ success: true });
+					});
+
+					it('an uncredentialed ask is never offered to the room binder', async () => {
+						ask({ fromSessionId: 'session-1', fromTabId: 'room-tab' });
+						await vi.waitFor(() => expect(callbacks.consultAgent).toHaveBeenCalled());
+						expect(bindGroupChatConsultLineage).not.toHaveBeenCalled();
+					});
+
+					it('a refused room credential binds nothing', () => {
+						ask({ fromSessionId: 'session-2', fromTabId: 'room-tab', callerCredential: ROOM });
+						expect(bindGroupChatConsultLineage).not.toHaveBeenCalled();
+						expect(callbacks.consultAgent).not.toHaveBeenCalled();
+					});
+
+					it('without a composed room binder the room turn still asks unbound', async () => {
+						handler.setCallbacks({
+							bindGroupChatConsultLineage: undefined,
+						} as Partial<MessageHandlerCallbacks>);
+						roomAsk();
+						await vi.waitFor(() => expect(callbacks.consultAgent).toHaveBeenCalled());
+						expect(lastReply()).toMatchObject({ success: true });
+					});
+				});
+
 				describe('custody of the room turn while the consult runs', () => {
 					let finish: (result: Record<string, unknown>) => void;
 					let withdrawCallerConsult: ReturnType<typeof vi.fn>;

@@ -595,6 +595,27 @@ function autoRunConsultLineageBinderOf(
 }
 
 /**
+ * The host-only hook that binds the asking room participant turn's admitted lineage (the room
+ * child it was verified on) to the dispatch ticket its ask carries (MCOMP-17-03BR), so the
+ * consult that ticket starts is admitted as that room turn's child. Called with the credential
+ * (never echoed) and the fresh ticket; true only when the binding is held. Optional: absent, the
+ * consult is admitted as the transport that asked.
+ */
+export type GroupChatConsultLineageBinder = (credential: string, dispatchTicket: string) => boolean;
+
+/** The room lineage binder the desktop composed for the ask handler, when it composed one. */
+function groupChatConsultLineageBinderOf(
+	ctx: MessageHandlerContext
+): GroupChatConsultLineageBinder | undefined {
+	const { bindGroupChatConsultLineage } = ctx.callbacks as MessageHandlerContext['callbacks'] & {
+		bindGroupChatConsultLineage?: GroupChatConsultLineageBinder;
+	};
+	return typeof bindGroupChatConsultLineage === 'function'
+		? bindGroupChatConsultLineage
+		: undefined;
+}
+
+/**
  * Authenticate a forwarded caller credential (MCOMP-17-03AP): the exact source it names, or the
  * refusal that leaves nothing asked. A chat turn's credential is tried first; the stated ids must
  * both be present and be exactly that agent and tab, so a credential never lends one turn's
@@ -787,6 +808,21 @@ export function handleCrossAgentAsk(
 				success: false,
 				error:
 					'The asking Auto Run attempt has no lineage this host can bind to the consult; nothing was asked.',
+			});
+			return;
+		}
+	}
+	// A room participant turn's ask (MCOMP-17-03BR): the same gate over the room child the turn
+	// was admitted on, through its own binder, so a room turn is never bound as an attempt and an
+	// attempt never as a room turn.
+	if (custodyCredential !== undefined && custodyKind === 'group-chat') {
+		const bindLineage = groupChatConsultLineageBinderOf(ctx);
+		if (bindLineage && bindLineage(custodyCredential, dispatchTicket) !== true) {
+			withdrawDispatchTicket(dispatchTicket);
+			reply({
+				success: false,
+				error:
+					'The asking group chat participant turn has no lineage this host can bind to the consult; nothing was asked.',
 			});
 			return;
 		}
