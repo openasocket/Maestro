@@ -21,6 +21,11 @@ import {
 	type PolicyDecision,
 } from '../../managed/authority';
 import { createManagedBinding } from '../../managed/binding';
+import {
+	delegationContextOf,
+	MANAGED_DELEGATION_ENV_VAR,
+	readDelegationContextEnv,
+} from '../../managed/delegation';
 import { createHeadlessSpawnAuthority, installationIdentity } from '../../managed/host-adapter';
 import { resolveMaestroPaths } from '../../paths/resolve';
 import type { AgentRecord } from '../../store/records';
@@ -65,12 +70,14 @@ describe('Auto Run turns: a refused effort, and the fence claimed per attempt', 
 		resetEffortRejections();
 	});
 	afterEach(() => {
+		vi.unstubAllEnvs();
 		fs.rmSync(dir, { recursive: true, force: true });
 	});
 
 	function runner(
 		replies: Reply[],
-		extra: Pick<AutoRunTurnRunnerOptions, 'workflow' | 'managed'> = {}
+		extra: Pick<AutoRunTurnRunnerOptions, 'workflow' | 'managed'> = {},
+		customEnvVars?: Record<string, string>
 	) {
 		const record = {
 			id: 'a1',
@@ -78,6 +85,7 @@ describe('Auto Run turns: a refused effort, and the fence claimed per attempt', 
 			toolType: 'claude-code',
 			cwd: dir,
 			projectRoot: dir,
+			customEnvVars,
 		} as unknown as AgentRecord;
 		return createAutoRunTurnRunner({
 			...extra,
@@ -114,6 +122,7 @@ describe('Auto Run turns: a refused effort, and the fence claimed per attempt', 
 									...turn.launch.sessionCustomEnvVars,
 									FAKE_AGENT_RECORDING: recording,
 									FAKE_AGENT_ARGV_OUT: path.join(dir, `started-${efforts.length}.json`),
+									FAKE_AGENT_ENV_OUT: path.join(dir, `env-${efforts.length}.json`),
 									...(reply === 'hold' ? { FAKE_AGENT_HOLD: '1' } : {}),
 								},
 							},
@@ -221,6 +230,161 @@ describe('Auto Run turns: a refused effort, and the fence claimed per attempt', 
 			});
 			return { port, authority };
 		}
+
+		it.each(['synopsis', 'goal-handoff'] as const)(
+			'carries the verified task and %s context into the child environment, overriding inherited and configured records',
+			async (purpose) => {
+				vi.stubEnv(MANAGED_DELEGATION_ENV_VAR, 'stale inherited context');
+				const requests: AdmissionRequest[] = [];
+				const { port } = await managedPort((request) => {
+					requests.push(request);
+					return ALLOW;
+				});
+				const context = port.context.bind(port);
+				// A trusted fixture host binds its own chain/grant. The environment cannot supply either.
+				port.context = (input) =>
+					context({
+						...input,
+						delegation: {
+							chain: [
+								{ kind: 'human', id: 'source-actor' },
+								{ kind: 'agent', id: 'a1' },
+							],
+							grantRef: 'authenticated-grant',
+						},
+					});
+				const fence = { ownerEpoch: 'opaque-epoch', fencingToken: 'opaque-fence' };
+				const turns = runner(
+					['answer', 'answer'],
+					{
+						workflow,
+						managed: { port, fence: () => fence },
+					},
+					{ [MANAGED_DELEGATION_ENV_VAR]: 'forged configured context' }
+				);
+				expect(
+					(await turns.run({ purpose: 'task', prompt: 'work', document: 'TASKS.md' })).success
+				).toBe(true);
+				expect(
+					(await turns.run({ purpose, prompt: 'summarize', resumeSessionId: 'sess-1' })).success
+				).toBe(true);
+				expect(startedProcesses()).toBe(2);
+				expect(requests).toHaveLength(2);
+				for (const [index, request] of requests.entries()) {
+					const env = JSON.parse(fs.readFileSync(path.join(dir, `env-${index + 1}.json`), 'utf8'));
+					expect(readDelegationContextEnv(env)).toEqual({
+						status: 'ok',
+						context: delegationContextOf(request.context),
+					});
+					expect(request.context.actor).toEqual({ kind: 'human', id: 'operator' });
+					expect(request.context.workflow).toEqual({
+						workflowId: workflow.workflowId,
+						version: workflow.version,
+						triggerEventId: workflow.triggerEventId,
+						...fence,
+					});
+					expect(env.MAESTRO_QUERY_SOURCE).toBe('auto');
+				}
+				expect(requests[1].context.identity.parentRunId).toBe(requests[0].context.identity.runId);
+				expect(requests[1].context.identity.rootRunId).toBe(workflow.runId);
+			}
+		);
+
+		it('stamps the renewed fence, current policy and fresh attempt on an effort retry', async () => {
+			let revision = 0;
+			const requests: AdmissionRequest[] = [];
+			const { port } = await managedPort((request) => {
+				requests.push(request);
+				return { decision: 'allow', policyRevision: revision };
+			});
+			port.policy = () => ({ sources: [], policyRevision: revision });
+			const result = await runner(['refuse', 'answer'], {
+				workflow,
+				managed: {
+					port,
+					fence: async () => ({
+						ownerEpoch: `epoch-${++revision}`,
+						fencingToken: `fence-${revision}`,
+					}),
+				},
+			}).run({ purpose: 'task', prompt: 'work', effort: 'minimal' });
+			expect(result.success).toBe(true);
+			expect(requests).toHaveLength(2);
+			for (const [index, request] of requests.entries()) {
+				const env = JSON.parse(fs.readFileSync(path.join(dir, `env-${index + 1}.json`), 'utf8'));
+				expect(readDelegationContextEnv(env)).toEqual({
+					status: 'ok',
+					context: delegationContextOf(request.context),
+				});
+				expect(request.context.policyRevision).toBe(index + 1);
+				expect(request.context.workflow).toMatchObject({
+					ownerEpoch: `epoch-${index + 1}`,
+					fencingToken: `fence-${index + 1}`,
+				});
+			}
+			expect(requests[0].context.identity.requestId).toBe(requests[1].context.identity.requestId);
+			expect(requests[0].context.identity.attemptId).not.toBe(
+				requests[1].context.identity.attemptId
+			);
+		});
+
+		it.each(['standing', 'authority'] as const)(
+			'refuses a host %s change while awaiting the owner claim',
+			async (change) => {
+				const decide = vi.fn(() => ALLOW);
+				const { port, authority } = await managedPort(decide);
+				const mutablePort = { ...port };
+				const result = await runner(['answer'], {
+					workflow,
+					managed: {
+						port: mutablePort,
+						fence: async () => {
+							if (change === 'standing') mutablePort.standing = () => 'standalone';
+							else mutablePort.authority = { ...authority }; // Even a replacement with the same id.
+							return FENCE;
+						},
+					},
+				}).run({ purpose: 'task', prompt: 'work' });
+				expect(result).toMatchObject({
+					success: false,
+					managed: { state: 'unavailable', code: 'runtime-unavailable' },
+				});
+				expect(decide).not.toHaveBeenCalled();
+				expect(startedProcesses()).toBe(0);
+			}
+		);
+
+		it('does not downgrade an already managed run after it loses enrollment', async () => {
+			const { port } = await managedPort();
+			const turns = runner(['answer', 'answer'], {
+				workflow,
+				managed: { port, fence: () => FENCE },
+			});
+			expect((await turns.run({ purpose: 'task', prompt: 'first' })).success).toBe(true);
+			port.standing = () => 'standalone';
+			const result = await turns.run({ purpose: 'task', prompt: 'second' });
+			expect(result).toMatchObject({ success: false, managed: { state: 'unavailable' } });
+			expect(startedProcesses()).toBe(1);
+		});
+
+		it('starts no process if the run is stopped while awaiting its fence', async () => {
+			const controller = new AbortController();
+			const decide = vi.fn(() => ALLOW);
+			const { port } = await managedPort(decide);
+			const result = await runner(['answer'], {
+				workflow,
+				managed: {
+					port,
+					fence: async () => {
+						controller.abort();
+						return FENCE;
+					},
+				},
+			}).run({ purpose: 'task', prompt: 'work', signal: controller.signal });
+			expect(result).toMatchObject({ success: false, outcome: 'interrupted' });
+			expect(decide).not.toHaveBeenCalled();
+			expect(startedProcesses()).toBe(0);
+		});
 
 		it('claims for the request and each attempt, the effort retry included, and admits on the fence it was given', async () => {
 			const claims: Array<{ runId: string; attemptId: string }> = [];

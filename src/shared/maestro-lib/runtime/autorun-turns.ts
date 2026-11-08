@@ -55,6 +55,7 @@ import { createIdleWatchdog } from '../control/idle-watchdog';
 import { logger } from '../host';
 import type { ManagedLaunchInput } from '../launch/launch-plan';
 import type { ContextVerification, HostAuthority, PolicySourceSet } from '../managed/authority';
+import { delegationContextEnv, delegationContextOf } from '../managed/delegation';
 import type { HeadlessSpawnContextInput } from '../managed/host-adapter';
 import type { ManagedDenialCode } from '../managed/types';
 import { isWorkflowFenceRefusal, type WorkflowFenceAnswer } from '../managed/workflows';
@@ -224,6 +225,8 @@ export function createAutoRunTurnRunner(options: AutoRunTurnRunnerOptions): Auto
 	const startTurn = deps.runAgentTurn ?? runAgentTurn;
 	/** The task turn each provider session came from, so a synopsis hangs under the turn it resumes. */
 	const turnsBySession = new Map<string, AutoRunTurnAttribution>();
+	// Losing enrollment during this run must not turn its next attempt into standalone work.
+	let requiresManagedAdmission = false;
 
 	function attributionFor(request: AutoRunTurnRequest): AutoRunTurnAttribution | null {
 		if (!options.workflow) return null;
@@ -302,12 +305,23 @@ export function createAutoRunTurnRunner(options: AutoRunTurnRunnerOptions): Auto
 		attribution: AutoRunTurnAttribution | null
 	): Promise<ManagedTurn> {
 		const managed = options.managed;
-		if (!managed || managed.port.standing() === 'standalone') return { managed: false };
+		if (!managed) return { managed: false };
 		const refuse = (state: AutoRunManagedState, code: ManagedDenialCode, message: string) =>
 			({
 				managed: true,
 				refusal: managedRefusal(provider, attribution, state, code, message),
 			}) as const;
+		if (managed.port.standing() === 'standalone') {
+			return requiresManagedAdmission
+				? refuse(
+						'unavailable',
+						'runtime-unavailable',
+						'This Auto Run lost its managed host standing.'
+					)
+				: { managed: false };
+		}
+		requiresManagedAdmission = true;
+		const authority = managed.port.authority;
 		if (!attribution) {
 			return refuse(
 				'unavailable',
@@ -327,6 +341,13 @@ export function createAutoRunTurnRunner(options: AutoRunTurnRunnerOptions): Auto
 				`Auto Run "${attribution.workflow.workflowId}" has no workflow owner fence; a managed host does not run an unowned workflow, and this runner does not mint one (CP-03, the workflow owner producer).`
 			);
 		}
+		if (managed.port.standing() !== 'managed' || managed.port.authority !== authority) {
+			return refuse(
+				'unavailable',
+				'runtime-unavailable',
+				'The managed host changed while claiming this Auto Run attempt; no turn was started.'
+			);
+		}
 		const policy = managed.port.policy();
 		const verified = managed.port.context({
 			identity: autoRunRunIdentity(attribution),
@@ -344,7 +365,7 @@ export function createAutoRunTurnRunner(options: AutoRunTurnRunnerOptions): Auto
 		return {
 			managed: true,
 			authority: {
-				authority: managed.port.authority,
+				authority,
 				context: verified.context,
 				policy,
 				account: managed.account ?? null,
@@ -392,7 +413,25 @@ export function createAutoRunTurnRunner(options: AutoRunTurnRunnerOptions): Auto
 		// Admission is per attempt and the lease is checked again inside the spawn, so nothing
 		// decided for an earlier turn, or for this request's earlier attempt, carries into this one.
 		const managedTurn = await managedTurnFor(provider, attribution);
+		if (request.signal?.aborted) {
+			return attempt({
+				success: false,
+				outcome: 'interrupted',
+				error: 'Auto Run stopped before launch.',
+			});
+		}
 		if (managedTurn.managed && 'refusal' in managedTurn) return managedTurn.refusal;
+		if (managedTurn.managed) {
+			// Stamp the verified context after user env layers, before launch planning/SSH wrapping.
+			// A nested dispatch reads this attempt's workflow, fence and grant, never inherited JSON.
+			turn.launch = {
+				...turn.launch,
+				maestroEnvVars: {
+					...turn.launch.maestroEnvVars,
+					...delegationContextEnv(delegationContextOf(managedTurn.authority.context)),
+				},
+			};
+		}
 
 		const sessionId = `${agentId}-batch-${deps.now()}`;
 		const started = await startTurn(turn, {
