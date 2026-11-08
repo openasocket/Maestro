@@ -51,6 +51,7 @@ import { delegationContextOf } from '../../shared/maestro-lib/managed/delegation
 import {
 	isWorkflowFenceRefusal,
 	type WorkflowFenceAnswer,
+	type WorkflowFenceLifetime,
 } from '../../shared/maestro-lib/managed/workflows';
 import { canonicalJson } from '../../shared/canonicalJson';
 import { generateUUID } from '../../shared/uuid';
@@ -357,6 +358,7 @@ async function bindCueManagedRun(
 			'The Cue host standing or authority changed while claiming workflow ownership; no executor was started.'
 		);
 	}
+	const lifetime = fence.lifetime;
 	const policy = current.policy();
 	const contextInput = structuredClone({
 		identity: lineage.identity,
@@ -388,7 +390,9 @@ async function bindCueManagedRun(
 		let message: string;
 		try {
 			const live = deps.port();
-			if (scopeKey(request) !== boundScope) {
+			if (lifetime && (!lifetime.current() || lifetime.signal.aborted)) {
+				message = 'The Cue workflow owner fence is no longer current.';
+			} else if (scopeKey(request) !== boundScope) {
 				message = 'The Cue admission no longer carries the prepared context and policy.';
 			} else if (!live || live.standing() !== 'managed' || live.authority !== authority) {
 				message = 'The Cue host standing or authority changed before dispatch.';
@@ -454,7 +458,7 @@ async function bindCueManagedRun(
 	};
 }
 
-export async function executeCueRunAction(
+async function executeBoundCueRunAction(
 	deps: CueRunActionDeps,
 	{
 		runId,
@@ -472,7 +476,8 @@ export async function executeCueRunAction(
 		pipelineName,
 		chainRootId,
 		parentEventId,
-	}: OnCueRunParams
+	}: OnCueRunParams,
+	onDispatch?: () => void
 ): Promise<CueRunResult> {
 	const storedSession = deps.findSession(sessionId);
 	if (!storedSession) {
@@ -694,6 +699,7 @@ export async function executeCueRunAction(
 			);
 			if (!binding || isLaunchCancelled(signal)) return stoppedResult();
 			if (binding.managed && 'refusal' in binding) return managedRefusalResult(binding.refusal);
+			onDispatch?.();
 			return deps.executeCueShell({
 				runId,
 				session: sessionInfo,
@@ -746,6 +752,7 @@ export async function executeCueRunAction(
 						policyRevision: null,
 					}
 		);
+		onDispatch?.();
 		return deps.executeCueCli({
 			runId,
 			session: sessionInfo,
@@ -832,6 +839,7 @@ export async function executeCueRunAction(
 	if (!binding || isLaunchCancelled(signal)) return stoppedResult();
 	if (binding.managed && 'refusal' in binding) return managedRefusalResult(binding.refusal);
 
+	onDispatch?.();
 	const result = await deps.executeCuePrompt({
 		runId,
 		session: sessionInfo,
@@ -887,4 +895,73 @@ export async function executeCueRunAction(
 	// History reads Cue runs from `cue_events`, not the JSONL file -
 	// see the note on the notify path above.
 	return result;
+}
+
+/** Keep a claimed workflow's live custody through preparation, execution and settlement. */
+export async function executeCueRunAction(
+	deps: CueRunActionDeps,
+	params: OnCueRunParams
+): Promise<CueRunResult> {
+	const managed = deps.managed;
+	if (!managed?.workflowFence) return executeBoundCueRunAction(deps, params);
+	let lifetime: WorkflowFenceLifetime | undefined;
+	let dispatched = false;
+	let result: CueRunResult | undefined;
+	const stopped = new AbortController();
+	const stop = () => {
+		if (stopped.signal.aborted) return;
+		stopped.abort();
+		// The same registry owns local and SSH processes. Pending executors see
+		// the signal instead, and retain any late admission until they settle it.
+		deps.stopCueRun(params.runId);
+	};
+	try {
+		result = await executeBoundCueRunAction(
+			{
+				...deps,
+				managed: {
+					...managed,
+					workflowFence: async (workflow, run) => {
+						const answer = (await managed.workflowFence?.(workflow, run)) ?? null;
+						if (answer && !isWorkflowFenceRefusal(answer) && answer.lifetime) {
+							lifetime = answer.lifetime;
+							lifetime.signal.addEventListener('abort', stop, { once: true });
+							if (lifetime.signal.aborted || !lifetime.current()) stop();
+						}
+						return answer;
+					},
+				},
+			},
+			{
+				...params,
+				signal: params.signal ? AbortSignal.any([params.signal, stopped.signal]) : stopped.signal,
+			},
+			() => {
+				dispatched = true;
+			}
+		);
+		return result;
+	} finally {
+		// Settlement can itself revoke the lifetime. Detach first so it cannot
+		// stop a later run that reused this run id.
+		lifetime?.signal.removeEventListener('abort', stop);
+		if (lifetime) {
+			const effect =
+				result?.managed?.state === 'unknown'
+					? 'uncertain'
+					: !dispatched || result?.executionStarted === false
+						? 'no_effect'
+						: result?.executionStarted === true && result.status === 'completed'
+							? 'applied'
+							: 'uncertain';
+			try {
+				await lifetime.finish(effect);
+			} catch (error) {
+				deps.onLog(
+					'warn',
+					`[CUE] Workflow settlement remains uncertain: ${error instanceof Error ? error.message : String(error)}`
+				);
+			}
+		}
+	}
 }

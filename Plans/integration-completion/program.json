@@ -3820,6 +3820,20 @@
 					"id": "MCOMP-17-03H"
 				},
 				{
+					"label": "Bind Cue runs to workflow fence lifetimes",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/main/cue/cue-run-router.ts",
+						"src/__tests__/main/cue/cue-run-router.managed.test.ts",
+						"Plans/integration-completion/program.json"
+					],
+					"outcome": "Consume MAESTRO-EFFECT-CONSUMERS-BUILD and its pinned MAESTRO-CONTRACT-INPUTS-BUILD dependency. Bounded continuation of MCOMP-17-03: carry the existing workflow fence lifetime through Cue prompt, shell and CLI routing. Cancel pending launches and stop registered processes when ownership is revoked, recheck current ownership at admission and the final gate, and settle unused, completed or uncertain work without dropping producer custody. Remove listeners before settlement and reclaim on every retry. Use the existing owner port, process registry and canonical lease gate with declared local fixtures. Retain MCOMP-17-03 unchecked for Cue Auto Run actions, incoming authenticated delegation, desktop composition and managed room custody across turns. No new wire definition, external capability, producer mapping or paired/provider/native qualification is supplied. Keep to three authored files and fewer than 500 changed lines.",
+					"backlog": ["M-04"],
+					"requires": ["MAESTRO-EFFECT-CONSUMERS-BUILD"],
+					"produces": [],
+					"id": "MCOMP-17-03I"
+				},
+				{
 					"label": "Bind Auto Run Cue and nested work at dispatch",
 					"kind": "IMPLEMENT",
 					"targets": [
@@ -3862,7 +3876,7 @@
 			"produces": ["MAESTRO-WORKFLOW-CONSUMERS-BUILD"],
 			"id": "MCOMP-17",
 			"path": ".maestro/playbooks/2026-10-29-Maestro-Integration-Completion/MCOMP-17.md",
-			"taskCount": 13,
+			"taskCount": 14,
 			"stage": "S10"
 		},
 		{
@@ -5652,7 +5666,7 @@
 				"PAIR-DIRECT-EVIDENCE"
 			],
 			"nativeInputs": false,
-			"taskCount": 20
+			"taskCount": 21
 		},
 		{
 			"id": "S11",
@@ -5856,9 +5870,9 @@
 			"taskCount": 1
 		}
 	],
-	"taskCount": 333,
+	"taskCount": 334,
 	"taskCounts": {
-		"IMPLEMENT": 224,
+		"IMPLEMENT": 225,
 		"TEST": 49,
 		"VERIFY": 60
 	},
@@ -6612,6 +6626,7 @@
 			"MCOMP-17-03F",
 			"MCOMP-17-03G",
 			"MCOMP-17-03H",
+			"MCOMP-17-03I",
 			"MCOMP-17-03",
 			"MCOMP-17-04",
 			"MCOMP-17-05",

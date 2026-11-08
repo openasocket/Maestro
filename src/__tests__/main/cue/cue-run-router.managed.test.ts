@@ -36,6 +36,7 @@ import {
 	leaseAdmissionAuthority,
 } from '../../../shared/maestro-lib/run/start-turn';
 import { createHeadlessSpawnAuthority } from '../../../shared/maestro-lib/managed/host-adapter';
+import type { WorkflowFenceLifetime } from '../../../shared/maestro-lib/managed/workflows';
 import type { ManagedBindingState } from '../../../shared/maestro-lib/managed/binding';
 import {
 	delegationContextOf,
@@ -1009,5 +1010,258 @@ describe('Cue custody across preparation, admission and the spawn gate', () => {
 		if (outcome.state !== 'admitted') throw new Error(`Unexpected ${outcome.state}`);
 		outcome.lease.release({ outcome: 'stopped', by: 'caller' });
 		expect(current.authority.live()).toEqual([]);
+	});
+});
+
+describe('Cue workflow fence lifetime', () => {
+	// The owner lifetime and executors are declared doubles. Admission uses the real
+	// headless port and local lease authority; this does not qualify a provider route.
+	function fixture() {
+		const controller = new AbortController();
+		const lifetime = {
+			signal: controller.signal,
+			current: vi.fn(() => !controller.signal.aborted),
+			finish: vi.fn<WorkflowFenceLifetime['finish']>().mockResolvedValue(undefined),
+		};
+		const port = cuePort();
+		const workflowFence = vi.fn<NonNullable<CueManagedDeps['workflowFence']>>(async () => ({
+			...FENCE,
+			lifetime,
+		}));
+		const deps = makeDeps({ port: () => port, workflowFence });
+		return { controller, lifetime, port, workflowFence, deps };
+	}
+
+	describe.each([
+		{ name: 'prompt', executor: 'executeCuePrompt', overrides: {} },
+		{
+			name: 'shell',
+			executor: 'executeCueShell',
+			overrides: {
+				action: 'command',
+				command: { mode: 'shell', shell: 'echo hi' },
+			},
+		},
+		{
+			name: 'cli',
+			executor: 'executeCueCli',
+			overrides: {
+				action: 'command',
+				command: { mode: 'cli', cli: { command: 'send', target: 'agent-2' } },
+			},
+		},
+	] satisfies {
+		name: string;
+		executor: 'executeCuePrompt' | 'executeCueShell' | 'executeCueCli';
+		overrides: Partial<OnCueRunParams>;
+	}[])('$name', ({ executor, overrides }) => {
+		it.each(['cancelled', 'revoked', 'stale'] as const)(
+			'settles an unused late %s claim',
+			async (change) => {
+				const { deps, controller, lifetime, workflowFence } = fixture();
+				const caller = new AbortController();
+				workflowFence.mockImplementationOnce(async () => {
+					if (change === 'cancelled') caller.abort();
+					else if (change === 'revoked') controller.abort();
+					else lifetime.current.mockReturnValue(false);
+					return { ...FENCE, lifetime };
+				});
+				const result = await executeCueRunAction(
+					deps,
+					params({ ...overrides, signal: caller.signal })
+				);
+				expect(result).toMatchObject({ status: 'stopped', executionStarted: false });
+				expect(deps[executor]).not.toHaveBeenCalled();
+				expect(lifetime.finish).toHaveBeenCalledExactlyOnceWith('no_effect');
+			}
+		);
+
+		it('stops registered work on revocation and waits for its terminal result before settlement', async () => {
+			const { deps, controller, lifetime } = fixture();
+			const entered = Promise.withResolvers<AbortSignal | undefined>();
+			const ended = Promise.withResolvers<CueRunResult>();
+			deps[executor].mockImplementation(async (config) => {
+				entered.resolve((config as CueExecutionConfig).signal);
+				return ended.promise;
+			});
+			const pending = executeCueRunAction(deps, params(overrides));
+			const signal = await entered.promise;
+			controller.abort();
+			expect(signal?.aborted).toBe(true);
+			expect(deps.stopCueRun).toHaveBeenCalledExactlyOnceWith('run-9');
+			expect(lifetime.finish).not.toHaveBeenCalled();
+			ended.resolve({ ...fakeResult('run-9'), status: 'stopped', executionStarted: true });
+			await pending;
+			expect(lifetime.finish).toHaveBeenCalledExactlyOnceWith('uncertain');
+		});
+	});
+
+	it.each([
+		{ status: 'completed', executionStarted: true, effect: 'applied' },
+		{ status: 'failed', executionStarted: true, effect: 'uncertain' },
+		{ status: 'failed', executionStarted: false, effect: 'no_effect' },
+		{ status: 'failed', effect: 'uncertain' },
+		{
+			status: 'failed',
+			executionStarted: false,
+			managed: { state: 'unknown', code: 'outcome-unknown' },
+			effect: 'uncertain',
+		},
+	] as const)(
+		'settles $status / $executionStarted as $effect and removes its listener first',
+		async ({ effect, ...outcome }) => {
+			const { deps, lifetime, controller } = fixture();
+			deps.executeCuePrompt.mockResolvedValueOnce({ ...fakeResult('run-9'), ...outcome });
+			lifetime.finish.mockImplementationOnce(async () => {
+				controller.abort();
+			});
+			await executeCueRunAction(deps, params());
+			expect(lifetime.finish).toHaveBeenCalledExactlyOnceWith(effect);
+			expect(deps.stopCueRun).not.toHaveBeenCalled();
+		}
+	);
+
+	it.each(['before admission', 'after admission', 'spawn gate'] as const)(
+		'rechecks current ownership %s without changing the producer lease',
+		async (boundary) => {
+			const { deps, lifetime, port } = fixture();
+			const snapshot = buildDispatchSnapshot(
+				{ command: '/fixture/claude', args: [], env: {} },
+				{
+					provider: 'claude-code',
+					model: 'opus',
+					operation: 'start',
+					account: null,
+					target: { kind: 'local' },
+				}
+			);
+			const original = port.authority.admit.bind(port.authority);
+			const admit = vi.spyOn(port.authority, 'admit');
+			if (boundary === 'after admission') {
+				admit.mockImplementationOnce(async (request) => {
+					const answer = await original(request);
+					lifetime.current.mockReturnValue(false);
+					return answer;
+				});
+			}
+			deps.executeCuePrompt.mockImplementationOnce(async ({ admission }) => {
+				if (boundary === 'before admission') lifetime.current.mockReturnValue(false);
+				const answer = await admission!.authority.admit({
+					context: admission!.context,
+					policy: admission!.policy,
+					snapshot,
+				});
+				if (boundary === 'spawn gate') {
+					expect(answer.state).toBe('admitted');
+					if (answer.state !== 'admitted') throw new Error('Expected a lease');
+					expect(port.authority.live()[0]).toBe(answer.lease);
+					lifetime.current.mockReturnValue(false);
+					expect(leaseAdmission(admission!.authority, answer.lease).admit(snapshot)).toMatchObject({
+						state: 'denied',
+					});
+				} else expect(answer.state).toBe('unavailable');
+				return { ...fakeResult('run-9'), status: 'failed', executionStarted: false };
+			});
+			await executeCueRunAction(deps, params());
+			expect(admit).toHaveBeenCalledTimes(boundary === 'before admission' ? 0 : 1);
+			expect(port.authority.live()).toHaveLength(0);
+			expect(lifetime.finish).toHaveBeenCalledExactlyOnceWith('no_effect');
+		}
+	);
+
+	it.each(['before executor', 'in executor'] as const)(
+		'retains exceptions %s and settles conservatively',
+		async (boundary) => {
+			const { deps, lifetime, port, controller } = fixture();
+			if (boundary === 'before executor')
+				vi.spyOn(port, 'context').mockImplementationOnce(() => {
+					throw new Error('context failed');
+				});
+			else deps.executeCuePrompt.mockRejectedValueOnce(new Error('executor failed'));
+			await expect(executeCueRunAction(deps, params())).rejects.toThrow('failed');
+			expect(lifetime.finish).toHaveBeenCalledExactlyOnceWith(
+				boundary === 'before executor' ? 'no_effect' : 'uncertain'
+			);
+			controller.abort();
+			expect(deps.stopCueRun).not.toHaveBeenCalled();
+		}
+	);
+
+	it('retains the executor result when settlement fails and reports the uncertainty', async () => {
+		const { deps, lifetime } = fixture();
+		lifetime.finish.mockRejectedValueOnce(new Error('settlement offline'));
+		const result = await executeCueRunAction(deps, params());
+		expect(result.status).toBe('completed');
+		expect(deps.onLog).toHaveBeenCalledWith('warn', expect.stringContaining('settlement offline'));
+	});
+
+	it('reclaims on retry and removes the previous attempt listener', async () => {
+		const first = fixture();
+		const next = fixture();
+		first.workflowFence
+			.mockResolvedValueOnce({ ...FENCE, lifetime: first.lifetime })
+			.mockResolvedValueOnce({ ...FENCE, lifetime: next.lifetime });
+		first.deps.executeCuePrompt.mockResolvedValue({
+			...fakeResult('run-9'),
+			executionStarted: true,
+		});
+		await executeCueRunAction(first.deps, params());
+		first.controller.abort();
+		await executeCueRunAction(first.deps, params({ runId: 'retry-9' }));
+		expect(first.workflowFence).toHaveBeenCalledTimes(2);
+		expect(first.workflowFence.mock.calls[1][1]).toMatchObject({ runId: 'retry-9' });
+		expect(first.lifetime.finish).toHaveBeenCalledExactlyOnceWith('applied');
+		expect(next.lifetime.finish).toHaveBeenCalledExactlyOnceWith('applied');
+		expect(first.deps.stopCueRun).not.toHaveBeenCalled();
+	});
+
+	it('fences an actual fixture process through the existing Cue Stop registry', async () => {
+		const { runProcess, stopProcess, getActiveProcessMap } =
+			await import('../../../main/cue/cue-process-lifecycle');
+		const { deps, controller, lifetime, port } = fixture();
+		const runId = 'workflow-lifetime-process';
+		deps.stopCueRun.mockImplementation(stopProcess);
+		deps.executeCuePrompt.mockImplementationOnce(async (config) => ({
+			...fakeResult(runId),
+			...(await runProcess(
+				runId,
+				{
+					command: process.execPath,
+					args: ['-e', 'setInterval(() => {}, 1000)'],
+					cwd: process.cwd(),
+					env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+				},
+				{
+					toolType: 'terminal',
+					timeoutMs: 10_000,
+					onLog: vi.fn(),
+					signal: config.signal,
+					managed: {
+						...config.admission!,
+						attribution: {
+							provider: 'terminal',
+							model: null,
+							operation: 'start',
+							account: null,
+							target: { kind: 'local' },
+						},
+					},
+				}
+			)),
+		}));
+		const pending = executeCueRunAction(deps, params({ runId }));
+		try {
+			await vi.waitFor(() => expect(getActiveProcessMap().has(runId)).toBe(true));
+			expect(port.authority.live()).toHaveLength(1);
+			controller.abort();
+			expect(await pending).toMatchObject({ status: 'stopped', executionStarted: true });
+			expect(deps.stopCueRun).toHaveBeenCalledExactlyOnceWith(runId);
+			expect(getActiveProcessMap().has(runId)).toBe(false);
+			expect(port.authority.live()).toHaveLength(0);
+			expect(lifetime.finish).toHaveBeenCalledExactlyOnceWith('uncertain');
+		} finally {
+			stopProcess(runId);
+			await pending;
+		}
 	});
 });
