@@ -224,6 +224,16 @@ export function createWebServerFactory(deps: WebServerFactoryDependencies) {
 			return lineage !== null && bindCrossAgentConsultInitiator(ticket, lineage);
 		});
 
+		// A room participant's ask carries the room lineage its turn was admitted on (MCOMP-17-03BT).
+		// The same rule as the Auto Run binder, through the manager's group chat lineage lookup
+		// only: the manager answers the verified room child while it still holds the participant
+		// credential, the router binds it to the ticket, and anything short of a binding answers
+		// false so the handler refuses the ask instead of admitting it unbound.
+		server.setGroupChatConsultLineageBinder((credential, ticket) => {
+			const lineage = deps.getProcessManager()?.groupChatCallerLineageOf(credential) ?? null;
+			return lineage !== null && bindCrossAgentConsultInitiator(ticket, lineage);
+		});
+
 		// When that caller loses custody mid-consult, the ask handler withdraws the ask and hands
 		// over the dispatch ticket it issued (MCOMP-17-03AW). The router cancels the consult the
 		// ticket started and tombstones the ticket, so a later arrival on it is refused as canceled.

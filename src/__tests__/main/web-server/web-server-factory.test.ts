@@ -79,6 +79,8 @@ vi.mock('../../../main/web-server/WebServer', () => {
 			setAutoRunConsultLineageBinder = vi.fn();
 			// MCOMP-17-03BP: and the room participant credential resolver.
 			setGroupChatCallerSourceResolver = vi.fn();
+			// MCOMP-17-03BT: and the room participant consult lineage binder.
+			setGroupChatConsultLineageBinder = vi.fn();
 			setNoteAgentDelegationCallback = vi.fn();
 			setEnqueueCommandCallback = vi.fn();
 			setListQueueCallback = vi.fn();
@@ -823,6 +825,120 @@ describe('web-server/web-server-factory', () => {
 			} as any);
 			expect(binder('attempt-cred', 'ticket-2')).toBe(false);
 			expect(after).toHaveBeenCalledWith('attempt-cred');
+			expect(before).toHaveBeenCalledTimes(1);
+			expect(bindCrossAgentConsultInitiator).toHaveBeenCalledTimes(1);
+		});
+	});
+
+	describe('room participant consult lineage binder composition (MCOMP-17-03BT)', () => {
+		// Opaque to the factory: it hands the manager answer to the router unchanged.
+		const roomLineage = {
+			identity: { runId: 'room-run-1', rootRunId: 'room-run-1' },
+			traceId: 'trace-room',
+			workflow: null,
+		};
+
+		beforeEach(() => {
+			vi.mocked(bindCrossAgentConsultInitiator).mockClear();
+			vi.mocked(bindCrossAgentConsultInitiator).mockReturnValue(true);
+		});
+
+		it('composes exactly one binder on every server it builds', () => {
+			const createWebServer = createWebServerFactory(deps);
+			const first = createWebServer() as any;
+			const second = createWebServer({ lanAccess: true }) as any;
+
+			expect(first.setGroupChatConsultLineageBinder).toHaveBeenCalledTimes(1);
+			expect(second.setGroupChatConsultLineageBinder).toHaveBeenCalledTimes(1);
+			expect(typeof first.setGroupChatConsultLineageBinder.mock.calls[0][0]).toBe('function');
+			expect(first.setGroupChatConsultLineageBinder.mock.calls[0][0]).not.toBe(
+				first.setAutoRunConsultLineageBinder.mock.calls[0][0]
+			);
+			expect(bindCrossAgentConsultInitiator).not.toHaveBeenCalled();
+		});
+
+		it('binds the room lineage the manager answers for the credential to exactly that ticket', () => {
+			const groupChatCallerLineageOf = vi.fn().mockReturnValue(roomLineage);
+			const autoRunCallerLineageOf = vi.fn().mockReturnValue(null);
+			deps.getProcessManager = vi.fn().mockReturnValue({
+				...mockProcessManager,
+				groupChatCallerLineageOf,
+				autoRunCallerLineageOf,
+			} as any);
+			const server = createWebServerFactory(deps)() as any;
+			const binder = server.setGroupChatConsultLineageBinder.mock.calls[0][0];
+
+			expect(binder('room-cred', 'ticket-1')).toBe(true);
+			expect(groupChatCallerLineageOf).toHaveBeenCalledWith('room-cred');
+			expect(bindCrossAgentConsultInitiator).toHaveBeenCalledTimes(1);
+			expect(bindCrossAgentConsultInitiator).toHaveBeenCalledWith('ticket-1', roomLineage);
+			// Kind isolation: the room binder never reads the Auto Run lookup.
+			expect(autoRunCallerLineageOf).not.toHaveBeenCalled();
+		});
+
+		it('never binds through the room lookup from the Auto Run binder', () => {
+			const groupChatCallerLineageOf = vi.fn().mockReturnValue(roomLineage);
+			const autoRunCallerLineageOf = vi.fn().mockReturnValue(null);
+			deps.getProcessManager = vi.fn().mockReturnValue({
+				...mockProcessManager,
+				groupChatCallerLineageOf,
+				autoRunCallerLineageOf,
+			} as any);
+			const server = createWebServerFactory(deps)() as any;
+			const autoRunBinder = server.setAutoRunConsultLineageBinder.mock.calls[0][0];
+
+			expect(autoRunBinder('room-cred', 'ticket-1')).toBe(false);
+			expect(groupChatCallerLineageOf).not.toHaveBeenCalled();
+			expect(bindCrossAgentConsultInitiator).not.toHaveBeenCalled();
+		});
+
+		it('answers false when the router refuses the binding', () => {
+			vi.mocked(bindCrossAgentConsultInitiator).mockReturnValue(false);
+			deps.getProcessManager = vi.fn().mockReturnValue({
+				...mockProcessManager,
+				groupChatCallerLineageOf: vi.fn().mockReturnValue(roomLineage),
+			} as any);
+			const server = createWebServerFactory(deps)() as any;
+			const binder = server.setGroupChatConsultLineageBinder.mock.calls[0][0];
+
+			expect(binder('room-cred', 'spent-ticket')).toBe(false);
+			expect(bindCrossAgentConsultInitiator).toHaveBeenCalledWith('spent-ticket', roomLineage);
+		});
+
+		it('binds nothing when the manager holds no room lineage or is absent', () => {
+			const groupChatCallerLineageOf = vi.fn().mockReturnValue(null);
+			const getProcessManager = vi
+				.fn()
+				.mockReturnValue({ ...mockProcessManager, groupChatCallerLineageOf } as any);
+			deps.getProcessManager = getProcessManager;
+			const server = createWebServerFactory(deps)() as any;
+			const binder = server.setGroupChatConsultLineageBinder.mock.calls[0][0];
+
+			expect(binder('attempt-cred', 'ticket-1')).toBe(false);
+			expect(groupChatCallerLineageOf).toHaveBeenCalledWith('attempt-cred');
+
+			getProcessManager.mockReturnValue(null);
+			expect(binder('room-cred', 'ticket-2')).toBe(false);
+			expect(bindCrossAgentConsultInitiator).not.toHaveBeenCalled();
+		});
+
+		it('re-reads the process manager on every ask instead of capturing one at build', () => {
+			const before = vi.fn().mockReturnValue(roomLineage);
+			const after = vi.fn().mockReturnValue(null);
+			const getProcessManager = vi
+				.fn()
+				.mockReturnValue({ ...mockProcessManager, groupChatCallerLineageOf: before } as any);
+			deps.getProcessManager = getProcessManager;
+			const server = createWebServerFactory(deps)() as any;
+			const binder = server.setGroupChatConsultLineageBinder.mock.calls[0][0];
+
+			expect(binder('room-cred', 'ticket-1')).toBe(true);
+			getProcessManager.mockReturnValue({
+				...mockProcessManager,
+				groupChatCallerLineageOf: after,
+			} as any);
+			expect(binder('room-cred', 'ticket-2')).toBe(false);
+			expect(after).toHaveBeenCalledWith('room-cred');
 			expect(before).toHaveBeenCalledTimes(1);
 			expect(bindCrossAgentConsultInitiator).toHaveBeenCalledTimes(1);
 		});
