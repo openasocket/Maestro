@@ -1,0 +1,312 @@
+{
+	"schemaVersion": 1,
+	"schema": "maestro-qualification-receipt/1",
+	"artifactId": "MAESTRO-P0-CLOSURE",
+	"owner": "maestro",
+	"proofClass": "qualified-evidence",
+	"status": "published",
+	"producerDocument": "MCOMP-10",
+	"task": "MCOMP-10-01",
+	"stage": "S06",
+	"backlog": ["M-01", "M-02"],
+	"recordedAt": "2026-11-08T09:07:50.361Z",
+	"standing": "Local public-runtime P0 closure under the 2026-11-08 independent-lane amendment. Source-pinned archived Maestro code runs normal API sends with a real harmless fixture child and local fixture authority/custody. This is no production authority, provider qualification, protected native custody or actual paired service evidence.",
+	"grants": {
+		"authority": "none",
+		"lease": "none",
+		"policy": "none"
+	},
+	"qualifies": {
+		"archiveIdentity": true,
+		"normalPublicRuntimeFixture": true,
+		"mandatoryAdmissionFixture": true,
+		"protectedStandingConsumerFixture": true,
+		"paired": false,
+		"provider": false,
+		"native": false,
+		"ci": false
+	},
+	"implementationRevision": "aa419735e11896b034e803422a5d316de85cf6b1",
+	"observedRevision": "590aeb40d3656cd6286747cbf1ad485fb91cb71d",
+	"inputDigest": "ad3b1a7cc4ed649545550cbaf4a266b6c1bfd7e9982c70f31d03bfc33adaf5e0",
+	"snapshot": {
+		"inputMap": {
+			"path": ".maestro/playbooks/Working/MCOMP-10-01/input-map.json",
+			"sha256": "5797a7e3f398dad95f3b28e630d2228c93eefdc9685625b90d7204635134f201"
+		},
+		"inputDigestEncoding": "sha256(canonicalJson(inputs))",
+		"implementationDigest": "1c1a739ce8e95baf7033c7fe1bb1922415ea4fa78f3f22b4714f42be0ebdfab5",
+		"implementationDirty": false,
+		"checkoutDirty": true,
+		"sourceDrift": 0,
+		"libraryInputsMoved": 0,
+		"scope": "The exhaustive implementation/library and exact dependency maps remain bound by the P0 BUILD receipt and unchanged archive. This task adds hashes for its harness, runtime executable, fixtures, tests and generated archive config. The modified coordination manifest is recorded as a test input, not claimed committed or clean.",
+		"preservedChanges": [
+			"Plans/integration-completion/EXECUTION-RULES.md",
+			"Plans/integration-completion/README.md",
+			"Plans/integration-completion/RUN-ORDER.md",
+			"Plans/integration-completion/program.json"
+		]
+	},
+	"dependencies": [
+		{
+			"artifactId": "MAESTRO-M0-RUNTIME",
+			"path": "Plans/integration-completion/evidence/completion-runtime-bootstrap.json",
+			"sha256": "7ae88873583103c4a3f3843223f542aaaf67d29c311ca8febe7c1771655c076d",
+			"archiveSha256": "759b947aaf546631e573642e5a9c8450adafa74a239e42741766cc1acef05a3e"
+		},
+		{
+			"artifactId": "MAESTRO-P0-CLOSURE-BUILD",
+			"path": "Plans/integration-completion/evidence/p0-build.json",
+			"sha256": "e8b0c051efccc4d075ed5231aa895ee2623f0dbe4b4aef78e3357240eb60f29f",
+			"archiveSha256": "81e90819f86b17228abeb2ff1930dd661f5b3bd86d2376e09a03dc59061159ca"
+		},
+		{
+			"artifactId": "MAESTRO-CONTRACT-INPUTS-BUILD",
+			"path": "Plans/integration-completion/evidence/contract-inputs-build.json",
+			"sha256": "206664f3ab7605927bbf9964597da12f4607da34bac5f601ce18e19fffca34c2"
+		}
+	],
+	"replacementM0": {
+		"artifactId": "MAESTRO-M0-RUNTIME",
+		"version": "0.36.0",
+		"archive": "/Users/dr3/dev-shit/Maestro/dist/mega-maestro-runtime/0.36.0/81e90819f86b17228abeb2ff1930dd661f5b3bd86d2376e09a03dc59061159ca/runtime.tgz",
+		"sha256": "81e90819f86b17228abeb2ff1930dd661f5b3bd86d2376e09a03dc59061159ca",
+		"sha512": "17eabbf6df03f02999d6c74dee65e53e51fc797111cc4647a0577bc64c9689586ddf7371a81d80132192d61aa77d0477d8d30df3aef6336ea9bf75df9f2cdb7e",
+		"bytes": 2587687,
+		"manifest": {
+			"path": "/Users/dr3/dev-shit/Maestro/dist/mega-maestro-runtime/0.36.0/81e90819f86b17228abeb2ff1930dd661f5b3bd86d2376e09a03dc59061159ca/artifact.json",
+			"sha256": "18b97644facdb4454951afb3f38a7ee7cc4f834016da5d072279ddd9a61f8ed3"
+		},
+		"sidecar": {
+			"path": "/Users/dr3/dev-shit/Maestro/dist/mega-maestro-runtime/0.36.0/81e90819f86b17228abeb2ff1930dd661f5b3bd86d2376e09a03dc59061159ca/runtime.tgz.sha256",
+			"sha256": "606dfabc8243e8183a06d2af2e419f67d70b8e34c7e3b6581b3f75a9dc5b004c"
+		},
+		"payloadDigest": "534b7948e213fe3e200057c04d2aa5f0ae1df2a95d750c5b20a8732018114c58",
+		"payloadFiles": 309,
+		"payloadMap": "/Users/dr3/dev-shit/Maestro/dist/mega-maestro-runtime/0.36.0/81e90819f86b17228abeb2ff1930dd661f5b3bd86d2376e09a03dc59061159ca/artifact.json#/payloadSha256",
+		"entrySha256": "9fe1b09e1cf43fa000c9dabe9d3ae158ffc1de2b0859f1245d3d2afc3bae9848",
+		"pin": {
+			"path": "Plans/integration-completion/runtime-conformance.json",
+			"sha256": "428ce61b0160ac8e784add82a9a4a32a3d2208a175a7a43f3be57786a80e717e"
+		},
+		"packaging": "Repackaged the clean compiled P0 library with the existing deterministic packager. It reproduced the exact P0 BUILD archive (existing=true); this v0.36.0 cohort replaces bootstrap v0.32.0 without rewriting either archive or the committed pin.",
+		"verification": {
+			"path": ".maestro/playbooks/Working/MCOMP-10-01/results/runtime-verified.json",
+			"sha256": "c46cd168cf330794d83904363ee1c1a5091a4b828a4617c91dc33e3375d77327"
+		}
+	},
+	"bootstrapPreserved": {
+		"path": "dist/mega-maestro-runtime/0.32.0/759b947aaf546631e573642e5a9c8450adafa74a239e42741766cc1acef05a3e/runtime.tgz",
+		"sha256": "759b947aaf546631e573642e5a9c8450adafa74a239e42741766cc1acef05a3e",
+		"sha512": "106b2be395da76e69a7674891e725caf8d0289ff7e9681f118b62f4bd31c39a93a172b5f8d9e26b106144edf9963f185375929d8d92c7ac9b3adbc4d50b05ad2",
+		"bytes": 2444724,
+		"unchanged": true,
+		"receipt": {
+			"path": "Plans/integration-completion/evidence/completion-runtime-bootstrap.json",
+			"sha256": "7ae88873583103c4a3f3843223f542aaaf67d29c311ca8febe7c1771655c076d"
+		}
+	},
+	"checks": [
+		{
+			"name": "package-replacement",
+			"command": "st proxy node scripts/package-mega-maestro-runtime.mjs --library .maestro/playbooks/Working/MCOMP-09-07/library --json",
+			"exitCode": 0,
+			"log": {
+				"path": ".maestro/playbooks/Working/MCOMP-10-01/results/repackage-final.json",
+				"sha256": "92cb2e3d418cc0077ad92f848444e866a18374661554f7a0a66467d4da2c23b5"
+			}
+		},
+		{
+			"name": "verify-runtime-pin-and-source",
+			"command": "st proxy node scripts/package-mega-maestro-runtime.mjs --runtime /Users/dr3/dev-shit/Maestro/dist/mega-maestro-runtime/0.36.0/81e90819f86b17228abeb2ff1930dd661f5b3bd86d2376e09a03dc59061159ca --json",
+			"exitCode": 0,
+			"log": {
+				"path": ".maestro/playbooks/Working/MCOMP-10-01/results/runtime-verified.json",
+				"sha256": "c46cd168cf330794d83904363ee1c1a5091a4b828a4617c91dc33e3375d77327"
+			}
+		},
+		{
+			"name": "public-contract-archive-and-exact-dependency-closure",
+			"command": "st proxy node .maestro/playbooks/Working/MCOMP-00-01/verify-inputs.mjs",
+			"exitCode": 0,
+			"log": {
+				"path": ".maestro/playbooks/Working/MCOMP-10-01/results/contracts.json",
+				"sha256": "36eef50e024c7307bd9a3e4832a63c265dcb6df7b15878eb105b99f0b2f989a9"
+			}
+		},
+		{
+			"name": "focused-p0-tests",
+			"command": "st proxy env TMPDIR=$PWD/.maestro/t10 GIT_CEILING_DIRECTORIES=$PWD/.maestro/t10 node node_modules/vitest/vitest.mjs run src/shared/maestro-lib/runtime/__tests__/turns.test.ts src/shared/maestro-lib/runtime/__tests__/server-requests.test.ts src/__tests__/shared/maestro-lib/run/start-turn.test.ts src/__tests__/main/enterprise/identity-store.test.ts src/__tests__/main/enterprise/headless-lifecycle.test.ts src/__tests__/cli/services/host-managed.test.ts src/__tests__/cli/services/cli-managed-binding.test.ts src/__tests__/cli/services/cue-standalone-engine.test.ts src/__tests__/scripts/package-mega-maestro-runtime.test.ts --reporter=default --reporter=json --outputFile=.maestro/playbooks/Working/MCOMP-10-01/unit-results.json",
+			"exitCode": 0,
+			"log": {
+				"path": ".maestro/playbooks/Working/MCOMP-10-01/results/unit.log",
+				"sha256": "6f108419b2fd51ed5ad3dd7d098439faa9a86f67332087795f6fb8fb47ca553a"
+			}
+		},
+		{
+			"name": "archive-conformance",
+			"command": "st proxy env TMPDIR=$PWD/.maestro/t10 GIT_CEILING_DIRECTORIES=$PWD/.maestro/t10 node node_modules/vitest/vitest.mjs run --config .maestro/playbooks/Working/MCOMP-10-01/vitest.archive.config.mts src/__tests__/integration/mega-maestro/conformance.test.ts src/__tests__/shared/maestro-lib/managed/provider-contract.test.ts --reporter=default --reporter=json --outputFile=.maestro/playbooks/Working/MCOMP-10-01/archive-results.json",
+			"exitCode": 0,
+			"log": {
+				"path": ".maestro/playbooks/Working/MCOMP-10-01/results/archive.log",
+				"sha256": "d150b78b4aec0a09b8626293a474ce4e9ac96d46be85d095c80707ccfd24a48a"
+			}
+		},
+		{
+			"name": "real-normal-api-fixture",
+			"command": "st proxy env -i PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin TMPDIR=$PWD/.maestro/t10 MAESTRO_USER_DATA=$PWD/.maestro/t10/user-data CLAUDE_CONFIG_DIR=$PWD/.maestro/t10/claude node .maestro/playbooks/Working/MCOMP-10-01/public-runtime.mjs",
+			"exitCode": 0,
+			"log": {
+				"path": ".maestro/playbooks/Working/MCOMP-10-01/results/public-runtime-final.log",
+				"sha256": "5e3bfda66fc39f58faf943d9fe1243a6e557e69a9a95faba82f653f5f4fcf579"
+			}
+		},
+		{
+			"name": "docs-verify",
+			"command": "st proxy npm run docs:verify",
+			"exitCode": 0,
+			"log": {
+				"path": ".maestro/playbooks/Working/MCOMP-10-01/results/docs-verify.log",
+				"sha256": "062a8efa7dd52f093f95ec50285fd66219e1904d0384c720f7dabb6bcea8d5f0"
+			}
+		},
+		{
+			"name": "repository-format-preflight",
+			"command": "st proxy npm run format:check:all",
+			"exitCode": 1,
+			"log": {
+				"path": ".maestro/playbooks/Working/MCOMP-10-01/results/format-all.log",
+				"sha256": "4838cf83aee607bfccca5f2997759a4aeb61410a307a091728d0c65851adda3c"
+			},
+			"scope": "23 unrelated guidance/planning files and generated SlopTimize caches; no application failure and no requested source changed."
+		}
+	],
+	"tests": {
+		"focused": {
+			"files": 8,
+			"passed": 186,
+			"failed": 0,
+			"skipped": 1,
+			"report": {
+				"path": ".maestro/playbooks/Working/MCOMP-10-01/unit-results.json",
+				"sha256": "de982515d54f10a685253e7c4c271136923df8d8da8f1c95aae02446b2de08f1"
+			}
+		},
+		"archive": {
+			"files": 2,
+			"passed": 47,
+			"failed": 0,
+			"skipped": 0,
+			"report": {
+				"path": ".maestro/playbooks/Working/MCOMP-10-01/archive-results.json",
+				"sha256": "59d2cf0baa18b0b7f203ce4ee27872c0c36dda168b6d3f353e41fbbacb43ef1b"
+			}
+		},
+		"publicRuntime": {
+			"cases": [
+				{
+					"id": "normal-send-denied-before-effect",
+					"passed": true,
+					"started": 0,
+					"effects": 0,
+					"journal": "failed",
+					"transcriptEntries": 0
+				},
+				{
+					"id": "normal-send-allowed-real-child",
+					"passed": true,
+					"pid": 78939,
+					"leaseId": "fixture-lease-1",
+					"phase": "terminal",
+					"outcome": "completed",
+					"effectSha256": "b5c7290b6f6cc7aeb119f6e9ab02538031feda35ac11b902b15d82304b5a3c64"
+				},
+				{
+					"id": "omitted-and-forged-admission-refused",
+					"passed": true,
+					"effects": 0
+				},
+				{
+					"id": "deleted-mirror-still-denied",
+					"passed": true,
+					"binding": "enrolled",
+					"effects": 0
+				},
+				{
+					"id": "custody-unavailable-fails-closed",
+					"passed": true,
+					"effects": 0,
+					"authorityCalls": 0
+				},
+				{
+					"id": "custody-recovery-admits-normal-send",
+					"passed": true,
+					"completedRuns": 2,
+					"liveLeases": 0
+				}
+			],
+			"report": {
+				"path": ".maestro/playbooks/Working/MCOMP-10-01/public-runtime-results.json",
+				"sha256": "654ef0acdddcd100e425a650e1d42bf92e4fa6dac59ba3f754ea1d475308674c"
+			},
+			"harness": {
+				"path": ".maestro/playbooks/Working/MCOMP-10-01/public-runtime.mjs",
+				"sha256": "a16bcebaa9ba2a7014c52c66c1ac52a70311a72621605967a689c0913ad474f8"
+			}
+		},
+		"skipped": "One pre-existing Windows-only .cmd shim case skipped on darwin-arm64; no Windows qualification claimed.",
+		"selection": "Vitest matched eight focused test files. The supplied headless-lifecycle.test.ts filter matched no file; headless registration, refresh, reconnect and close are exercised in the matched host-managed.test.ts suite.",
+		"isolation": "Only workspace-local temporary data and fixture files; fresh child environment, no real account keys, real tenants, live stores or keychain. The existing isolated Electron resolver blocker is reused for temporary unit-test directories.",
+		"archiveExtraction": {
+			"path": ".maestro/playbooks/Working/MCOMP-10-01/archive-validation.json",
+			"sha256": "ad5432fb545a80d029034498c81e5f008baed66bec354cb2e2062a85df907753"
+		},
+		"redirects": {
+			"path": ".maestro/playbooks/Working/MCOMP-10-01/archive-redirects.log",
+			"sha256": "70b20f979feb4a9dac398958da0adef6552e16e0afdb31c9abf378172228eab4"
+		}
+	},
+	"attempts": {
+		"firstHarness": {
+			"exitCode": 1,
+			"log": {
+				"path": ".maestro/playbooks/Working/MCOMP-10-01/results/public-runtime-attempt1.log",
+				"sha256": "0f0df65f3fbbdd539523d9d8822b7ba644b5afff87ae148033b8ee70d29a2beb"
+			},
+			"resolution": "Corrected the observer to assert the normal API failed code and policy message; managed-denied is a journal detail, not a required user-message prefix."
+		},
+		"secondHarness": {
+			"exitCode": 1,
+			"log": {
+				"path": ".maestro/playbooks/Working/MCOMP-10-01/results/public-runtime-attempt2.log",
+				"sha256": "f9412dba7ed8c4b26857a4f1437c57e6b4167c8cdb4fd89cb8b6a5e6bedbff46"
+			},
+			"resolution": "The fixture changed its custody object without publishing the change. Both outage and recovery now call the public managedBinding.reload API, as required by the cached binding contract. No production implementation or guard changed."
+		},
+		"outputCorrection": "Re-ran packaging unfiltered through st proxy because the filtered output appended a cache footer to JSON."
+	},
+	"remaining": {
+		"contractCoverage": {
+			"path": "Plans/integration-completion/contract-coverage.json",
+			"sha256": "680a8aa2bd6a8976017026d9cdd1d8905a54a4f5863da08a31e255a88d881537"
+		},
+		"gaps": [
+			"HEADLESS-CUSTODY/1 remains proposed and unnegotiated. Plain Node has no independently protected default seal; held installations remain unavailable.",
+			"REGISTRATION-HTTP/2 runtime-use wire registration remains pending; no local fixture supplies production authority.",
+			"Actual headless/native custody, real provider effects and paired service qualification remain in MCOMP-14, MCOMP-32, MCOMP-34 and the other qualification stages."
+		],
+		"qualification": "Actual paired services, native custody and real provider effects remain in the separate qualification stages; fixture registration and custody do not negotiate missing wire definitions."
+	},
+	"evidence": {
+		"directory": ".maestro/playbooks/Working/MCOMP-10-01",
+		"inGit": false,
+		"generated": "Safe archive extraction (309 payloads), archive config derived from the P0 build harness, copied byte-identical fake executable, recording projection, isolated runtime journals/transcripts and test reports. Original evidence and archives preserved.",
+		"authored": "One temporary verification harness, this receipt and the operational MCOMP-10 checklist; no application source changes.",
+		"imagesAnalyzed": 0
+	},
+	"publication": {
+		"archives": "Content-addressed workspace archive available for consumer import; no service upload.",
+		"github": "Local receipt commit is ready; GitHub publication remains pending because the required repository-wide formatting preflight exits 1. Push will use the existing hooks. No hook bypass used."
+	}
+}
