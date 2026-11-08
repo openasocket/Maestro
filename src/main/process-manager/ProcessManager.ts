@@ -332,6 +332,43 @@ export function chatTurnSourceOf(
 	return { agentId, tabId };
 }
 
+/** The `<agent>-batch-<ts>` process id the desktop renderer forms for an Auto Run attempt. */
+const AUTO_RUN_PROCESS_ID = /^(.+)-batch-\d+$/;
+
+/**
+ * The Auto Run source a spawn is (MCOMP-17-03BA): the agent and exact process of one desktop
+ * Auto Run attempt, read off the `<agent>-batch-<ts>` process id the renderer forms, for a
+ * spawn that carries its Auto Run lineage. Null for anything that is not one: a terminal, a
+ * chat turn, a dispatched child, a utility/probe/supervisor turn, or a spawn with a lineage but
+ * some other id. An Auto Run has no tab, so it is never a chat-turn source (`chatTurnSourceOf`).
+ */
+export function autoRunSpawnSourceOf(
+	config: Pick<
+		ProcessConfig,
+		'sessionId' | 'toolType' | 'autoRun' | 'delegation' | 'utilityOf' | 'purpose'
+	>
+): { agentId: string; processId: string } | null {
+	if (config.toolType === 'terminal' || !config.autoRun || config.delegation || config.utilityOf) {
+		return null;
+	}
+	if (config.purpose !== undefined && config.purpose !== 'conversation') return null;
+	const agentId = config.sessionId.match(AUTO_RUN_PROCESS_ID)?.[1];
+	return agentId ? { agentId, processId: config.sessionId } : null;
+}
+
+/** What a caller credential was minted for: a chat turn, or one Auto Run attempt. */
+type CallerCredentialSource =
+	| { kind: 'chat'; agentId: string; tabId: string }
+	| { kind: 'auto-run'; agentId: string; processId: string };
+
+/** The credential source a spawn is, if it is one; the two kinds never overlap. */
+function callerCredentialSourceOf(config: ProcessConfig): CallerCredentialSource | null {
+	const chat = chatTurnSourceOf(config);
+	if (chat) return { kind: 'chat', ...chat };
+	const run = autoRunSpawnSourceOf(config);
+	return run ? { kind: 'auto-run', ...run } : null;
+}
+
 export interface TerminalTabSpawnConfig {
 	sessionId: string;
 	cwd: string;
@@ -385,14 +422,14 @@ export class ProcessManager extends EventEmitter {
 	/**
 	 * Caller credential -> the chat-turn source it was minted for (MCOMP-17-03AO), with the exact
 	 * process record and admission it was stamped on, so a respawn under the same session id or
-	 * a rebound lease never inherits it. Pruned when its lease is released.
+	 * a rebound lease never inherits it. Pruned when its lease is released. An admitted desktop
+	 * Auto Run attempt gets one too (MCOMP-17-03BA), resolved only by `autoRunCallerSourceOf`.
 	 */
 	private readonly callerCredentials = new Map<
 		string,
 		{
 			sessionId: string;
-			agentId: string;
-			tabId: string;
+			source: CallerCredentialSource;
 			process: ManagedProcess;
 			admission: ProcessSpawnAdmission;
 		}
@@ -743,7 +780,9 @@ export class ProcessManager extends EventEmitter {
 		// shell's proof of which live source a request comes from, since the agent and tab ids it
 		// states are claims. Stamped after the ceiling (which strips any user or inherited copy),
 		// and resolvable only while this process holds this admission (`callerSourceOf`).
-		const callerSource = lease && config.admission ? chatTurnSourceOf(config) : null;
+		// An admitted desktop Auto Run attempt is credentialed the same way (MCOMP-17-03BA), per
+		// attempt: a retry is a new spawn, so it is stamped afresh and the old one lapses with it.
+		const callerSource = lease && config.admission ? callerCredentialSourceOf(config) : null;
 		const callerCredential = callerSource ? randomBytes(32).toString('base64url') : null;
 		const stamped: Record<string, string> = {
 			...(handshake && handshake.ok ? handshake.env : {}),
@@ -796,7 +835,7 @@ export class ProcessManager extends EventEmitter {
 				bound.admission === config.admission
 			) {
 				this.callerCredentials.set(callerCredential, {
-					...callerSource,
+					source: callerSource,
 					sessionId: config.sessionId,
 					process: proc,
 					admission: bound.admission,
@@ -1175,6 +1214,25 @@ export class ProcessManager extends EventEmitter {
 	 * of an ended process authenticates nobody. The coordinates select a source; no spawn permit.
 	 */
 	callerSourceOf(credential: unknown): { agentId: string; tabId: string } | null {
+		const source = this.liveCallerSource(credential);
+		return source?.kind === 'chat' ? { agentId: source.agentId, tabId: source.tabId } : null;
+	}
+
+	/**
+	 * Host-only: the exact live desktop Auto Run attempt a caller credential was minted for
+	 * (MCOMP-17-03BA), its agent and `<agent>-batch-<ts>` process id, under the same custody
+	 * rules as `callerSourceOf`. Null for a chat turn's credential (and `callerSourceOf` answers
+	 * null for an attempt's), so neither kind lends its standing to the other.
+	 */
+	autoRunCallerSourceOf(credential: unknown): { agentId: string; processId: string } | null {
+		const source = this.liveCallerSource(credential);
+		return source?.kind === 'auto-run'
+			? { agentId: source.agentId, processId: source.processId }
+			: null;
+	}
+
+	/** The source of a credential whose process still holds the bound admission it was stamped on. */
+	private liveCallerSource(credential: unknown): CallerCredentialSource | null {
 		if (typeof credential !== 'string') return null;
 		const caller = this.callerCredentials.get(credential);
 		if (!caller) return null;
@@ -1188,7 +1246,7 @@ export class ProcessManager extends EventEmitter {
 			this.callerCredentials.delete(credential);
 			return null;
 		}
-		return { agentId: caller.agentId, tabId: caller.tabId };
+		return caller.source;
 	}
 
 	/** Whether a session's admission is still bound to its process. */

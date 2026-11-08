@@ -82,10 +82,16 @@ vi.mock('../../../main/utils/logger', () => ({
 
 import {
 	ProcessManager,
+	autoRunSpawnSourceOf,
 	chatTurnSourceOf,
 	localTuiLaunchOf,
 } from '../../../main/process-manager/ProcessManager';
 import { CALLER_CREDENTIAL_ENV_VAR } from '../../../shared/maestro-lib/launch/env';
+import {
+	newAutoRunTurnRequest,
+	nextAutoRunAttempt,
+	type AutoRunWorkflowIdentity,
+} from '../../../shared/maestro-lib/autorun/attribution';
 import {
 	sendSteeringRequest,
 	steeringSocketPathFor,
@@ -854,5 +860,125 @@ describe('the caller credential of a managed chat turn (MCOMP-17-03AO)', () => {
 		expect(
 			chatTurnSourceOf({ ...base, utilityOf: {} as NonNullable<ProcessConfig['utilityOf']> })
 		).toBeNull();
+	});
+});
+
+describe('the caller credential of a managed desktop Auto Run attempt (MCOMP-17-03BA)', () => {
+	const OWNING = 'tui-launch-agent';
+	const WORKFLOW: AutoRunWorkflowIdentity = {
+		workflowId: 'playbook:/work/.maestro/playbooks/release',
+		version: 'docs-2-0badf00d',
+		triggerEventId: 'operator:1700000000000',
+		runId: 'run-root',
+	};
+	const FENCE = { ownerEpoch: 'epoch-1', fencingToken: 'fence-1' };
+	let ids = 0;
+	const newId = () => `id-${++ids}`;
+	let stamp = 1_700_000_000_000;
+	const attemptTurn = (
+		attribution = newAutoRunTurnRequest(WORKFLOW, { purpose: 'task', document: '01', newId }),
+		overrides: Partial<ProcessConfig> = {}
+	) =>
+		tuiTurn({
+			command: binPath,
+			args: HOST_ARGS,
+			sessionId: `${OWNING}-batch-${++stamp}`,
+			querySource: 'auto',
+			autoRun: { attribution, fence: FENCE },
+			...overrides,
+		});
+
+	it('stamps a credential that resolves to exactly its agent and process, never as a chat turn', async () => {
+		const manager = managedManager();
+		const { turn } = await admitAndSpawn(manager, attemptTurn());
+		const credential = envOf(captured.child[0])[CALLER_CREDENTIAL_ENV_VAR];
+		expect(credential).toMatch(/^[A-Za-z0-9_-]{43}$/);
+		// Stamped at the sink, never on the request the snapshot digests.
+		expect(turn.customEnvVars?.[CALLER_CREDENTIAL_ENV_VAR]).toBeUndefined();
+		expect(manager.autoRunCallerSourceOf(credential)).toEqual({
+			agentId: OWNING,
+			processId: turn.sessionId,
+		});
+		expect(manager.callerSourceOf(credential)).toBeNull();
+	});
+
+	it('never resolves a chat turn credential as an Auto Run attempt', async () => {
+		const manager = managedManager();
+		await admitAndSpawn(manager, tuiTurn({ command: binPath, args: HOST_ARGS }));
+		const credential = envOf(captured.child[0])[CALLER_CREDENTIAL_ENV_VAR];
+		expect(manager.callerSourceOf(credential)).not.toBeNull();
+		expect(manager.autoRunCallerSourceOf(credential)).toBeNull();
+	});
+
+	it('mints a fresh credential for a retry, and the ended attempt authenticates nobody', async () => {
+		const manager = managedManager();
+		const first = newAutoRunTurnRequest(WORKFLOW, { purpose: 'task', document: '01', newId });
+		const one = await admitAndSpawn(manager, attemptTurn(first));
+		const old = envOf(captured.child[0])[CALLER_CREDENTIAL_ENV_VAR];
+		expect(manager.kill(one.turn.sessionId)).toBe(true);
+		expect(manager.autoRunCallerSourceOf(old)).toBeNull();
+		const two = await admitAndSpawn(manager, attemptTurn(nextAutoRunAttempt(first, newId)));
+		const fresh = envOf(captured.child[1])[CALLER_CREDENTIAL_ENV_VAR];
+		expect(fresh).not.toBe(old);
+		expect(manager.autoRunCallerSourceOf(fresh)).toEqual({
+			agentId: OWNING,
+			processId: two.turn.sessionId,
+		});
+		expect(manager.autoRunCallerSourceOf(old)).toBeNull();
+	});
+
+	it('stops authenticating when the lease is revoked, and refuses unknown or malformed credentials', async () => {
+		const port = fakeSpawnPort();
+		const manager = new ProcessManager(undefined, {
+			spawnAuthority: () => port,
+			userDataDir: dataDir,
+		});
+		await admitAndSpawn(manager, attemptTurn());
+		const credential = envOf(captured.child[0])[CALLER_CREDENTIAL_ENV_VAR];
+		for (const bad of ['forged', '', `${credential}x`, undefined, null, 42]) {
+			expect(manager.autoRunCallerSourceOf(bad)).toBeNull();
+		}
+		expect(manager.autoRunCallerSourceOf(credential)).not.toBeNull();
+		expect(port.authority.revokeAll('policy changed')).toBe(1);
+		expect(manager.autoRunCallerSourceOf(credential)).toBeNull();
+	});
+
+	it('mints none on a standalone host or for a lineage spawn that is not an Auto Run process', async () => {
+		const standalone = new ProcessManager(undefined, { userDataDir: dataDir });
+		expect(standalone.spawn(attemptTurn())).toEqual(SPAWN_RESULT);
+		expect(envOf(captured.child[0])).not.toHaveProperty(CALLER_CREDENTIAL_ENV_VAR);
+
+		const manager = managedManager();
+		await admitAndSpawn(manager, attemptTurn(undefined, { sessionId: 'synopsis-agent-1' }));
+		expect(envOf(captured.child[1])).not.toHaveProperty(CALLER_CREDENTIAL_ENV_VAR);
+	});
+
+	it('reads the source off the batch process id and refuses every other lineage', () => {
+		const autoRun = {} as NonNullable<ProcessConfig['autoRun']>;
+		const base = { sessionId: 'agent-1-batch-1700', toolType: 'claude-code', autoRun };
+		expect(autoRunSpawnSourceOf(base)).toEqual({
+			agentId: 'agent-1',
+			processId: 'agent-1-batch-1700',
+		});
+		expect(autoRunSpawnSourceOf({ ...base, purpose: 'conversation' })).not.toBeNull();
+		expect(autoRunSpawnSourceOf({ ...base, autoRun: undefined })).toBeNull();
+		expect(autoRunSpawnSourceOf({ ...base, sessionId: 'agent-1-ai-tab-9' })).toBeNull();
+		expect(autoRunSpawnSourceOf({ ...base, sessionId: 'agent-1-batch-' })).toBeNull();
+		expect(autoRunSpawnSourceOf({ ...base, sessionId: '-batch-1700' })).toBeNull();
+		expect(autoRunSpawnSourceOf({ ...base, toolType: 'terminal' })).toBeNull();
+		for (const purpose of ['utility', 'probe', 'supervisor'] as const) {
+			expect(autoRunSpawnSourceOf({ ...base, purpose })).toBeNull();
+		}
+		expect(
+			autoRunSpawnSourceOf({
+				...base,
+				delegation: {} as NonNullable<ProcessConfig['delegation']>,
+			})
+		).toBeNull();
+		expect(
+			autoRunSpawnSourceOf({ ...base, utilityOf: {} as NonNullable<ProcessConfig['utilityOf']> })
+		).toBeNull();
+		// An Auto Run attempt is never a chat-turn source.
+		expect(chatTurnSourceOf({ ...base, sessionId: 'agent-1-ai-tab-9' })).toBeNull();
 	});
 });
