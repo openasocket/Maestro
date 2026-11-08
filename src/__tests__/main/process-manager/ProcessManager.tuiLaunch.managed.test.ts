@@ -88,6 +88,8 @@ import {
 } from '../../../main/process-manager/ProcessManager';
 import { CALLER_CREDENTIAL_ENV_VAR } from '../../../shared/maestro-lib/launch/env';
 import {
+	autoRunRunIdentity,
+	autoRunTraceId,
 	newAutoRunTurnRequest,
 	nextAutoRunAttempt,
 	type AutoRunWorkflowIdentity,
@@ -951,6 +953,79 @@ describe('the caller credential of a managed desktop Auto Run attempt (MCOMP-17-
 		const manager = managedManager();
 		await admitAndSpawn(manager, attemptTurn(undefined, { sessionId: 'synopsis-agent-1' }));
 		expect(envOf(captured.child[1])).not.toHaveProperty(CALLER_CREDENTIAL_ENV_VAR);
+	});
+
+	describe('the lineage the attempt was admitted on (MCOMP-17-03BE)', () => {
+		it('answers the verified run identity, trace, fenced workflow and chain of exactly that attempt', async () => {
+			const manager = managedManager();
+			const attribution = newAutoRunTurnRequest(WORKFLOW, {
+				purpose: 'task',
+				document: '01',
+				newId,
+			});
+			await admitAndSpawn(manager, attemptTurn(attribution));
+			const credential = envOf(captured.child[0])[CALLER_CREDENTIAL_ENV_VAR];
+			const lineage = manager.autoRunCallerLineageOf(credential);
+			expect(lineage).not.toBeNull();
+			expect(lineage!.identity).toEqual(autoRunRunIdentity(attribution));
+			expect(lineage!.traceId).toBe(autoRunTraceId(attribution));
+			expect(lineage!.workflow).toEqual({
+				workflowId: WORKFLOW.workflowId,
+				version: WORKFLOW.version,
+				triggerEventId: WORKFLOW.triggerEventId,
+				ownerEpoch: FENCE.ownerEpoch,
+				fencingToken: FENCE.fencingToken,
+			});
+			expect(Array.isArray(lineage!.delegation.chain)).toBe(true);
+		});
+
+		it('hands out a fresh copy each read, so a caller cannot rewrite the held record', async () => {
+			const manager = managedManager();
+			await admitAndSpawn(manager, attemptTurn());
+			const credential = envOf(captured.child[0])[CALLER_CREDENTIAL_ENV_VAR];
+			const first = manager.autoRunCallerLineageOf(credential)!;
+			first.workflow!.fencingToken = 'forged';
+			first.identity.runId = 'forged';
+			first.delegation.chain.push({ kind: 'agent', id: 'forged' });
+			const second = manager.autoRunCallerLineageOf(credential)!;
+			expect(second.workflow!.fencingToken).toBe(FENCE.fencingToken);
+			expect(second.identity.runId).not.toBe('forged');
+			expect(second.delegation.chain).not.toContainEqual({ kind: 'agent', id: 'forged' });
+		});
+
+		it('a retry answers its own attempt, and the ended attempt answers nothing', async () => {
+			const manager = managedManager();
+			const first = newAutoRunTurnRequest(WORKFLOW, { purpose: 'task', document: '01', newId });
+			const one = await admitAndSpawn(manager, attemptTurn(first));
+			const old = envOf(captured.child[0])[CALLER_CREDENTIAL_ENV_VAR];
+			expect(manager.kill(one.turn.sessionId)).toBe(true);
+			expect(manager.autoRunCallerLineageOf(old)).toBeNull();
+			const retry = nextAutoRunAttempt(first, newId);
+			await admitAndSpawn(manager, attemptTurn(retry));
+			const fresh = envOf(captured.child[1])[CALLER_CREDENTIAL_ENV_VAR];
+			expect(manager.autoRunCallerLineageOf(fresh)?.identity.attemptId).toBe(retry.attemptId);
+			expect(manager.autoRunCallerLineageOf(old)).toBeNull();
+		});
+
+		it('answers nothing once the lease is revoked, or for forged, malformed or chat credentials', async () => {
+			const port = fakeSpawnPort();
+			const manager = new ProcessManager(undefined, {
+				spawnAuthority: () => port,
+				userDataDir: dataDir,
+			});
+			await admitAndSpawn(manager, attemptTurn());
+			await admitAndSpawn(manager, tuiTurn({ command: binPath, args: HOST_ARGS }));
+			const attempt = envOf(captured.child[0])[CALLER_CREDENTIAL_ENV_VAR];
+			const chat = envOf(captured.child[1])[CALLER_CREDENTIAL_ENV_VAR];
+			expect(manager.callerSourceOf(chat)).not.toBeNull();
+			expect(manager.autoRunCallerLineageOf(chat)).toBeNull();
+			for (const bad of ['forged', '', `${attempt}x`, undefined, null, 42]) {
+				expect(manager.autoRunCallerLineageOf(bad)).toBeNull();
+			}
+			expect(manager.autoRunCallerLineageOf(attempt)).not.toBeNull();
+			expect(port.authority.revokeAll('policy changed')).toBe(2);
+			expect(manager.autoRunCallerLineageOf(attempt)).toBeNull();
+		});
 	});
 
 	it('reads the source off the batch process id and refuses every other lineage', () => {

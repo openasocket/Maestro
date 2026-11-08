@@ -4492,6 +4492,20 @@
 					"produces": []
 				},
 				{
+					"id": "MCOMP-17-03BE",
+					"label": "Record the verified lineage of an admitted desktop Auto Run attempt behind its caller credential",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/main/process-manager/ProcessManager.ts",
+						"src/__tests__/main/process-manager/ProcessManager.tuiLaunch.managed.test.ts",
+						"Plans/integration-completion/program.json"
+					],
+					"outcome": "Consume MAESTRO-EFFECT-CONSUMERS-BUILD and its pinned MAESTRO-CONTRACT-INPUTS-BUILD dependency. Bounded prerequisite continuation of MCOMP-17-03 after MCOMP-17-03BD: ProcessManager keeps the record each admission was verified on (run identity, trace, fenced workflow, delegation chain, policy generation) against the frozen admission, carries it on an Auto Run attempt's caller credential, and exposes host-only autoRunCallerLineageOf(credential) under the same custody rules as autoRunCallerSourceOf, returning a fresh copy, so a consult that attempt starts can be bound as its child on the run's workflow lineage. Exercise the exact verified record, copy isolation, retry and ended attempts, revocation, forged and chat credentials, and a mutation check. Binding that lineage on the desktop consult (ask handler, ticket and router), background/consult child credentials and room owner lifetime remain pending. Reuse WORKFLOW-CONTEXT/1; no new wire capability, producer mapping or paired/provider/native qualification. Keep to three authored files and fewer than 500 changed lines.",
+					"backlog": ["M-04"],
+					"requires": ["MAESTRO-EFFECT-CONSUMERS-BUILD"],
+					"produces": []
+				},
+				{
 					"label": "Bind Auto Run Cue and nested work at dispatch",
 					"kind": "IMPLEMENT",
 					"targets": [
@@ -4534,7 +4548,7 @@
 			"produces": ["MAESTRO-WORKFLOW-CONSUMERS-BUILD"],
 			"id": "MCOMP-17",
 			"path": ".maestro/playbooks/2026-10-29-Maestro-Integration-Completion/MCOMP-17.md",
-			"taskCount": 61,
+			"taskCount": 62,
 			"stage": "S10"
 		},
 		{
@@ -6324,7 +6338,7 @@
 				"PAIR-DIRECT-EVIDENCE"
 			],
 			"nativeInputs": false,
-			"taskCount": 68
+			"taskCount": 69
 		},
 		{
 			"id": "S11",
@@ -6528,8 +6542,8 @@
 			"taskCount": 1
 		}
 	],
-	"taskCount": 381,
-	"taskCounts": { "IMPLEMENT": 272, "TEST": 49, "VERIFY": 60 },
+	"taskCount": 382,
+	"taskCounts": { "IMPLEMENT": 273, "TEST": 49, "VERIFY": 60 },
 	"artifacts": {
 		"MEGA-CONTRACTS-FOUNDATION-BUILD": {
 			"producerDocument": "GCOMP-01",
@@ -7326,6 +7340,7 @@
 			"MCOMP-17-03BB",
 			"MCOMP-17-03BC",
 			"MCOMP-17-03BD",
+			"MCOMP-17-03BE",
 			"MCOMP-17-03",
 			"MCOMP-17-04",
 			"MCOMP-17-05",

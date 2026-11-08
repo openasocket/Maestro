@@ -48,6 +48,7 @@ import {
 } from '../../shared/maestro-lib/managed/workflows';
 import {
 	childDelegationContext,
+	delegationContextOf,
 	delegationContextProblems,
 	intersectDelegationScope,
 	type ManagedDelegationContext,
@@ -413,6 +414,15 @@ export class ProcessManager extends EventEmitter {
 	/** The claude binary's digest, remembered per file identity across turns. */
 	private readonly digestFile = createFileDigestCache();
 	/** The lease behind each admission this manager minted; a look-alike has none. */
+	/**
+	 * The verified record each admission was bound on (MCOMP-17-03BE): the run identity, trace,
+	 * workflow with its owner fence, delegation chain and policy generation the authority admitted.
+	 * Held only against the frozen admission object, so nothing a request carries can name one.
+	 */
+	private readonly admissionContexts = new WeakMap<
+		ProcessSpawnAdmission,
+		ManagedDelegationContext
+	>();
 	private readonly admissionLeases = new WeakMap<ProcessSpawnAdmission, DispatchLease>();
 	/** The lease bound to each session's live process, released when it ends. */
 	private readonly boundLeases = new Map<
@@ -432,6 +442,8 @@ export class ProcessManager extends EventEmitter {
 			source: CallerCredentialSource;
 			process: ManagedProcess;
 			admission: ProcessSpawnAdmission;
+			/** For an Auto Run attempt, the record its admission was bound on (MCOMP-17-03BE). */
+			lineage?: ManagedDelegationContext;
 		}
 	>();
 
@@ -834,7 +846,12 @@ export class ProcessManager extends EventEmitter {
 				bound &&
 				bound.admission === config.admission
 			) {
+				const lineage =
+					callerSource.kind === 'auto-run'
+						? this.admissionContexts.get(bound.admission)
+						: undefined;
 				this.callerCredentials.set(callerCredential, {
+					...(lineage ? { lineage } : {}),
 					source: callerSource,
 					sessionId: config.sessionId,
 					process: proc,
@@ -1044,6 +1061,7 @@ export class ProcessManager extends EventEmitter {
 			attemptId: lease.attemptId,
 		});
 		this.admissionLeases.set(admission, lease);
+		this.admissionContexts.set(admission, delegationContextOf(verified.context));
 		return { state: 'admitted', admission };
 	}
 
@@ -1229,6 +1247,20 @@ export class ProcessManager extends EventEmitter {
 		return source?.kind === 'auto-run'
 			? { agentId: source.agentId, processId: source.processId }
 			: null;
+	}
+
+	/**
+	 * Host-only: the record the live desktop Auto Run attempt a caller credential was minted for
+	 * was admitted on (MCOMP-17-03BE): its run identity, trace, workflow with its owner fence,
+	 * delegation chain and policy generation, as the authority verified them. A consult that
+	 * attempt starts is bound as its child on this record, so the run's workflow lineage survives
+	 * the ask. Same custody rules as `autoRunCallerSourceOf`; null for a chat turn's credential
+	 * and for an attempt with no verified record. A fresh copy each read, never the held record.
+	 */
+	autoRunCallerLineageOf(credential: unknown): ManagedDelegationContext | null {
+		if (this.liveCallerSource(credential)?.kind !== 'auto-run') return null;
+		const lineage = this.callerCredentials.get(credential as string)?.lineage;
+		return lineage ? delegationContextOf(lineage) : null;
 	}
 
 	/** The source of a credential whose process still holds the bound admission it was stamped on. */
