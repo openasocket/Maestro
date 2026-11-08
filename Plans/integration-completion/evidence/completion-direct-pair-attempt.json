@@ -263,6 +263,29 @@
 			"validation": "Compared the current manifest and coverage hashes, required receipt inventory, extension statuses and sibling evidence inventory with run 7; all unchanged. No application source changed or application/qualification test was run.",
 			"taskCompleted": false,
 			"imagesAnalyzed": 0
+		},
+		{
+			"run": 9,
+			"recordedAt": "2026-11-08T10:21:15.915Z",
+			"observedRevision": "edde5b18b3e7dc22f996ee05b4b2eb3b2b6936d2",
+			"command": "st node .maestro/playbooks/Working/mcomp-14-01/readiness.mjs",
+			"exitCode": 2,
+			"status": "blocked",
+			"evidence": {
+				"path": ".maestro/playbooks/Working/mcomp-14-01/readiness-MCOMP-14-01-2026-11-08T10-21-15-915Z.json",
+				"sha256": "20ab1318440390e8150e01e86b43790c76d7c482f9221779458890276fc9b4e6"
+			},
+			"unchanged": [
+				"inputs",
+				"requirements",
+				"pendingExtensions",
+				"siblingEvidence",
+				"qualification"
+			],
+			"observations": "Same three missing S03 BUILD receipts and four proposed-not-negotiated extensions as runs 7 and 8. No downstream pair command was retried. Prior archive and contract checks above remain historical run 7 results, not current qualification evidence.",
+			"validation": "Verified current manifest, coverage and present receipt hashes; compared required receipt inventory, extension statuses and sibling evidence inventory with run 7, all unchanged. No application source changed or application/qualification test was run.",
+			"taskCompleted": false,
+			"imagesAnalyzed": 0
 		}
 	]
 }
