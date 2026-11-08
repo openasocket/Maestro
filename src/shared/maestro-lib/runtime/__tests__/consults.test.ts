@@ -719,6 +719,7 @@ describe('runtime consults', () => {
 				agentId: string;
 				tabId: string;
 				processId?: string;
+				kind?: 'auto-run';
 			}>();
 			let readable: boolean;
 			let sourceLookup: ReturnType<
@@ -765,6 +766,307 @@ describe('runtime consults', () => {
 				value(await runtime.turns.send('a1', 'a1-t1', { text: 'Source operation' }));
 				return runtime;
 			}
+
+			it('refuses unknown source kinds without borrowing live chat custody', async () => {
+				const runtime = await liveChat();
+				sourceLookup.mockImplementation(() => ({
+					agentId: 'a1',
+					tabId: 'a1-t1',
+					kind: 'unknown' as 'auto-run',
+				}));
+				expect(errorOf(await ask(runtime)).message).toMatch(/custody/i);
+				expect(sourceAdmissions).toHaveLength(1);
+				expect(provider.calls).toHaveLength(0);
+				expect(consultTab('a2')).toBeUndefined();
+				sourceLookup.mockImplementation(() => callers.getStore() ?? null);
+				value(await ask(runtime));
+			});
+
+			describe('live Auto Run source composition', () => {
+				async function liveAutoRun(kind: 'playbook' | 'goal' = 'playbook', script = ANSWER) {
+					readable = true;
+					sourceAdmissions = [];
+					const processes: string[] = [];
+					const recording = writeFakeTurn(work, { chunks: [], close: { code: 0, signal: null } });
+					chatTurn = async (turn, options) => {
+						const started = await runAgentTurn(
+							{
+								...turn,
+								launch: {
+									...turn.launch,
+									command: process.execPath,
+									args: [FAKE_AGENT_PATH],
+									sessionCustomEnvVars: {
+										...turn.launch.sessionCustomEnvVars,
+										FAKE_AGENT_RECORDING: recording,
+										FAKE_AGENT_HOLD: '1',
+									},
+								},
+							},
+							{ ...options, stopGraceMs: 200 }
+						);
+						if (started.ok) processes.push(options.sessionId);
+						return started;
+					};
+					const owner = new AbortController();
+					const lifetime = {
+						signal: owner.signal,
+						current: vi.fn(() => true),
+						finish: vi.fn(async () => {}),
+					};
+					const claim = vi.fn(() => ({ ownerEpoch: 'epoch-1', fencingToken: 'fence-1', lifetime }));
+					sourceLookup = vi.fn(() => (readable ? (callers.getStore() ?? null) : null));
+					const runtime = await startEnrolled(() => 'allow', sourceAdmissions, script, {
+						consultSource: sourceLookup,
+						workflowFence: claim,
+					});
+					const file = path.join(work, 'source.md');
+					fs.writeFileSync(file, '- [ ] Source task\n');
+					value(await runtime.agents.update('a1', { autoRunFolderPath: work }));
+					value<unknown>(
+						await (kind === 'goal'
+							? runtime.autoRun.launchGoal('a1', { goal: 'Source work', maxIterations: 1 })
+							: runtime.autoRun.launch('a1', { documents: [{ file }] }))
+					);
+					await vi.waitFor(() => expect(processes).toHaveLength(1));
+					const caller: NonNullable<ReturnType<typeof sourceLookup>> = {
+						agentId: 'a1',
+						tabId: 'a1-t1',
+						processId: processes[0],
+						kind: 'auto-run',
+					};
+					const nested = () =>
+						callers.run(caller, () =>
+							runtime.consults.ask({ ...input, handoffAnswer: 'Save the answer.' })
+						);
+					return { runtime, caller, nested, owner, lifetime, claim, file, processes };
+				}
+
+				it.each(['playbook', 'goal'] as const)(
+					'binds live %s lineage and access without reclaiming the source',
+					async (kind) => {
+						const { nested, claim, lifetime } = await liveAutoRun(kind);
+						const lease = authority.live()[0];
+						expect(value(await nested()).answer).toBe('Answer 1: use a queue.');
+						const child = lineageOf(0);
+						expect(child).toEqual(
+							childDelegationContext(delegationContextOf(sourceAdmissions[0].context), {
+								link: { kind: 'agent', id: 'a2' },
+								requestId: child.identity.requestId,
+								attemptId: child.identity.attemptId,
+							})
+						);
+						expect(child.workflow).toMatchObject({
+							ownerEpoch: 'epoch-1',
+							fencingToken: 'fence-1',
+						});
+						expect(permissionMode(provider.calls[0].spec.args)).toBeUndefined();
+						expect(sourceAdmissions).toHaveLength(2);
+						expect(claim).toHaveBeenCalledTimes(1);
+						expect(lifetime.finish).not.toHaveBeenCalled();
+						expect(authority.live()).toEqual([lease]);
+						expect(lease.state()).toBe('bound');
+					}
+				);
+
+				it.each([
+					'missing',
+					'blank',
+					'wrong-agent',
+					'wrong-tab',
+					'wrong-kind',
+					'stopped',
+					'ended',
+					'revoked',
+					'owner',
+					'withdrawn',
+					'unreadable',
+				] as const)('refuses %s Auto Run custody without a child effect', async (mode) => {
+					const { runtime, caller, nested, lifetime, owner } = await liveAutoRun();
+					if (mode === 'missing') delete caller.processId;
+					if (mode === 'blank') caller.processId = '';
+					if (mode === 'wrong-agent') caller.agentId = 'a3';
+					if (mode === 'wrong-tab') caller.tabId = 'a1-t2';
+					if (mode === 'wrong-kind') delete caller.kind;
+					if (mode === 'stopped') value(await runtime.autoRun.stop('a1'));
+					if (mode === 'ended') {
+						owner.abort();
+						await vi.waitFor(() => expect(runtime.runs.activeRuns()).toHaveLength(0));
+					}
+					if (mode === 'revoked') authority.revoke(authority.live()[0].leaseId, 'Source revoked');
+					if (mode === 'owner') lifetime.current.mockReturnValue(false);
+					if (mode === 'withdrawn') readable = false;
+					if (mode === 'unreadable')
+						sourceLookup.mockImplementation(() => {
+							throw new Error('No source');
+						});
+					expect(errorOf(await nested()).message).toMatch(/custody/i);
+					expect(provider.calls).toHaveLength(0);
+					expect(consultTab('a2')).toBeUndefined();
+					expect(sourceAdmissions).toHaveLength(1);
+				});
+
+				it.each(['preparation', 'admission', 'observer', 'sink'] as const)(
+					'rechecks Auto Run custody at %s and releases unused leases before recovery',
+					async (boundary) => {
+						let withdraw = false;
+						let withdrawSource = () => {};
+						const { nested, lifetime } = await liveAutoRun('playbook', () => {
+							if (withdraw && boundary === 'sink') withdrawSource();
+							return { text: 'Recovered' };
+						});
+						withdrawSource = () => lifetime.current.mockReturnValue(false);
+						const leases: DispatchLease[] = [];
+						const admit = authority.admit.bind(authority);
+						vi.spyOn(authority, 'admit').mockImplementation(async (request) => {
+							const answer = await admit(request);
+							if (answer.state === 'admitted') leases.push(answer.lease);
+							if (withdraw && boundary === 'admission') withdrawSource();
+							return answer;
+						});
+						probeBinary = async () => {
+							if (withdraw && boundary === 'preparation') withdrawSource();
+							return { exists: true, path: '/fake/bin/claude' };
+						};
+						onBackgroundAdmission = (event) => {
+							if (withdraw && boundary === 'observer' && event.kind === 'admitted')
+								withdrawSource();
+						};
+						withdraw = true;
+						expect(errorOf(await nested()).message).toMatch(/custody|lease.*released/i);
+						expect(leases).toHaveLength(boundary === 'preparation' ? 0 : 1);
+						for (const lease of leases) {
+							expect(lease.pid()).toBeUndefined();
+							expect(lease.ended()).toMatchObject({
+								state: 'released',
+								release: { outcome: 'spawn-failed' },
+							});
+						}
+						expect(authority.live()).toHaveLength(1);
+						withdraw = false;
+						lifetime.current.mockReturnValue(true);
+						expect(value(await nested()).answer).toBe('Recovered');
+						expect(authority.live()).toHaveLength(1);
+					}
+				);
+
+				it.each(['process', 'kind'] as const)(
+					'refuses changed Auto Run %s selection through preparation',
+					async (field) => {
+						const { caller, nested } = await liveAutoRun();
+						const original = { ...caller };
+						probeBinary = async () => {
+							if (field === 'kind') delete caller.kind;
+							else caller.processId = 'replacement';
+							return { exists: true, path: '/fake/bin/claude' };
+						};
+						expect(errorOf(await nested()).message).toMatch(/custody/i);
+						expect(sourceAdmissions).toHaveLength(1);
+						expect(provider.calls).toHaveLength(0);
+						probeBinary = undefined;
+						Object.assign(caller, original);
+						value(await nested());
+					}
+				);
+
+				it('isolates concurrent Auto Run sources and checks the exact owning agent', async () => {
+					const { runtime, caller, file, processes } = await liveAutoRun();
+					value(await runtime.agents.update('a3', { autoRunFolderPath: work }));
+					value(await runtime.autoRun.launch('a3', { documents: [{ file }] }));
+					await vi.waitFor(() => expect(processes).toHaveLength(2));
+					const other = { ...caller, agentId: 'a3', tabId: 'a3-t1', processId: processes[1] };
+					const request = {
+						...input,
+						fromAgentId: 'a3',
+						fromTabId: 'a3-t1',
+						handoffAnswer: 'Save this.',
+					};
+					expect(
+						errorOf(
+							await callers.run({ ...other, processId: processes[0] }, () =>
+								runtime.consults.ask(request)
+							)
+						).message
+					).toMatch(/custody/i);
+					expect(provider.calls).toHaveLength(0);
+					const answers = await Promise.all([
+						callers.run(caller, () => runtime.consults.ask({ ...input, targetAgentId: 'a3' })),
+						callers.run(other, () => runtime.consults.ask(request)),
+					]);
+					answers.forEach(value);
+					expect(
+						[lineageOf(0).identity.parentRunId, lineageOf(1).identity.parentRunId].sort()
+					).toEqual(
+						sourceAdmissions
+							.slice(0, 2)
+							.map((request) => request.context.identity.runId)
+							.sort()
+					);
+					expect(authority.live()).toHaveLength(2);
+				});
+
+				it('keeps nested consults under the Auto Run workflow and the read-only child ceiling', async () => {
+					const { runtime, caller } = await liveAutoRun('playbook', (call) => ({
+						text: 'Nested',
+						hold: call.nth === 1,
+					}));
+					const outer = callers.run(caller, () => runtime.consults.ask(input));
+					await vi.waitFor(() =>
+						expect(authority.live().filter((lease) => lease.state() === 'bound')).toHaveLength(2)
+					);
+					const nestedCaller = {
+						agentId: 'a2',
+						tabId: consultTab('a2').id,
+						processId: provider.calls[0].processId,
+					};
+					value(
+						await callers.run(nestedCaller, () =>
+							runtime.consults.ask({
+								targetAgentId: 'a3',
+								fromAgentId: 'a2',
+								fromTabId: nestedCaller.tabId,
+								question: 'More',
+								handoffAnswer: 'Save this.',
+							})
+						)
+					);
+					expect(lineageOf(1).workflow).toEqual(lineageOf(0).workflow);
+					expect(lineageOf(1).identity.parentRunId).toBe(lineageOf(0).identity.requestId);
+					expect(lineageOf(1).identity.rootRunId).toBe(lineageOf(0).identity.rootRunId);
+					expect(permissionMode(provider.calls[1].spec.args)).toBe('plan');
+					authority.revoke(authority.live()[1].leaseId, 'Finish child');
+					await outer;
+				});
+
+				it('rechecks queued Auto Run work after a graceful stop and recovers on a new run', async () => {
+					const { runtime, caller, nested, file, processes } = await liveAutoRun(
+						'playbook',
+						(call) => ({ text: 'Answer', hold: call.nth === 1 })
+					);
+					const first = nested();
+					await vi.waitFor(() =>
+						expect(authority.live().filter((lease) => lease.state() === 'bound')).toHaveLength(2)
+					);
+					const reads = sourceLookup.mock.calls.length;
+					const queued = nested();
+					await vi.waitFor(() => expect(sourceLookup.mock.calls.length).toBeGreaterThan(reads));
+					value(await runtime.autoRun.stop('a1'));
+					authority.revoke(authority.live()[1].leaseId, 'Finish first child');
+					await first;
+					expect(errorOf(await queued).message).toMatch(/custody/i);
+					expect(provider.calls).toHaveLength(1);
+					authority.revoke(authority.live()[0].leaseId, 'Finish source');
+					await vi.waitFor(() => expect(runtime.runs.activeRuns()).toHaveLength(0));
+					value(await runtime.autoRun.launch('a1', { documents: [{ file }] }));
+					await vi.waitFor(() => expect(processes).toHaveLength(2));
+					expect(errorOf(await nested()).message).toMatch(/custody/i);
+					caller.processId = processes[1];
+					value(await nested());
+					expect(lineageOf(1).identity.parentRunId).toBe(
+						sourceAdmissions[2].context.identity.runId
+					);
+				});
+			});
 
 			async function liveConsult(
 				readOnly = true,

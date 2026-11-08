@@ -185,9 +185,15 @@ export interface MaestroRuntimeOptions {
 		 * refuses the child. Coordinates from a request or environment cannot implement this port.
 		 * The runtime supplies the original bound source lease/context, never accepts one here.
 		 * A processId selects exact background/consult custody; absent selects a chat turn.
-		 * Transport authentication and Auto Run source custody must be composed by the host.
+		 * kind: 'auto-run' selects exact Auto Run custody and requires a processId. Sources never
+		 * fall back to another kind. The host must authenticate the transport and install this lookup.
 		 */
-		consultSource?(): { agentId: string; tabId: string; processId?: string } | null;
+		consultSource?(): {
+			agentId: string;
+			tabId: string;
+			processId?: string;
+			kind?: 'auto-run';
+		} | null;
 		/**
 		 * The owner fence of an Auto Run's (or a hosted Cue run's) workflow, claimed on every
 		 * attempt for that attempt's run and attempt ids. Default: the runtime's own
@@ -914,7 +920,7 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 					const { fromAgentId, fromTabId } = input;
 					let active = true;
 					let required = false;
-					let selected: { processId: string | undefined } | undefined;
+					let selected: { processId: string | undefined; kind?: 'auto-run' } | undefined;
 					return consultSource.run(
 						{
 							// Enrollment during a wait requires custody; losing it cannot undo that.
@@ -923,10 +929,17 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 								if (!active || !fromAgentId || !fromTabId) return null;
 								const source = lookup();
 								if (source?.agentId !== fromAgentId || source.tabId !== fromTabId) return null;
-								// Pin the selected process, including the chat/background distinction. A
+								// Pin the selected process and source kind. A
 								// queued ask cannot transfer to another live source on the same agent/tab.
-								selected ??= { processId: source.processId };
-								if (selected.processId !== source.processId) return null;
+								selected ??= { processId: source.processId, kind: source.kind };
+								if (selected.processId !== source.processId || selected.kind !== source.kind)
+									return null;
+								if (source.kind === 'auto-run') {
+									return source.processId
+										? autoRun.sourceCustody(fromAgentId, source.processId)
+										: null;
+								}
+								if (source.kind !== undefined) return null;
 								return source.processId === undefined
 									? turns.sourceCustody(fromAgentId, fromTabId)
 									: background.sourceCustody(source.processId);
