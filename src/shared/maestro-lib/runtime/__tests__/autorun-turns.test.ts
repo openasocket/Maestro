@@ -39,6 +39,7 @@ import {
 } from '../../managed/delegation';
 import { createHeadlessSpawnAuthority, installationIdentity } from '../../managed/host-adapter';
 import type { WorkflowFenceLifetime } from '../../managed/workflows';
+import { CALLER_CREDENTIAL_ENV_VAR } from '../../launch/env';
 import { resolveMaestroPaths } from '../../paths/resolve';
 import type { AgentRecord } from '../../store/records';
 import type { AssembledTurn } from '../../turns/assemble';
@@ -535,6 +536,81 @@ describe('Auto Run turns: a refused effort, and the fence claimed per attempt', 
 						stop.abort();
 						await second;
 					}
+				});
+
+				it('mints a fresh caller credential per managed attempt that resolves only to its live process', async () => {
+					const { port, authority } = await managedPort();
+					const onStream = vi.fn();
+					const launches: Array<{ options: RunAgentTurnOptions; credential?: string }> = [];
+					const source = runner(
+						['hold', 'hold'],
+						{ workflow, managed: { port, fence: () => FENCE }, onStream },
+						{ [CALLER_CREDENTIAL_ENV_VAR]: 'user-forged-credential' },
+						(options, turn) => {
+							launches.push({
+								options,
+								credential: turn.launch.maestroEnvVars?.[CALLER_CREDENTIAL_ENV_VAR],
+							});
+						}
+					);
+					const first = source.run({ purpose: 'task', prompt: 'first' });
+					let firstCredential!: string;
+					try {
+						await vi.waitFor(() => expect(onStream).toHaveBeenCalled());
+						firstCredential = launches[0].credential!;
+						expect(firstCredential).toMatch(/^[A-Za-z0-9_-]{43}$/);
+						// The process holds Maestro's credential, never the user layer's forged copy.
+						const env = JSON.parse(fs.readFileSync(path.join(dir, 'env-1.json'), 'utf8'));
+						expect(env[CALLER_CREDENTIAL_ENV_VAR]).toBe(firstCredential);
+						expect(source.callerSource(firstCredential)).toEqual({
+							agentId: 'a1',
+							processId: launches[0].options.sessionId,
+						});
+						expect(source.callerSource('user-forged-credential')).toBeNull();
+						expect(source.callerSource('')).toBeNull();
+						expect(source.callerSource(42 as unknown as string)).toBeNull();
+						// Revoking the lease withdraws the credential with the custody.
+						authority.revokeAll('withdrawn');
+						expect(source.callerSource(firstCredential)).toBeNull();
+					} finally {
+						authority.revokeAll('withdrawn');
+						await first;
+					}
+					expect(source.callerSource(firstCredential)).toBeNull();
+					onStream.mockClear();
+					const stop = new AbortController();
+					const second = source.run({ purpose: 'task', prompt: 'second', signal: stop.signal });
+					try {
+						await vi.waitFor(() => expect(onStream).toHaveBeenCalled());
+						const secondCredential = launches[1].credential!;
+						expect(secondCredential).not.toBe(firstCredential);
+						expect(source.callerSource(secondCredential)).toEqual({
+							agentId: 'a1',
+							processId: launches[1].options.sessionId,
+						});
+						// The earlier attempt's credential is not revived by a fresh admission.
+						expect(source.callerSource(firstCredential)).toBeNull();
+						stop.abort();
+						await vi.waitFor(() => expect(source.callerSource(secondCredential)).toBeNull());
+					} finally {
+						stop.abort();
+						await second;
+					}
+					expect(source.callerSource(launches[1].credential!)).toBeNull();
+					expect(authority.live()).toHaveLength(0);
+				});
+
+				it('stamps no caller credential on a standalone attempt', async () => {
+					let credential: string | undefined = 'unset';
+					const source = runner(['answer'], {}, undefined, (_options, turn) => {
+						credential = turn.launch.maestroEnvVars?.[CALLER_CREDENTIAL_ENV_VAR];
+					});
+					expect(await source.run({ purpose: 'task', prompt: 'standalone' })).toMatchObject({
+						success: true,
+					});
+					expect(credential).toBeUndefined();
+					const env = JSON.parse(fs.readFileSync(path.join(dir, 'env-1.json'), 'utf8'));
+					expect(env[CALLER_CREDENTIAL_ENV_VAR]).toBeUndefined();
 				});
 
 				it('rechecks concurrent sources in their original async contexts', async () => {

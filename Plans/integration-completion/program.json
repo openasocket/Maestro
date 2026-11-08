@@ -4394,6 +4394,20 @@
 					"produces": []
 				},
 				{
+					"id": "MCOMP-17-03AX",
+					"label": "Mint per-attempt caller credentials for managed Auto Run turns",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/shared/maestro-lib/runtime/autorun-turns.ts",
+						"src/shared/maestro-lib/runtime/__tests__/autorun-turns.test.ts",
+						"Plans/integration-completion/program.json"
+					],
+					"outcome": "Consume MAESTRO-EFFECT-CONSUMERS-BUILD and its pinned MAESTRO-CONTRACT-INPUTS-BUILD dependency. Bounded prerequisite continuation of MCOMP-17-03 after MCOMP-17-03AW: every admitted managed Auto Run attempt (task, effort retry, synopsis, handoff) stamps its process with a fresh random MAESTRO_MANAGED_CALLER_CREDENTIAL after the user env layers, and the host-only AutoRunTurnRunner.callerSource(credential) maps it to its exact agent and batch process only while that process still holds unambiguous source custody. Unknown, malformed, user-forged, revoked, stopped, ended or earlier-attempt credentials authenticate nobody, and standalone attempts carry none. Exercise the stamped process environment, revocation, a fresh attempt that does not revive the earlier credential, the standalone path, and a mutation check. Routing an Auto Run credential through askAsCaller, background/consult child credentials and room owner lifetime remain pending. Reuse WORKFLOW-CONTEXT/1; no new wire capability, producer mapping or paired/provider/native qualification. Keep to three authored files and fewer than 500 changed lines.",
+					"backlog": ["M-04"],
+					"requires": ["MAESTRO-EFFECT-CONSUMERS-BUILD"],
+					"produces": []
+				},
+				{
 					"label": "Bind Auto Run Cue and nested work at dispatch",
 					"kind": "IMPLEMENT",
 					"targets": [
@@ -4436,7 +4450,7 @@
 			"produces": ["MAESTRO-WORKFLOW-CONSUMERS-BUILD"],
 			"id": "MCOMP-17",
 			"path": ".maestro/playbooks/2026-10-29-Maestro-Integration-Completion/MCOMP-17.md",
-			"taskCount": 54,
+			"taskCount": 55,
 			"stage": "S10"
 		},
 		{
@@ -6226,7 +6240,7 @@
 				"PAIR-DIRECT-EVIDENCE"
 			],
 			"nativeInputs": false,
-			"taskCount": 61
+			"taskCount": 62
 		},
 		{
 			"id": "S11",
@@ -6430,8 +6444,8 @@
 			"taskCount": 1
 		}
 	],
-	"taskCount": 374,
-	"taskCounts": { "IMPLEMENT": 265, "TEST": 49, "VERIFY": 60 },
+	"taskCount": 375,
+	"taskCounts": { "IMPLEMENT": 266, "TEST": 49, "VERIFY": 60 },
 	"artifacts": {
 		"MEGA-CONTRACTS-FOUNDATION-BUILD": {
 			"producerDocument": "GCOMP-01",
@@ -7221,6 +7235,7 @@
 			"MCOMP-17-03AU",
 			"MCOMP-17-03AV",
 			"MCOMP-17-03AW",
+			"MCOMP-17-03AX",
 			"MCOMP-17-03",
 			"MCOMP-17-04",
 			"MCOMP-17-05",

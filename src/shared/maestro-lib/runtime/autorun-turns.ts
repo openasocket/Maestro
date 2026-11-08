@@ -38,9 +38,16 @@
  * A live workflow fence also owns cancellation through the turn's guarded stop. Each attempt
  * settles its unused, completed or uncertain effect before returning or claiming a retry; an
  * unacknowledged settlement never becomes a reported success.
+ *
+ * A managed attempt's process is also stamped with its own caller credential
+ * (`CALLER_CREDENTIAL_ENV_VAR`, MCOMP-17-03AX), so a host can tell which live Auto Run process a
+ * request from that process's shell comes from without trusting the ids the caller states.
+ * `callerSource()` resolves it only while that exact process still holds unambiguous source
+ * custody; a standalone attempt carries none.
  */
 
 import { AsyncResource } from 'node:async_hooks';
+import { randomBytes } from 'node:crypto';
 import { getClaudeTokenSourceFields, type ClaudeTokenSourceFields } from '../../claudeTokenMode';
 import { usageStatsToTurnFields } from '../../turnUsageLedger';
 import { canonicalJson } from '../../canonicalJson';
@@ -58,6 +65,7 @@ import {
 import type { AutoRunTurnResult, AutoRunTurnRequest } from '../autorun/engine-types';
 import { createIdleWatchdog } from '../control/idle-watchdog';
 import { logger } from '../host';
+import { CALLER_CREDENTIAL_ENV_VAR } from '../launch/env';
 import type { ManagedLaunchInput } from '../launch/launch-plan';
 import {
 	isVerifiedContext,
@@ -194,6 +202,14 @@ export interface AutoRunTurnRunner {
 	run(request: AutoRunTurnRequest): Promise<AutoRunTurnResult>;
 	/** Host-only live process custody. The selector authenticates nobody and grants no spawn permit. */
 	sourceCustody(processId: string): ReturnType<RuntimeTurns['sourceCustody']>;
+	/**
+	 * Host-only: the live Auto Run process a caller credential (`CALLER_CREDENTIAL_ENV_VAR`) was
+	 * minted for, while that exact process still holds unambiguous source custody. Null for an
+	 * unknown, malformed, stale or withdrawn credential, so one copied out of an ended, stopped or
+	 * revoked attempt authenticates nobody. The coordinates select `sourceCustody`; they are no
+	 * spawn permit. Never exposed on the client API.
+	 */
+	callerSource(credential: string): { agentId: string; processId: string } | null;
 }
 
 function minutesSetting(value: unknown, fallback: number): number {
@@ -261,6 +277,11 @@ export function createAutoRunTurnRunner(options: AutoRunTurnRunnerOptions): Auto
 			count: number;
 			ambiguous: boolean;
 		}
+	>();
+	// Caller credential -> the process it was minted for and that process's own custody reader.
+	const callers = new Map<
+		string,
+		{ processId: string; read: () => ReturnType<AutoRunTurnRunner['sourceCustody']> }
 	>();
 	// Losing enrollment during this run must not turn its next attempt into standalone work.
 	let requiresManagedAdmission = false;
@@ -650,6 +671,8 @@ export function createAutoRunTurnRunner(options: AutoRunTurnRunnerOptions): Auto
 			});
 		}
 		if (managedTurn.managed && 'refusal' in managedTurn) return managedTurn.refusal;
+		// A managed attempt's process gets its own caller credential, fresh per attempt.
+		const credential = managedTurn.managed ? randomBytes(32).toString('base64url') : null;
 		if (managedTurn.managed) {
 			// Stamp the verified context after user env layers, before launch planning/SSH wrapping.
 			// A nested dispatch reads this attempt's workflow, fence and grant, never inherited JSON.
@@ -658,6 +681,7 @@ export function createAutoRunTurnRunner(options: AutoRunTurnRunnerOptions): Auto
 				maestroEnvVars: {
 					...turn.launch.maestroEnvVars,
 					...delegationContextEnv(delegationContextOf(managedTurn.authority.context)),
+					...(credential ? { [CALLER_CREDENTIAL_ENV_VAR]: credential } : {}),
 				},
 			};
 		}
@@ -731,7 +755,10 @@ export function createAutoRunTurnRunner(options: AutoRunTurnRunnerOptions): Auto
 		source.ambiguous ||= source.count > 0;
 		source.count++;
 		sources.set(sessionId, source);
+		const caller = credential ? { processId: sessionId, read: readSource } : null;
+		if (credential && caller) callers.set(credential, caller);
 		const forget = () => {
+			if (credential && callers.get(credential) === caller) callers.delete(credential);
 			if (--source.count === 0 && sources.get(sessionId) === source) sources.delete(sessionId);
 		};
 		process.result.then(forget, forget);
@@ -861,6 +888,15 @@ export function createAutoRunTurnRunner(options: AutoRunTurnRunnerOptions): Auto
 		sourceCustody: (processId) => {
 			const source = sources.get(processId);
 			return source && !source.ambiguous ? source.read() : null;
+		},
+		callerSource: (credential) => {
+			const caller = typeof credential === 'string' ? callers.get(credential) : undefined;
+			if (!caller) return null;
+			// The credential holds only while its own reader is still that process's live custody.
+			const source = sources.get(caller.processId);
+			if (!source || source.ambiguous || source.read !== caller.read || caller.read() === null)
+				return null;
+			return { agentId, processId: caller.processId };
 		},
 	};
 }
