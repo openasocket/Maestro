@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import {
@@ -9,6 +9,7 @@ import {
 
 const origin = 'https://approval.invalid';
 const csrf = 'isolated-csrf-canary';
+let wire: typeof import('../../../../vendor/mega-maestro/contracts/dist/local-endpoint.js');
 const challenge = () => ({
 	challengeId: '11111111-1111-4111-8111-111111111111',
 	nonce: 'N'.repeat(43),
@@ -18,8 +19,18 @@ const challenge = () => ({
 
 // Declared browser/service unit port. No real browser, cookie, tenant or paired
 // authentication is exercised. The real pinned HTTP client constructs requests.
+// Session/CSRF/replay decisions below are declared service responses, not a
+// replacement implementation or evidence of the remote service's enforcement.
 function browserPort() {
-	const state = { kind: 'user', expiresAt: Date.now() + 60_000, status: 200, replyId: '' };
+	const state = {
+		kind: 'user',
+		expiresAt: Date.now() + 60_000,
+		status: 200,
+		replyId: '',
+		authenticated: true,
+		sessionCsrf: csrf,
+		consumed: new Set<string>(),
+	};
 	const browser = {
 		origin: () => origin,
 		csrf: () => csrf,
@@ -28,24 +39,42 @@ function browserPort() {
 			expect(new Headers(init.headers).has('authorization')).toBe(false);
 			expect(new Headers(init.headers).has('cookie')).toBe(false);
 			if (url.pathname === '/api/identity/session') {
+				expect(init.method).toBe('GET');
 				return Response.json({ principal: { kind: state.kind }, expiresAt: state.expiresAt });
 			}
 			expect(url.pathname).toBe('/api/enrollment/runtime-registrations/approve');
-			expect(new Headers(init.headers).get('x-csrf-token')).toBe(csrf);
+			expect(init.method).toBe('POST');
 			const body = JSON.parse(String(init.body));
-			expect(Object.keys(body).sort()).toEqual(['challengeDigest', 'challengeId', 'nonce']);
+			expect(wire.runtimeApprovalInput.safeParse(body).success).toBe(true);
+			const status =
+				!state.authenticated || state.expiresAt <= Date.now()
+					? 401
+					: state.kind !== 'user' ||
+						  new Headers(init.headers).get('x-csrf-token') !== state.sessionCsrf ||
+						  state.consumed.has(body.challengeId)
+						? 403
+						: state.status;
+			if (status === 200) state.consumed.add(body.challengeId);
 			return Response.json(
-				state.status === 200
+				status === 200
 					? { challengeId: state.replyId || body.challengeId }
 					: { error: { code: `secret-${csrf}-${body.nonce}` } },
-				{ status: state.status }
+				{ status }
 			);
 		}),
 	};
 	return { browser, state };
 }
 
-afterEach(() => vi.useRealTimers());
+beforeAll(async () => {
+	// The production bridge verifies the archive pin/payload before loading code.
+	await createActorApprovalBridge({ browser: browserPort().browser, origin });
+	wire = await import('../../../../vendor/mega-maestro/contracts/dist/local-endpoint.js');
+});
+afterEach(() => {
+	vi.useRealTimers();
+	vi.restoreAllMocks();
+});
 describe('owned actor approval bridge (local contract evidence only)', () => {
 	it('uses the pinned browser/CSRF API once and emits no execution authority', async () => {
 		const { browser } = browserPort();
@@ -55,8 +84,136 @@ describe('owned actor approval bridge (local contract evidence only)', () => {
 		expect(await bridge.approve(input)).toEqual({ outcome: 'approved' });
 		expect(await bridge.approve(input)).toEqual({ outcome: 'denied' });
 		expect(browser.fetch).toHaveBeenCalledTimes(2);
+		const [url, init] = browser.fetch.mock.calls[1];
+		expect(url.href).toBe(`${origin}/api/enrollment/runtime-registrations/approve`);
+		expect(new Headers(init.headers).get('x-csrf-token')).toBe(csrf);
+		expect(JSON.parse(String(init.body))).toEqual({
+			challengeId: input.challengeId,
+			nonce: input.nonce,
+			challengeDigest: input.challengeDigest,
+		});
 		expect(JSON.stringify(bridge.input)).not.toContain(input.nonce);
 	});
+
+	it.each(['session', 'csrf', 'expiry', 'principal'])(
+		'honors service refusal when %s changes after the session read',
+		async (fault) => {
+			const { browser, state } = browserPort();
+			const fetch = browser.fetch.getMockImplementation()!;
+			browser.fetch.mockImplementation(async (url, init) => {
+				const response = await fetch(url, init);
+				if (init.method === 'GET') {
+					if (fault === 'session') state.authenticated = false;
+					if (fault === 'csrf') state.sessionCsrf = 'different-session-csrf';
+					if (fault === 'expiry') state.expiresAt = 0;
+					if (fault === 'principal') state.kind = 'service';
+				}
+				return response;
+			});
+			const bridge = await createActorApprovalBridge({ browser, origin });
+			const input = challenge();
+			expect(await bridge.approve(input)).toEqual({ outcome: 'denied' });
+			expect(await bridge.approve(input)).toEqual({ outcome: 'denied' });
+			expect(browser.fetch.mock.calls.map(([, init]) => init.method)).toEqual(['GET', 'POST']);
+			expect(state.consumed.size).toBe(0);
+		}
+	);
+
+	it('fences concurrent bridge use and preserves a service replay refusal on a new bridge', async () => {
+		const { browser, state } = browserPort();
+		const bridge = await createActorApprovalBridge({ browser, origin });
+		const input = challenge();
+		expect(await Promise.all([bridge.approve(input), bridge.approve(input)])).toEqual([
+			{ outcome: 'approved' },
+			{ outcome: 'denied' },
+		]);
+		expect(browser.fetch).toHaveBeenCalledTimes(2);
+		const second = await createActorApprovalBridge({ browser, origin });
+		expect(await second.approve(input)).toEqual({ outcome: 'denied' });
+		expect(state.consumed).toEqual(new Set([input.challengeId]));
+		expect(browser.fetch).toHaveBeenCalledTimes(4);
+	});
+
+	it.each(['runtime_use', 'fleet_management'] as const)(
+		'refuses valid public v2 %s approval without stripping its purpose',
+		async (purpose) => {
+			const { browser } = browserPort();
+			const bridge = await createActorApprovalBridge({ browser, origin });
+			const { expiresAt, ...body } = challenge();
+			const v2 = { ...body, version: 2, purpose };
+			expect(wire.runtimeApprovalInputV2.safeParse(v2).success).toBe(true);
+			expect(wire.runtimeApprovalInput.safeParse(v2).success).toBe(false);
+			expect(await bridge.approve({ ...v2, expiresAt })).toEqual({ outcome: 'denied' });
+			expect(await bridge.approve({ ...body, expiresAt })).toEqual({ outcome: 'denied' });
+			expect(browser.fetch).not.toHaveBeenCalled();
+		}
+	);
+
+	it.each([false, true])('fences a late response after cancellation (POST=%s)', async (post) => {
+		const { browser } = browserPort();
+		const bridge = await createActorApprovalBridge({ browser, origin });
+		const fetch = browser.fetch.getMockImplementation()!;
+		const controller = new AbortController();
+		let release!: () => void;
+		let entered!: () => void;
+		const waiting = new Promise<void>((resolve) => {
+			entered = resolve;
+		});
+		browser.fetch.mockImplementation(async (url, init) => {
+			if ((init.method === 'POST') === post) {
+				await new Promise<void>((resolve) => {
+					release = resolve;
+					entered();
+				});
+			}
+			return fetch(url, init);
+		});
+		const input = challenge();
+		const pending = bridge.approve(input, { signal: controller.signal });
+		await waiting;
+		controller.abort('abort-secret-canary');
+		expect(await pending).toEqual({ outcome: post ? 'unknown' : 'unavailable' });
+		release();
+		await new Promise<void>((resolve) => setImmediate(resolve));
+		expect(await bridge.approve(input)).toEqual({ outcome: 'denied' });
+		expect(browser.fetch).toHaveBeenCalledTimes(post ? 2 : 1);
+		expect(browser.fetch.mock.calls.at(-1)![1].signal?.aborted).toBe(true);
+	});
+
+	it.each(['http', 'transport', 'json'])(
+		'keeps %s failure canaries out of diagnostics and output',
+		async (failure) => {
+			const { browser } = browserPort();
+			const bridge = await createActorApprovalBridge({ browser, origin });
+			const input = challenge();
+			const canary = `cookie-secret bearer-secret ${csrf} ${input.nonce}`;
+			const logs = ['log', 'warn', 'error', 'info', 'debug'].map((method) =>
+				vi.spyOn(console, method as 'log').mockImplementation(() => {})
+			);
+			const stdout = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+			const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+			const fetch = browser.fetch.getMockImplementation()!;
+			browser.fetch.mockImplementation(async (url, init) => {
+				if (init.method === 'GET') return fetch(url, init);
+				if (failure === 'transport') throw new Error(canary);
+				if (failure === 'json') return new Response(`invalid-json ${canary}`);
+				return Response.json({ error: { code: canary, requestId: canary } }, { status: 403 });
+			});
+			const result = await bridge.approve(input);
+			expect(result).toEqual({ outcome: failure === 'http' ? 'denied' : 'unknown' });
+			const output = JSON.stringify([
+				result,
+				bridge.input,
+				...logs.map((log) => log.mock.calls),
+				stdout.mock.calls,
+				stderr.mock.calls,
+			]);
+			for (const secret of ['cookie-secret', 'bearer-secret', csrf, input.nonce]) {
+				expect(output).not.toContain(secret);
+			}
+			expect(browser.fetch).toHaveBeenCalledTimes(2);
+		}
+	);
 
 	it.each([
 		{ actorId: 'forged' },
@@ -141,6 +298,37 @@ describe('owned actor approval bridge (local contract evidence only)', () => {
 			detail: 'approval bridge not configured; this does not probe API availability',
 		});
 	});
+
+	it.each([200, 403, 500])(
+		'persists only a correlated acknowledgement after HTTP %i',
+		async (status) => {
+			const { browser, state } = browserPort();
+			state.status = status;
+			const bridge = await createActorApprovalBridge({ browser, origin });
+			const dir = fs.mkdtempSync(path.join(process.cwd(), '.approval-test-'));
+			vi.useFakeTimers();
+			const stop = watchForChallenge(dir, bridge.approve, 1000);
+			try {
+				const input = challenge();
+				fs.writeFileSync(path.join(dir, 'challenge.json'), JSON.stringify(input), { mode: 0o600 });
+				await vi.advanceTimersByTimeAsync(251);
+				expect(browser.fetch).toHaveBeenCalledTimes(2);
+				expect(fs.readdirSync(dir)).toEqual(status === 200 ? ['approval.json'] : []);
+				if (status === 200) {
+					const text = fs.readFileSync(path.join(dir, 'approval.json'), 'utf8');
+					expect(JSON.parse(text)).toEqual({ challengeId: input.challengeId });
+					for (const secret of [input.nonce, input.challengeDigest, csrf]) {
+						expect(text).not.toContain(secret);
+					}
+				}
+				// This file acknowledges approval only; no endpoint redemption was exercised.
+				expect(bridge.input).toMatchObject({ paired: false, authority: 'none' });
+			} finally {
+				stop();
+				fs.rmSync(dir, { recursive: true, force: true });
+			}
+		}
+	);
 
 	it.each([false, true])(
 		'cleans the challenge and fences late approval (cancel=%s)',

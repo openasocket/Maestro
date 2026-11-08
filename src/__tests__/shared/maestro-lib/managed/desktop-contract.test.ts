@@ -244,4 +244,111 @@ describe('desktop authoring mapping against pinned public schema 1', () => {
 			)
 		).toEqual({ outcome: 'unavailable', reason: 'mapping_unavailable' });
 	});
+
+	it.each([
+		['duplicate operation', { operations: ['create', 'create'] }],
+		['duplicate choice', { choices: [...projection().choices, projection().choices[0]] }],
+		[
+			'unknown provider',
+			{
+				choices: projection().choices.map((choice) =>
+					choice.kind === 'model' ? { ...choice, providerRef: 'absent' } : choice
+				),
+			},
+		],
+		[
+			'unknown account',
+			{
+				choices: projection().choices.map((choice) =>
+					choice.kind === 'credential' ? { ...choice, accountRef: 'absent' } : choice
+				),
+			},
+		],
+		[
+			'cross-kind reference',
+			{
+				fields: {
+					...projection().fields,
+					workspace: { state: 'user_editable', allowed: ['provider-1'] },
+				},
+			},
+		],
+		[
+			'duplicate selection',
+			{
+				fields: {
+					...projection().fields,
+					credential: { state: 'locked', values: ['credential-1', 'credential-1'] },
+				},
+			},
+		],
+		[
+			'multiple single selections',
+			{
+				fields: {
+					...projection().fields,
+					model: { state: 'locked', values: ['model-1', 'model-2'] },
+				},
+			},
+		],
+		['unbounded lifetime', { expiresAt: new Date(now + 300_000).toISOString() }],
+		['zero lifetime', { expiresAt: new Date(now - 1_000).toISOString() }],
+		[
+			'credential value',
+			{
+				choices: projection().choices.map((choice) =>
+					choice.kind === 'credential' ? { ...choice, secret: 'credential-secret-canary' } : choice
+				),
+			},
+		],
+		[
+			'workspace path',
+			{
+				choices: projection().choices.map((choice) =>
+					choice.kind === 'workspace' ? { ...choice, path: '/private/path-canary' } : choice
+				),
+			},
+		],
+	])('rejects public projection fault: %s', (_name, patch) => {
+		const raw = { outcome: 'available', projection: { ...projection(), ...patch } };
+		const before = structuredClone(raw);
+		expect(schema.safeParse(raw).success).toBe(false);
+		expect(mapDesktopPolicy(raw, options())).toEqual({
+			outcome: 'unavailable',
+			reason: 'mapping_unavailable',
+		});
+		expect(raw).toEqual(before);
+	});
+
+	it('rechecks the current user and freshness when a previously usable projection is replayed', () => {
+		const raw = { outcome: 'available', projection: projection() };
+		expect(mapDesktopPolicy(raw, options()).outcome).toBe('available');
+		const otherUser = {
+			...binding,
+			principal: {
+				...binding.principal,
+				id: '22222222-2222-4222-8222-222222222222',
+			},
+		};
+		expect(mapDesktopPolicy(raw, { ...options(), binding: otherUser })).toEqual({
+			outcome: 'denied',
+			reason: 'binding_mismatch',
+		});
+		expect(mapDesktopPolicy(raw, { ...options(), now: now + 60_000 })).toEqual({
+			outcome: 'unavailable',
+			reason: 'policy_expired',
+		});
+	});
+
+	it.each([
+		{ outcome: 'denied', reason: 'policy_denied' },
+		{ outcome: 'unavailable', reason: 'mapping_unavailable' },
+	])('refuses choices smuggled alongside $outcome without leaking them', (refusal) => {
+		const raw = { ...refusal, projection: projection(), secret: 'response-secret-canary' };
+		expect(schema.safeParse(raw).success).toBe(false);
+		expect(mapDesktopPolicy(raw, options())).toEqual({
+			outcome: 'unavailable',
+			reason: 'mapping_unavailable',
+		});
+	});
 });
