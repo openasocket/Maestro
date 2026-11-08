@@ -164,4 +164,75 @@ describe('cross-agent:send dispatch ticket (MRC-08-01C)', () => {
 		await send(undefined, payload({ sourceSessionId: 'src', sourceTabId: 'tab-1' }));
 		expect(actorSeen()).toEqual({ peer: 'in-process' });
 	});
+
+	/**
+	 * MCOMP-17-03AU: the ticket the sink honored is what names the consult to the
+	 * router, so withdrawing the ask (its source lost custody) reaches exactly the
+	 * consult it started. A ticket the sink did not honor names nothing.
+	 */
+	describe('names the consult to the router by its honored ticket (MCOMP-17-03AU)', () => {
+		const ticketSeen = () => {
+			const calls = vi.mocked(startCrossAgentRequest).mock.calls;
+			return calls[calls.length - 1][1].dispatchTicket;
+		};
+
+		it('passes a claimed CLI ticket through as it arrived', async () => {
+			const send = registerSend();
+			const ticket = issueDispatchTicket({ kind: 'cli' }, { agentId: 'tgt' });
+
+			await send(undefined, payload({ dispatchTicket: ticket }));
+
+			expect(ticketSeen()).toBe(ticket);
+			expect(actorSeen()).toEqual({ peer: 'host-secret' });
+		});
+
+		it('passes a claimed device ticket through', async () => {
+			const send = registerSend();
+			const ticket = issueDispatchTicket(
+				{ kind: 'lite', deviceId: 'dev-7', deviceName: 'Pixel 9' },
+				{ agentId: 'tgt', tabId: 'consult-1' }
+			);
+
+			await send(undefined, payload({ dispatchTicket: ticket }));
+
+			expect(ticketSeen()).toBe(ticket);
+		});
+
+		it('does not let a replay of a spent ticket re-point the withdrawal', async () => {
+			const send = registerSend();
+			const ticket = issueDispatchTicket({ kind: 'cli' }, { agentId: 'tgt' });
+
+			await send(undefined, payload({ dispatchTicket: ticket }));
+			await send(undefined, payload({ dispatchTicket: ticket }));
+
+			const calls = vi.mocked(startCrossAgentRequest).mock.calls;
+			expect(calls[0][1].dispatchTicket).toBe(ticket);
+			expect(calls[1][1].dispatchTicket).toBeUndefined();
+			expect(calls[1][1].actor).toEqual({ peer: 'in-process' });
+		});
+
+		it('names nothing for a forged ticket', async () => {
+			const send = registerSend();
+			await send(undefined, payload({ dispatchTicket: 'not-a-ticket-cli' }));
+			expect(ticketSeen()).toBeUndefined();
+		});
+
+		it('names nothing for a ticket issued for another agent', async () => {
+			const send = registerSend();
+			const ticket = issueDispatchTicket({ kind: 'cli' }, { agentId: 'someone-else' });
+
+			await send(undefined, payload({ dispatchTicket: ticket }));
+
+			expect(ticketSeen()).toBeUndefined();
+		});
+
+		it('names nothing for a typed mention or an empty ticket', async () => {
+			const send = registerSend();
+			await send(undefined, payload({ sourceSessionId: 'src', sourceTabId: 'tab-1' }));
+			expect(ticketSeen()).toBeUndefined();
+			await send(undefined, payload({ dispatchTicket: '' }));
+			expect(ticketSeen()).toBeUndefined();
+			expect(actorSeen()).toEqual({ peer: 'in-process' });
+		});
+	});
 });

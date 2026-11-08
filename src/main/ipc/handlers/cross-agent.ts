@@ -32,7 +32,11 @@ import type {
 } from '../../../shared/crossAgentTypes';
 import { generateUUID } from '../../../shared/uuid';
 import { logger } from '../../utils/logger';
-import { currentSpawnActor } from '../../web-server/auth/transport-actor';
+import {
+	claimDispatchTicket,
+	currentSpawnActor,
+	transportSpawnActor,
+} from '../../web-server/auth/transport-actor';
 import {
 	startCrossAgentRequest,
 	cancelCrossAgentRequestsForSource,
@@ -143,11 +147,30 @@ export function registerCrossAgentHandlers(deps: CrossAgentHandlerDependencies):
 				// renderer's to find or create), else bind the caller's own standing.
 				// A forged, spent, expired or mismatched ticket binds nothing, and a
 				// typed `@mention` carries none and stays in-process (MRC-08-01C).
-				const actor = currentSpawnActor({
-					ticket: payload.dispatchTicket,
-					agentId: payload.targetSessionId,
-					tabId: payload.targetTabId,
-				});
+				const ticket =
+					typeof payload.dispatchTicket === 'string' && payload.dispatchTicket.length > 0
+						? payload.dispatchTicket
+						: undefined;
+				const issuedFor =
+					ticket === undefined
+						? undefined
+						: claimDispatchTicket(ticket, {
+								agentId: payload.targetSessionId,
+								tabId: payload.targetTabId,
+							});
+				if (ticket !== undefined && issuedFor === undefined) {
+					logger.warn(
+						'Dispatch ticket not honored (unknown, spent, expired or mismatched); binding the caller as itself',
+						LOG_CONTEXT,
+						{ agentId: payload.targetSessionId, tabId: payload.targetTabId }
+					);
+				}
+				const actor = issuedFor ? transportSpawnActor(issuedFor) : currentSpawnActor();
+				// Only an honored ticket names this consult to the router (MCOMP-17-03AU), so
+				// withdrawing the ask (its source lost custody) stops exactly the consult it
+				// started. A replayed or forged ticket must not re-point that withdrawal at a
+				// consult bound in-process, nor leave the credentialed one running.
+				const dispatchTicket = issuedFor ? ticket : undefined;
 
 				const requestId = generateUUID();
 				const request: CrossAgentRequest = {
@@ -192,6 +215,7 @@ export function registerCrossAgentHandlers(deps: CrossAgentHandlerDependencies):
 					getCustomEnvVars,
 					writable,
 					actor,
+					dispatchTicket,
 					onChunk: (chunk: CrossAgentResponseChunk) => safeSend('cross-agent:chunk', chunk),
 				}).catch((err) => {
 					logger.error(`${LOG_CONTEXT} Cross-agent dispatch failed`, LOG_CONTEXT, {
