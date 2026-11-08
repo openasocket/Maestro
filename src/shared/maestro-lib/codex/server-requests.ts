@@ -58,50 +58,56 @@ export function codexRequestEffect(request: CodexAppServerRequest): ManagedEffec
 	const text = (value: unknown): string | null => (typeof value === 'string' ? value : null);
 	const strings = (value: unknown): string[] =>
 		Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
-	switch (request.method) {
-		case 'item/commandExecution/requestApproval':
-		case 'execCommandApproval': {
-			const argv = strings(params.proposedExecpolicyAmendment ?? params.command);
-			return {
-				kind: 'command',
-				command: text(params.command) ?? argv.join(' '),
-				cwd: text(params.cwd),
-				argv: argv.length > 0 ? argv : null,
-			};
+	const projected: ManagedEffect = (() => {
+		switch (request.method) {
+			case 'item/commandExecution/requestApproval':
+			case 'execCommandApproval': {
+				const argv = strings(params.proposedExecpolicyAmendment ?? params.command);
+				return {
+					kind: 'command',
+					command: text(params.command) ?? argv.join(' '),
+					cwd: text(params.cwd),
+					argv: argv.length > 0 ? argv : null,
+				};
+			}
+			case 'item/fileChange/requestApproval':
+			case 'applyPatchApproval': {
+				const changes = Array.isArray(params.changes) ? params.changes : [];
+				const paths = [
+					...strings(params.paths),
+					...(text(params.path) ? [text(params.path) as string] : []),
+					...changes
+						.map((change) => text((change as Record<string, unknown> | null)?.path))
+						.filter((path): path is string => path !== null),
+				];
+				return { kind: 'file-change', paths: [...new Set(paths)].sort(), cwd: text(params.cwd) };
+			}
+			case 'item/permissions/requestApproval':
+				return {
+					kind: 'permissions',
+					permissions:
+						params.permissions && typeof params.permissions === 'object'
+							? (params.permissions as Record<string, unknown>)
+							: {},
+				};
+			case 'item/tool/call':
+				return {
+					kind: 'tool-call',
+					tool: text(params.tool) ?? text(params.name) ?? 'unknown',
+					input: params.arguments ?? params.input ?? null,
+				};
+			case 'item/tool/requestUserInput':
+				return { kind: 'user-input', prompt: text(params.prompt) ?? text(params.message) };
+			case 'mcpServer/elicitation/request':
+				return { kind: 'elicitation', server: text(params.serverName) ?? text(params.server) };
+			default:
+				return { kind: 'other', method: request.method };
 		}
-		case 'item/fileChange/requestApproval':
-		case 'applyPatchApproval': {
-			const changes = Array.isArray(params.changes) ? params.changes : [];
-			const paths = [
-				...strings(params.paths),
-				...(text(params.path) ? [text(params.path) as string] : []),
-				...changes
-					.map((change) => text((change as Record<string, unknown> | null)?.path))
-					.filter((path): path is string => path !== null),
-			];
-			return { kind: 'file-change', paths: [...new Set(paths)].sort(), cwd: text(params.cwd) };
-		}
-		case 'item/permissions/requestApproval':
-			return {
-				kind: 'permissions',
-				permissions:
-					params.permissions && typeof params.permissions === 'object'
-						? (params.permissions as Record<string, unknown>)
-						: {},
-			};
-		case 'item/tool/call':
-			return {
-				kind: 'tool-call',
-				tool: text(params.tool) ?? text(params.name) ?? 'unknown',
-				input: params.arguments ?? params.input ?? null,
-			};
-		case 'item/tool/requestUserInput':
-			return { kind: 'user-input', prompt: text(params.prompt) ?? text(params.message) };
-		case 'mcpServer/elicitation/request':
-			return { kind: 'elicitation', server: text(params.serverName) ?? text(params.server) };
-		default:
-			return { kind: 'other', method: request.method };
-	}
+	})();
+	return {
+		...projected,
+		request: structuredClone({ method: request.method, input: request.params ?? null }),
+	};
 }
 
 /** The thread, turn and item ids a server request names, for the effect binding. */

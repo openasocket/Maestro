@@ -105,26 +105,29 @@ export function opencodePermissionEffect(permission: Permission): ManagedEffect 
 			: [];
 	const metadata = permission.metadata ?? {};
 	const text = (value: unknown): string | null => (typeof value === 'string' ? value : null);
-	switch (permission.type) {
-		case 'bash':
-			return {
-				kind: 'command',
-				command: text(metadata.command) ?? patterns.join(' '),
-				cwd: text(metadata.cwd),
-				argv: null,
-			};
-		case 'edit':
-		case 'write':
-		case 'patch':
-		case 'external_directory':
-			return {
-				kind: 'file-change',
-				paths: [...new Set(patterns)].sort(),
-				cwd: text(metadata.cwd),
-			};
-		default:
-			return { kind: 'tool-call', tool: permission.type, input: metadata };
-	}
+	const projected: ManagedEffect = (() => {
+		switch (permission.type) {
+			case 'bash':
+				return {
+					kind: 'command',
+					command: text(metadata.command) ?? patterns.join(' '),
+					cwd: text(metadata.cwd),
+					argv: null,
+				};
+			case 'edit':
+			case 'write':
+			case 'patch':
+			case 'external_directory':
+				return {
+					kind: 'file-change',
+					paths: [...new Set(patterns)].sort(),
+					cwd: text(metadata.cwd),
+				};
+			default:
+				return { kind: 'tool-call', tool: permission.type, input: metadata };
+		}
+	})();
+	return { ...projected, request: structuredClone({ method: permission.type, input: permission }) };
 }
 
 /**

@@ -300,7 +300,9 @@ export class PermissionRelayServer {
 		// Consent is intersected with the admission as it stands NOW: a lease
 		// that ended while the prompt was open denies, whatever the user said.
 		if (verdict.managed && decision.behavior === 'allow') {
-			const live = this.managedGate?.recheck(binding) ?? { ok: true };
+			const live = effectGranted(verdict.decision)
+				? (this.managedGate?.recheck(binding) ?? { ok: true })
+				: { ok: false, reason: 'The effect authorization ended while consent was pending.' };
 			if (!live.ok) {
 				logger.info(
 					'Relayed tool request allowed by the user but its admission ended',

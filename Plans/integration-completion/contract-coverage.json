@@ -296,7 +296,7 @@
 	"remainingWork": {
 		"inputBuildReceipt": "MCOMP-00-03",
 		"scope": "Internal Maestro behavior proceeds through existing typed ports in the named implementation tasks. All new external mappings stay pending/unqualified until published definitions and paired verification agree; proposal operation names are never sent.",
-		"executionAuthority": "broker_dispatched records broker dispatch only; no local spawn permit or per-effect authorization. Existing conversion in host-adapter.ts still requires MCOMP-13 repair."
+		"executionAuthority": "MCOMP-13-01 removed broker-receipt-to-local-lease conversion. MCOMP-13-02 implements a local per-effect consumer with no production producer; PREPARED/1 and EFFECT/1 wire mappings remain pending."
 	},
 	"qualification": {
 		"paired": false,
@@ -336,7 +336,10 @@
 			"operations": "Propose effect_authorize, effect_settle, effect_reconcile; none is shipped.",
 			"missing": "Exact command/file/permission/tool input plus leaseId, authenticated actor reference, provider/thread/turn/request IDs, effect digest, policy revision, expiry, revocation and idempotency. Correlated allow/deny/unavailable/unknown must remain distinct; a launch/dispatch receipt cannot grant an effect.",
 			"implementationTasks": ["MCOMP-13-02", "MCOMP-13-05"],
-			"pairedVerification": ["MCOMP-14-01", "MCOMP-32-01"]
+			"pairedVerification": ["MCOMP-14-01", "MCOMP-32-01"],
+			"localConsumer": "ManagedEffectProducer.version=1 is injected through ManagedHostAdapterDeps.effectProducer only after authenticated negotiation. createManagedEffectAuthority sends a cloned full request plus binding, digest, policy revision and standing generation to authorize, validates its receipt, then consumes once before returning a live-checked allow. No production producer, endpoint operation or advertised capability is installed.",
+			"lifetime": "Only an owned bound prepared lease with matching actor/provider and current registration/policy/trust may ask. Lease release/revocation and caller cancellation abort pending requests. Inputs, receipt identity/digest/policy/expiry and standing are rechecked after each await and at the reply sink, including after relay consent. Lost/malformed responses stay unknown; retries and reused receipts are held. In-memory fences do not replace durable producer reconciliation.",
+			"nativeBoundary": "The negotiated producer must pin exact native file/executable/network identities, enforce confinement and descendant revocation through the actual effect, and durably settle/reconcile consumption. Receipt consume grants one permission without executing the effect. These obligations are not implemented by the published wire schemas and remain unqualified. Complete provider inputs are preserved; a permission projection alone cannot qualify native confinement."
 		},
 		{
 			"id": "DESKTOP-LOCAL/1",

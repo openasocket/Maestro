@@ -14,7 +14,7 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createLocalEndpointClient } from '../../../../main/enterprise/endpoint-client';
 import { DEFAULT_TAB_DEFAULTS } from '../../../../shared/maestro-lib/agents/rules';
@@ -59,6 +59,13 @@ import {
 	type FakeEndpoint,
 	type FakeEndpointOptions,
 } from '../../../main/enterprise/fakeEndpoint';
+
+import { managedRecord, NOW } from '../../../main/enterprise/fakeManaged';
+import {
+	effectGranted,
+	type ManagedEffectProducer,
+	type ManagedEffectBinding,
+} from '../../../../shared/maestro-lib/managed/effects';
 
 const T0 = Date.parse('2026-10-21T12:00:00Z');
 const INSTALLATION = {
@@ -206,6 +213,97 @@ describe('managed host adapter', () => {
 	afterEach(async () => {
 		for (const port of ports.splice(0)) await port.close();
 		for (const fake of open.splice(0)) await fake.close();
+	});
+
+	it.each([
+		'live',
+		'actor',
+		'provider',
+		'issued',
+		'release',
+		'revoke',
+		'trust',
+		'policy',
+		'disconnect',
+		'expiry',
+	] as const)('binds effects to owned prepared leases: %s', async (change) => {
+		const fake = await endpoint();
+		const port = await attachedPort(fake);
+		const r = managedRecord('ada');
+		r.endpoint.socketPath = fake.socketPath;
+		const view = okView(r);
+		const prepared = createLocalHostAuthority({
+			authorityId: managedAuthorityId(r),
+			newId: () => 'fixture-lease',
+			now: () => NOW,
+			decide: () => ({ decision: 'allow', policyRevision: 3 }),
+		});
+		Object.defineProperty(port, 'preparedExecution', { value: { ...prepared, version: 1 } });
+		const producer: ManagedEffectProducer = {
+			version: 1,
+			authorityId: prepared.authorityId,
+			authorize: vi.fn(async (request) => ({
+				decision: 'allow',
+				receipt: {
+					receiptId: 'fixture-effect',
+					effectDigest: request.effectDigest,
+					policyRevision: 3,
+					expiresAt: new Date(NOW + 1000).toISOString(),
+				},
+			})),
+			consume: vi.fn(async (_request, receipt) => ({ decision: 'allow', receipt })),
+		};
+		const adapter = createManagedHostAdapter({
+			installation: INSTALLATION,
+			identity: { read: () => view },
+			endpoint: port,
+			status: () => standing(port, view),
+			effectProducer: () => producer,
+			now: () => NOW,
+		});
+		const launch = await adapter.authority.admit(admission());
+		if (launch.state !== 'admitted') throw new Error(launch.state);
+		const { lease } = launch;
+		if (change !== 'issued') lease.bind(321);
+		const binding: ManagedEffectBinding = {
+			leaseId: lease.leaseId,
+			actor: lease.actor,
+			provider: 'claude-code',
+			threadId: null,
+			turnId: null,
+			requestId: 'effect-1',
+		};
+		if (change === 'actor') binding.actor = { kind: 'human', id: 'mallory' };
+		if (change === 'provider') binding.provider = 'other';
+		if (change === 'release') lease.release({ outcome: 'exited', exitCode: 0, signal: null });
+		if (change === 'revoke') adapter.authority.revoke(lease.leaseId, 'fixture');
+		if (change === 'trust') r.endpoint.trustRootDigest = 'e'.repeat(64);
+		if (change === 'policy') r.policy.appliedRevision = 4;
+		if (change === 'disconnect') port.redial();
+		if (change === 'expiry') r.registration!.expiresAt = new Date(NOW).toISOString();
+		const effect = {
+			kind: 'tool-call' as const,
+			tool: 'Write',
+			input: { content: 'one' },
+			request: { method: 'Write', input: { file_path: '/work/a', content: 'one' } },
+		};
+		const answer = await adapter.effects.decide(effect, binding, new AbortController().signal);
+		expect(effectGranted(answer)).toBe(change === 'live');
+		expect(producer.consume).toHaveBeenCalledTimes(change === 'live' ? 1 : 0);
+		if (change === 'live') {
+			vi.mocked(producer.authorize).mockImplementation(() => new Promise(() => {}));
+			const pending = adapter.effects.decide(
+				effect,
+				{ ...binding, requestId: 'effect-2' },
+				new AbortController().signal
+			);
+			lease.release({ outcome: 'exited', exitCode: 0, signal: null });
+			expect(await pending).toMatchObject({ decision: 'deny' });
+			expect(effectGranted(answer)).toBe(false);
+		}
+		expect(
+			fake.calls.filter((c) => (c.body as { operation: string }).operation === 'execution')
+		).toHaveLength(0);
 	});
 
 	it('exposes the workflow owner producer over its endpoint, and none without one (MRC-07-06A)', async () => {

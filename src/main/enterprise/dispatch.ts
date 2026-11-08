@@ -472,21 +472,24 @@ export async function dispatchHarness(
  */
 export function claudeToolEffect(toolName: string, input: Record<string, unknown>): ManagedEffect {
 	const text = (value: unknown): string | null => (typeof value === 'string' ? value : null);
-	switch (toolName) {
-		case 'Bash':
-			return { kind: 'command', command: text(input.command) ?? '', cwd: null, argv: null };
-		case 'Edit':
-		case 'MultiEdit':
-		case 'Write':
-		case 'NotebookEdit': {
-			const path = text(input.file_path) ?? text(input.notebook_path);
-			return { kind: 'file-change', paths: path ? [path] : [], cwd: null };
+	const projected: ManagedEffect = (() => {
+		switch (toolName) {
+			case 'Bash':
+				return { kind: 'command', command: text(input.command) ?? '', cwd: null, argv: null };
+			case 'Edit':
+			case 'MultiEdit':
+			case 'Write':
+			case 'NotebookEdit': {
+				const path = text(input.file_path) ?? text(input.notebook_path);
+				return { kind: 'file-change', paths: path ? [path] : [], cwd: null };
+			}
+			case 'AskUserQuestion':
+				return { kind: 'user-input', prompt: null };
+			default:
+				return { kind: 'tool-call', tool: toolName, input };
 		}
-		case 'AskUserQuestion':
-			return { kind: 'user-input', prompt: null };
-		default:
-			return { kind: 'tool-call', tool: toolName, input };
-	}
+	})();
+	return { ...projected, request: structuredClone({ method: toolName, input }) };
 }
 
 export interface RelayGateDeps {

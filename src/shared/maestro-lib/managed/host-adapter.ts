@@ -83,6 +83,11 @@ import {
 	type ManagedWorkflowRef,
 } from './types';
 import { endpointWorkflowOwnerPort, type WorkflowOwnerPort } from './workflows';
+import {
+	createManagedEffectAuthority,
+	type ManagedEffectAuthority,
+	type ManagedEffectProducer,
+} from './effects';
 
 // ---------------------------------------------------------------------------
 // The spawn authority of a host with no Electron (maestro-cli, a headless
@@ -309,6 +314,8 @@ export interface ManagedHostAdapterDeps {
 	installation: ManagedInstallationIdentity;
 	identity: ManagedIdentityPort;
 	endpoint: EndpointPort | null;
+	/** Trusted host injection only, after EFFECT/1 authentication and negotiation. */
+	effectProducer?: () => ManagedEffectProducer | null;
 	/** This process's standing, as the enrollment lifecycle sees it. */
 	status(): ManagedEnrollmentStatus;
 	now?: () => number;
@@ -324,6 +331,7 @@ export interface ManagedHostAdapter {
 	readonly installation: ManagedInstallationIdentity;
 	readonly identity: ManagedIdentityPort;
 	readonly authority: HostAuthority;
+	readonly effects: ManagedEffectAuthority;
 	/**
 	 * The workflow owner producer over this adapter's endpoint socket (the
 	 * endpoint's `workflow` operation, MRC-07-06A), for a host's
@@ -678,7 +686,13 @@ export function createManagedHostAdapter(deps: ManagedHostAdapterDeps): ManagedH
 	const attempts = new Map<string, AdmissionOutcome>();
 	const owners = new Map<
 		DispatchLease,
-		{ port: PreparedExecutionPort; generation: string; request: AdmissionRequest; input: string }
+		{
+			port: PreparedExecutionPort;
+			generation: string;
+			request: AdmissionRequest;
+			input: string;
+			ended: AbortController;
+		}
 	>();
 	let invalidation = 0;
 	function generation(): string {
@@ -699,6 +713,10 @@ export function createManagedHostAdapter(deps: ManagedHostAdapterDeps): ManagedH
 				management: record.management,
 				endpoint: record.endpoint,
 				registration: record.registration,
+				policy: {
+					desiredRevision: record.policy.desiredRevision,
+					appliedRevision: record.policy.appliedRevision,
+				},
 			},
 		});
 	}
@@ -822,7 +840,14 @@ export function createManagedHostAdapter(deps: ManagedHostAdapterDeps): ManagedH
 				);
 				return unknown;
 			}
-			owners.set(lease, { port, generation: before, request, input });
+			const ended = new AbortController();
+			const release = lease.release.bind(lease);
+			lease.release = (result) => {
+				ended.abort();
+				release(result);
+			};
+			lease.onRevoked(() => ended.abort());
+			owners.set(lease, { port, generation: before, request, input, ended });
 		}
 		if (outcome.state === 'unavailable') attempts.delete(key);
 		else attempts.set(key, outcome);
@@ -868,6 +893,30 @@ export function createManagedHostAdapter(deps: ManagedHostAdapterDeps): ManagedH
 		installation: deps.installation,
 		identity: deps.identity,
 		authority,
+		effects: createManagedEffectAuthority({
+			authorityId,
+			producer: () => deps.effectProducer?.() ?? null,
+			now,
+			scope(binding) {
+				const matches = [...owners].filter(([lease]) => lease.leaseId === binding.leaseId);
+				if (matches.length !== 1) return null;
+				const [lease, owner] = matches[0];
+				const current = () => {
+					const registration = deps.identity.read().record?.registration;
+					const verdict = authority.check(lease, lease.snapshotDigest);
+					return (
+						lease.state() === 'bound' &&
+						canonicalJson(binding.actor) === canonicalJson(lease.actor) &&
+						binding.provider === owner.request.snapshot.provider &&
+						!!registration &&
+						Date.parse(registration.expiresAt) > now() &&
+						// check guards a launch; an owned bound lease has already launched.
+						(verdict.ok || verdict.reason === 'already-bound')
+					);
+				};
+				return { lease, generation: owner.generation, signal: owner.ended.signal, current };
+			},
+		}),
 		// Read per access: a desktop composes the adapter before its socket opens.
 		get workflows() {
 			return deps.endpoint ? endpointWorkflowOwnerPort(deps.endpoint) : null;

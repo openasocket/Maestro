@@ -444,6 +444,51 @@ describe('permission-relay server AskUserQuestion round-trip', () => {
 		}
 	});
 
+	it('refuses an effect that expires while user consent is pending', async () => {
+		const { token, cleanup } = registerSpawn({ sessionId: 'effect-expiry' });
+		let current = true;
+		server.setOnRequest((req) => {
+			current = false;
+			resolvePending(req.requestId, { behavior: 'allow' });
+		});
+		server.setManagedGate({
+			decide: async () => ({
+				managed: true,
+				decision: { decision: 'allow', current: () => current },
+			}),
+			recheck: () => ({ ok: true }),
+		});
+		try {
+			const response = await relayRequest(token, 'expiry', 'Write', {
+				file_path: '/p/a',
+				content: 'one',
+			});
+			expect(response.decision).toMatchObject({
+				behavior: 'deny',
+				message: expect.stringContaining('authorization ended'),
+			});
+		} finally {
+			server.setManagedGate(null);
+			cleanup();
+		}
+	});
+
+	it('retains complete Claude edit and network inputs without aliasing', () => {
+		for (const tool of ['Edit', 'Bash', 'WebFetch']) {
+			const input = {
+				file_path: '/p/a',
+				new_string: 'one',
+				command: 'echo fixture',
+				url: 'https://fixture',
+				body: 'one',
+			};
+			const effect = claudeToolEffect(tool, input);
+			expect(effect.request).toEqual({ method: tool, input });
+			input.new_string = 'two';
+			input.body = 'two';
+			expect(effect.request).not.toEqual(claudeToolEffect(tool, input).request);
+		}
+	});
 	it('passes a user allow through when the gate allows and the admission is still live', async () => {
 		const { token, cleanup } = registerSpawn({ sessionId: 'sM4' });
 		server.setOnRequest((req) => resolvePending(req.requestId, { behavior: 'allow' }));
@@ -533,12 +578,12 @@ describe('permission-relay server AskUserQuestion round-trip', () => {
 			managed: true,
 			decision: { decision: 'deny', reason: 'file-change is not allowed' },
 		});
-		expect(claudeToolEffect('Edit', { file_path: '/p/a.ts', old_string: 'x' })).toEqual({
+		expect(claudeToolEffect('Edit', { file_path: '/p/a.ts', old_string: 'x' })).toMatchObject({
 			kind: 'file-change',
 			paths: ['/p/a.ts'],
 			cwd: null,
 		});
-		expect(claudeToolEffect('WebFetch', { url: 'https://x' })).toEqual({
+		expect(claudeToolEffect('WebFetch', { url: 'https://x' })).toMatchObject({
 			kind: 'tool-call',
 			tool: 'WebFetch',
 			input: { url: 'https://x' },

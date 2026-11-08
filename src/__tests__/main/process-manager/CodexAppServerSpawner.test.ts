@@ -1186,7 +1186,7 @@ describe('CodexAppServerSpawner managed server requests', () => {
 
 		expect(server.responseTo(0)).toMatchObject({ result: { decision: 'accept' } });
 		expect(effects.asked).toHaveLength(1);
-		expect(effects.asked[0].effect).toEqual({
+		expect(effects.asked[0].effect).toMatchObject({
 			kind: 'command',
 			command: '/bin/zsh -lc "rm -rf /tmp/x"',
 			cwd: '/tmp/codex-project',
@@ -1299,35 +1299,57 @@ describe('Codex server request effects (pure)', () => {
 					proposedExecpolicyAmendment: ['git', 'push'],
 				})
 			)
-		).toEqual({ kind: 'command', command: 'git push', cwd: '/p', argv: ['git', 'push'] });
+		).toMatchObject({ kind: 'command', command: 'git push', cwd: '/p', argv: ['git', 'push'] });
 		expect(
 			codexRequestEffect(
 				request('item/fileChange/requestApproval', {
 					changes: [{ path: '/p/b.ts' }, { path: '/p/a.ts' }, { path: '/p/a.ts' }],
 				})
 			)
-		).toEqual({ kind: 'file-change', paths: ['/p/a.ts', '/p/b.ts'], cwd: null });
+		).toMatchObject({ kind: 'file-change', paths: ['/p/a.ts', '/p/b.ts'], cwd: null });
 		expect(
 			codexRequestEffect(
 				request('item/permissions/requestApproval', { permissions: { network: true } })
 			)
-		).toEqual({ kind: 'permissions', permissions: { network: true } });
+		).toMatchObject({ kind: 'permissions', permissions: { network: true } });
 		expect(
 			codexRequestEffect(request('item/tool/call', { tool: 'lookup', arguments: { q: 1 } }))
-		).toEqual({
+		).toMatchObject({
 			kind: 'tool-call',
 			tool: 'lookup',
 			input: { q: 1 },
 		});
-		expect(codexRequestEffect(request('attestation/generate', {}))).toEqual({
+		expect(codexRequestEffect(request('attestation/generate', {}))).toMatchObject({
 			kind: 'other',
 			method: 'attestation/generate',
 		});
-		expect(codexRequestIds(request('x', { threadId: 't', turnId: 'u', itemId: 'i' }))).toEqual({
+		expect(
+			codexRequestIds(request('x', { threadId: 't', turnId: 'u', itemId: 'i' }))
+		).toMatchObject({
 			threadId: 't',
 			turnId: 'u',
 			itemId: 'i',
 		});
+	});
+
+	it('retains file edits and network/command options in the full request', () => {
+		for (const method of [
+			'item/fileChange/requestApproval',
+			'item/commandExecution/requestApproval',
+			'item/permissions/requestApproval',
+		]) {
+			const params = {
+				changes: [{ path: '/p/a', patch: '+first' }],
+				command: 'curl fixture',
+				env: { MODE: 'fixture' },
+				network: { url: 'https://fixture', method: 'POST', body: 'one' },
+			};
+			const effect = codexRequestEffect(request(method, params));
+			expect(effect.request).toEqual({ method, input: params });
+			params.changes[0].patch = '+second';
+			params.network.body = 'two';
+			expect(effect.request).not.toEqual(codexRequestEffect(request(method, params)).request);
+		}
 	});
 
 	it('lets only a live allow grant once a managed decision is present', () => {

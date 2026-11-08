@@ -853,7 +853,7 @@ describe('OpenCode server isolation under management', () => {
 	});
 
 	it('takes the server scope from the admission and the effect from the permission event', () => {
-		expect(opencodeManagedScope(fakeAdmission({ policyRevision: 7 }))).toEqual({
+		expect(opencodeManagedScope(fakeAdmission({ policyRevision: 7 }))).toMatchObject({
 			authorityId: 'test-authority',
 			actor: { kind: 'human', id: 'ada' },
 			policyRevision: 7,
@@ -868,20 +868,29 @@ describe('OpenCode server isolation under management', () => {
 			metadata,
 			time: { created: 1 },
 		});
-		expect(opencodePermissionEffect(permission('bash', 'rm *', { command: 'rm -rf /' }))).toEqual({
+		const metadata = { method: 'POST', body: 'one' };
+		const full = permission('webfetch', 'https://fixture', metadata);
+		const extracted = opencodePermissionEffect(full);
+		expect(extracted.request).toEqual({ method: full.type, input: full });
+		metadata.body = 'two';
+		expect(extracted.request).not.toEqual(opencodePermissionEffect(full).request);
+
+		expect(
+			opencodePermissionEffect(permission('bash', 'rm *', { command: 'rm -rf /' }))
+		).toMatchObject({
 			kind: 'command',
 			command: 'rm -rf /',
 			cwd: null,
 			argv: null,
 		});
-		expect(opencodePermissionEffect(permission('edit', ['/p/b.ts', '/p/a.ts']))).toEqual({
+		expect(opencodePermissionEffect(permission('edit', ['/p/b.ts', '/p/a.ts']))).toMatchObject({
 			kind: 'file-change',
 			paths: ['/p/a.ts', '/p/b.ts'],
 			cwd: null,
 		});
 		expect(
 			opencodePermissionEffect(permission('webfetch', 'https://x', { url: 'https://x' }))
-		).toEqual({ kind: 'tool-call', tool: 'webfetch', input: { url: 'https://x' } });
+		).toMatchObject({ kind: 'tool-call', tool: 'webfetch', input: { url: 'https://x' } });
 	});
 });
 

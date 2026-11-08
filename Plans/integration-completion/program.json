@@ -2128,13 +2128,74 @@
 					"targets": [
 						"src/shared/maestro-lib/managed/effects.ts",
 						"src/shared/maestro-lib/managed/host-adapter.ts",
-						"src/main/enterprise/dispatch.ts"
+						"Plans/integration-completion/contract-coverage.json"
 					],
 					"outcome": "Replace default unavailable effect authority only when negotiated producer exists. Map exact command/file/net/tool inputs to request-bound decisions and consume receipts; cancellation/revocation and lease lifetime govern the actual native/runtime effect. No grant-all or prompt-only enforcement. Keep the task to these 1-3 authored files and fewer than 500 changed lines; insert a bounded continuation before the dependent check when necessary.",
 					"backlog": ["M-03"],
 					"requires": ["MEGA-PREPARED-EXECUTION-BUILD"],
 					"produces": [],
 					"id": "MCOMP-13-02"
+				},
+				{
+					"id": "MCOMP-13-02A",
+					"label": "Preserve complete provider effect inputs",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/main/enterprise/dispatch.ts",
+						"src/shared/maestro-lib/codex/server-requests.ts",
+						"src/main/process-manager/spawners/OpencodeServerSpawner.ts"
+					],
+					"outcome": "Retain the complete Claude, Codex and OpenCode request beside each existing effect projection, including file contents, network inputs and execution options. Do not enable unqualified provider routes. Bounded continuation required by MCOMP-13-02; at most three authored files and fewer than 500 changed lines. Local fixture proof only; real paired/provider/native qualification remains separate.",
+					"backlog": ["M-03"],
+					"requires": ["MAESTRO-CONTRACT-INPUTS-BUILD"],
+					"produces": []
+				},
+				{
+					"id": "MCOMP-13-02B",
+					"label": "Test effect receipt and lease consumers",
+					"kind": "TEST",
+					"targets": [
+						"src/__tests__/shared/maestro-lib/managed/effects.test.ts",
+						"src/__tests__/shared/maestro-lib/managed/host-adapter.test.ts",
+						"docs/agent-guides/CANONICAL-UTILITIES.md"
+					],
+					"outcome": "Use declared local producers to test exact input/digest, receipt consumption, replay and unknown outcomes, cancellation, lease lifetime, actor/provider binding and changed policy/trust. Document the consumer boundary. Bounded continuation required by MCOMP-13-02; at most three authored files and fewer than 500 changed lines. Local fixture proof only; real paired/provider/native qualification remains separate.",
+					"backlog": ["M-03"],
+					"requires": ["MAESTRO-CONTRACT-INPUTS-BUILD"],
+					"produces": []
+				},
+				{
+					"id": "MCOMP-13-02C",
+					"label": "Test complete provider effect inputs",
+					"kind": "TEST",
+					"targets": [
+						"src/__tests__/main/process-manager/CodexAppServerSpawner.test.ts",
+						"src/__tests__/main/process-manager/ProcessManager.serveSpawn.test.ts"
+					],
+					"outcome": "Retain extraction expectations and prove file/network/execution fields participate in the request digest for both SDK request paths. Bounded continuation required by MCOMP-13-02; at most three authored files and fewer than 500 changed lines. Local fixture proof only; real paired/provider/native qualification remains separate.",
+					"backlog": ["M-03"],
+					"requires": ["MAESTRO-CONTRACT-INPUTS-BUILD"],
+					"produces": []
+				},
+				{
+					"id": "MCOMP-13-02D",
+					"label": "Recheck effect authority after relay consent",
+					"kind": "IMPLEMENT",
+					"targets": ["src/main/permission-relay/PermissionRelayServer.ts"],
+					"outcome": "Recheck the request-bound effect decision after human consent, so expiry, cancellation, revocation or changed input cannot spend an earlier allow. Bounded continuation required by MCOMP-13-02; at most three authored files and fewer than 500 changed lines. Local fixture proof only; real paired/provider/native qualification remains separate.",
+					"backlog": ["M-03"],
+					"requires": ["MAESTRO-CONTRACT-INPUTS-BUILD"],
+					"produces": []
+				},
+				{
+					"id": "MCOMP-13-02E",
+					"label": "Test relay exact inputs and delayed consent",
+					"kind": "TEST",
+					"targets": ["src/__tests__/main/permission-relay/relay-core.test.ts"],
+					"outcome": "Prove Claude edit/network inputs remain exact and a grant that ends while consent is pending denies at the relay reply. Bounded continuation required by MCOMP-13-02; at most three authored files and fewer than 500 changed lines. Local fixture proof only; real paired/provider/native qualification remains separate.",
+					"backlog": ["M-03"],
+					"requires": ["MAESTRO-CONTRACT-INPUTS-BUILD"],
+					"produces": []
 				},
 				{
 					"label": "Compose authority before desktop runtime admission",
@@ -2196,7 +2257,7 @@
 			"produces": ["MAESTRO-EFFECT-CONSUMERS-BUILD"],
 			"id": "MCOMP-13",
 			"path": ".maestro/playbooks/2026-10-29-Maestro-Integration-Completion/MCOMP-13.md",
-			"taskCount": 7,
+			"taskCount": 12,
 			"stage": "S06"
 		},
 		{
@@ -5364,7 +5425,7 @@
 				"MEGA-RUNTIME-ADAPTER-BUILD"
 			],
 			"nativeInputs": false,
-			"taskCount": 8
+			"taskCount": 13
 		},
 		{
 			"id": "S07",
@@ -5642,8 +5703,12 @@
 			"taskCount": 1
 		}
 	],
-	"taskCount": 317,
-	"taskCounts": { "IMPLEMENT": 213, "TEST": 44, "VERIFY": 60 },
+	"taskCount": 322,
+	"taskCounts": {
+		"IMPLEMENT": 215,
+		"TEST": 47,
+		"VERIFY": 60
+	},
 	"artifacts": {
 		"MEGA-CONTRACTS-FOUNDATION-BUILD": {
 			"producerDocument": "GCOMP-01",
@@ -6336,7 +6401,12 @@
 			"MCOMP-13-03",
 			"MCOMP-13-05",
 			"MCOMP-13-06",
-			"MCOMP-13-01A"
+			"MCOMP-13-01A",
+			"MCOMP-13-02A",
+			"MCOMP-13-02B",
+			"MCOMP-13-02C",
+			"MCOMP-13-02D",
+			"MCOMP-13-02E"
 		],
 		"PAIR-02": [
 			"GCOMP-08-01",
