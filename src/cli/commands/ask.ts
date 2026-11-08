@@ -18,6 +18,8 @@ import { resolveAgentId } from '../services/storage';
 import { withMaestroClient } from '../services/maestro-client';
 import { readCallerIdentity } from '../../shared/agentDelegation';
 import { exitIfMaestroNotRunning } from '../services/session-command';
+import { isBlankEnvValue } from '../../shared/agentEnvironment';
+import { CALLER_CREDENTIAL_ENV_VAR } from '../../shared/maestro-lib/runtime/turns';
 
 export interface AskOptions {
 	/**
@@ -119,6 +121,15 @@ export async function ask(agentId: string, question: string, options: AskOptions
 	}
 	const timeoutMs = Math.round(seconds * 1000);
 
+	// The credential a managed turn's process was spawned with (MCOMP-17-03AM). It is the
+	// host's proof of which live source this shell belongs to, so it is forwarded whenever this
+	// process holds one, even beside an explicit `--from`: the host checks the stated ids against
+	// it and refuses a mismatch, and a host that cannot resolve it refuses the ask. Dropping it
+	// would turn an authenticated caller back into stated ids. It is never printed.
+	const credential = process.env[CALLER_CREDENTIAL_ENV_VAR];
+	const callerCredential =
+		credential !== undefined && !isBlankEnvValue(credential) ? credential : undefined;
+
 	try {
 		const result = await withMaestroClient(async (client) =>
 			client.sendCommand<AskResponse>(
@@ -128,6 +139,7 @@ export async function ask(agentId: string, question: string, options: AskOptions
 					question,
 					fromSessionId,
 					...(fromTabId ? { fromTabId } : {}),
+					...(callerCredential !== undefined ? { callerCredential } : {}),
 					withContext: options.withContext === true,
 					timeoutMs,
 				},

@@ -28,6 +28,7 @@ import { withMaestroClient } from '../../../cli/services/maestro-client';
 import { resolveAgentId } from '../../../cli/services/storage';
 import { isolateAgentEnv } from '../../helpers/agentEnvIsolation';
 import { CALLER_AGENT_ID_ENV_VAR, CALLER_TAB_ID_ENV_VAR } from '../../../shared/agentDelegation';
+import { CALLER_CREDENTIAL_ENV_VAR } from '../../../shared/maestro-lib/runtime/turns';
 
 /** Wire `withMaestroClient` to a stub client and hand back its sendCommand spy. */
 function mockClient(response: Record<string, unknown>) {
@@ -41,7 +42,7 @@ function mockClient(response: Record<string, unknown>) {
 describe('ask command', () => {
 	// `--from` defaults to the caller identity in the environment, and the suite
 	// runs in whatever shell launched it - inside a Maestro agent that is a real id.
-	isolateAgentEnv([CALLER_AGENT_ID_ENV_VAR, CALLER_TAB_ID_ENV_VAR]);
+	isolateAgentEnv([CALLER_AGENT_ID_ENV_VAR, CALLER_TAB_ID_ENV_VAR, CALLER_CREDENTIAL_ENV_VAR]);
 
 	let logSpy: MockInstance;
 	let errorSpy: MockInstance;
@@ -191,6 +192,112 @@ describe('ask command', () => {
 
 			expect(sendCommand).not.toHaveBeenCalled();
 			expect(errorSpy).toHaveBeenCalledWith('Error: an agent cannot consult itself');
+		});
+	});
+
+	describe('forwarded caller credential (MCOMP-17-03AM)', () => {
+		const CREDENTIAL = 'cred-0123456789abcdef-secret';
+
+		/** Everything the command printed, on either stream. */
+		const printed = () =>
+			[...logSpy.mock.calls, ...errorSpy.mock.calls].map((call) => call.join(' ')).join('\n');
+
+		it('forwards the credential this process was spawned with beside its own ids', async () => {
+			process.env[CALLER_AGENT_ID_ENV_VAR] = 'caller-agent';
+			process.env[CALLER_TAB_ID_ENV_VAR] = 'caller-tab';
+			process.env[CALLER_CREDENTIAL_ENV_VAR] = CREDENTIAL;
+			const sendCommand = mockClient({ success: true, answer: 'yes' });
+
+			await ask('pedtome', 'q', {});
+
+			expect(sendCommand).toHaveBeenCalledTimes(1);
+			expect(sendCommand.mock.calls[0][0]).toMatchObject({
+				type: 'cross_agent_ask',
+				fromSessionId: 'caller-agent',
+				fromTabId: 'caller-tab',
+				callerCredential: CREDENTIAL,
+			});
+			expect(printed()).not.toContain(CREDENTIAL);
+			expect(exitSpy).not.toHaveBeenCalled();
+		});
+
+		it('sends no credential field when the variable is unset', async () => {
+			process.env[CALLER_AGENT_ID_ENV_VAR] = 'caller-agent';
+			process.env[CALLER_TAB_ID_ENV_VAR] = 'caller-tab';
+			const sendCommand = mockClient({ success: true, answer: 'yes' });
+
+			await ask('pedtome', 'q', {});
+
+			expect(sendCommand.mock.calls[0][0]).not.toHaveProperty('callerCredential');
+		});
+
+		it('treats a blank variable as unset rather than sending an empty credential', async () => {
+			process.env[CALLER_CREDENTIAL_ENV_VAR] = '   ';
+			const sendCommand = mockClient({ success: true, answer: 'yes' });
+
+			await ask('pedtome', 'q', { from: 'kensho' });
+
+			expect(sendCommand.mock.calls[0][0]).not.toHaveProperty('callerCredential');
+		});
+
+		it('still forwards the credential beside an explicit --from, so the host can refuse a mismatch', async () => {
+			process.env[CALLER_AGENT_ID_ENV_VAR] = 'caller-agent';
+			process.env[CALLER_TAB_ID_ENV_VAR] = 'caller-tab';
+			process.env[CALLER_CREDENTIAL_ENV_VAR] = CREDENTIAL;
+			const sendCommand = mockClient({ success: true, answer: 'yes' });
+
+			await ask('pedtome', 'q', { from: 'kensho' });
+
+			const [message] = sendCommand.mock.calls[0];
+			expect(message).toMatchObject({
+				fromSessionId: 'resolved-kensho',
+				callerCredential: CREDENTIAL,
+			});
+			expect(message).not.toHaveProperty('fromTabId');
+		});
+
+		it('reports a host refusal of the credential without echoing it', async () => {
+			process.env[CALLER_AGENT_ID_ENV_VAR] = 'caller-agent';
+			process.env[CALLER_TAB_ID_ENV_VAR] = 'caller-tab';
+			process.env[CALLER_CREDENTIAL_ENV_VAR] = CREDENTIAL;
+			mockClient({
+				type: 'cross_agent_ask_result',
+				success: false,
+				error: 'This host cannot authenticate a caller credential; nothing was asked.',
+			});
+
+			await ask('pedtome', 'q', {});
+
+			expect(errorSpy).toHaveBeenCalledWith(
+				'Error: This host cannot authenticate a caller credential; nothing was asked.'
+			);
+			expect(exitSpy).toHaveBeenCalledWith(1);
+			expect(printed()).not.toContain(CREDENTIAL);
+		});
+
+		it('keeps the credential out of --json output', async () => {
+			process.env[CALLER_AGENT_ID_ENV_VAR] = 'caller-agent';
+			process.env[CALLER_TAB_ID_ENV_VAR] = 'caller-tab';
+			process.env[CALLER_CREDENTIAL_ENV_VAR] = CREDENTIAL;
+			mockClient({ success: true, answer: 'yes', targetAgentName: 'PedTome' });
+
+			await ask('pedtome', 'q', { json: true });
+
+			const output = JSON.parse(logSpy.mock.calls[0][0] as string);
+			expect(output).toMatchObject({ success: true, answer: 'yes' });
+			expect(output).not.toHaveProperty('callerCredential');
+			expect(printed()).not.toContain(CREDENTIAL);
+		});
+
+		it('sends nothing, credential included, when the invocation is refused locally', async () => {
+			process.env[CALLER_AGENT_ID_ENV_VAR] = 'resolved-pedtome';
+			process.env[CALLER_CREDENTIAL_ENV_VAR] = CREDENTIAL;
+			const sendCommand = mockClient({ success: true });
+
+			await ask('pedtome', 'q', {});
+
+			expect(sendCommand).not.toHaveBeenCalled();
+			expect(printed()).not.toContain(CREDENTIAL);
 		});
 	});
 });
