@@ -68,7 +68,32 @@ export interface WorkflowOwnerReceipt {
 }
 
 /** The producer port. A host builds it over its endpoint socket; a test injects a table. */
+/** Trusted WORKFLOW-CONTEXT/1 adapter, supplied only after authenticated v2 negotiation.
+ * This is a local port, not a wire DTO. The producer binds registration/delegation,
+ * preserves the full input, reconciles prior pending operations on restart, and
+ * confirms settlement before returning released. Expiry never transfers ownership.
+ */
+export interface WorkflowOwnerLifecyclePort {
+	version: 1;
+	signal: AbortSignal;
+	current(): boolean;
+	invoke(
+		action: 'claim' | 'renew' | 'release',
+		input: WorkflowClaimInput,
+		prior: HeldWorkflowOwnership | null,
+		owner: WorkflowOwnerStanding,
+		effect?: 'applied' | 'no_effect' | 'uncertain'
+	): Promise<EndpointInvokeOutcome<unknown>>;
+}
+
+export interface WorkflowFenceLifetime {
+	signal: AbortSignal;
+	current(): boolean;
+	finish(effect: 'applied' | 'no_effect' | 'uncertain'): Promise<void>;
+}
+
 export interface WorkflowOwnerPort {
+	lifecycle?: WorkflowOwnerLifecyclePort;
 	claim(request: WorkflowOwnerRequest): Promise<EndpointInvokeOutcome<unknown>>;
 }
 
@@ -113,7 +138,7 @@ export function endpointWorkflowOwnerPort(
 // ---------------------------------------------------------------------------
 
 /** `held`: the registry confirmed it. `fenced`: the registry named another owner. `unknown`: an answer was lost. */
-export type HeldWorkflowState = 'held' | 'fenced' | 'unknown';
+export type HeldWorkflowState = 'held' | 'fenced' | 'unknown' | 'released';
 
 export interface HeldWorkflowOwnership {
 	workflowId: string;
@@ -122,7 +147,10 @@ export interface HeldWorkflowOwnership {
 	version: string;
 	triggerEventId: string;
 	ownerId: string;
-	ownerEpoch: number;
+	ownerEpoch: number | string;
+	lifecycleVersion?: 1;
+	expiresAt?: string;
+	pending?: 'claim' | 'renew' | 'release';
 	fencingToken: string;
 	/** The authority the fence is good under; a record for another one is not a fence here. */
 	authorityId: string;
@@ -145,7 +173,7 @@ export interface WorkflowOwnershipDocument {
 export type WorkflowClaimOutcome =
 	| {
 			state: 'owned';
-			fence: AutoRunOwnerFence;
+			fence: AutoRunOwnerFence & { lifetime?: WorkflowFenceLifetime };
 			held: HeldWorkflowOwnership;
 			/** `claimed`: newly issued; `confirmed`: the held values stand; `offline`: kept while the producer is unreachable. */
 			disposition: 'claimed' | 'confirmed' | 'offline';
@@ -166,7 +194,10 @@ export interface WorkflowFenceRefusal {
 	message: string;
 }
 
-export type WorkflowFenceAnswer = AutoRunOwnerFence | WorkflowFenceRefusal | null;
+export type WorkflowFenceAnswer =
+	| (AutoRunOwnerFence & { lifetime?: WorkflowFenceLifetime })
+	| WorkflowFenceRefusal
+	| null;
 
 export function isWorkflowFenceRefusal(
 	answer: WorkflowFenceAnswer
@@ -247,8 +278,13 @@ function heldProblem(value: unknown): string | null {
 	for (const key of HELD_IDS) {
 		if (typeof value[key] !== 'string' || value[key] === '') return `${key} is not an id`;
 	}
-	if (!isEpoch(value.ownerEpoch)) return 'ownerEpoch is not a count';
-	if (!['held', 'fenced', 'unknown'].includes(value.state as string)) return 'state is unknown';
+	if (
+		!isEpoch(value.ownerEpoch) &&
+		!(value.lifecycleVersion === 1 && isEndpointIdentifier(value.ownerEpoch))
+	)
+		return 'ownerEpoch is not a count';
+	if (!['held', 'fenced', 'unknown', 'released'].includes(value.state as string))
+		return 'state is unknown';
 	return null;
 }
 
@@ -257,6 +293,10 @@ export function createWorkflowOwnership(deps: WorkflowOwnershipDeps): WorkflowOw
 	const newId =
 		deps.newId ?? (() => `fence-${sha256Hex(`${deps.now()}-${Math.random()}`).slice(0, 32)}`);
 	const claims = createKeyedWriteQueue();
+	const live = new Map<
+		string,
+		{ lifetime: WorkflowFenceLifetime; controller: AbortController; clear(): void; stop(): void }
+	>();
 	let doc: WorkflowOwnershipDocument = { [STORE_SCHEMA_KEY]: 1, workflows: [] };
 	let loading: Promise<WorkflowOwnershipLoad> | null = null;
 	let loaded = false;
@@ -287,9 +327,9 @@ export function createWorkflowOwnership(deps: WorkflowOwnershipDeps): WorkflowOw
 	async function persist(): Promise<void> {
 		if (doc.workflows.length > maxWorkflows) {
 			const rank = (w: HeldWorkflowOwnership) => (w.state === 'held' ? 1 : 0);
-			const ordered = [...doc.workflows].sort(
-				(a, b) => rank(a) - rank(b) || a.confirmedAt.localeCompare(b.confirmedAt)
-			);
+			const ordered = doc.workflows
+				.filter((w) => w.lifecycleVersion !== 1 || w.state === 'released')
+				.sort((a, b) => rank(a) - rank(b) || a.confirmedAt.localeCompare(b.confirmedAt));
 			const dropped = new Set(ordered.slice(0, doc.workflows.length - maxWorkflows));
 			doc.workflows = doc.workflows.filter((w) => !dropped.has(w));
 		}
@@ -306,8 +346,249 @@ export function createWorkflowOwnership(deps: WorkflowOwnershipDeps): WorkflowOw
 		return existing ?? next;
 	}
 
+	async function lifecycleClaim(
+		input: WorkflowClaimInput,
+		port: WorkflowOwnerLifecyclePort,
+		action: 'claim' | 'renew' | 'release' = 'claim',
+		effect?: 'applied' | 'no_effect' | 'uncertain'
+	): Promise<WorkflowClaimOutcome> {
+		const key = input.workflow.workflowId;
+		const existing = find(key);
+		const owner = deps.owner();
+		const unavailable = (message: string): WorkflowClaimOutcome => ({
+			state: 'unavailable',
+			code: 'runtime-unavailable',
+			message,
+		});
+		const stop = () => {
+			live.get(key)?.stop();
+			live.delete(key);
+		};
+		if (
+			!owner ||
+			owner.policyRevision === null ||
+			port.version !== 1 ||
+			!port.current() ||
+			port.signal.aborted
+		) {
+			stop();
+			return unavailable('No current authenticated workflow lifecycle authority.');
+		}
+		if (
+			existing &&
+			(existing.ownerId !== owner.ownerId || existing.authorityId !== owner.authorityId)
+		) {
+			stop();
+			return unavailable('Existing workflow custody belongs to another owner or authority.');
+		}
+		if (!existing && doc.workflows.length >= maxWorkflows)
+			return unavailable(
+				'Workflow custody storage is full; unresolved ownership cannot be discarded.'
+			);
+		const standing = { ...owner };
+		const prior = existing ? { ...existing } : null;
+		const active = live.get(key);
+		const pending: HeldWorkflowOwnership = {
+			workflowId: key,
+			endpointWorkflowId: workflowEndpointId(key),
+			version: input.workflow.version,
+			triggerEventId: input.workflow.triggerEventId,
+			ownerId: owner.ownerId,
+			ownerEpoch: prior?.ownerEpoch ?? 0,
+			fencingToken: prior?.fencingToken ?? workflowEndpointId(newId()),
+			authorityId: owner.authorityId,
+			policyRevision: owner.policyRevision,
+			offlineEnabled: false,
+			state: 'unknown',
+			claimedAt: prior?.claimedAt ?? iso(),
+			confirmedAt: prior?.confirmedAt ?? iso(),
+			lastRunId: input.runId,
+			lastAttemptId: input.attemptId,
+			lifecycleVersion: 1,
+			pending: action,
+			expiresAt: prior?.expiresAt,
+			detail: 'Workflow operation awaiting producer reconciliation.',
+		};
+		if (action === 'release') stop();
+		const valid = () => {
+			const current = deps.owner();
+			return (
+				port.current() &&
+				!port.signal.aborted &&
+				deps.port()?.lifecycle === port &&
+				current?.ownerId === standing.ownerId &&
+				current.authorityId === standing.authorityId &&
+				current.policyRevision === standing.policyRevision &&
+				(action !== 'renew' || (!!active && !active.lifetime.signal.aborted))
+			);
+		};
+		try {
+			await upsert(existing, pending);
+			if (!valid()) {
+				stop();
+				return unavailable('Workflow authority changed before dispatch.');
+			}
+			const outcome = await port.invoke(
+				action,
+				structuredClone(input),
+				structuredClone(prior),
+				{ ...standing },
+				effect
+			);
+
+			const receipt =
+				outcome.status === 'ok' && isRecord(outcome.payload)
+					? structuredClone(outcome.payload)
+					: null;
+			const expires =
+				receipt && typeof receipt.expiresAt === 'string' ? Date.parse(receipt.expiresAt) : NaN;
+			const sameFence =
+				receipt &&
+				prior &&
+				prior.version === input.workflow.version &&
+				prior.triggerEventId === input.workflow.triggerEventId &&
+				receipt.ownerEpoch === prior.ownerEpoch &&
+				receipt.fencingToken === prior.fencingToken;
+			if (
+				!valid() ||
+				!receipt ||
+				receipt.workflowId !== pending.endpointWorkflowId ||
+				receipt.ownerId !== standing.ownerId ||
+				!isEndpointIdentifier(receipt.ownerEpoch) ||
+				!isEndpointIdentifier(receipt.fencingToken) ||
+				receipt.outcome !== { claim: 'owned', renew: 'renewed', release: 'released' }[action] ||
+				(action !== 'claim' && !sameFence) ||
+				(action !== 'release' && !(expires > deps.now() && expires - deps.now() <= 300_000))
+			) {
+				stop();
+				if (outcome.status === 'denied' && outcome.reason === 'owner_unfenced') {
+					await upsert(find(key), {
+						...pending,
+						state: 'fenced',
+						detail: 'The producer fenced this owner.',
+					});
+					return {
+						state: 'denied',
+						code: 'policy-denied',
+						message: 'The producer fenced this workflow owner.',
+						fenced: true,
+					};
+				}
+				return {
+					state: 'unknown',
+					code: 'outcome-unknown',
+					message: 'Workflow custody is uncertain; producer reconciliation is required.',
+				};
+			}
+			const kept = await upsert(find(key), {
+				...pending,
+				ownerEpoch: receipt.ownerEpoch,
+				fencingToken: receipt.fencingToken,
+				state: action === 'release' ? 'released' : 'held',
+				pending: undefined,
+				expiresAt: action === 'release' ? undefined : (receipt.expiresAt as string),
+				confirmedAt: iso(),
+				detail: null,
+			});
+			if (!valid() || (action !== 'release' && expires <= deps.now())) {
+				stop();
+				return unavailable('Workflow authority changed during persistence.');
+			}
+			if (action === 'release')
+				return unavailable('Workflow ownership was released by the producer.');
+			const previous = live.get(key);
+			if (!sameFence) stop();
+			const controller = previous && sameFence ? previous.controller : new AbortController();
+			const signal = controller.signal;
+			const expire = setTimeout(() => {
+				stop();
+			}, expires - deps.now());
+			expire.unref?.();
+			const revoke = () => stop();
+			port.signal.addEventListener('abort', revoke, { once: true });
+			const lifetime: WorkflowFenceLifetime = {
+				signal,
+				current: () =>
+					!signal.aborted &&
+					port.current() &&
+					!port.signal.aborted &&
+					deps.port()?.lifecycle === port &&
+					deps.owner()?.ownerId === standing.ownerId &&
+					deps.owner()?.authorityId === standing.authorityId &&
+					deps.owner()?.policyRevision === standing.policyRevision &&
+					Date.parse(find(key)?.expiresAt ?? '') > deps.now(),
+				finish: async (result) => {
+					if (signal.aborted) return;
+					if (find(key)?.pending === 'renew' && find(key)?.lastAttemptId === input.attemptId) {
+						stop();
+						return;
+					}
+					await claims.enqueue(key, async () => {
+						const latest = find(key);
+						if (
+							!latest ||
+							latest.ownerEpoch !== receipt.ownerEpoch ||
+							latest.fencingToken !== receipt.fencingToken ||
+							latest.lastRunId !== input.runId ||
+							latest.lastAttemptId !== input.attemptId ||
+							latest.state === 'released'
+						)
+							return;
+						await lifecycleClaim(input, port, 'release', result);
+					});
+				},
+			};
+			previous?.clear();
+			const clear = () => {
+				clearTimeout(expire);
+				clearTimeout(renewal);
+				port.signal.removeEventListener('abort', revoke);
+			};
+			live.set(key, {
+				lifetime,
+				controller,
+				clear,
+				stop: () => {
+					clear();
+					controller.abort();
+				},
+			});
+			const renewal = setTimeout(
+				() => {
+					void claims.enqueue(key, () => lifecycleClaim(input, port, 'renew'));
+				},
+				Math.max(1, (expires - deps.now()) / 2)
+			);
+			renewal.unref?.();
+			return {
+				state: 'owned',
+				fence: { ...fenceOf(kept), lifetime },
+				held: { ...kept },
+				disposition: sameFence ? 'confirmed' : 'claimed',
+			};
+		} catch {
+			stop();
+			return {
+				state: 'unknown',
+				code: 'outcome-unknown',
+				message: 'Workflow operation or custody persistence failed; reconciliation is required.',
+			};
+		}
+	}
+
 	async function claim(input: WorkflowClaimInput): Promise<WorkflowClaimOutcome> {
 		const { workflow } = input;
+		const lifecycle = deps.port()?.lifecycle;
+		if (lifecycle) return lifecycleClaim(input, lifecycle);
+		if (find(workflow.workflowId)?.lifecycleVersion === 1) {
+			live.get(workflow.workflowId)?.stop();
+			live.delete(workflow.workflowId);
+			return {
+				state: 'unavailable',
+				code: 'capability-unsupported',
+				message: 'Workflow lifecycle custody cannot be downgraded to the legacy claim protocol.',
+			};
+		}
 		const at = iso();
 		const unavailable = (
 			message: string,
@@ -340,7 +621,7 @@ export function createWorkflowOwnership(deps: WorkflowOwnershipDeps): WorkflowOw
 			runId: workflowEndpointId(input.runId),
 			attemptId: workflowEndpointId(input.attemptId),
 			ownerId: owner.ownerId,
-			ownerEpoch: prior?.ownerEpoch ?? 0,
+			ownerEpoch: typeof prior?.ownerEpoch === 'number' ? prior.ownerEpoch : 0,
 			fencingToken: prior?.fencingToken ?? workflowEndpointId(newId()),
 			offlineEnabled: input.offlineEnabled ?? false,
 			policyRevision: owner.policyRevision,
@@ -470,11 +751,14 @@ export function createWorkflowOwnership(deps: WorkflowOwnershipDeps): WorkflowOw
 			if (!loaded) return null;
 			const owner = deps.owner();
 			const record = find(workflow.workflowId);
+			if (record?.lifecycleVersion === 1)
+				return live.get(workflow.workflowId)?.lifetime.current() ? fenceOf(record) : null;
 			return record && owner && record.state === 'held' && record.authorityId === owner.authorityId
 				? fenceOf(record)
 				: null;
 		},
 		async claim(input) {
+			input = structuredClone(input);
 			const read = await load();
 			if (!read.ok) {
 				return {
@@ -485,7 +769,7 @@ export function createWorkflowOwnership(deps: WorkflowOwnershipDeps): WorkflowOw
 			}
 			return claims.enqueue(input.workflow.workflowId, () => claim(input));
 		},
-		held: () => doc.workflows,
+		held: () => doc.workflows.map((record) => ({ ...record })),
 	};
 }
 

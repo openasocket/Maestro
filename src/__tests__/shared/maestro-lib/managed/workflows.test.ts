@@ -11,7 +11,7 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { EndpointInvokeOutcome } from '../../../../shared/maestro-lib/managed/endpoint-port';
 import {
@@ -23,6 +23,7 @@ import {
 	workflowFenceOf,
 	workflowOwnerReceiptProblems,
 	type WorkflowOwnerPort,
+	type WorkflowOwnerLifecyclePort,
 	type WorkflowOwnerRequest,
 	type WorkflowOwnerStanding,
 } from '../../../../shared/maestro-lib/managed/workflows';
@@ -104,6 +105,146 @@ describe('workflow ownership', () => {
 			newId,
 		});
 	}
+
+	describe('negotiated lifecycle custody', () => {
+		const signals: AbortController[] = [];
+		afterEach(() => {
+			signals.splice(0).forEach((s) => s.abort());
+			vi.useRealTimers();
+		});
+		function producer() {
+			const signal = new AbortController();
+			signals.push(signal);
+			const port = fakePort(owned(1, 'legacy'));
+			const invoke = vi.fn<WorkflowOwnerLifecyclePort['invoke']>(
+				async (action, input, prior, owner) => {
+					expect(JSON.parse(fs.readFileSync(file, 'utf8')).workflows[0]).toMatchObject({
+						state: 'unknown',
+						pending: action,
+					});
+					return {
+						status: 'ok',
+						payload: {
+							outcome: { claim: 'owned', renew: 'renewed', release: 'released' }[action],
+							workflowId: workflowEndpointId(input.workflow.workflowId),
+							ownerId: owner.ownerId,
+							ownerEpoch: typeof prior?.ownerEpoch === 'string' ? prior.ownerEpoch : 'opaque-epoch',
+							fencingToken: 'server-fence',
+							expiresAt: new Date(now + 10_000).toISOString(),
+						},
+					};
+				}
+			);
+			port.lifecycle = { version: 1, signal: signal.signal, current: () => true, invoke };
+			return { port, invoke, signal, store: ownership(port) };
+		}
+		async function claim(store: ReturnType<typeof ownership>, run = RUN) {
+			const result = await store.claim({ workflow: WORKFLOW, ...run, offlineEnabled: true });
+			if (result.state !== 'owned' || !result.fence.lifetime)
+				throw new Error(JSON.stringify(result));
+			return result.fence.lifetime;
+		}
+		it('persists opaque custody, reclaims on restart and releases only on producer acknowledgment', async () => {
+			const { port, invoke, store } = producer();
+			await claim(store);
+			const restarted = ownership(port);
+			await restarted.load();
+			expect(restarted.fence(WORKFLOW)).toBeNull();
+			const lifetime = await claim(restarted, RETRY);
+			expect(invoke.mock.calls[1][2]).toMatchObject({
+				ownerEpoch: 'opaque-epoch',
+				fencingToken: 'server-fence',
+			});
+			await lifetime.finish('applied');
+			expect(restarted.held()[0].state).toBe('released');
+			expect(lifetime.signal.aborted).toBe(true);
+			expect(port.requests).toHaveLength(0);
+		});
+		it('renews the same live signal, then stops it when the producer fences the owner', async () => {
+			vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+			const { invoke, store } = producer();
+			const lifetime = await claim(store);
+			now += 5000;
+			await vi.advanceTimersByTimeAsync(5000);
+			await vi.waitFor(() => expect(store.held()[0].confirmedAt).toBe(new Date(now).toISOString()));
+			expect(invoke.mock.calls[1][0]).toBe('renew');
+			expect(lifetime.signal.aborted).toBe(false);
+			invoke.mockResolvedValue({ status: 'denied', reason: 'owner_unfenced' });
+			now += 5000;
+			await vi.advanceTimersByTimeAsync(5000);
+			await vi.waitFor(() => expect(lifetime.signal.aborted).toBe(true));
+			expect(store.fence(WORKFLOW)).toBeNull();
+		});
+		it.each(['unknown', 'unavailable', 'throw'] as const)(
+			'retains lost release custody for restart: %s',
+			async (status) => {
+				const { invoke, port, store } = producer();
+				const lifetime = await claim(store);
+				invoke.mockImplementation(async () => {
+					if (status === 'throw') throw new Error('lost');
+					return status === 'unknown'
+						? { status, message: 'lost' }
+						: { status, reason: 'transport', message: 'offline' };
+				});
+				await lifetime.finish('uncertain');
+				expect(store.held()[0]).toMatchObject({
+					state: 'unknown',
+					pending: 'release',
+					ownerEpoch: 'opaque-epoch',
+				});
+				const restarted = ownership(port);
+				await restarted.load();
+				expect(restarted.fence(WORKFLOW)).toBeNull();
+				expect((await restarted.claim({ workflow: WORKFLOW, ...RETRY })).state).toBe('unknown');
+				expect(invoke.mock.calls.at(-1)?.[2]).toMatchObject({ pending: 'release' });
+			}
+		);
+		it('keeps a lost first claim intent and never falls back to v1', async () => {
+			const { invoke, port, store } = producer();
+			invoke.mockResolvedValue({ status: 'unknown', message: 'lost' });
+			expect((await store.claim({ workflow: WORKFLOW, ...RUN })).state).toBe('unknown');
+			expect(store.held()[0]).toMatchObject({ pending: 'claim', lastAttemptId: RUN.attemptId });
+			delete port.lifecycle;
+			expect((await ownership(port).claim({ workflow: WORKFLOW, ...RETRY })).state).toBe(
+				'unavailable'
+			);
+			expect(port.requests).toHaveLength(0);
+		});
+		it('revokes active custody on authenticated connection loss and rejects stale release handles', async () => {
+			const { invoke, signal, store } = producer();
+			const old = await claim(store);
+			const latest = await claim(store, RETRY);
+			await old.finish('no_effect');
+			expect(invoke).toHaveBeenCalledTimes(2);
+			expect(latest.current()).toBe(true);
+			signal.abort();
+			expect(old.signal.aborted).toBe(true);
+			expect(store.fence(WORKFLOW)).toBeNull();
+		});
+		it('expires an active fence while renewal is unanswered', async () => {
+			vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+			const { invoke, store } = producer();
+			const lifetime = await claim(store);
+			invoke.mockImplementation(() => new Promise(() => {}));
+			now += 10_000;
+			await vi.advanceTimersByTimeAsync(10_000);
+			expect(lifetime.signal.aborted).toBe(true);
+			expect(store.fence(WORKFLOW)).toBeNull();
+			expect(store.held()[0].state).not.toBe('released');
+			await lifetime.finish('uncertain');
+		});
+		it('rejects owner changes across an awaited claim', async () => {
+			const { invoke, store } = producer();
+			const original = invoke.getMockImplementation()!;
+			invoke.mockImplementation(async (...args) => {
+				const result = await original(...args);
+				standing = { ...STANDING, ownerId: 'another' };
+				return result;
+			});
+			expect((await store.claim({ workflow: WORKFLOW, ...RUN })).state).toBe('unknown');
+			expect(store.fence(WORKFLOW)).toBeNull();
+		});
+	});
 
 	it('a first claim proposes epoch 0 and a nonce, holds what the registry answered, and persists it', async () => {
 		const port = fakePort(owned(4, 'token-A'));

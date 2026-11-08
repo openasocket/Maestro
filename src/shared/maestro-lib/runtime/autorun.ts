@@ -100,7 +100,11 @@ import {
 	type ManagedHostAdapter,
 } from '../managed/host-adapter';
 import type { ManagedInstallationIdentity } from '../managed/types';
-import type { WorkflowFenceAnswer } from '../managed/workflows';
+import {
+	isWorkflowFenceRefusal,
+	type WorkflowFenceAnswer,
+	type WorkflowFenceLifetime,
+} from '../managed/workflows';
 import type { MaestroPaths } from '../paths/resolve';
 import { createPromptLoaderFor } from '../prompts/load';
 import { readHistory } from '../store/read-history';
@@ -216,6 +220,9 @@ interface RunHandle {
 	documents: string[];
 	folder: string;
 	done: Promise<void>;
+	workflowLifetime?: WorkflowFenceLifetime;
+	removeWorkflowListener?(): void;
+	admitted?: boolean;
 }
 
 const ok = <T>(value: T): ClientResult<T> => ({ ok: true, value });
@@ -525,8 +532,37 @@ export function createRuntimeAutoRun(options: RuntimeAutoRunOptions): RuntimeAut
 				? {
 						managed: {
 							port: spawnPort(managed),
-							fence: (run) => managed.workflowFence?.(workflow, run) ?? null,
-							...(managed.onAdmission ? { onAdmission: managed.onAdmission } : {}),
+							fence: async (attempt) => {
+								const answer = (await managed.workflowFence?.(workflow, attempt)) ?? null;
+								if (answer && !isWorkflowFenceRefusal(answer) && answer.lifetime) {
+									const run = runs.get(agentId);
+									const lifetime = answer.lifetime;
+									if (!run || run.abort.signal.aborted || !lifetime.current())
+										return {
+											fence: null,
+											state: 'unavailable',
+											code: 'runtime-unavailable',
+											message: 'Workflow ownership is no longer live.',
+										};
+									run.removeWorkflowListener?.();
+									run.workflowLifetime = lifetime;
+									const stop = () => {
+										run.controller.requestStop();
+										run.abort.abort();
+										void registry.stopAgent(agentId);
+									};
+									lifetime.signal.addEventListener('abort', stop, { once: true });
+									run.removeWorkflowListener = () =>
+										lifetime.signal.removeEventListener('abort', stop);
+									if (!lifetime.current()) stop();
+								}
+								return answer;
+							},
+							onAdmission: (event) => {
+								const run = runs.get(agentId);
+								if (run && event.kind === 'admitted') run.admitted = true;
+								managed.onAdmission?.(event);
+							},
 						},
 					}
 				: {}),
@@ -649,6 +685,14 @@ export function createRuntimeAutoRun(options: RuntimeAutoRunOptions): RuntimeAut
 				// Whatever the engine said before it threw, the run did not end that way.
 				outcome = { status: 'error', reason: errorText(error) };
 			} finally {
+				run.removeWorkflowListener?.();
+				try {
+					await run.workflowLifetime?.finish(
+						!run.admitted ? 'no_effect' : outcome?.status === 'completed' ? 'applied' : 'uncertain'
+					);
+				} catch (error) {
+					logger.warn(`Workflow settlement remains uncertain: ${errorText(error)}`, LOG_CONTEXT);
+				}
 				runs.delete(run.agentId);
 				bus.emit({
 					type: 'autorun.ended',
