@@ -10,6 +10,7 @@ import { tunnelManager } from '../tunnel-manager';
 import { createRemoteHostStatusProvider } from './remote-host-status';
 import { logger } from '../utils/logger';
 import { isWebContentsAvailable } from '../utils/safe-send';
+import { withdrawCrossAgentConsult } from '../cross-agent/cross-agent-router';
 import type { ProcessManager } from '../process-manager';
 import type { SettingsStoreInterface as SettingsStore } from '../stores/types';
 import type { DebugPackageDependencies } from '../debug-package';
@@ -193,6 +194,13 @@ export function createWebServerFactory(deps: WebServerFactoryDependencies) {
 		server.setCallerSourceResolver(
 			(credential) => deps.getProcessManager()?.callerSourceOf(credential) ?? null
 		);
+
+		// When that caller loses custody mid-consult, the ask handler withdraws the ask and hands
+		// over the dispatch ticket it issued (MCOMP-17-03AW). The router cancels the consult the
+		// ticket started and tombstones the ticket, so a later arrival on it is refused as canceled.
+		server.setCallerConsultWithdrawer((ticket) => {
+			withdrawCrossAgentConsult(ticket);
+		});
 
 		registerSessionCallbacks(server, deps);
 		registerThemeCallbacks(server, deps);

@@ -71,6 +71,8 @@ vi.mock('../../../main/web-server/WebServer', () => {
 			setConsultAgentCallback = vi.fn();
 			// MCOMP-17-03AR: the factory composes the caller credential resolver on every build.
 			setCallerSourceResolver = vi.fn();
+			// MCOMP-17-03AW: and the consult withdrawer beside it.
+			setCallerConsultWithdrawer = vi.fn();
 			setNoteAgentDelegationCallback = vi.fn();
 			setEnqueueCommandCallback = vi.fn();
 			setListQueueCallback = vi.fn();
@@ -225,6 +227,11 @@ vi.mock('../../../shared/cli-activity', () => ({
 	getSessionIdsBusyWithCli: vi.fn(() => new Set<string>()),
 }));
 
+// MCOMP-17-03AW: the factory hands withdrawn ask tickets to the cross-agent router.
+vi.mock('../../../main/cross-agent/cross-agent-router', () => ({
+	withdrawCrossAgentConsult: vi.fn().mockReturnValue(true),
+}));
+
 vi.mock('../../../main/group-chat/group-chat-queue', () => ({
 	steerQueuedItem: vi.fn().mockResolvedValue({ outcome: 'delivered', targets: ['Moderator'] }),
 	steerNewMessage: vi.fn().mockResolvedValue({ outcome: 'refused', verdict: 'refused' }),
@@ -248,6 +255,7 @@ import {
 } from '../../../main/concerto-html';
 import { getSessionIdsBusyWithCli } from '../../../shared/cli-activity';
 import { steerNewMessage, steerQueuedItem } from '../../../main/group-chat/group-chat-queue';
+import { withdrawCrossAgentConsult } from '../../../main/cross-agent/cross-agent-router';
 
 describe('web-server/web-server-factory', () => {
 	let mockSettingsStore: WebServerFactoryDependencies['settingsStore'];
@@ -537,6 +545,49 @@ describe('web-server/web-server-factory', () => {
 			expect(resolver('cred-1')).toBeNull();
 			expect(after).toHaveBeenCalledWith('cred-1');
 			expect(before).toHaveBeenCalledTimes(1);
+		});
+	});
+
+	describe('caller consult withdrawer composition (MCOMP-17-03AW)', () => {
+		it('composes exactly one withdrawer on every server it builds', () => {
+			const createWebServer = createWebServerFactory(deps);
+			const first = createWebServer() as any;
+			const second = createWebServer({ lanAccess: true }) as any;
+
+			expect(first.setCallerConsultWithdrawer).toHaveBeenCalledTimes(1);
+			expect(second.setCallerConsultWithdrawer).toHaveBeenCalledTimes(1);
+			expect(typeof first.setCallerConsultWithdrawer.mock.calls[0][0]).toBe('function');
+		});
+
+		it('leaves the router uncalled until an ask is withdrawn', () => {
+			vi.mocked(withdrawCrossAgentConsult).mockClear();
+			createWebServerFactory(deps)();
+
+			expect(withdrawCrossAgentConsult).not.toHaveBeenCalled();
+		});
+
+		it('hands the withdrawn ticket to the router unchanged, once per withdrawal', () => {
+			vi.mocked(withdrawCrossAgentConsult).mockClear();
+			const server = createWebServerFactory(deps)() as any;
+			const withdrawer = server.setCallerConsultWithdrawer.mock.calls[0][0];
+
+			expect(withdrawer('ticket-1')).toBeUndefined();
+			expect(withdrawCrossAgentConsult).toHaveBeenCalledTimes(1);
+			expect(withdrawCrossAgentConsult).toHaveBeenCalledWith('ticket-1');
+
+			withdrawer('ticket-2');
+			expect(withdrawCrossAgentConsult).toHaveBeenCalledTimes(2);
+			expect(withdrawCrossAgentConsult).toHaveBeenLastCalledWith('ticket-2');
+		});
+
+		it('hands nothing back to the ask handler when the router finds no consult', () => {
+			vi.mocked(withdrawCrossAgentConsult).mockClear();
+			vi.mocked(withdrawCrossAgentConsult).mockReturnValueOnce(false);
+			const server = createWebServerFactory(deps)() as any;
+			const withdrawer = server.setCallerConsultWithdrawer.mock.calls[0][0];
+
+			expect(withdrawer('spent-ticket')).toBeUndefined();
+			expect(withdrawCrossAgentConsult).toHaveBeenCalledWith('spent-ticket');
 		});
 	});
 

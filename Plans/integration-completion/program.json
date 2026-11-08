@@ -4380,6 +4380,20 @@
 					"produces": []
 				},
 				{
+					"id": "MCOMP-17-03AW",
+					"label": "Compose withdrawCrossAgentConsult into the desktop web server factory",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/main/web-server/web-server-factory.ts",
+						"src/__tests__/main/web-server/web-server-factory.test.ts",
+						"Plans/integration-completion/program.json"
+					],
+					"outcome": "Consume MAESTRO-EFFECT-CONSUMERS-BUILD and its pinned MAESTRO-CONTRACT-INPUTS-BUILD dependency. Bounded prerequisite continuation of MCOMP-17-03 after MCOMP-17-03AV: the desktop web server factory composes server.setCallerConsultWithdrawer on every server it builds, handing the dispatch ticket of a credentialed ask whose caller lost custody to withdrawCrossAgentConsult in the cross-agent router, so the consult it started is cancelled and a later arrival on the same ticket is refused as canceled. Exercise one composition per built server, the ticket forwarded unchanged to the router, one router call per withdrawal with nothing handed back to the ask handler, a router left uncalled until an ask is withdrawn, and a mutation check. Background/consult and Auto Run child credentials and room owner lifetime remain pending. Reuse WORKFLOW-CONTEXT/1; no new wire capability, producer mapping or paired/provider/native qualification. Keep to three authored files and fewer than 500 changed lines.",
+					"backlog": ["M-04"],
+					"requires": ["MAESTRO-EFFECT-CONSUMERS-BUILD"],
+					"produces": []
+				},
+				{
 					"label": "Bind Auto Run Cue and nested work at dispatch",
 					"kind": "IMPLEMENT",
 					"targets": [
@@ -4422,7 +4436,7 @@
 			"produces": ["MAESTRO-WORKFLOW-CONSUMERS-BUILD"],
 			"id": "MCOMP-17",
 			"path": ".maestro/playbooks/2026-10-29-Maestro-Integration-Completion/MCOMP-17.md",
-			"taskCount": 53,
+			"taskCount": 54,
 			"stage": "S10"
 		},
 		{
@@ -6212,7 +6226,7 @@
 				"PAIR-DIRECT-EVIDENCE"
 			],
 			"nativeInputs": false,
-			"taskCount": 60
+			"taskCount": 61
 		},
 		{
 			"id": "S11",
@@ -6416,8 +6430,8 @@
 			"taskCount": 1
 		}
 	],
-	"taskCount": 373,
-	"taskCounts": { "IMPLEMENT": 264, "TEST": 49, "VERIFY": 60 },
+	"taskCount": 374,
+	"taskCounts": { "IMPLEMENT": 265, "TEST": 49, "VERIFY": 60 },
 	"artifacts": {
 		"MEGA-CONTRACTS-FOUNDATION-BUILD": {
 			"producerDocument": "GCOMP-01",
@@ -7206,6 +7220,7 @@
 			"MCOMP-17-03AT",
 			"MCOMP-17-03AU",
 			"MCOMP-17-03AV",
+			"MCOMP-17-03AW",
 			"MCOMP-17-03",
 			"MCOMP-17-04",
 			"MCOMP-17-05",
