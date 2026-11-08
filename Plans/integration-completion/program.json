@@ -2637,6 +2637,23 @@
           "id": "MCOMP-09-05"
         },
         {
+          "id": "MCOMP-09-05A",
+          "label": "Test composed headless lifecycle and record the custody contract gap",
+          "kind": "TEST",
+          "targets": [
+            "src/__tests__/cli/services/host-managed.test.ts",
+            "src/__tests__/cli/services/runtime-host.test.ts",
+            "Plans/integration-completion/contract-coverage.json"
+          ],
+          "outcome": "Continuation of MCOMP-09-05. Reuse fakeCustody and fakeEndpoint with verified pinned public schemas. Prove enrollment pending without authority, registration, policy refresh, reconnect denial/recovery, terminal close, identity mismatch, custody loss and default runtime-host standing. Record HEADLESS-CUSTODY/1 as proposed, never negotiated or production capability. Preserve real headless/native qualification in MCOMP-14, MCOMP-32 and MCOMP-34. At most three authored files and fewer than 500 changed lines.",
+          "backlog": [
+            "M-01",
+            "M-02"
+          ],
+          "requires": [],
+          "produces": []
+        },
+        {
           "label": "Test ordinary managed APIs and custody failure",
           "kind": "TEST",
           "targets": [
@@ -2680,7 +2697,7 @@
       ],
       "id": "MCOMP-09",
       "path": ".maestro/playbooks/2026-10-29-Maestro-Integration-Completion/MCOMP-09.md",
-      "taskCount": 11,
+      "taskCount": 12,
       "stage": "S04"
     },
     {
@@ -7292,7 +7309,7 @@
         "MEGA-CONTRACTS-FOUNDATION-BUILD"
       ],
       "nativeInputs": false,
-      "taskCount": 17
+      "taskCount": 18
     },
     {
       "id": "S05",
@@ -7646,10 +7663,10 @@
       "taskCount": 1
     }
   ],
-  "taskCount": 314,
+  "taskCount": 315,
   "taskCounts": {
     "IMPLEMENT": 213,
-    "TEST": 41,
+    "TEST": 42,
     "VERIFY": 60
   },
   "artifacts": {
@@ -8073,6 +8090,7 @@
       "MCOMP-09-02",
       "MCOMP-09-02A",
       "MCOMP-09-05",
+      "MCOMP-09-05A",
       "MCOMP-09-06",
       "MCOMP-09-07",
       "MCOMP-10-01",
@@ -8096,6 +8114,7 @@
       "MCOMP-09-04B",
       "MCOMP-09-04C",
       "MCOMP-09-05",
+      "MCOMP-09-05A",
       "MCOMP-09-06",
       "MCOMP-09-07",
       "GCOMP-10-01",
