@@ -237,7 +237,8 @@ describe('broker dispatch bridge', () => {
 		});
 		expect(receipt?.effect.endedAt).not.toBeNull();
 		// Written through the store writer: the file carries the same record.
-		await new Promise((resolve) => setTimeout(resolve, 20));
+		await dispatch.flush();
+		expect(dispatch.persistFailures()).toBe(0);
 		const written = JSON.parse(fs.readFileSync(file, 'utf8')) as { receipts: unknown[] };
 		expect(written.receipts).toHaveLength(1);
 		expect(written.receipts[0]).toMatchObject({
@@ -309,7 +310,8 @@ describe('broker dispatch bridge', () => {
 		expect(admitted.state).toBe('admitted');
 		if (admitted.state !== 'admitted') return;
 		admitted.lease.bind(99);
-		await new Promise((resolve) => setTimeout(resolve, 20));
+		await dispatch.flush();
+		expect(dispatch.persistFailures()).toBe(0);
 
 		// A second process over the same ledger: the bound lease is nobody's any more.
 		const again = bridge(file);
