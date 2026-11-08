@@ -6,6 +6,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Stop's remote half is observed here, never sent: a real one runs ssh.
@@ -568,6 +569,300 @@ describe('background turns', () => {
 			asked = [];
 			admissions = [];
 			leases = 0;
+		});
+
+		describe('live background source custody', () => {
+			it.each([true, false])(
+				'retains original context and prepared readOnlyMode=%s',
+				async (readOnlyMode) => {
+					const authority = authorityOf(() => 'allow');
+					const { background } = managedTurns(() => ({ text: 'working', hold: true }), authority);
+					const runner = background.groupChatRunner(handlers);
+					const spawn = spawnOf({ readOnlyMode, delegation: carried(3) });
+					expect(background.sourceCustody(spawn.processId)).toBeNull();
+					const started = await runner.start(spawn);
+					expect(started.success).toBe(true);
+					const custody = background.sourceCustody(spawn.processId)!;
+					expect(custody.context).toBe(asked[0].context);
+					expect(custody.writable).toBe(!readOnlyMode);
+					expect(authority.live()[0].pid()).toBe(started.pid);
+					spawn.readOnlyMode = !readOnlyMode;
+					expect(background.sourceCustody(spawn.processId)).toEqual(custody);
+					expect(background.sourceCustody('other-process')).toBeNull();
+					runner.stop(spawn.processId);
+					expect(background.sourceCustody(spawn.processId)).toBeNull();
+					await background.whenSettled(() => true);
+					expect(authority.live()).toEqual([]);
+					await runner.start(spawn);
+					expect(background.sourceCustody(spawn.processId)?.context).not.toBe(custody.context);
+					expect(background.sourceCustody(spawn.processId)?.writable).toBe(readOnlyMode);
+				}
+			);
+
+			it.each([
+				'policy',
+				'sources',
+				'actor',
+				'authority',
+				'standing',
+				'unreadable',
+				'context',
+				'lease',
+				'revoked',
+			] as const)(
+				'withdraws custody on %s drift without reporting another admission',
+				async (change) => {
+					const authority = authorityOf(() => 'allow');
+					let port = portOf(authority);
+					let unreadable = false;
+					const { background } = managedTurns(
+						() => ({ text: 'working', hold: true }),
+						authority,
+						null,
+						() => {
+							if (unreadable) throw new Error('custody unavailable');
+							return port;
+						}
+					);
+					await background.groupChatRunner(handlers).start(spawnOf());
+					const custody = background.sourceCustody(PARTICIPANT)!;
+					expect(custody.context).toBe(asked[0].context);
+					const before = admissions.length;
+					switch (change) {
+						case 'policy':
+							port = portOf(authority, actor.id, 4);
+							break;
+						case 'sources':
+							port.policy = () => ({
+								sources: [{ kind: 'endpoint', id: 'changed', revision: 3 }],
+								policyRevision: 3,
+							});
+							break;
+						case 'actor':
+							port = portOf(authority, 'replacement');
+							break;
+						case 'authority':
+							port = portOf(authorityOf(() => 'allow'));
+							break;
+						case 'standing':
+							port = portOf(null);
+							break;
+						case 'unreadable':
+							unreadable = true;
+							break;
+						case 'context':
+							custody.context.identity.attemptId = 'tampered';
+							break;
+						case 'lease':
+							vi.spyOn(authority, 'live').mockReturnValueOnce([]);
+							break;
+						case 'revoked':
+							authority.revoke(authority.live()[0].leaseId, 'source withdrawn');
+							break;
+					}
+					expect(background.sourceCustody(PARTICIPANT)).toBeNull();
+					expect(admissions).toHaveLength(before);
+				}
+			);
+
+			it.each(['pending', 'denied', 'standalone'] as const)(
+				'supplies no %s custody',
+				async (mode) => {
+					const authority = authorityOf(() => (mode === 'denied' ? 'deny' : 'allow'));
+					const admission = Promise.withResolvers<void>();
+					if (mode === 'pending') {
+						const admit = authority.admit.bind(authority);
+						vi.spyOn(authority, 'admit').mockImplementation(async (request) => {
+							await admission.promise;
+							return admit(request);
+						});
+					}
+					const { background } = managedTurns(
+						() => ({ text: 'working', hold: true }),
+						mode === 'standalone' ? null : authority
+					);
+					const pending = background.groupChatRunner(handlers).start(spawnOf());
+					try {
+						if (mode === 'pending')
+							await vi.waitFor(() => expect(authority.admit).toHaveBeenCalled());
+						else await pending;
+						expect(background.sourceCustody(PARTICIPANT)).toBeNull();
+					} finally {
+						admission.resolve();
+						await pending;
+					}
+				}
+			);
+
+			it.each(['stop', 'revoke'] as const)(
+				'observes a %s during the current scope read',
+				async (change) => {
+					const authority = authorityOf(() => 'allow');
+					const port = portOf(authority);
+					const { background } = managedTurns(
+						() => ({ text: 'working', hold: true }),
+						authority,
+						null,
+						() => port
+					);
+					const runner = background.groupChatRunner(handlers);
+					await runner.start(spawnOf());
+					expect(background.sourceCustody(PARTICIPANT)).not.toBeNull();
+					const context = port.context.bind(port);
+					port.context = (input) => {
+						if (change === 'stop') runner.stop(PARTICIPANT);
+						else authority.revoke(authority.live()[0].leaseId, 'revoked during recheck');
+						return context(input);
+					};
+					expect(background.sourceCustody(PARTICIPANT)).toBeNull();
+				}
+			);
+
+			it('clears custody before asynchronous end reporting and on registry shutdown', async () => {
+				const authority = authorityOf(() => 'allow');
+				const reportedEnd = Promise.withResolvers<void>();
+				const releaseReport = Promise.withResolvers<void>();
+				const { background } = managedTurns(
+					({ processId }) => ({ text: 'answer', hold: processId === MODERATOR }),
+					authority
+				);
+				const runner = background.groupChatRunner({
+					...handlers,
+					onEnd: async () => {
+						reportedEnd.resolve();
+						await releaseReport.promise;
+					},
+				});
+				try {
+					await runner.start(spawnOf());
+					await reportedEnd.promise;
+					expect(background.registeredCount()).toBe(1);
+					expect(background.sourceCustody(PARTICIPANT)).toBeNull();
+					await runner.start(spawnOf({ processId: MODERATOR }));
+					expect(background.sourceCustody(MODERATOR)).not.toBeNull();
+					const stopping = registry.stopAll();
+					expect(background.sourceCustody(MODERATOR)).toBeNull();
+					releaseReport.resolve();
+					await stopping;
+				} finally {
+					releaseReport.resolve();
+				}
+				expect(authority.live()).toEqual([]);
+			});
+
+			it('keeps simultaneous consult sources isolated and rechecks their individual scope', async () => {
+				const authority = authorityOf(() => 'allow');
+				let withdrawn = false;
+				const { background } = managedTurns(() => ({ text: 'working', hold: true }), authority);
+				const observer = { onActivity: vi.fn(), onSessionId: vi.fn(), onEnd: vi.fn() };
+				const first = background.consultRunner(() =>
+					withdrawn ? { state: 'denied', code: 'policy-denied', message: 'source gone' } : null
+				);
+				const second = background.consultRunner();
+				await Promise.all([
+					first.start(
+						spawnOf({ processId: 'cross-agent-first', delegation: carried(3), readOnlyMode: true }),
+						observer
+					),
+					second.start(
+						spawnOf({ processId: 'cross-agent-second', delegation: carried(3) }),
+						observer
+					),
+				]);
+				expect(background.sourceCustody('cross-agent-first')?.writable).toBe(false);
+				const other = background.sourceCustody('cross-agent-second');
+				expect(other).not.toBeNull();
+				withdrawn = true;
+				expect(background.sourceCustody('cross-agent-first')).toBeNull();
+				expect(background.sourceCustody('cross-agent-second')).toEqual(other);
+				first.stop('cross-agent-first');
+				second.stop('cross-agent-second');
+				expect(background.sourceCustody('cross-agent-second')).toBeNull();
+				await background.whenSettled(() => true);
+				expect(observer.onEnd).not.toHaveBeenCalled();
+			});
+
+			it('rechecks each source in its original request context when a nested request reads it', async () => {
+				const authority = authorityOf(() => 'allow');
+				const parents = new AsyncLocalStorage<ContextVerification>();
+				const source = portOf(authority, 'first-caller').context(carried(3));
+				const other = portOf(authority, 'second-caller').context(carried(3));
+				const { background } = managedTurns(
+					() => ({ text: 'working', hold: true }),
+					authority,
+					null,
+					undefined,
+					{
+						parentContext: () =>
+							parents.getStore() ?? { ok: false, code: 'unauthenticated', problems: ['no caller'] },
+					}
+				);
+				const runner = background.groupChatRunner(handlers);
+				await Promise.all([
+					parents.run(source, () => runner.start(spawnOf())),
+					parents.run(other, () => runner.start(spawnOf({ processId: MODERATOR }))),
+				]);
+				const first = background.sourceCustody(PARTICIPANT)!;
+				const second = background.sourceCustody(MODERATOR)!;
+				expect(first.context.delegation.chain.at(-1)?.id).toBe('first-caller');
+				expect(second.context.delegation.chain.at(-1)?.id).toBe('second-caller');
+				expect(parents.run(other, () => background.sourceCustody(PARTICIPANT))).toEqual(first);
+				expect(parents.run(source, () => background.sourceCustody(MODERATOR))).toEqual(second);
+			});
+
+			it('admits a nested child from live custody, withdraws with the parent and recovers freshly', async () => {
+				const authority = authorityOf(() => 'allow');
+				const source = managedTurns(() => ({ text: 'source', hold: true }), authority);
+				const runner = source.background.groupChatRunner(handlers);
+				const record = carried(3);
+				record.workflow = {
+					workflowId: 'nightly',
+					version: 'v1',
+					triggerEventId: 'cue:1',
+					ownerEpoch: 'epoch-1',
+					fencingToken: 'fence-1',
+				};
+				record.delegation.grantRef = 'grant-1';
+				await runner.start(spawnOf({ delegation: record }));
+				const child = managedTurns(
+					() => ({ text: 'nested', hold: true }),
+					authority,
+					null,
+					undefined,
+					{
+						parentContext: () => {
+							const custody = source.background.sourceCustody(PARTICIPANT);
+							return custody
+								? { ok: true, context: custody.context }
+								: { ok: false, code: 'unauthenticated', problems: ['source ended'] };
+						},
+					}
+				);
+				const childRunner = child.background.groupChatRunner(handlers);
+				await expect(childRunner.start(spawnOf({ processId: MODERATOR }))).resolves.toMatchObject({
+					success: true,
+				});
+				const custody = child.background.sourceCustody(MODERATOR)!;
+				expect(custody.context.workflow).toEqual(record.workflow);
+				expect(custody.context.delegation).toEqual({
+					chain: [...record.delegation.chain, actor],
+					grantRef: 'grant-1',
+				});
+				expect(asked).toHaveLength(2);
+				runner.stop(PARTICIPANT);
+				expect(child.background.sourceCustody(MODERATOR)).toBeNull();
+				childRunner.stop(MODERATOR);
+				await registry.stopAll();
+				await expect(childRunner.start(spawnOf({ processId: MODERATOR }))).resolves.toMatchObject({
+					success: false,
+				});
+				expect(asked).toHaveLength(2);
+				await runner.start(spawnOf({ delegation: record }));
+				await expect(childRunner.start(spawnOf({ processId: MODERATOR }))).resolves.toMatchObject({
+					success: true,
+				});
+				expect(child.background.sourceCustody(MODERATOR)?.context).not.toBe(custody.context);
+			});
 		});
 
 		describe('request-specific consult custody', () => {

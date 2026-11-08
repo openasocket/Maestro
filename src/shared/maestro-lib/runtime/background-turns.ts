@@ -28,6 +28,7 @@
  */
 
 import type { UsageStats } from '../../types';
+import { AsyncResource } from 'node:async_hooks';
 import { canonicalJson } from '../../canonicalJson';
 import { BACKGROUND_STOP_GRACE_MS } from '../control/termination';
 import { guardTurn, type GuardedTurnStops } from '../control/turn-guard';
@@ -92,7 +93,7 @@ import {
 } from '../turns/run-agent-turn';
 import type { AutoRunSpawnAuthorityPort } from './autorun-turns';
 import type { ProcessRegistry } from './processes';
-import type { RuntimeTurnOptions } from './turns';
+import type { RuntimeTurnOptions, RuntimeTurns } from './turns';
 import { createSshRemoteStore } from './ssh-store';
 
 const LOG_CONTEXT = '[BackgroundTurns]';
@@ -219,6 +220,12 @@ export interface BackgroundTurns {
 	groupChatRunner(handlers: GroupChatRunnerHandlers): GroupChatTurnRunner;
 	/** The runner a consult starts its one turn through. */
 	consultRunner(checkScope?: ConsultScopeCheck): ConsultRunner;
+	/**
+	 * Host-only live source custody, using the original admitted context and prepared access.
+	 * A process id selects a source; the host must authenticate the caller independently.
+	 * This supplies no child spawn permit and is never exposed on the client API.
+	 */
+	sourceCustody(processId: string): ReturnType<RuntimeTurns['sourceCustody']>;
 	/** Turns whose process is running now (group chat and consult). */
 	activeCount(): number;
 	/** Turns still held by the registry: preparing, running, or reporting their end. */
@@ -240,7 +247,14 @@ export function createBackgroundTurns(options: BackgroundTurnsOptions): Backgrou
 	const sshStore = createSshRemoteStore(paths);
 
 	/** Turns running, by their full process id: what Stop reaches, through the guarded stops. */
-	const running = new Map<string, { turn: RunningTurn; stops: GuardedTurnStops }>();
+	const running = new Map<
+		string,
+		{
+			turn: RunningTurn;
+			stops: GuardedTurnStops;
+			sourceCustody?: () => ReturnType<BackgroundTurns['sourceCustody']>;
+		}
+	>();
 	// A turn stays in the process registry until `done` settles, which is after its end has been
 	// reported (and the moderator's report starts the participants). `running` drops it earlier.
 	const registered = new Map<string, { done: Promise<void>; stops: GuardedTurnStops }>();
@@ -296,12 +310,15 @@ export function createBackgroundTurns(options: BackgroundTurnsOptions): Backgrou
 	function managedTurnFor(
 		processId: string,
 		delegation: ManagedDelegationContext | null,
-		explicit: boolean
+		explicit: boolean,
+		reportRefusal = true
 	): ManagedTurn {
 		const refuse = (state: BackgroundManagedState, code: ManagedDenialCode, message: string) =>
 			({
 				managed: true,
-				refusal: managedRefusal(processId, delegation, state, code, message),
+				refusal: reportRefusal
+					? managedRefusal(processId, delegation, state, code, message)
+					: { success: false, error: message },
 			}) as const;
 		const port = options.managed?.port() ?? null;
 		if (!port || port.standing() === 'standalone') {
@@ -698,7 +715,43 @@ export function createBackgroundTurns(options: BackgroundTurnsOptions): Backgrou
 		}
 
 		const processId = prepared.processId;
-		running.set(processId, { turn, stops });
+		let sourceCustody: () => ReturnType<BackgroundTurns['sourceCustody']> = () => null;
+		if (managedTurn.managed && lease) {
+			const { authority, context } = managedTurn;
+			const held = lease;
+			const contextKey = canonicalJson(context);
+			const writable = !prepared.readOnlyMode;
+			// Parent and consult readers can be request-scoped. Recheck in THIS source's async
+			// context, even when a different request asks for its custody to start a nested turn.
+			sourceCustody = AsyncResource.bind(() => {
+				try {
+					if (signal.aborted || hooks.checkScope?.()) return null;
+					const current = managedTurnFor(processId, delegation, explicit, false);
+					if (
+						signal.aborted ||
+						!current.managed ||
+						'refusal' in current ||
+						current.authority !== authority ||
+						current.bindingKey !== managedTurn.bindingKey ||
+						!isVerifiedContext(context) ||
+						canonicalJson(context) !== contextKey ||
+						held.state() !== 'bound' ||
+						!authority.live().includes(held) ||
+						held.pid() !== turn.handle.pid ||
+						held.runId !== context.identity.runId ||
+						held.attemptId !== context.identity.attemptId ||
+						held.policyRevision !== context.policyRevision ||
+						canonicalJson(held.actor) !== canonicalJson(context.actor)
+					)
+						return null;
+					return { context, writable };
+				} catch {
+					// A custody read is not a new admission or permission to run a child.
+					return null;
+				}
+			});
+		}
+		running.set(processId, { turn, stops, sourceCustody });
 		void ended.then(async (completed) => {
 			running.delete(processId);
 			try {
@@ -721,6 +774,7 @@ export function createBackgroundTurns(options: BackgroundTurnsOptions): Backgrou
 	}
 
 	return {
+		sourceCustody: (processId) => running.get(processId)?.sourceCustody?.() ?? null,
 		resolveAgent: (providerId) =>
 			resolveProviderAgent(providerId, { paths, probe: deps.probeBinary }),
 		sshStore,
