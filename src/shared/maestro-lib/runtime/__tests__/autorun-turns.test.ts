@@ -30,6 +30,7 @@ import {
 	readDelegationContextEnv,
 } from '../../managed/delegation';
 import { createHeadlessSpawnAuthority, installationIdentity } from '../../managed/host-adapter';
+import type { WorkflowFenceLifetime } from '../../managed/workflows';
 import { resolveMaestroPaths } from '../../paths/resolve';
 import type { AgentRecord } from '../../store/records';
 import type { AssembledTurn } from '../../turns/assemble';
@@ -73,6 +74,7 @@ describe('Auto Run turns: a refused effort, and the fence claimed per attempt', 
 		resetEffortRejections();
 	});
 	afterEach(() => {
+		vi.restoreAllMocks();
 		vi.unstubAllEnvs();
 		fs.rmSync(dir, { recursive: true, force: true });
 	});
@@ -235,6 +237,259 @@ describe('Auto Run turns: a refused effort, and the fence claimed per attempt', 
 			});
 			return { port, authority };
 		}
+
+		describe('workflow fence lifetime', () => {
+			function ownership() {
+				const owner = new AbortController();
+				const lifetime = {
+					signal: owner.signal,
+					current: vi.fn(() => !owner.signal.aborted),
+					finish: vi.fn<WorkflowFenceLifetime['finish']>().mockResolvedValue(undefined),
+				};
+				const detached = vi.spyOn(owner.signal, 'removeEventListener');
+				return { owner, lifetime, detached, fence: { ...FENCE, lifetime } };
+			}
+
+			it.each(['cancelled', 'withdrawn', 'rejected', 'throws', 'expired', 'revoked'] as const)(
+				'settles an unused claim when launch is %s after the claim',
+				async (change) => {
+					const { port, authority } = await managedPort();
+					const { owner, lifetime, detached, fence } = ownership();
+					const stop = new AbortController();
+					const run = runner(['answer'], {
+						workflow,
+						managed: {
+							port,
+							fence: async () => {
+								if (change === 'cancelled') stop.abort();
+								if (change === 'withdrawn') port.standing = () => 'standalone';
+								if (change === 'rejected')
+									port.context = () => ({
+										ok: false,
+										code: 'unauthenticated',
+										problems: ['revoked'],
+									});
+								if (change === 'throws')
+									port.policy = () => {
+										throw new Error('policy lost');
+									};
+								if (change === 'expired') lifetime.current.mockReturnValue(false);
+								if (change === 'revoked') owner.abort();
+								return fence;
+							},
+						},
+					}).run({ purpose: 'task', prompt: 'work', signal: stop.signal });
+					if (change === 'throws') await expect(run).rejects.toThrow('policy lost');
+					else expect((await run).success).toBe(false);
+					expect(lifetime.finish).toHaveBeenCalledExactlyOnceWith('no_effect');
+					expect(detached).toHaveBeenCalledWith('abort', expect.any(Function));
+					expect(startedProcesses()).toBe(0);
+					expect(authority.live()).toEqual([]);
+				}
+			);
+
+			it.each(['preparation', 'admission'] as const)(
+				'cancels %s on workflow revocation and settles the unused claim',
+				async (boundary) => {
+					const { port, authority } = await managedPort();
+					const { owner, lifetime, fence } = ownership();
+					const admit = authority.admit.bind(authority);
+					vi.spyOn(authority, 'admit').mockImplementation(async (request) => {
+						const answer = await admit(request);
+						owner.abort();
+						return answer;
+					});
+					let signal: AbortSignal | undefined;
+					const result = await runner(
+						['answer'],
+						{ workflow, managed: { port, fence: () => fence } },
+						undefined,
+						(options) => {
+							signal = options.signal;
+							if (boundary === 'preparation') owner.abort();
+						}
+					).run({ purpose: 'task', prompt: 'work' });
+					expect(result.success).toBe(false);
+					expect(signal?.aborted).toBe(true);
+					expect(lifetime.finish).toHaveBeenCalledExactlyOnceWith('no_effect');
+					expect(startedProcesses()).toBe(0);
+					expect(authority.live()).toEqual([]);
+				}
+			);
+
+			it.each([
+				{ state: 'denied', code: 'policy-denied', policyRevision: 1 },
+				{ state: 'unavailable', code: 'runtime-unavailable' },
+				{ state: 'unknown', code: 'outcome-unknown' },
+			] as const)(
+				'preserves a late $state admission and settles without inventing a child effect',
+				async (outcome) => {
+					const { state } = outcome;
+					const { port } = await managedPort();
+					const { owner, lifetime, fence } = ownership();
+					vi.spyOn(port.authority, 'admit').mockImplementation(async () => {
+						owner.abort();
+						return { ...outcome, message: 'Producer reply' };
+					});
+					const result = await runner(['answer'], {
+						workflow,
+						managed: { port, fence: () => fence },
+					}).run({ purpose: 'task', prompt: 'work' });
+					expect(result).toMatchObject({
+						success: false,
+						managed: { state },
+						error: `[managed-${state}] Producer reply`,
+					});
+					expect(lifetime.finish).toHaveBeenCalledExactlyOnceWith(
+						state === 'unknown' ? 'uncertain' : 'no_effect'
+					);
+					expect(startedProcesses()).toBe(0);
+				}
+			);
+
+			it('retains uncertainty when the turn executor throws', async () => {
+				const { port } = await managedPort();
+				const { lifetime, fence } = ownership();
+				await expect(
+					runner(['answer'], { workflow, managed: { port, fence: () => fence } }, undefined, () => {
+						throw new Error('executor failed');
+					}).run({ purpose: 'task', prompt: 'work' })
+				).rejects.toThrow('executor failed');
+				expect(lifetime.finish).toHaveBeenCalledExactlyOnceWith('uncertain');
+			});
+
+			it.each(['owner', 'operator'] as const)(
+				'stops a real running process on %s cancellation and settles uncertainty',
+				async (source) => {
+					const { port, authority } = await managedPort();
+					const { owner, lifetime, fence } = ownership();
+					const stop = new AbortController();
+					const run = runner(['hold'], { workflow, managed: { port, fence: () => fence } }).run({
+						purpose: 'task',
+						prompt: 'work',
+						signal: stop.signal,
+					});
+					try {
+						await vi.waitFor(() => expect(startedProcesses()).toBe(1));
+						(source === 'owner' ? owner : stop).abort();
+						await vi.waitFor(() =>
+							expect(lifetime.finish).toHaveBeenCalledExactlyOnceWith('uncertain')
+						);
+						expect(await run).toMatchObject({ success: false, outcome: 'interrupted' });
+						expect(authority.live()).toEqual([]);
+					} finally {
+						stop.abort();
+						authority.revokeAll('test cleanup');
+						await run;
+					}
+				}
+			);
+
+			it.each(['task', 'synopsis', 'goal-handoff'] as const)(
+				'settles a completed %s only after detaching ownership cancellation',
+				async (purpose) => {
+					const { port, authority } = await managedPort();
+					const { owner, lifetime, detached, fence } = ownership();
+					let signal: AbortSignal | undefined;
+					lifetime.finish.mockImplementation(async () => {
+						expect(detached).toHaveBeenCalledWith('abort', expect.any(Function));
+						owner.abort();
+						expect(signal?.aborted).toBe(false);
+					});
+					const result = await runner(
+						['answer'],
+						{ workflow, managed: { port, fence: () => fence } },
+						undefined,
+						(options) => {
+							signal = options.signal;
+						}
+					).run({ purpose, prompt: 'work' });
+					expect(result.success).toBe(true);
+					expect(lifetime.finish).toHaveBeenCalledExactlyOnceWith('applied');
+					expect(authority.live()).toEqual([]);
+				}
+			);
+
+			it('settles each attempt before claiming fresh ownership for the effort retry', async () => {
+				const { port } = await managedPort();
+				const claims = [ownership(), ownership()];
+				let claim = 0;
+				const result = await runner(['refuse', 'answer'], {
+					workflow,
+					managed: {
+						port,
+						fence: () => {
+							if (claim === 1)
+								expect(claims[0].lifetime.finish).toHaveBeenCalledExactlyOnceWith('uncertain');
+							return claims[claim++].fence;
+						},
+					},
+				}).run({ purpose: 'task', prompt: 'work', effort: 'minimal' });
+				expect(result.success).toBe(true);
+				expect(claim).toBe(2);
+				expect(claims[1].lifetime.finish).toHaveBeenCalledExactlyOnceWith('applied');
+				expect(startedProcesses()).toBe(2);
+			});
+
+			it('does not report success when ownership settlement throws', async () => {
+				const { port } = await managedPort();
+				const { lifetime, fence } = ownership();
+				lifetime.finish.mockRejectedValue(new Error('settlement lost'));
+				await expect(
+					runner(['answer'], { workflow, managed: { port, fence: () => fence } }).run({
+						purpose: 'task',
+						prompt: 'work',
+					})
+				).rejects.toThrow('settlement lost');
+				expect(lifetime.finish).toHaveBeenCalledExactlyOnceWith('applied');
+			});
+
+			it.each(['standalone', 'dormant port', 'legacy fence'] as const)(
+				'keeps the original caller signal with a %s',
+				async (mode) => {
+					const { port } = await managedPort();
+					if (mode === 'dormant port') port.standing = () => 'standalone';
+					const stop = new AbortController();
+					const fence = vi.fn(() => FENCE);
+					const result = await runner(
+						['answer'],
+						{
+							workflow,
+							...(mode !== 'standalone' ? { managed: { port, fence } } : {}),
+						},
+						undefined,
+						(options) => {
+							expect(options.signal).toBe(stop.signal);
+						}
+					).run({ purpose: 'task', prompt: 'work', signal: stop.signal });
+					expect(result.success).toBe(true);
+					expect(fence).toHaveBeenCalledTimes(mode === 'legacy fence' ? 1 : 0);
+				}
+			);
+
+			it('waits for settlement acknowledgment before returning completion', async () => {
+				const { port } = await managedPort();
+				const { lifetime, fence } = ownership();
+				let release!: () => void;
+				lifetime.finish.mockReturnValue(
+					new Promise<void>((resolve) => {
+						release = resolve;
+					})
+				);
+				const completed = vi.fn();
+				const run = runner(['answer'], { workflow, managed: { port, fence: () => fence } })
+					.run({ purpose: 'task', prompt: 'work' })
+					.then(completed);
+				try {
+					await vi.waitFor(() => expect(lifetime.finish).toHaveBeenCalledWith('applied'));
+					expect(completed).not.toHaveBeenCalled();
+				} finally {
+					release();
+					await run;
+				}
+				expect(completed).toHaveBeenCalledWith(expect.objectContaining({ success: true }));
+			});
+		});
 
 		it.each(['synopsis', 'goal-handoff'] as const)(
 			'carries the verified task and %s context into the child environment, overriding inherited and configured records',

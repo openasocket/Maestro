@@ -35,6 +35,9 @@
  * managed host does not run an unowned workflow and this runner never mints a fence. The run's own
  * scheduling (the stall guard, auto-resume, the watchdog) is the Auto Run's and stays so: a
  * re-dispatch after a refusal is a new attempt that is admitted again, not the refusal overridden.
+ * A live workflow fence also owns cancellation through the turn's guarded stop. Each attempt
+ * settles its unused, completed or uncertain effect before returning or claiming a retry; an
+ * unacknowledged settlement never becomes a reported success.
  */
 
 import { getClaudeTokenSourceFields, type ClaudeTokenSourceFields } from '../../claudeTokenMode';
@@ -64,7 +67,11 @@ import type {
 import { delegationContextEnv, delegationContextOf } from '../managed/delegation';
 import type { HeadlessSpawnContextInput } from '../managed/host-adapter';
 import type { ManagedDenialCode } from '../managed/types';
-import { isWorkflowFenceRefusal, type WorkflowFenceAnswer } from '../managed/workflows';
+import {
+	isWorkflowFenceRefusal,
+	type WorkflowFenceAnswer,
+	type WorkflowFenceLifetime,
+} from '../managed/workflows';
 import { createOutputParser } from '../parsers/parser-factory';
 import type { MaestroPaths } from '../paths/resolve';
 import { readSettingsStore } from '../store/read-stores';
@@ -308,9 +315,9 @@ export function createAutoRunTurnRunner(options: AutoRunTurnRunnerOptions): Auto
 	 */
 	async function managedTurnFor(
 		provider: string,
-		attribution: AutoRunTurnAttribution | null
+		attribution: AutoRunTurnAttribution | null,
+		managed: AutoRunManagedOptions | undefined
 	): Promise<ManagedTurn> {
-		const managed = options.managed;
 		if (!managed) return { managed: false };
 		const refuse = (state: AutoRunManagedState, code: ManagedDenialCode, message: string) =>
 			({
@@ -454,6 +461,52 @@ export function createAutoRunTurnRunner(options: AutoRunTurnRunnerOptions): Auto
 		request: AutoRunTurnRequest,
 		attribution: AutoRunTurnAttribution | null
 	): Promise<AutoRunAttempt> {
+		let lifetime: WorkflowFenceLifetime | undefined;
+		let effect: 'applied' | 'no_effect' | 'uncertain' = 'no_effect';
+		const stopped = new AbortController();
+		const stop = () => stopped.abort();
+		const scopedRequest = { ...request };
+		const managed = options.managed;
+		try {
+			return await runAttempt(
+				scopedRequest,
+				attribution,
+				managed
+					? {
+							...managed,
+							fence: async (run) => {
+								const answer = await managed.fence(run);
+								if (answer && !isWorkflowFenceRefusal(answer) && answer.lifetime) {
+									lifetime = answer.lifetime;
+									// The turn's existing guarded stop owns local and SSH cancellation.
+									// Keep the caller's original signal when no lifetime was claimed.
+									scopedRequest.signal = request.signal
+										? AbortSignal.any([request.signal, stopped.signal])
+										: stopped.signal;
+									lifetime.signal.addEventListener('abort', stop, { once: true });
+									if (lifetime.signal.aborted || !lifetime.current()) stop();
+								}
+								return answer;
+							},
+						}
+					: undefined,
+				(value) => {
+					effect = value;
+				}
+			);
+		} finally {
+			// Release can revoke ownership itself; detach before settlement or a retry.
+			lifetime?.signal.removeEventListener('abort', stop);
+			await lifetime?.finish(effect);
+		}
+	}
+
+	async function runAttempt(
+		request: AutoRunTurnRequest,
+		attribution: AutoRunTurnAttribution | null,
+		managed: AutoRunManagedOptions | undefined,
+		noteEffect: (effect: 'applied' | 'no_effect' | 'uncertain') => void
+	): Promise<AutoRunAttempt> {
 		const record = repository.getAgent(agentId);
 		const agent = record ? toTurnAgent(record) : undefined;
 		if (!record || !agent)
@@ -486,7 +539,7 @@ export function createAutoRunTurnRunner(options: AutoRunTurnRunnerOptions): Auto
 
 		// Admission is per attempt and the lease is checked again inside the spawn, so nothing
 		// decided for an earlier turn, or for this request's earlier attempt, carries into this one.
-		const managedTurn = await managedTurnFor(provider, attribution);
+		const managedTurn = await managedTurnFor(provider, attribution, managed);
 		if (request.signal?.aborted) {
 			return attempt({
 				success: false,
@@ -508,6 +561,8 @@ export function createAutoRunTurnRunner(options: AutoRunTurnRunnerOptions): Auto
 		}
 
 		const sessionId = `${agentId}-batch-${deps.now()}`;
+		// Once handed to the executor, a thrown/lost reply cannot prove no effect.
+		noteEffect('uncertain');
 		const started = await startTurn(turn, {
 			sessionId,
 			sshStore,
@@ -518,6 +573,7 @@ export function createAutoRunTurnRunner(options: AutoRunTurnRunnerOptions): Auto
 		});
 		if (!started.ok) {
 			const state = managedStateOf(started.reason);
+			noteEffect(state === 'unknown' ? 'uncertain' : 'no_effect');
 			return state
 				? managedRefusal(provider, attribution, state, REFUSAL_CODES[state], started.message)
 				: attempt(failure(started.message));
@@ -582,6 +638,11 @@ export function createAutoRunTurnRunner(options: AutoRunTurnRunnerOptions): Auto
 			done: finished,
 		});
 		const completed = await finished;
+		noteEffect(
+			completed.outcome === 'completed' || completed.outcome === 'completed-with-warning'
+				? 'applied'
+				: 'uncertain'
+		);
 		const endedAt = deps.now();
 
 		// The usage row the desktop writes for every turn it spawns, marked as automation.
