@@ -21,6 +21,10 @@ import {
 } from '../../shared/maestro-lib/launch/launch-plan';
 import { buildSpawnPath } from '../utils/spawnPath';
 import { QUERY_SOURCE_ENV_VAR } from '../../shared/querySource';
+import {
+	delegationContextEnv,
+	delegationContextOf,
+} from '../../shared/maestro-lib/managed/delegation';
 import { ensureRemoteMaestroPProbed } from '../agents/probeRemoteMaestroP';
 import { sanitizeCustomEnvVars } from './cue-env-sanitizer';
 import {
@@ -207,6 +211,11 @@ export async function buildSpawnSpec(
 				| undefined
 		),
 		sessionCustomEnvVars: sanitizeLayer(customEnvVars),
+		// Carry the bound run into nested dispatches, after user env layers and
+		// the managed ceiling, and before the plan is wrapped for SSH.
+		maestroEnvVars: config.admission
+			? delegationContextEnv(delegationContextOf(config.admission.context))
+			: undefined,
 		// A Cue run is a Cue run no matter what the agent's env overrides say.
 		// Without this every downstream consumer of the spawned process (Claude
 		// Code hooks, telemetry sidecars) sees a turn indistinguishable from one

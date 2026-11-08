@@ -10,6 +10,12 @@ import type { CueExecutionConfig } from '../../../main/cue/cue-executor';
 import type { CueEvent, CueSubscription } from '../../../main/cue/cue-types';
 import type { SessionInfo } from '../../../shared/types';
 import type { TemplateContext } from '../../../shared/templateVariables';
+import { fakeSpawnPort } from '../../helpers/managedSpawnPort';
+import { MANAGED_CONTRACT_VERSION } from '../../../shared/maestro-lib/managed/types';
+import {
+	MANAGED_DELEGATION_ENV_VAR,
+	readDelegationContextEnv,
+} from '../../../shared/maestro-lib/managed/delegation';
 
 // ─── Mocks ───────────────────────────────────────────────────────────────────
 
@@ -193,6 +199,216 @@ describe('cue-spawn-builder', () => {
 	});
 
 	describe('buildSpawnSpec', () => {
+		describe('bound Cue delegation', () => {
+			// Reuse the verified-context fixture. This tests propagation only, not
+			// a production authority, provider execution or qualified SSH route.
+			const port = fakeSpawnPort();
+			const lineage = {
+				identity: {
+					requestId: 'cue-run',
+					idempotencyKey: 'cue-run',
+					attemptId: 'attempt-1',
+					runId: 'cue-run',
+					rootRunId: 'chain-root',
+					parentRunId: 'upstream-run',
+				},
+				workflow: {
+					workflowId: 'cue-pipeline:nightly',
+					version: 'v1',
+					taskId: 'review',
+					triggerEventId: 'file.changed:evt-1',
+					ownerEpoch: 'epoch-1',
+					fencingToken: 'opaque-fence',
+				},
+				delegation: {
+					chain: [
+						{ kind: 'service' as const, id: 'cue-subscription:nightly' },
+						{ kind: 'agent' as const, id: 'session-1' },
+					],
+					grantRef: 'test-grant',
+				},
+				traceId: 'cue:chain-root:cue-run:attempt-1',
+				policyRevision: 7,
+			};
+			let admission: NonNullable<CueExecutionConfig['admission']>;
+			beforeEach(() => {
+				const verified = port.verify({ ...lineage, actor: { peer: 'in-process' } });
+				if (!verified.ok) throw new Error(verified.problems.join('; '));
+				admission = {
+					authority: port.authority,
+					context: verified.context,
+					policy: { ...port.policy(), policyRevision: lineage.policyRevision },
+				};
+			});
+
+			it.each(['inherited', 'provider', 'agent', 'session'] as const)(
+				'overrides a conflicting %s record with the bound workflow, grant and attempt',
+				async (layer) => {
+					const spoof = { [MANAGED_DELEGATION_ENV_VAR]: 'untrusted-record' };
+					const config = createConfig({ admission });
+					if (layer === 'inherited') vi.stubEnv(MANAGED_DELEGATION_ENV_VAR, 'untrusted-record');
+					if (layer === 'provider')
+						mockGetAgentDefinition.mockReturnValue({ ...defaultAgentDef, defaultEnvVars: spoof });
+					if (layer === 'agent') config.agentConfigValues = { customEnvVars: spoof };
+					if (layer === 'session') config.customEnvVars = spoof;
+					const result = await buildSpawnSpec(config, 'review');
+					expect(result.ok).toBe(true);
+					if (!result.ok) return;
+					expect(readDelegationContextEnv(result.spec.env)).toEqual({
+						status: 'ok',
+						context: { contractVersion: MANAGED_CONTRACT_VERSION, ...lineage },
+					});
+					expect(result.spec.env.MAESTRO_QUERY_SOURCE).toBe('cue');
+				}
+			);
+
+			it.each([false, true])(
+				'preserves the authoritative record with server mode %s',
+				async (isServerMode) => {
+					const result = await buildSpawnSpec(
+						createConfig({
+							admission,
+							isServerMode,
+							customEnvVars: { [MANAGED_DELEGATION_ENV_VAR]: 'spoof', KEEP_ME: 'value' },
+							managed: {
+								route: {
+									providerId: 'claude-code',
+									model: null,
+									baseUrl: null,
+									accountDir: null,
+									login: 'provider-login',
+									permissionMode: null,
+								},
+							},
+						}),
+						'review'
+					);
+					expect(result.ok).toBe(true);
+					if (!result.ok) return;
+					expect(readDelegationContextEnv(result.spec.env)).toEqual({
+						status: 'ok',
+						context: { contractVersion: MANAGED_CONTRACT_VERSION, ...lineage },
+					});
+					expect(result.spec.env.KEEP_ME).toBe('value');
+				}
+			);
+
+			it.each([false, true])(
+				'carries the record through local and SSH plans with TUI mode %s',
+				async (interactive) => {
+					mockGetAgentDefinition.mockReturnValue({
+						...defaultAgentDef,
+						interactiveCommand: 'maestro-p',
+						interactiveModeArgs: ['--dangerously-skip-permissions'],
+					});
+					const config = createConfig({
+						admission,
+						enableMaestroP: interactive,
+						maestroPMode: 'interactive',
+					});
+					const local = await buildSpawnSpec(config, 'review');
+					expect(local.ok).toBe(true);
+					if (!local.ok) return;
+					expect(local.spec.command).toBe(interactive ? process.execPath : 'claude');
+					expect(readDelegationContextEnv(local.spec.env)).toEqual({
+						status: 'ok',
+						context: { contractVersion: MANAGED_CONTRACT_VERSION, ...lineage },
+					});
+					mockWrapSpawnWithSsh.mockResolvedValueOnce({
+						command: 'ssh',
+						args: ['host'],
+						cwd: config.projectRoot,
+						sshStdinScript: 'fixture-script',
+						sshRemoteUsed: { host: 'fixture-host' },
+					});
+					const remote = await buildSpawnSpec(
+						{
+							...config,
+							sshRemoteConfig: { enabled: true, remoteId: 'r1' },
+							sshStore: sshStoreWithRemotes(),
+						},
+						'review'
+					);
+					expect(remote.ok).toBe(true);
+					if (!remote.ok) return;
+					expect(remote.spec.command).toBe('ssh');
+					expect(remote.spec.sshStdinScript).toBe('fixture-script');
+					expect(
+						readDelegationContextEnv(mockWrapSpawnWithSsh.mock.calls[0][0].customEnvVars)
+					).toEqual({
+						status: 'ok',
+						context: { contractVersion: MANAGED_CONTRACT_VERSION, ...lineage },
+					});
+				}
+			);
+
+			it('uses the next verified attempt and policy on a retry', async () => {
+				const first = await buildSpawnSpec(createConfig({ admission }), 'review');
+				const next = {
+					...lineage,
+					identity: { ...lineage.identity, attemptId: 'attempt-2' },
+					traceId: 'cue:chain-root:cue-run:attempt-2',
+					policyRevision: 8,
+				};
+				const verified = port.verify({ ...next, actor: { peer: 'in-process' } });
+				if (!verified.ok) throw new Error(verified.problems.join('; '));
+				const retry = await buildSpawnSpec(
+					createConfig({
+						admission: {
+							...admission,
+							context: verified.context,
+							policy: { ...admission.policy, policyRevision: next.policyRevision },
+						},
+					}),
+					'review'
+				);
+				expect(first.ok && retry.ok).toBe(true);
+				if (!first.ok || !retry.ok) return;
+				expect(readDelegationContextEnv(first.spec.env)).toEqual({
+					status: 'ok',
+					context: { contractVersion: MANAGED_CONTRACT_VERSION, ...lineage },
+				});
+				expect(readDelegationContextEnv(retry.spec.env)).toEqual({
+					status: 'ok',
+					context: { contractVersion: MANAGED_CONTRACT_VERSION, ...next },
+				});
+			});
+
+			it('adds no managed context to an ordinary standalone launch', async () => {
+				vi.stubEnv(MANAGED_DELEGATION_ENV_VAR, undefined);
+				const result = await buildSpawnSpec(createConfig(), 'review');
+				expect(result.ok).toBe(true);
+				if (!result.ok) return;
+				expect(readDelegationContextEnv(result.spec.env)).toEqual({ status: 'absent' });
+			});
+
+			it('does not confer a managed SSH route merely by carrying attribution', async () => {
+				const result = await buildSpawnSpec(
+					createConfig({
+						admission,
+						managed: {
+							route: {
+								providerId: 'claude-code',
+								model: null,
+								baseUrl: null,
+								accountDir: null,
+								login: 'provider-login',
+								permissionMode: null,
+							},
+						},
+						sshRemoteConfig: { enabled: true, remoteId: 'r1' },
+						sshStore: sshStoreWithRemotes(),
+					}),
+					'review'
+				);
+				expect(result).toMatchObject({
+					ok: false,
+					message: expect.stringContaining('not supported on an SSH remote'),
+				});
+				expect(mockWrapSpawnWithSsh).not.toHaveBeenCalled();
+			});
+		});
+
 		it('injects a run-bound local MCP bridge for a Cue agent', async () => {
 			mockPluginsEnabled.mockReturnValue(true);
 			mockActivePluginManager.mockReturnValue({ getContributions: () => ({ tools: [{}] }) });
