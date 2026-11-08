@@ -28,6 +28,7 @@ import {
 import type { ManagedDenialCode, ManagedRunIdentity } from '../../shared/maestro-lib/managed/types';
 import { managedSshEndpointRef } from '../../shared/maestro-lib/launch/ssh-remote-resolver';
 import { isMaestroPBinaryPath } from '../../shared/maestro-lib/launch/interactive-mode';
+import { CALLER_CREDENTIAL_ENV_VAR } from '../../shared/maestro-lib/launch/env';
 import {
 	buildTuiHandshake,
 	createFileDigestCache,
@@ -306,6 +307,31 @@ async function autoRunFenceFor(
 	);
 }
 
+/**
+ * The chat-turn source a spawn is (MCOMP-17-03AO): the agent and tab of a person's AI-tab
+ * conversation turn, read off the composite `<agent>-ai-<tab>[-fp-<ts>]` session id the
+ * renderer forms. Null for anything that is not one: a terminal, an Auto Run attempt, a
+ * dispatched child, a utility/probe/supervisor turn, a bare or legacy session id, or a stated
+ * `tabId` that disagrees with the session id. Those carry their own lineage, or none.
+ */
+export function chatTurnSourceOf(
+	config: Pick<
+		ProcessConfig,
+		'sessionId' | 'toolType' | 'tabId' | 'autoRun' | 'delegation' | 'utilityOf' | 'purpose'
+	>
+): { agentId: string; tabId: string } | null {
+	if (config.toolType === 'terminal' || config.autoRun || config.delegation || config.utilityOf) {
+		return null;
+	}
+	if (config.purpose !== undefined && config.purpose !== 'conversation') return null;
+	const agentId = resolveOwningMaestroSessionId(config.sessionId);
+	const prefix = `${agentId}-ai-`;
+	if (!agentId || agentId === config.sessionId || !config.sessionId.startsWith(prefix)) return null;
+	const tabId = config.sessionId.slice(prefix.length).replace(/-fp-\d+$/, '');
+	if (!tabId || (config.tabId !== undefined && config.tabId !== tabId)) return null;
+	return { agentId, tabId };
+}
+
 export interface TerminalTabSpawnConfig {
 	sessionId: string;
 	cwd: string;
@@ -355,6 +381,21 @@ export class ProcessManager extends EventEmitter {
 	private readonly boundLeases = new Map<
 		string,
 		{ lease: DispatchLease; admission: ProcessSpawnAdmission; unsubscribe: () => void }
+	>();
+	/**
+	 * Caller credential -> the chat-turn source it was minted for (MCOMP-17-03AO), with the exact
+	 * process record and admission it was stamped on, so a respawn under the same session id or
+	 * a rebound lease never inherits it. Pruned when its lease is released.
+	 */
+	private readonly callerCredentials = new Map<
+		string,
+		{
+			sessionId: string;
+			agentId: string;
+			tabId: string;
+			process: ManagedProcess;
+			admission: ProcessSpawnAdmission;
+		}
 	>();
 
 	constructor(
@@ -698,8 +739,15 @@ export class ProcessManager extends EventEmitter {
 			lease && coworkingInjected && config.admission
 				? this.runAdmissionOf(config.admission, lease)
 				: null;
+		// An admitted managed chat turn also gets a fresh caller credential (MCOMP-17-03AO): its
+		// shell's proof of which live source a request comes from, since the agent and tab ids it
+		// states are claims. Stamped after the ceiling (which strips any user or inherited copy),
+		// and resolvable only while this process holds this admission (`callerSourceOf`).
+		const callerSource = lease && config.admission ? chatTurnSourceOf(config) : null;
+		const callerCredential = callerSource ? randomBytes(32).toString('base64url') : null;
 		const stamped: Record<string, string> = {
 			...(handshake && handshake.ok ? handshake.env : {}),
+			...(callerCredential ? { [CALLER_CREDENTIAL_ENV_VAR]: callerCredential } : {}),
 			...(steering ? { [STEERING_TOKEN_ENV_VAR]: steering.token } : {}),
 			...(runAdmission
 				? { [COWORKING_RUN_ADMISSION_ENV_VAR]: encodeCoworkingRunAdmission(runAdmission) }
@@ -735,6 +783,24 @@ export class ProcessManager extends EventEmitter {
 			if (steering) {
 				const proc = this.processes.get(config.sessionId);
 				if (proc) proc.steering = steering;
+			}
+			// Remembered only against the record the spawner registered and the admission now
+			// bound to it; a spawn that registered none leaves the credential authenticating nobody.
+			const proc = this.processes.get(config.sessionId);
+			const bound = this.boundLeases.get(config.sessionId);
+			if (
+				callerSource &&
+				callerCredential &&
+				proc &&
+				bound &&
+				bound.admission === config.admission
+			) {
+				this.callerCredentials.set(callerCredential, {
+					...callerSource,
+					sessionId: config.sessionId,
+					process: proc,
+					admission: bound.admission,
+				});
 			}
 			this.emitSpawn(config);
 		}
@@ -1088,11 +1154,41 @@ export class ProcessManager extends EventEmitter {
 		this.boundLeases.delete(sessionId);
 		bound.unsubscribe();
 		bound.lease.release(release);
+		for (const [credential, caller] of this.callerCredentials) {
+			if (caller.sessionId === sessionId && caller.admission === bound.admission) {
+				this.callerCredentials.delete(credential);
+			}
+		}
 	}
 
 	/** The admission a session's live process runs under, if it was admitted. */
 	admissionOf(sessionId: string): ProcessSpawnAdmission | null {
 		return this.boundLeases.get(sessionId)?.admission ?? null;
+	}
+
+	/**
+	 * Host-only: the exact live chat-turn source a caller credential (`CALLER_CREDENTIAL_ENV_VAR`)
+	 * was minted for (MCOMP-17-03AO), while that process is still the session's record and still
+	 * holds the admission it was stamped under with its lease bound. Null for an unknown, malformed
+	 * or non-string credential, on a standalone host (which mints none), and once the process
+	 * exits, is killed, is replaced or has its lease revoked or released, so a credential copied out
+	 * of an ended process authenticates nobody. The coordinates select a source; no spawn permit.
+	 */
+	callerSourceOf(credential: unknown): { agentId: string; tabId: string } | null {
+		if (typeof credential !== 'string') return null;
+		const caller = this.callerCredentials.get(credential);
+		if (!caller) return null;
+		const bound = this.boundLeases.get(caller.sessionId);
+		if (
+			this.processes.get(caller.sessionId) !== caller.process ||
+			!bound ||
+			bound.admission !== caller.admission ||
+			bound.lease.state() !== 'bound'
+		) {
+			this.callerCredentials.delete(credential);
+			return null;
+		}
+		return { agentId: caller.agentId, tabId: caller.tabId };
 	}
 
 	/** Whether a session's admission is still bound to its process. */

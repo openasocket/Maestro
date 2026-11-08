@@ -80,7 +80,12 @@ vi.mock('../../../main/utils/logger', () => ({
 	},
 }));
 
-import { ProcessManager, localTuiLaunchOf } from '../../../main/process-manager/ProcessManager';
+import {
+	ProcessManager,
+	chatTurnSourceOf,
+	localTuiLaunchOf,
+} from '../../../main/process-manager/ProcessManager';
+import { CALLER_CREDENTIAL_ENV_VAR } from '../../../shared/maestro-lib/launch/env';
 import {
 	sendSteeringRequest,
 	steeringSocketPathFor,
@@ -736,5 +741,118 @@ describe('the coworking run admission stamp on a managed host', () => {
 			MAESTRO_COWORKING_SOCKET_OVERRIDE: '/tmp/test-bridge.sock',
 		});
 		expect(standalone.coworkingAdmissionsOf(OWNING)).toBeNull();
+	});
+});
+
+describe('the caller credential of a managed chat turn (MCOMP-17-03AO)', () => {
+	const OWNING = 'tui-launch-agent';
+	const printTurn = (overrides: Partial<ProcessConfig> = {}) =>
+		tuiTurn({ command: binPath, args: HOST_ARGS, ...overrides });
+	const tabOf = (turn: ProcessConfig) => turn.sessionId.slice(`${OWNING}-ai-`.length);
+
+	it('stamps a fresh credential per admitted turn that resolves to exactly its own agent and tab', async () => {
+		const manager = managedManager();
+		const one = await admitAndSpawn(manager, printTurn());
+		const two = await admitAndSpawn(manager, printTurn());
+		const first = envOf(captured.child[0])[CALLER_CREDENTIAL_ENV_VAR];
+		const second = envOf(captured.child[1])[CALLER_CREDENTIAL_ENV_VAR];
+		expect(first).toMatch(/^[A-Za-z0-9_-]{43}$/);
+		expect(second).toMatch(/^[A-Za-z0-9_-]{43}$/);
+		expect(first).not.toBe(second);
+		// Stamped at the sink, never on the request the snapshot digests.
+		expect(one.turn.customEnvVars?.[CALLER_CREDENTIAL_ENV_VAR]).toBeUndefined();
+		expect(manager.callerSourceOf(first)).toEqual({ agentId: OWNING, tabId: tabOf(one.turn) });
+		expect(manager.callerSourceOf(second)).toEqual({ agentId: OWNING, tabId: tabOf(two.turn) });
+	});
+
+	it('replaces a user-layer copy, which authenticates nobody, and refuses unknown or malformed credentials', async () => {
+		const manager = managedManager();
+		await admitAndSpawn(
+			manager,
+			printTurn({
+				customEnvVars: { MAESTRO_CLAUDE_BIN: binPath, [CALLER_CREDENTIAL_ENV_VAR]: 'forged' },
+			})
+		);
+		const stamped = envOf(captured.child[0])[CALLER_CREDENTIAL_ENV_VAR];
+		expect(stamped).not.toBe('forged');
+		expect(manager.callerSourceOf(stamped)).not.toBeNull();
+		for (const bad of ['forged', '', `${stamped}x`, undefined, null, 42, { stamped }]) {
+			expect(manager.callerSourceOf(bad)).toBeNull();
+		}
+	});
+
+	it('stops authenticating once the process is killed, and a respawn of the same tab gets a new one', async () => {
+		const manager = managedManager();
+		const turn = printTurn();
+		await admitAndSpawn(manager, turn);
+		const old = envOf(captured.child[0])[CALLER_CREDENTIAL_ENV_VAR];
+		expect(manager.kill(turn.sessionId)).toBe(true);
+		expect(manager.callerSourceOf(old)).toBeNull();
+		await admitAndSpawn(manager, turn);
+		const fresh = envOf(captured.child[1])[CALLER_CREDENTIAL_ENV_VAR];
+		expect(fresh).not.toBe(old);
+		expect(manager.callerSourceOf(fresh)).toEqual({ agentId: OWNING, tabId: tabOf(turn) });
+		expect(manager.callerSourceOf(old)).toBeNull();
+	});
+
+	it('stops authenticating when a record replaces the one it was stamped on', async () => {
+		const manager = managedManager();
+		const turn = printTurn();
+		await admitAndSpawn(manager, turn);
+		const credential = envOf(captured.child[0])[CALLER_CREDENTIAL_ENV_VAR];
+		const record = captured.processes!.get(turn.sessionId)!;
+		captured.processes!.set(turn.sessionId, { ...record });
+		expect(manager.callerSourceOf(credential)).toBeNull();
+	});
+
+	it('stops authenticating when the lease is revoked', async () => {
+		const port = fakeSpawnPort();
+		const manager = new ProcessManager(undefined, {
+			spawnAuthority: () => port,
+			userDataDir: dataDir,
+		});
+		await admitAndSpawn(manager, printTurn());
+		const credential = envOf(captured.child[0])[CALLER_CREDENTIAL_ENV_VAR];
+		expect(manager.callerSourceOf(credential)).not.toBeNull();
+		expect(port.authority.revokeAll('policy changed')).toBe(1);
+		expect(manager.callerSourceOf(credential)).toBeNull();
+	});
+
+	it('mints none on a standalone host or for a turn that is not a chat turn', async () => {
+		const standalone = new ProcessManager(undefined, { userDataDir: dataDir });
+		expect(standalone.spawn(printTurn())).toEqual(SPAWN_RESULT);
+		expect(envOf(captured.child[0])).not.toHaveProperty(CALLER_CREDENTIAL_ENV_VAR);
+
+		const manager = managedManager();
+		await admitAndSpawn(manager, printTurn({ purpose: 'utility' }));
+		expect(envOf(captured.child[1])).not.toHaveProperty(CALLER_CREDENTIAL_ENV_VAR);
+		await admitAndSpawn(manager, printTurn({ sessionId: 'synopsis-agent-1' }));
+		expect(envOf(captured.child[2])).not.toHaveProperty(CALLER_CREDENTIAL_ENV_VAR);
+	});
+
+	it('reads the source off the composite session id and refuses every other lineage', () => {
+		const base = { sessionId: 'agent-1-ai-tab-9', toolType: 'claude-code' };
+		expect(chatTurnSourceOf(base)).toEqual({ agentId: 'agent-1', tabId: 'tab-9' });
+		expect(chatTurnSourceOf({ ...base, sessionId: 'agent-1-ai-tab-9-fp-1700' })).toEqual({
+			agentId: 'agent-1',
+			tabId: 'tab-9',
+		});
+		expect(chatTurnSourceOf({ ...base, tabId: 'tab-9', purpose: 'conversation' })).not.toBeNull();
+		expect(chatTurnSourceOf({ ...base, tabId: 'tab-other' })).toBeNull();
+		expect(chatTurnSourceOf({ ...base, sessionId: 'agent-1-ai' })).toBeNull();
+		expect(chatTurnSourceOf({ ...base, sessionId: 'agent-1' })).toBeNull();
+		expect(chatTurnSourceOf({ ...base, toolType: 'terminal' })).toBeNull();
+		for (const purpose of ['utility', 'probe', 'supervisor'] as const) {
+			expect(chatTurnSourceOf({ ...base, purpose })).toBeNull();
+		}
+		expect(
+			chatTurnSourceOf({ ...base, autoRun: {} as NonNullable<ProcessConfig['autoRun']> })
+		).toBeNull();
+		expect(
+			chatTurnSourceOf({ ...base, delegation: {} as NonNullable<ProcessConfig['delegation']> })
+		).toBeNull();
+		expect(
+			chatTurnSourceOf({ ...base, utilityOf: {} as NonNullable<ProcessConfig['utilityOf']> })
+		).toBeNull();
 	});
 });
