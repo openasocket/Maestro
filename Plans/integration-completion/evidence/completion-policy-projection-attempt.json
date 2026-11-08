@@ -6,8 +6,8 @@
 	"status": "blocked",
 	"task": "MCOMP-16-01",
 	"stage": "Q16",
-	"recordedAt": "2026-11-08T11:23:38.027Z",
-	"observedRevision": "24179c736def9d6decb61b237c1b961ef9a39ded",
+	"recordedAt": "2026-11-08T11:27:14.269Z",
+	"observedRevision": "a95fca808ec53e0d44b83174cfe70b837bda1b6f",
 	"inputs": [
 		{
 			"path": "Plans/integration-completion/program.json",
@@ -172,8 +172,8 @@
 			"sha256": "7aea35fcc211f5f3fa35fc13fa14aa58c926a07c803742c2280ab59fb8f36768"
 		},
 		{
-			"path": ".maestro/playbooks/Working/mcomp-16-01/readiness-MCOMP-16-01-2026-11-08T11-23-38-027Z.json",
-			"sha256": "c8b83a8fe5c188e6c8e4dccf4c55e876c9805e9ca93d14c91737075d205b211c"
+			"path": ".maestro/playbooks/Working/mcomp-16-01/readiness-MCOMP-16-01-2026-11-08T11-27-14-269Z.json",
+			"sha256": "25a4587295937a1eabbce7f36c727a5c8e5594c7c2856927c8ecc476f518bda6"
 		},
 		{
 			"path": "Plans/integration-completion/EXECUTION-RULES.md",
@@ -182,10 +182,10 @@
 	],
 	"probeCorrection": "Replaced the owned MCOMP-16 legacy launcher with the existing manifest-driven MCOMP-14 inventory pattern. Uses Q16 requirements and current policy BUILD archives; retired Tauri, historical M0 and obsolete S10 gates are excluded.",
 	"validation": "Readiness exits 2 for the three named missing counterpart receipts and proposed DESKTOP-LOCAL/1 mapping. Current runtime verifier reports ready with zero source/input drift; compiled desktop SHA-256/SHA-512 match. No application code or tests changed; no real policy case passed or was waived.",
-	"attempt": 8,
+	"attempt": 9,
 	"previousAttempt": {
-		"recordedAt": "2026-11-08T11:20:10.069Z",
-		"observedRevision": "042a986583b5e6a970e5b420d4c14604cb8b491e",
+		"recordedAt": "2026-11-08T11:23:38.027Z",
+		"observedRevision": "24179c736def9d6decb61b237c1b961ef9a39ded",
 		"status": "blocked"
 	}
 }
