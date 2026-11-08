@@ -23,6 +23,7 @@ export * from './managed/endpoint-port';
 export * from './managed/desktop-contract';
 export * from './managed/host-adapter';
 export * from './managed/provider-route';
+export * from './managed/provider-contract';
 export * from './managed/credentials';
 export * from './managed/effects';
 export * from './managed/delegation';
