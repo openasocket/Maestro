@@ -1519,6 +1519,90 @@ describe('runtime consults', () => {
 				await outer;
 			});
 
+			describe('forwarded background caller credentials (MCOMP-17-03BK)', () => {
+				/** The caller credential the consult process `nth` was stamped with. */
+				const consultCredential = (nth = 0): string => {
+					const credential = provider.callsFor('consult')[nth].spec.env[CALLER_CREDENTIAL_ENV_VAR];
+					expect(typeof credential).toBe('string');
+					return credential as string;
+				};
+
+				it('binds the presenting consult process without asking the host lookup', async () => {
+					const { runtime, outer, request } = await liveConsult();
+					const credential = consultCredential();
+					// The outer ask keeps reading its own host source; the forwarded ask never does.
+					const asked: unknown[] = [];
+					sourceLookup.mockImplementation(() => {
+						asked.push(callers.getStore());
+						return readable ? (callers.getStore() ?? null) : null;
+					});
+					expect(value(await runtime.askAsCaller(credential, request)).answer).toBe(
+						'Nested answer'
+					);
+					expect(asked.every((store) => (store as { agentId?: string })?.agentId === 'a1')).toBe(
+						true
+					);
+					expect(provider.calls).toHaveLength(2);
+					expect(lineageOf(1).identity.parentRunId).toBe(lineageOf(0).identity.requestId);
+					expect(lineageOf(1).identity.rootRunId).toBe(lineageOf(0).identity.rootRunId);
+					expect(lineageOf(1).delegation.chain).toEqual([
+						...lineageOf(0).delegation.chain,
+						{ kind: 'agent', id: 'a3' },
+					]);
+					expect(sourceAdmissions).toHaveLength(3);
+					value(await runtime.turns.interrupt('a1', 'a1-t1'));
+					await outer;
+				});
+
+				it.each(['other-agent', 'source-agent', 'no-tab', 'chat-credential', 'unknown'] as const)(
+					'refuses a %s ask without a child effect',
+					async (mode) => {
+						const { runtime, outer, request } = await liveConsult();
+						let credential = consultCredential();
+						let stated: typeof request | Omit<typeof request, 'fromTabId'> = request;
+						if (mode === 'other-agent')
+							stated = { ...request, fromAgentId: 'a3', targetAgentId: 'a1' };
+						if (mode === 'source-agent') stated = { ...request, fromAgentId: 'a1' };
+						if (mode === 'no-tab') {
+							const { fromTabId: _tab, ...rest } = request;
+							stated = rest;
+						}
+						if (mode === 'chat-credential') credential = await credentialOf();
+						if (mode === 'unknown') credential = `${credential}x`;
+						expect(errorOf(await runtime.askAsCaller(credential, stated)).message).toMatch(
+							/custody/i
+						);
+						expect(provider.calls).toHaveLength(1);
+						expect(consultTab(request.targetAgentId)).toBeUndefined();
+						expect(sourceAdmissions).toHaveLength(2);
+						value(await runtime.turns.interrupt('a1', 'a1-t1'));
+						await outer;
+					}
+				);
+
+				it.each(['stopped', 'revoked'] as const)(
+					'stops authenticating once the consult process is %s',
+					async (mode) => {
+						const { runtime, outer, request } = await liveConsult();
+						const credential = consultCredential();
+						if (mode === 'stopped') {
+							value(await runtime.turns.interrupt('a1', 'a1-t1'));
+							await outer;
+						}
+						if (mode === 'revoked') authority.revoke(authority.live()[1].leaseId, 'Source revoked');
+						expect(errorOf(await runtime.askAsCaller(credential, request)).message).toMatch(
+							/custody/i
+						);
+						expect(provider.calls).toHaveLength(1);
+						expect(consultTab(request.targetAgentId)).toBeUndefined();
+						if (mode === 'revoked') {
+							value(await runtime.turns.interrupt('a1', 'a1-t1'));
+							await outer;
+						}
+					}
+				);
+			});
+
 			it.each(['preparation', 'admission', 'observer', 'sink'] as const)(
 				'rechecks nested custody at %s, releases unused leases and recovers',
 				async (boundary) => {

@@ -262,12 +262,15 @@ export interface MaestroRuntime extends MaestroClient {
 	/** Consults waiting on another agent's answer (GD24). */
 	consultsInFlight(): number;
 	/**
-	 * Host only: ask on behalf of the chat turn or live Auto Run process that presented
-	 * `credential` (its `MAESTRO_MANAGED_CALLER_CREDENTIAL`). The credential is resolved again at
+	 * Host only: ask on behalf of the chat turn, live Auto Run process or managed background
+	 * (consult or group chat) process that presented `credential` (its
+	 * `MAESTRO_MANAGED_CALLER_CREDENTIAL`). The credential is resolved again at
 	 * every custody read of the consult, so stopping, revoking or finishing that turn or run
-	 * withdraws the ask's source. It selects that tab's chat custody, or that run's Auto Run custody
-	 * (pinned to its process), and stands in for `managed.consultSource` for this ask; the stated
-	 * `fromAgentId` (and a chat turn's `fromTabId`) must match it. An unknown, stale or withdrawn credential
+	 * withdraws the ask's source. It selects that tab's chat custody, or that run's Auto Run custody,
+	 * or that background process's custody (both pinned to their process), and stands in for
+	 * `managed.consultSource` for this ask; the stated `fromAgentId` must match it (a background
+	 * turn's is the agent link its admitted delegation ends at), and so must a chat turn's
+	 * `fromTabId`. An unknown, stale or withdrawn credential
 	 * authenticates nobody, so a managed ask is refused. Never expose this on a client transport
 	 * without the host first reading the credential from that caller.
 	 */
@@ -1071,14 +1074,24 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 			consultsInFlight: consults.inFlight,
 			// A credential resolves to a chat turn's own tab, or else to the live Auto Run process it
 			// was minted for (MCOMP-17-03AZ). A tab is no Auto Run custody coordinate, so the run
-			// answers the stated tab and `askFrom` pins its process and kind; never a background process.
+			// answers the stated tab and `askFrom` pins its process and kind. A background (consult or
+			// group chat) credential selects that exact process's custody (MCOMP-17-03BK): the stated
+			// agent must be the agent link its admitted delegation ends at, and the tab is display only.
 			askAsCaller: (credential, input) =>
 				askFrom(input, () => {
 					const chat = turns.callerSource(credential);
 					if (chat) return chat;
 					const run = autoRun.callerSource(credential);
-					return run && input.fromTabId
-						? { ...run, tabId: input.fromTabId, kind: 'auto-run' as const }
+					if (run) {
+						return input.fromTabId
+							? { ...run, tabId: input.fromTabId, kind: 'auto-run' as const }
+							: null;
+					}
+					const turn = background.callerSource(credential);
+					if (!turn || !input.fromTabId) return null;
+					const link = background.sourceCustody(turn.processId)?.context.delegation.chain.at(-1);
+					return link?.kind === 'agent' && link.id === input.fromAgentId
+						? { agentId: link.id, tabId: input.fromTabId, processId: turn.processId }
 						: null;
 				}),
 		},
