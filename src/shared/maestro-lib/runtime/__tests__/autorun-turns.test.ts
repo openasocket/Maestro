@@ -8,6 +8,11 @@ import * as os from 'os';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+vi.mock('../../run/run-to-completion', async (importOriginal) => ({
+	...(await importOriginal<typeof import('../../run/run-to-completion')>()),
+}));
+
+import * as processTurns from '../../run/run-to-completion';
 import { claudeStream } from '../../../../__tests__/shared/maestro-lib/run/fakeGroupChatProvider';
 import {
 	FAKE_AGENT_PATH,
@@ -83,7 +88,7 @@ describe('Auto Run turns: a refused effort, and the fence claimed per attempt', 
 		replies: Reply[],
 		extra: Pick<AutoRunTurnRunnerOptions, 'workflow' | 'managed'> = {},
 		customEnvVars?: Record<string, string>,
-		prepare?: (options: RunAgentTurnOptions) => void | Promise<void>
+		prepare?: (options: RunAgentTurnOptions, turn: AssembledTurn) => void | Promise<void>
 	) {
 		const record = {
 			id: 'a1',
@@ -106,7 +111,7 @@ describe('Auto Run turns: a refused effort, and the fence claimed per attempt', 
 				probeBinary: async (binaryName) => ({ exists: true, path: `/fake/bin/${binaryName}` }),
 				runAgentTurn: async (turn: AssembledTurn, options) => {
 					efforts.push(turn.settings.effort);
-					await prepare?.(options);
+					await prepare?.(options, turn);
 					const reply = replies.shift() ?? 'answer';
 					const recording = writeFakeTurn(
 						dir,
@@ -237,6 +242,254 @@ describe('Auto Run turns: a refused effort, and the fence claimed per attempt', 
 			});
 			return { port, authority };
 		}
+
+		describe('shared turn cancellation and unused custody', () => {
+			it.each(['preparation', 'admission', 'observer'] as const)(
+				'creates no process when cancelled during %s and admits a fresh retry',
+				async (boundary) => {
+					const { port, authority } = await managedPort();
+					const stop = new AbortController();
+					const execute = vi.spyOn(processTurns, 'runTurn');
+					const leases: DispatchLease[] = [];
+					const tempDir = path.join(dir, 'prompts');
+					fs.mkdirSync(tempDir);
+					const admit = authority.admit.bind(authority);
+					vi.spyOn(authority, 'admit').mockImplementation(async (request) => {
+						const answer = await admit(request);
+						if (answer.state === 'admitted') {
+							leases.push(answer.lease);
+							vi.spyOn(answer.lease, 'release');
+							vi.spyOn(answer.lease, 'bind');
+						}
+						if (boundary === 'admission') stop.abort();
+						return answer;
+					});
+					const onAdmission = vi.fn((event: AutoRunAdmissionEvent) => {
+						if (event.kind === 'admitted' && boundary === 'observer') stop.abort();
+					});
+					const turns = runner(
+						['answer', 'answer'],
+						{ workflow, managed: { port, fence: () => FENCE, onAdmission } },
+						undefined,
+						(options, turn) => {
+							turn.systemPromptDelivery = { via: 'file' };
+							options.deps = { tempDir };
+							if (boundary === 'preparation') stop.abort();
+						}
+					);
+					const result = await turns.run({ purpose: 'task', prompt: 'work', signal: stop.signal });
+					expect(result).toMatchObject({ success: false, error: expect.stringMatching(/cancel/i) });
+					expect(execute).not.toHaveBeenCalled();
+					expect(startedProcesses()).toBe(0);
+					expect(authority.live()).toEqual([]);
+					expect(fs.readdirSync(tempDir)).toEqual([]);
+					expect(onAdmission).toHaveBeenCalledTimes(boundary === 'observer' ? 1 : 0);
+					for (const lease of leases) {
+						expect(lease.bind).not.toHaveBeenCalled();
+						expect(lease.release).toHaveBeenCalledExactlyOnceWith({
+							outcome: 'spawn-failed',
+							message: expect.stringMatching(/cancel/i),
+						});
+					}
+					expect((await turns.run({ purpose: 'task', prompt: 'retry' })).success).toBe(true);
+					expect(startedProcesses()).toBe(1);
+					expect(new Set(leases.map((lease) => lease.leaseId)).size).toBe(leases.length);
+					expect(authority.live()).toEqual([]);
+				}
+			);
+
+			it('releases an unused lease and prompt file when the admission observer throws', async () => {
+				const { port, authority } = await managedPort();
+				const execute = vi.spyOn(processTurns, 'runTurn');
+				let lease!: DispatchLease;
+				const admit = authority.admit.bind(authority);
+				vi.spyOn(authority, 'admit').mockImplementation(async (request) => {
+					const answer = await admit(request);
+					if (answer.state === 'admitted') {
+						lease = answer.lease;
+						vi.spyOn(lease, 'release');
+					}
+					return answer;
+				});
+				const tempDir = path.join(dir, 'prompts');
+				fs.mkdirSync(tempDir);
+				const turns = runner(
+					['answer'],
+					{
+						workflow,
+						managed: {
+							port,
+							fence: () => FENCE,
+							onAdmission: () => {
+								throw new Error('observer failed');
+							},
+						},
+					},
+					undefined,
+					(options, turn) => {
+						turn.systemPromptDelivery = { via: 'file' };
+						options.deps = { tempDir };
+					}
+				);
+				await expect(turns.run({ purpose: 'task', prompt: 'work' })).resolves.toMatchObject({
+					success: false,
+					error: expect.stringContaining('observer failed'),
+				});
+				expect(execute).not.toHaveBeenCalled();
+				expect(lease.release).toHaveBeenCalledExactlyOnceWith({
+					outcome: 'spawn-failed',
+					message: 'observer failed',
+				});
+				expect(authority.live()).toEqual([]);
+				expect(fs.readdirSync(tempDir)).toEqual([]);
+			});
+
+			it.each(['denied', 'unavailable', 'unknown', 'throws'] as const)(
+				'keeps a late %s admission diagnostic and cleans the prompt file after cancellation',
+				async (state) => {
+					const { port, authority } = await managedPort();
+					const stop = new AbortController();
+					const execute = vi.spyOn(processTurns, 'runTurn');
+					const tempDir = path.join(dir, 'prompts');
+					fs.mkdirSync(tempDir);
+					vi.spyOn(authority, 'admit').mockImplementation(async () => {
+						expect(fs.readdirSync(tempDir)).toHaveLength(1);
+						stop.abort();
+						if (state === 'throws') throw new Error('producer reply lost');
+						if (state === 'denied')
+							return {
+								state,
+								code: 'policy-denied',
+								message: 'late denied',
+								policyRevision: 1,
+							};
+						if (state === 'unknown')
+							return {
+								state,
+								code: 'outcome-unknown',
+								message: 'late unknown',
+							};
+						return { state, code: 'runtime-unavailable', message: 'late unavailable' };
+					});
+					const turns = runner(
+						['answer'],
+						{ workflow, managed: { port, fence: () => FENCE } },
+						undefined,
+						(options, turn) => {
+							turn.systemPromptDelivery = { via: 'file' };
+							options.deps = { tempDir };
+						}
+					);
+					const result = turns.run({ purpose: 'task', prompt: 'work', signal: stop.signal });
+					if (state === 'throws') await expect(result).rejects.toThrow('producer reply lost');
+					else
+						await expect(result).resolves.toMatchObject({
+							success: false,
+							managed: { state },
+							error: expect.stringContaining(`late ${state}`),
+						});
+					expect(execute).not.toHaveBeenCalled();
+					expect(authority.live()).toEqual([]);
+					expect(fs.readdirSync(tempDir)).toEqual([]);
+				}
+			);
+
+			it.each(['standalone', 'managed'] as const)(
+				'stops a %s turn cancelled during SSH preparation before admission or any child',
+				async (mode) => {
+					const { port, authority } = await managedPort();
+					const admit = vi.spyOn(authority, 'admit');
+					const execute = vi.spyOn(processTurns, 'runTurn');
+					const stop = new AbortController();
+					const remote = {
+						id: 'remote-1',
+						name: 'Fixture',
+						host: 'fixture.invalid',
+						port: 22,
+						username: 'fixture',
+						privateKeyPath: path.join(dir, 'fixture-key'),
+						enabled: true,
+					};
+					const wrap = vi.fn<
+						NonNullable<NonNullable<RunAgentTurnOptions['deps']>['wrapSpawnWithSsh']>
+					>(async (config) => {
+						await Promise.resolve();
+						stop.abort();
+						return {
+							command: process.execPath,
+							args: [FAKE_AGENT_PATH],
+							cwd: config.cwd,
+							sshRemoteUsed: remote,
+						};
+					});
+					const result = await runner(
+						['answer'],
+						mode === 'managed' ? { workflow, managed: { port, fence: () => FENCE } } : {},
+						undefined,
+						(options, turn) => {
+							turn.launch.sshRemoteConfig = { enabled: true, remoteId: remote.id };
+							options.sshStore = { getSshRemotes: () => [remote] };
+							options.deps = { wrapSpawnWithSsh: wrap };
+						}
+					).run({ purpose: 'task', prompt: 'work', signal: stop.signal });
+					expect(result).toMatchObject({ success: false, error: expect.stringMatching(/cancel/i) });
+					expect(wrap).toHaveBeenCalledOnce();
+					expect(admit).not.toHaveBeenCalled();
+					expect(execute).not.toHaveBeenCalled();
+					expect(startedProcesses()).toBe(0);
+				}
+			);
+
+			it('releases a lease when the native spawn synchronously proves nonstart', async () => {
+				const { port, authority } = await managedPort();
+				let lease!: DispatchLease;
+				const admit = authority.admit.bind(authority);
+				vi.spyOn(authority, 'admit').mockImplementation(async (request) => {
+					const answer = await admit(request);
+					if (answer.state === 'admitted') {
+						lease = answer.lease;
+						vi.spyOn(lease, 'release');
+					}
+					return answer;
+				});
+				const result = await runner(
+					['answer'],
+					{ workflow, managed: { port, fence: () => FENCE } },
+					undefined,
+					(_options, turn) => {
+						turn.launch.cwd = '\0';
+					}
+				).run({ purpose: 'task', prompt: 'work' });
+				expect(result).toMatchObject({
+					success: false,
+					error: expect.stringContaining('Could not start'),
+				});
+				expect(lease.release).toHaveBeenCalledExactlyOnceWith({
+					outcome: 'spawn-failed',
+					message: expect.any(String),
+				});
+				expect(authority.live()).toEqual([]);
+				expect(startedProcesses()).toBe(0);
+			});
+
+			it('does not classify an unproven executor exception as an unused lease', async () => {
+				const { port, authority } = await managedPort();
+				vi.spyOn(processTurns, 'runTurn').mockImplementationOnce(() => {
+					throw new Error('executor outcome lost');
+				});
+				try {
+					await expect(
+						runner(['answer'], { workflow, managed: { port, fence: () => FENCE } }).run({
+							purpose: 'task',
+							prompt: 'work',
+						})
+					).rejects.toThrow('executor outcome lost');
+					expect(authority.live()).toHaveLength(1);
+				} finally {
+					authority.revokeAll('test cleanup');
+				}
+			});
+		});
 
 		describe('workflow fence lifetime', () => {
 			function ownership() {
@@ -709,10 +962,19 @@ describe('Auto Run turns: a refused effort, and the fence claimed per attempt', 
 								if (boundary === 'preparation') mutate();
 							}
 						).run({ purpose: 'task', prompt: 'work', effort: 'minimal' });
-						expect(result).toMatchObject({
-							success: false,
-							managed: { state: boundary === 'spawn gate' ? 'denied' : 'unavailable' },
-						});
+						if (change === 'owner signal' && boundary !== 'admission') {
+							// Cancellation now stops before admission or the final gate can decide.
+							expect(result).toMatchObject({
+								success: false,
+								error: expect.stringMatching(/cancel/i),
+							});
+							expect(result.managed).toBeUndefined();
+						} else {
+							expect(result).toMatchObject({
+								success: false,
+								managed: { state: boundary === 'spawn gate' ? 'denied' : 'unavailable' },
+							});
+						}
 						expect(asked).toHaveBeenCalledTimes(boundary === 'preparation' ? 0 : 1);
 						expect(efforts).toHaveLength(1);
 						expect(startedProcesses()).toBe(0);

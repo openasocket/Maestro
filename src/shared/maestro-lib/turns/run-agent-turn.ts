@@ -79,6 +79,7 @@ import {
 } from '../run/run-to-completion';
 import {
 	DispatchRefusedError,
+	TurnNotStartedError,
 	freezeTurnProcessSpec,
 	leaseAdmission,
 	turnSinkStanding,
@@ -351,6 +352,7 @@ export async function runAgentTurn(
 	turn: AssembledTurn,
 	options: RunAgentTurnOptions
 ): Promise<RunAgentTurnStart> {
+	if (options.signal?.aborted) return refuse('launch', 'The turn was cancelled before it started.');
 	const launch = turn.launch;
 	const provider = turn.provider;
 	const providerId = provider.id;
@@ -462,6 +464,8 @@ export async function runAgentTurn(
 		if (systemPromptFile) removeTempFiles([systemPromptFile]);
 		return refuse(reason, message);
 	};
+	if (options.signal?.aborted)
+		return abandon('launch', 'The turn was cancelled before it started.');
 
 	const planned = buildAgentLaunchPlan({
 		...launch,
@@ -582,24 +586,34 @@ export async function runAgentTurn(
 	};
 	let admission: { gate: DispatchAdmission; attribution: typeof attribution } | undefined;
 	let lease: DispatchLease | undefined;
-	if (options.managed) {
-		const managed = options.managed;
-		const admitted = await managed.authority.admit({
-			context: managed.context,
-			snapshot: buildDispatchSnapshot(final, attribution),
-			policy: managed.policy,
-		});
-		if (admitted.state !== 'admitted')
-			return abandon(`managed-${admitted.state}`, admitted.message);
-		lease = admitted.lease;
-		managed.onLease?.(lease);
-		admission = { gate: leaseAdmission(managed.authority, lease), attribution };
-	}
-
 	const stopGraceMs = options.stopGraceMs ?? INTERACTIVE_STOP_GRACE_MS;
 	const stream = new EventStream<ParsedEvent>();
 	let running: RunningTurn;
+	let spawnAttempted = false;
 	try {
+		if (options.signal?.aborted)
+			return abandon('launch', 'The turn was cancelled before it started.');
+		if (options.managed) {
+			const managed = options.managed;
+			const admitted = await managed.authority.admit({
+				context: managed.context,
+				snapshot: buildDispatchSnapshot(final, attribution),
+				policy: managed.policy,
+			});
+			// A late refusal or unknown reply keeps its producer diagnostic, even after Stop.
+			if (admitted.state !== 'admitted')
+				return abandon(`managed-${admitted.state}`, admitted.message);
+			lease = admitted.lease;
+			// Hold custody before notifying observers, which may throw or cancel the turn.
+			if (!options.signal?.aborted) managed.onLease?.(lease);
+			admission = { gate: leaseAdmission(managed.authority, lease), attribution };
+		}
+		if (options.signal?.aborted) {
+			const message = 'The turn was cancelled before it started.';
+			lease?.release({ outcome: 'spawn-failed', message });
+			return abandon('launch', message);
+		}
+		spawnAttempted = true;
 		running = runTurn(
 			final,
 			{
@@ -613,6 +627,22 @@ export async function runAgentTurn(
 			{ onEvent: (event) => stream.push(event) }
 		);
 	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		if (!spawnAttempted || error instanceof UnknownProviderError) {
+			lease?.release({ outcome: 'spawn-failed', message });
+		}
+		if (systemPromptFile) removeTempFiles([systemPromptFile]);
+		// A thrown producer request or an exception after entering the executor cannot prove
+		// no effect. Keep that uncertainty and custody for the caller's reconciliation.
+		if (
+			(!spawnAttempted && !lease) ||
+			(spawnAttempted &&
+				!(error instanceof DispatchRefusedError) &&
+				!(error instanceof UnknownProviderError) &&
+				!(error instanceof TurnNotStartedError))
+		) {
+			throw error;
+		}
 		if (error instanceof DispatchRefusedError) {
 			// A lease issued for a launch the sink refused is released with the sink's word, so the
 			// authority does not hold it live until it expires; nothing was spawned.
@@ -620,10 +650,7 @@ export async function runAgentTurn(
 			return abandon(`managed-${error.state}`, error.message);
 		}
 		if (error instanceof UnknownProviderError) return abandon('no-parser', error.message);
-		return abandon(
-			'launch',
-			`Could not start ${provider.name ?? providerId}: ${error instanceof Error ? error.message : String(error)}`
-		);
+		return abandon('launch', `Could not start ${provider.name ?? providerId}: ${message}`);
 	}
 	// Before the first line is read, which is on a later tick.
 	primeClaudeResume(running.handle.parser, claudeResume);

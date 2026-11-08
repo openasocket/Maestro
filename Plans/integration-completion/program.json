@@ -3862,6 +3862,20 @@
 					"id": "MCOMP-17-03K"
 				},
 				{
+					"id": "MCOMP-17-03L",
+					"label": "Close shared turn cancellation and unused lease cleanup",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/shared/maestro-lib/turns/run-agent-turn.ts",
+						"src/shared/maestro-lib/runtime/__tests__/autorun-turns.test.ts",
+						"Plans/integration-completion/program.json"
+					],
+					"outcome": "Consume MAESTRO-EFFECT-CONSUMERS-BUILD and its pinned MAESTRO-CONTRACT-INPUTS-BUILD dependency. Bounded continuation of MCOMP-17-03 at run-agent-turn.ts, the shared process boundary used by autorun-turns.ts: stop cancelled turns before preparation, admission and process creation; retain late denied, unavailable and unknown producer diagnostics; release unused late leases and leases whose observer throws. Remove temporary prompt files on admission failures, preserve uncertainty after unproven spawn failures, and retain the original producer lease and canonical final gate. Exercise cancellation, observer cleanup, final-gate refusal and fresh retries through the existing Auto Run process harness. Retain MCOMP-17-03 unchecked for Cue Auto Run actions, incoming authenticated delegation, desktop composition and managed room custody across turns. No new wire definition, external capability, producer mapping or paired/provider/native qualification is supplied. Keep to three authored files and fewer than 500 changed lines.",
+					"backlog": ["M-04"],
+					"requires": ["MAESTRO-EFFECT-CONSUMERS-BUILD"],
+					"produces": []
+				},
+				{
 					"label": "Bind Auto Run Cue and nested work at dispatch",
 					"kind": "IMPLEMENT",
 					"targets": [
@@ -3904,7 +3918,7 @@
 			"produces": ["MAESTRO-WORKFLOW-CONSUMERS-BUILD"],
 			"id": "MCOMP-17",
 			"path": ".maestro/playbooks/2026-10-29-Maestro-Integration-Completion/MCOMP-17.md",
-			"taskCount": 16,
+			"taskCount": 17,
 			"stage": "S10"
 		},
 		{
@@ -5694,7 +5708,7 @@
 				"PAIR-DIRECT-EVIDENCE"
 			],
 			"nativeInputs": false,
-			"taskCount": 23
+			"taskCount": 24
 		},
 		{
 			"id": "S11",
@@ -5898,12 +5912,8 @@
 			"taskCount": 1
 		}
 	],
-	"taskCount": 336,
-	"taskCounts": {
-		"IMPLEMENT": 227,
-		"TEST": 49,
-		"VERIFY": 60
-	},
+	"taskCount": 337,
+	"taskCounts": { "IMPLEMENT": 228, "TEST": 49, "VERIFY": 60 },
 	"artifacts": {
 		"MEGA-CONTRACTS-FOUNDATION-BUILD": {
 			"producerDocument": "GCOMP-01",
@@ -6656,6 +6666,7 @@
 			"MCOMP-17-03H",
 			"MCOMP-17-03I",
 			"MCOMP-17-03J",
+			"MCOMP-17-03L",
 			"MCOMP-17-03",
 			"MCOMP-17-04",
 			"MCOMP-17-05",
