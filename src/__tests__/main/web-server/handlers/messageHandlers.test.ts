@@ -919,6 +919,173 @@ describe('WebSocketMessageHandler', () => {
 				});
 			});
 
+			describe('an Auto Run attempt credential (MCOMP-17-03BB)', () => {
+				const CHAT = 'mcc_live-chat-credential';
+				const RUN = 'mcc_live-attempt-credential';
+				let callerSourceOf: ReturnType<typeof vi.fn>;
+				let autoRunCallerSourceOf: ReturnType<typeof vi.fn>;
+				const ask = (fields: Record<string, unknown>) =>
+					handler.handleMessage(
+						{ ...client, cli: true },
+						{
+							type: 'cross_agent_ask',
+							sessionId: 'session-1',
+							question: 'q',
+							requestId: 'r-run',
+							...fields,
+						}
+					);
+				const replies = () =>
+					vi
+						.mocked(client.socket.send)
+						.mock.calls.map((call) => JSON.parse(String(call[0])))
+						.filter((r) => r.type === 'cross_agent_ask_result');
+
+				beforeEach(() => {
+					callerSourceOf = vi.fn((credential: string) =>
+						credential === CHAT ? { agentId: 'caller-1', tabId: 'caller-tab' } : null
+					);
+					autoRunCallerSourceOf = vi.fn((credential: string) =>
+						credential === RUN ? { agentId: 'runner-1', processId: 'runner-1-batch-1' } : null
+					);
+					handler.setCallbacks({
+						callerSourceOf,
+						autoRunCallerSourceOf,
+					} as Partial<MessageHandlerCallbacks>);
+				});
+
+				it('consults as exactly the attempt agent, shown in the stated tab', async () => {
+					ask({ fromSessionId: 'runner-1', fromTabId: 'runner-tab', callerCredential: RUN });
+					await vi.waitFor(() => expect(callbacks.consultAgent).toHaveBeenCalled());
+					expect(autoRunCallerSourceOf).toHaveBeenCalledWith(RUN);
+					const params = vi.mocked(callbacks.consultAgent).mock.calls[0][0];
+					expect(params).toMatchObject({ fromSessionId: 'runner-1', fromTabId: 'runner-tab' });
+					expect(JSON.stringify(params)).not.toContain(RUN);
+					expect(lastReply()).toMatchObject({ success: true, requestId: 'r-run' });
+					expect(JSON.stringify(lastReply())).not.toContain(RUN);
+				});
+
+				it('authenticates with only the Auto Run resolver composed', async () => {
+					handler.setCallbacks({ callerSourceOf: undefined } as Partial<MessageHandlerCallbacks>);
+					ask({ fromSessionId: 'runner-1', fromTabId: 'runner-tab', callerCredential: RUN });
+					await vi.waitFor(() => expect(callbacks.consultAgent).toHaveBeenCalled());
+					expect(lastReply()).toMatchObject({ success: true });
+				});
+
+				it('a chat credential still resolves as its chat turn, never through the run resolver', async () => {
+					ask({ fromSessionId: 'caller-1', fromTabId: 'caller-tab', callerCredential: CHAT });
+					await vi.waitFor(() => expect(callbacks.consultAgent).toHaveBeenCalled());
+					expect(autoRunCallerSourceOf).not.toHaveBeenCalled();
+					expect(lastReply()).toMatchObject({ success: true });
+				});
+
+				it.each([
+					['another agent', RUN, 'runner-2', 'runner-tab', 'is not the Auto Run attempt'],
+					['no stated agent', RUN, undefined, 'runner-tab', 'is not the Auto Run attempt'],
+					['no stated tab', RUN, 'runner-1', undefined, 'is not the Auto Run attempt'],
+					['the chat agent', RUN, 'caller-1', 'caller-tab', 'is not the Auto Run attempt'],
+					[
+						'an unknown credential',
+						'mcc_forged',
+						'runner-1',
+						'runner-tab',
+						'authenticates no live',
+					],
+					['a blank credential', '', 'runner-1', 'runner-tab', 'authenticates no live'],
+				])(
+					'refuses %s before any ticket, lookup or consult',
+					(_label, callerCredential, fromSessionId, fromTabId, reason) => {
+						ask({
+							...(fromSessionId ? { fromSessionId } : {}),
+							...(fromTabId ? { fromTabId } : {}),
+							callerCredential,
+						});
+						expect(callbacks.consultAgent).not.toHaveBeenCalled();
+						expect(callbacks.getSessionDetail).not.toHaveBeenCalled();
+						const response = lastReply();
+						expect(response).toMatchObject({ success: false, requestId: 'r-run' });
+						expect(response.error).toContain(reason);
+						expect(response.error).toContain('nothing was asked');
+						expect(JSON.stringify(response)).not.toContain(RUN);
+					}
+				);
+
+				it('a blank credential is never offered to either resolver', () => {
+					ask({ fromSessionId: 'runner-1', fromTabId: 'runner-tab', callerCredential: '' });
+					expect(callerSourceOf).not.toHaveBeenCalled();
+					expect(autoRunCallerSourceOf).not.toHaveBeenCalled();
+				});
+
+				describe('custody of the attempt while the consult runs', () => {
+					let finish: (result: Record<string, unknown>) => void;
+					let withdrawCallerConsult: ReturnType<typeof vi.fn>;
+					const runAsk = () =>
+						ask({ fromSessionId: 'runner-1', fromTabId: 'runner-tab', callerCredential: RUN });
+
+					beforeEach(() => {
+						vi.useFakeTimers();
+						vi.mocked(callbacks.consultAgent).mockImplementation(
+							() =>
+								new Promise((resolve) => {
+									finish = resolve as typeof finish;
+								})
+						);
+						withdrawCallerConsult = vi.fn();
+						handler.setCallbacks({
+							callerSourceOf,
+							autoRunCallerSourceOf,
+							withdrawCallerConsult,
+						} as Partial<MessageHandlerCallbacks>);
+					});
+					afterEach(() => {
+						vi.useRealTimers();
+					});
+
+					it('delivers the answer while the attempt holds custody', async () => {
+						runAsk();
+						vi.advanceTimersByTime(CALLER_CUSTODY_RECHECK_MS * 2);
+						expect(autoRunCallerSourceOf.mock.calls.length).toBeGreaterThanOrEqual(3);
+						finish({ success: true, answer: 'run answer' });
+						await vi.advanceTimersByTimeAsync(0);
+						expect(replies()).toHaveLength(1);
+						expect(replies()[0]).toMatchObject({ success: true, answer: 'run answer' });
+						expect(withdrawCallerConsult).not.toHaveBeenCalled();
+					});
+
+					it('withdraws the ask when the attempt ends mid-flight', async () => {
+						runAsk();
+						const ticket = ticketSent();
+						autoRunCallerSourceOf.mockReturnValue(null);
+						vi.advanceTimersByTime(CALLER_CUSTODY_RECHECK_MS);
+						expect(replies()).toHaveLength(1);
+						expect(replies()[0].error).toContain('the ask was withdrawn');
+						expect(withdrawCallerConsult).toHaveBeenCalledWith(ticket);
+						finish({ success: true, answer: 'late answer' });
+						await vi.advanceTimersByTimeAsync(0);
+						expect(JSON.stringify(replies())).not.toContain('late answer');
+					});
+
+					it('a credential that moves to another attempt process is custody lost', () => {
+						runAsk();
+						autoRunCallerSourceOf.mockReturnValue({
+							agentId: 'runner-1',
+							processId: 'runner-1-batch-2',
+						});
+						vi.advanceTimersByTime(CALLER_CUSTODY_RECHECK_MS);
+						expect(replies()).toHaveLength(1);
+						expect(replies()[0].error).toContain('the ask was withdrawn');
+					});
+
+					it('a credential that turns into a chat turn is custody lost', () => {
+						runAsk();
+						callerSourceOf.mockReturnValue({ agentId: 'runner-1', tabId: 'runner-tab' });
+						vi.advanceTimersByTime(CALLER_CUSTODY_RECHECK_MS);
+						expect(replies()).toHaveLength(1);
+						expect(replies()[0].error).toContain('the ask was withdrawn');
+					});
+				});
+			});
+
 			it('a request without the field keeps the existing consult path', async () => {
 				handler.handleMessage(client, {
 					type: 'cross_agent_ask',

@@ -500,6 +500,31 @@ function callerSourceResolverOf(ctx: MessageHandlerContext): CallerSourceResolve
 }
 
 /**
+ * The host-only lookup from a caller credential to the live Auto Run attempt it was stamped on
+ * (`ProcessManager.autoRunCallerSourceOf`, MCOMP-17-03BA). An attempt runs in no tab, so it
+ * answers its agent and process. Null for anything that authenticates nobody.
+ */
+export type AutoRunCallerSourceResolver = (
+	credential: string
+) => { agentId: string; processId: string } | null;
+
+/** The Auto Run resolver the desktop composed for the ask handler, when it composed one. */
+function autoRunCallerSourceResolverOf(
+	ctx: MessageHandlerContext
+): AutoRunCallerSourceResolver | undefined {
+	const { autoRunCallerSourceOf } = ctx.callbacks as MessageHandlerContext['callbacks'] & {
+		autoRunCallerSourceOf?: AutoRunCallerSourceResolver;
+	};
+	return typeof autoRunCallerSourceOf === 'function' ? autoRunCallerSourceOf : undefined;
+}
+
+/** The source a forwarded caller credential authenticated (MCOMP-17-03AP, 03BB). */
+export type ForwardedCaller =
+	| { ok: true; kind: 'chat'; agentId: string; tabId: string }
+	| { ok: true; kind: 'auto-run'; agentId: string; tabId: string; processId: string }
+	| { ok: false; error: string };
+
+/**
  * How often a credentialed ask re-reads its caller's custody while the consult runs
  * (MCOMP-17-03AS). The credential is also re-read once more when the consult settles.
  */
@@ -523,40 +548,63 @@ function callerConsultWithdrawerOf(
 }
 
 /**
- * Authenticate a forwarded caller credential (MCOMP-17-03AP): the exact agent and tab it names,
- * or the refusal that leaves nothing asked. The stated ids must both be present and be exactly
- * that source, so a credential never lends one turn's standing to another agent or tab.
+ * Authenticate a forwarded caller credential (MCOMP-17-03AP): the exact source it names, or the
+ * refusal that leaves nothing asked. A chat turn's credential is tried first; the stated ids must
+ * both be present and be exactly that agent and tab, so a credential never lends one turn's
+ * standing to another agent or tab. Otherwise an Auto Run attempt's credential (MCOMP-17-03BB):
+ * the stated agent must be exactly the attempt's agent and pins its process. An attempt runs in
+ * no tab, so (as the shared host's `askAsCaller` does) the stated tab is required only as where
+ * the consult is shown, never as custody. The two kinds never resolve as each other.
  */
 export function resolveForwardedCaller(
 	ctx: MessageHandlerContext,
 	credential: unknown,
 	stated: { fromSessionId?: string; fromTabId?: string }
-): { ok: true; agentId: string; tabId: string } | { ok: false; error: string } {
+): ForwardedCaller {
 	if (typeof credential !== 'string') {
 		return { ok: false, error: 'callerCredential must be a string; nothing was asked.' };
 	}
-	const resolve = callerSourceResolverOf(ctx);
-	if (!resolve) {
+	const resolveChat = callerSourceResolverOf(ctx);
+	const resolveAutoRun = autoRunCallerSourceResolverOf(ctx);
+	if (!resolveChat && !resolveAutoRun) {
 		return {
 			ok: false,
 			error: 'This host cannot authenticate a caller credential; nothing was asked.',
 		};
 	}
-	const source = credential ? resolve(credential) : null;
-	if (!source) {
+	const chat = credential && resolveChat ? resolveChat(credential) : null;
+	if (chat) {
+		if (stated.fromSessionId !== chat.agentId || stated.fromTabId !== chat.tabId) {
+			return {
+				ok: false,
+				error:
+					'The stated caller is not the chat turn the caller credential names; nothing was asked.',
+			};
+		}
+		return { ok: true, kind: 'chat', agentId: chat.agentId, tabId: chat.tabId };
+	}
+	const run = credential && resolveAutoRun ? resolveAutoRun(credential) : null;
+	if (run) {
+		if (stated.fromSessionId !== run.agentId || !stated.fromTabId) {
+			return {
+				ok: false,
+				error:
+					'The stated caller is not the Auto Run attempt the caller credential names; nothing was asked.',
+			};
+		}
 		return {
-			ok: false,
-			error: 'The caller credential authenticates no live chat turn; nothing was asked.',
+			ok: true,
+			kind: 'auto-run',
+			agentId: run.agentId,
+			tabId: stated.fromTabId,
+			processId: run.processId,
 		};
 	}
-	if (stated.fromSessionId !== source.agentId || stated.fromTabId !== source.tabId) {
-		return {
-			ok: false,
-			error:
-				'The stated caller is not the chat turn the caller credential names; nothing was asked.',
-		};
-	}
-	return { ok: true, agentId: source.agentId, tabId: source.tabId };
+	return {
+		ok: false,
+		error:
+			'The caller credential authenticates no live chat turn or Auto Run attempt; nothing was asked.',
+	};
 }
 
 /**
@@ -601,8 +649,8 @@ export function handleCrossAgentAsk(
 		reply({ success: false, error: 'Missing target agent or question' });
 		return;
 	}
-	// A forwarded caller credential (MCOMP-17-03AL) is a managed chat turn's proof of which
-	// turn is asking; the stated from ids are only claims. It is resolved by the host that
+	// A forwarded caller credential (MCOMP-17-03AL) is a managed chat turn's (or, MCOMP-17-03BB,
+	// a managed Auto Run attempt's) proof of which turn is asking; the stated from ids are only claims. It is resolved by the host that
 	// minted it (`callerSourceOf`, MCOMP-17-03AO/AP), never dropped: dropping it would fall
 	// back to the claimed ids. Absent a resolver, an unknown, stale or withdrawn credential, or
 	// stated ids that are not exactly the source it names, the ask refuses before any ticket is
@@ -610,6 +658,7 @@ export function handleCrossAgentAsk(
 	let fromSessionId = statedFromSessionId;
 	let fromTabId = statedFromTabId;
 	let custodyCredential: string | undefined;
+	let custodyProcessId: string | undefined;
 	if ('callerCredential' in message) {
 		const caller = resolveForwardedCaller(ctx, message.callerCredential, {
 			fromSessionId: statedFromSessionId,
@@ -622,6 +671,7 @@ export function handleCrossAgentAsk(
 		fromSessionId = caller.agentId;
 		fromTabId = caller.tabId;
 		custodyCredential = message.callerCredential as string;
+		if (caller.kind === 'auto-run') custodyProcessId = caller.processId;
 	}
 	if (!ctx.callbacks.getSessionDetail?.(targetSessionId)) {
 		reply({ success: false, error: 'Agent not found' });
@@ -664,9 +714,16 @@ export function handleCrossAgentAsk(
 		reply(payload);
 		return true;
 	};
-	const custodyHeld = (): boolean =>
-		custodyCredential === undefined ||
-		resolveForwardedCaller(ctx, custodyCredential, { fromSessionId, fromTabId }).ok;
+	// Custody holds only while the credential still names the same kind of source: the same chat
+	// turn, or the same Auto Run attempt process (MCOMP-17-03BB).
+	const custodyHeld = (): boolean => {
+		if (custodyCredential === undefined) return true;
+		const held = resolveForwardedCaller(ctx, custodyCredential, { fromSessionId, fromTabId });
+		if (!held.ok) return false;
+		return custodyProcessId === undefined
+			? held.kind === 'chat'
+			: held.kind === 'auto-run' && held.processId === custodyProcessId;
+	};
 	const withdrawForCustody = (): void => {
 		const replied = settle({
 			success: false,
