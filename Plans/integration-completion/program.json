@@ -4296,6 +4296,20 @@
 					"produces": []
 				},
 				{
+					"id": "MCOMP-17-03AQ",
+					"label": "Compose the caller credential resolver into the desktop WebServer",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/main/web-server/WebServer.ts",
+						"src/__tests__/main/web-server/WebServer.test.ts",
+						"Plans/integration-completion/program.json"
+					],
+					"outcome": "Consume MAESTRO-EFFECT-CONSUMERS-BUILD and its pinned MAESTRO-CONTRACT-INPUTS-BUILD dependency. Bounded prerequisite continuation of MCOMP-17-03 after MCOMP-17-03AP: WebServer gains setCallerSourceResolver(resolver), which hands the host-only CallerSourceResolver straight to the WebSocket message handler (merged callbacks, never routed through the renderer), so the cross_agent_ask handler of MCOMP-17-03AP authenticates a forwarded callerCredential through it. The resolver survives the callback setup start() runs; absent composition a credential still refuses with cannot authenticate. Exercise the composed server with a resolver double: consult as exactly the resolved source with the credential absent from the consult params and reply, a null resolution refused before any consult, the uncomposed refusal, the uncredentialed path unchanged, and a mutation check. Wiring ProcessManager.callerSourceOf in the web server factory, consult source custody on the desktop consult path, background/consult and Auto Run child credentials and room owner lifetime remain pending. Reuse WORKFLOW-CONTEXT/1; no new wire capability, producer mapping or paired/provider/native qualification. Keep to three authored files and fewer than 500 changed lines.",
+					"backlog": ["M-04"],
+					"requires": ["MAESTRO-EFFECT-CONSUMERS-BUILD"],
+					"produces": []
+				},
+				{
 					"label": "Bind Auto Run Cue and nested work at dispatch",
 					"kind": "IMPLEMENT",
 					"targets": [
@@ -4338,7 +4352,7 @@
 			"produces": ["MAESTRO-WORKFLOW-CONSUMERS-BUILD"],
 			"id": "MCOMP-17",
 			"path": ".maestro/playbooks/2026-10-29-Maestro-Integration-Completion/MCOMP-17.md",
-			"taskCount": 47,
+			"taskCount": 48,
 			"stage": "S10"
 		},
 		{
@@ -6128,7 +6142,7 @@
 				"PAIR-DIRECT-EVIDENCE"
 			],
 			"nativeInputs": false,
-			"taskCount": 54
+			"taskCount": 55
 		},
 		{
 			"id": "S11",
@@ -6332,8 +6346,8 @@
 			"taskCount": 1
 		}
 	],
-	"taskCount": 367,
-	"taskCounts": { "IMPLEMENT": 258, "TEST": 49, "VERIFY": 60 },
+	"taskCount": 368,
+	"taskCounts": { "IMPLEMENT": 259, "TEST": 49, "VERIFY": 60 },
 	"artifacts": {
 		"MEGA-CONTRACTS-FOUNDATION-BUILD": {
 			"producerDocument": "GCOMP-01",
@@ -7116,6 +7130,7 @@
 			"MCOMP-17-03AN",
 			"MCOMP-17-03AO",
 			"MCOMP-17-03AP",
+			"MCOMP-17-03AQ",
 			"MCOMP-17-03",
 			"MCOMP-17-04",
 			"MCOMP-17-05",

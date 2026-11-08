@@ -56,6 +56,8 @@ import {
 } from '../utils/network-address-watcher';
 import { captureException } from '../utils/sentry';
 import { WebSocketMessageHandler } from './handlers';
+import type { MessageHandlerCallbacks } from './handlers';
+import type { CallerSourceResolver } from './handlers/messageHandlers/commands';
 import type {
 	WebTerminalInputResult,
 	WebTerminalSpawnResult,
@@ -711,6 +713,20 @@ export class WebServer {
 
 	setConsultAgentCallback(callback: ConsultAgentCallback): void {
 		this.callbackRegistry.setConsultAgentCallback(callback);
+	}
+
+	/**
+	 * The host-only lookup the `cross_agent_ask` handler authenticates a forwarded caller
+	 * credential with (MCOMP-17-03AQ): the desktop composes `ProcessManager.callerSourceOf`.
+	 * Handed straight to the message handler, which merges callbacks, so it survives the
+	 * callback setup `start()` runs and is never routed through the renderer. Until one is
+	 * composed, a forwarded credential refuses with "cannot authenticate".
+	 */
+	setCallerSourceResolver(resolver: CallerSourceResolver): void {
+		const callbacks: Partial<MessageHandlerCallbacks> & { callerSourceOf: CallerSourceResolver } = {
+			callerSourceOf: resolver,
+		};
+		this.messageHandler.setCallbacks(callbacks);
 	}
 
 	setNoteAgentDelegationCallback(callback: NoteAgentDelegationCallback): void {

@@ -379,3 +379,82 @@ describe('WebServer origin policy', () => {
 		expect(res.statusCode).toBe(200);
 	});
 });
+
+describe('caller credential resolver composition (MCOMP-17-03AQ)', () => {
+	const LIVE = 'mcc_live-turn-credential';
+
+	function compose(resolver?: (credential: string) => { agentId: string; tabId: string } | null) {
+		const server = new WebServer(0);
+		const consultAgent = vi.fn().mockResolvedValue({ success: true, response: 'answer' });
+		server.setConsultAgentCallback(consultAgent);
+		server.setGetSessionDetailCallback(vi.fn().mockReturnValue({ state: 'idle' }) as never);
+		// Composed before start() wires the remaining callbacks, as the factory does.
+		if (resolver) server.setCallerSourceResolver(resolver);
+		(server as any).setupMessageHandlerCallbacks();
+		const sent: Array<Record<string, unknown>> = [];
+		const client = {
+			id: 'cli-socket',
+			connectedAt: Date.now(),
+			cli: true,
+			socket: {
+				readyState: WebSocket.OPEN,
+				send: vi.fn((frame: string) => sent.push(JSON.parse(frame))),
+				once: vi.fn(),
+				off: vi.fn(),
+			},
+		};
+		const ask = (fields: Record<string, unknown>) =>
+			(server as any).messageHandler.handleMessage(client, {
+				type: 'cross_agent_ask',
+				sessionId: 'target-agent',
+				question: 'q',
+				requestId: 'r-1',
+				...fields,
+			});
+		const lastReply = () => sent[sent.length - 1];
+		return { consultAgent, ask, lastReply };
+	}
+
+	it('authenticates a forwarded credential through the composed resolver', async () => {
+		const resolver = vi.fn((credential: string) =>
+			credential === LIVE ? { agentId: 'caller-1', tabId: 'caller-tab' } : null
+		);
+		const { consultAgent, ask, lastReply } = compose(resolver);
+		ask({ fromSessionId: 'caller-1', fromTabId: 'caller-tab', callerCredential: LIVE });
+		await vi.waitFor(() => expect(consultAgent).toHaveBeenCalledTimes(1));
+		expect(resolver).toHaveBeenCalledWith(LIVE);
+		const params = consultAgent.mock.calls[0][0];
+		expect(params).toMatchObject({
+			targetSessionId: 'target-agent',
+			fromSessionId: 'caller-1',
+			fromTabId: 'caller-tab',
+		});
+		expect(JSON.stringify(params)).not.toContain(LIVE);
+		await vi.waitFor(() => expect(lastReply()).toMatchObject({ success: true, requestId: 'r-1' }));
+		expect(JSON.stringify(lastReply())).not.toContain(LIVE);
+	});
+
+	it('refuses a credential the composed resolver authenticates nobody with', () => {
+		const { consultAgent, ask, lastReply } = compose(() => null);
+		ask({ fromSessionId: 'caller-1', fromTabId: 'caller-tab', callerCredential: LIVE });
+		expect(consultAgent).not.toHaveBeenCalled();
+		expect(lastReply()).toMatchObject({ success: false, requestId: 'r-1' });
+		expect(lastReply().error).toContain('authenticates no live chat turn');
+	});
+
+	it('refuses as unauthenticatable when no resolver was composed', () => {
+		const { consultAgent, ask, lastReply } = compose();
+		ask({ fromSessionId: 'caller-1', fromTabId: 'caller-tab', callerCredential: LIVE });
+		expect(consultAgent).not.toHaveBeenCalled();
+		expect(lastReply().error).toContain('cannot authenticate a caller credential');
+	});
+
+	it('keeps the uncredentialed consult path unchanged', async () => {
+		const resolver = vi.fn(() => null);
+		const { consultAgent, ask } = compose(resolver);
+		ask({ fromSessionId: 'caller-1' });
+		await vi.waitFor(() => expect(consultAgent).toHaveBeenCalledTimes(1));
+		expect(resolver).not.toHaveBeenCalled();
+		expect(consultAgent.mock.calls[0][0]).toMatchObject({ fromSessionId: 'caller-1' });
+	});
+});
