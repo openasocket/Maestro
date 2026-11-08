@@ -58,15 +58,21 @@ import type { AutoRunTurnResult, AutoRunTurnRequest } from '../autorun/engine-ty
 import { createIdleWatchdog } from '../control/idle-watchdog';
 import { logger } from '../host';
 import type { ManagedLaunchInput } from '../launch/launch-plan';
-import type {
-	AdmissionRequest,
-	ContextVerification,
-	HostAuthority,
-	PolicySourceSet,
+import {
+	isVerifiedContext,
+	type AdmissionRequest,
+	type ContextVerification,
+	type HostAuthority,
+	type PolicySourceSet,
 } from '../managed/authority';
-import { delegationContextEnv, delegationContextOf } from '../managed/delegation';
+import {
+	childDelegationContext,
+	delegationContextEnv,
+	delegationContextOf,
+	delegationContextProblems,
+} from '../managed/delegation';
 import type { HeadlessSpawnContextInput } from '../managed/host-adapter';
-import type { ManagedDenialCode } from '../managed/types';
+import type { ManagedAuthenticatedContext, ManagedDenialCode } from '../managed/types';
 import {
 	isWorkflowFenceRefusal,
 	type WorkflowFenceAnswer,
@@ -134,6 +140,12 @@ export type AutoRunAdmissionEvent =
 
 export interface AutoRunManagedOptions {
 	port: AutoRunSpawnAuthorityPort;
+	/**
+	 * Trusted host verification of the initiating operation, read for every attempt and
+	 * again before dispatch. Never supply environment or renderer JSON as authentication.
+	 * A supplied source must remain verified and own this workflow under its current fence.
+	 */
+	parentContext?(): ContextVerification;
 	/**
 	 * The workflow's owner fence, claimed on every attempt for that attempt's request and attempt
 	 * ids (`runId` is the task's request id, as the Cue router claims it), so a fence that lapses
@@ -325,11 +337,11 @@ export function createAutoRunTurnRunner(options: AutoRunTurnRunnerOptions): Auto
 				refusal: managedRefusal(provider, attribution, state, code, message),
 			}) as const;
 		if (managed.port.standing() === 'standalone') {
-			return requiresManagedAdmission
+			return requiresManagedAdmission || managed.parentContext
 				? refuse(
 						'unavailable',
 						'runtime-unavailable',
-						'This Auto Run lost its managed host standing.'
+						'This Auto Run requires managed host standing.'
 					)
 				: { managed: false };
 		}
@@ -342,6 +354,42 @@ export function createAutoRunTurnRunner(options: AutoRunTurnRunnerOptions): Auto
 				'This Auto Run carries no workflow identity, so a managed host cannot bind its turns.'
 			);
 		}
+		const contextKey = (context: ManagedAuthenticatedContext) =>
+			canonicalJson({
+				...context,
+				verification: { ...context.verification, verifiedAt: undefined },
+			});
+		let parent: ManagedAuthenticatedContext | undefined;
+		try {
+			const source = managed.parentContext?.();
+			if (source && !source.ok) {
+				return refuse('denied', source.code, source.problems.join('; '));
+			}
+			if (source?.ok && isVerifiedContext(source.context)) parent = structuredClone(source.context);
+			else if (managed.parentContext) {
+				return refuse('unavailable', 'runtime-unavailable', 'The Auto Run parent is unavailable.');
+			}
+		} catch (error) {
+			return refuse(
+				'unavailable',
+				'runtime-unavailable',
+				`The Auto Run parent could not be verified: ${error instanceof Error ? error.message : String(error)}`
+			);
+		}
+		const parentKey = parent ? contextKey(parent) : null;
+		const parentIsCurrent = () => {
+			if (!parent) return true;
+			try {
+				const source = managed.parentContext?.();
+				return (
+					source?.ok === true &&
+					isVerifiedContext(source.context) &&
+					contextKey(source.context) === parentKey
+				);
+			} catch {
+				return false;
+			}
+		};
 		const fence = await managed.fence({
 			runId: attribution.requestId,
 			attemptId: attribution.attemptId,
@@ -361,12 +409,51 @@ export function createAutoRunTurnRunner(options: AutoRunTurnRunnerOptions): Auto
 				'The managed host changed while claiming this Auto Run attempt; no turn was started.'
 			);
 		}
+		if (!parentIsCurrent()) {
+			return refuse(
+				'unavailable',
+				'runtime-unavailable',
+				'The Auto Run parent changed during admission.'
+			);
+		}
 		const policy = managed.port.policy();
+		const workflow = autoRunWorkflowRef(attribution.workflow, fence);
+		if (parent && canonicalJson(parent.workflow) !== canonicalJson(workflow)) {
+			return refuse(
+				'denied',
+				'policy-denied',
+				'The Auto Run workflow and owner fence do not match its authenticated parent.'
+			);
+		}
+		const child = parent
+			? childDelegationContext(delegationContextOf(parent), {
+					link: parent.actor,
+					requestId: attribution.requestId,
+					attemptId: attribution.attemptId,
+					idempotencyKey: attribution.idempotencyKey,
+				})
+			: undefined;
+		if (child) {
+			const problems = delegationContextProblems(child);
+			if (problems.length) return refuse('denied', 'policy-denied', problems.join('; '));
+		}
 		const contextInput = structuredClone({
-			identity: autoRunRunIdentity(attribution),
-			traceId: autoRunTraceId(attribution),
+			identity: {
+				...autoRunRunIdentity(attribution),
+				...(child
+					? {
+							rootRunId: child.identity.rootRunId,
+							parentRunId:
+								attribution.parentRunId === attribution.workflow.runId
+									? child.identity.parentRunId
+									: attribution.parentRunId,
+						}
+					: {}),
+			},
+			traceId: child?.traceId ?? autoRunTraceId(attribution),
 			policyRevision: policy.policyRevision,
-			workflow: autoRunWorkflowRef(attribution.workflow, fence),
+			workflow,
+			...(child ? { delegation: child.delegation } : {}),
 		});
 		const verified = managed.port.context(structuredClone(contextInput));
 		if (!verified.ok) {
@@ -390,7 +477,9 @@ export function createAutoRunTurnRunner(options: AutoRunTurnRunnerOptions): Auto
 		) => {
 			let message: string;
 			try {
-				if (fence.lifetime && (!fence.lifetime.current() || fence.lifetime.signal.aborted)) {
+				if (!parentIsCurrent()) {
+					message = 'The Auto Run authenticated parent changed before dispatch.';
+				} else if (fence.lifetime && (!fence.lifetime.current() || fence.lifetime.signal.aborted)) {
 					message = 'The Auto Run workflow owner fence is no longer current.';
 				} else if (scopeKey(request) !== boundScope) {
 					message = 'The Auto Run admission no longer carries the prepared context and policy.';

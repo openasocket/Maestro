@@ -25,6 +25,7 @@ import {
 	createLocalHostAuthority,
 	type AdmissionOutcome,
 	type AdmissionRequest,
+	type ContextVerification,
 	type DispatchLease,
 	type PolicyDecision,
 } from '../../managed/authority';
@@ -32,6 +33,7 @@ import { createManagedBinding } from '../../managed/binding';
 import {
 	delegationContextOf,
 	MANAGED_DELEGATION_ENV_VAR,
+	MAX_DELEGATION_DEPTH,
 	readDelegationContextEnv,
 } from '../../managed/delegation';
 import { createHeadlessSpawnAuthority, installationIdentity } from '../../managed/host-adapter';
@@ -242,6 +244,217 @@ describe('Auto Run turns: a refused effort, and the fence claimed per attempt', 
 			});
 			return { port, authority };
 		}
+
+		describe('trusted incoming Auto Run delegation', () => {
+			function parentOf(port: AutoRunSpawnAuthorityPort) {
+				const bound = port.context({
+					identity: {
+						requestId: 'cue-request',
+						idempotencyKey: 'cue-request',
+						attemptId: 'cue-attempt',
+						runId: 'cue-run',
+						rootRunId: 'pipeline-root',
+						parentRunId: 'pipeline-parent',
+					},
+					traceId: 'cue-trace',
+					policyRevision: 1,
+					workflow: {
+						workflowId: workflow.workflowId,
+						version: workflow.version,
+						triggerEventId: workflow.triggerEventId,
+						...FENCE,
+					},
+					delegation: { chain: [{ kind: 'human', id: 'source-human' }], grantRef: 'source-grant' },
+				});
+				if (!bound.ok) throw new Error(bound.problems.join('; '));
+				const parent = createContextVerifier({
+					...bound.context.verification,
+					now: Date.now,
+					accept: () => [],
+				}).verify({ ...bound.context, actor: { kind: 'agent', id: 'source-agent' } });
+				if (!parent.ok) throw new Error(parent.problems.join('; '));
+				return parent;
+			}
+
+			it.each(['synopsis', 'goal-handoff'] as const)(
+				'preserves incoming custody through an effort retry and %s in real child environments',
+				async (purpose) => {
+					const requests: AdmissionRequest[] = [];
+					const { port } = await managedPort((request) => {
+						requests.push(request);
+						return ALLOW;
+					});
+					const parent = parentOf(port);
+					const parentContext = vi.fn(() => {
+						parent.context.verification.verifiedAt = new Date(
+							Date.parse(parent.context.verification.verifiedAt) + 1
+						).toISOString();
+						return parent;
+					});
+					const turns = runner(['refuse', 'answer', 'answer'], {
+						workflow,
+						managed: { port, fence: () => FENCE, parentContext },
+					});
+					expect(
+						await turns.run({ purpose: 'task', prompt: 'work', effort: 'minimal' })
+					).toMatchObject({ success: true });
+					expect(
+						await turns.run({ purpose, prompt: 'summary', resumeSessionId: 'sess-1' })
+					).toMatchObject({ success: true });
+					expect(startedProcesses()).toBe(3);
+					expect(requests).toHaveLength(3);
+					for (const [index, { context }] of requests.entries()) {
+						const env = JSON.parse(
+							fs.readFileSync(path.join(dir, `env-${index + 1}.json`), 'utf8')
+						);
+						expect(readDelegationContextEnv(env)).toEqual({
+							status: 'ok',
+							context: delegationContextOf(context),
+						});
+						expect(context.identity.rootRunId).toBe('pipeline-root');
+						expect(context.identity.parentRunId).toBe(
+							index === 2 ? requests[1].context.identity.runId : 'cue-run'
+						);
+						expect(context.workflow).toEqual(parent.context.workflow);
+						expect(context.delegation).toEqual({
+							chain: [
+								{ kind: 'human', id: 'source-human' },
+								{ kind: 'agent', id: 'source-agent' },
+							],
+							grantRef: 'source-grant',
+						});
+						expect(context.actor).toEqual({ kind: 'human', id: 'operator' });
+					}
+					expect(requests[0].context.identity.requestId).toBe(
+						requests[1].context.identity.requestId
+					);
+					expect(requests[0].context.identity.attemptId).not.toBe(
+						requests[1].context.identity.attemptId
+					);
+					expect(parentContext.mock.calls.length).toBeGreaterThan(3);
+				}
+			);
+
+			it.each([
+				'withdrawn',
+				'throwing',
+				'unverified',
+				'workflow',
+				'fence',
+				'standalone',
+				'depth',
+			] as const)('refuses a %s incoming source before creating a child', async (change) => {
+				const decide = vi.fn(() => ALLOW);
+				const { port } = await managedPort(decide);
+				const parent = parentOf(port);
+				if (change === 'workflow') parent.context.workflow!.version = 'different-version';
+				if (change === 'fence') parent.context.workflow!.fencingToken = 'stale-fence';
+				if (change === 'standalone') port.standing = () => 'standalone';
+				if (change === 'depth')
+					parent.context.delegation.chain = Array.from(
+						{ length: MAX_DELEGATION_DEPTH },
+						(_, i) => ({
+							kind: 'agent',
+							id: `prior-${i}`,
+						})
+					);
+				const result = await runner(['answer'], {
+					workflow,
+					managed: {
+						port,
+						fence: () => FENCE,
+						parentContext: () => {
+							if (change === 'throwing') throw new Error('parent unavailable');
+							if (change === 'unverified')
+								return { ok: true, context: structuredClone(parent.context) };
+							if (change === 'withdrawn')
+								return { ok: false, code: 'unauthenticated', problems: ['parent revoked'] };
+							return parent;
+						},
+					},
+				}).run({ purpose: 'task', prompt: 'work' });
+				expect(result.success).toBe(false);
+				expect(result.managed).toBeDefined();
+				expect(decide).not.toHaveBeenCalled();
+				expect(startedProcesses()).toBe(0);
+			});
+
+			describe.each(['fence', 'preparation', 'admission', 'spawn gate'] as const)(
+				'%s source recheck',
+				(boundary) => {
+					it.each(['grant', 'actor', 'withdrawn', 'throwing', 'unverified'] as const)(
+						'refuses %s drift, releases unused custody and permits a fresh retry',
+						async (change) => {
+							const { port, authority } = await managedPort();
+							const parent = parentOf(port);
+							let changed = false;
+							let enabled = true;
+							const mutate = () => {
+								if (enabled) changed = true;
+							};
+							const issued: DispatchLease[] = [];
+							const original = authority.admit.bind(authority);
+							vi.spyOn(authority, 'admit').mockImplementation(async (request) => {
+								const outcome = await original(request);
+								if (outcome.state === 'admitted') issued.push(outcome.lease);
+								if (boundary === 'admission') mutate();
+								return outcome;
+							});
+							const turns = runner(
+								['answer', 'answer'],
+								{
+									workflow,
+									managed: {
+										port,
+										onAdmission: (event) => {
+											if (event.kind === 'admitted' && boundary === 'spawn gate') mutate();
+										},
+										fence: async () => {
+											if (boundary === 'fence') mutate();
+											return FENCE;
+										},
+										parentContext: (): ContextVerification => {
+											if (!changed) return parent;
+											if (change === 'unverified')
+												return { ok: true, context: structuredClone(parent.context) };
+											if (change === 'throwing') throw new Error('parent read failed');
+											if (change === 'withdrawn')
+												return { ok: false, code: 'unauthenticated', problems: ['parent revoked'] };
+											const next = parentOf(port);
+											if (change === 'grant') next.context.delegation.grantRef = 'changed-grant';
+											else next.context.actor.id = 'replacement-source';
+											return next;
+										},
+									},
+								},
+								undefined,
+								() => {
+									if (boundary === 'preparation') mutate();
+								}
+							);
+							expect(await turns.run({ purpose: 'task', prompt: 'work' })).toMatchObject({
+								success: false,
+							});
+							expect(startedProcesses()).toBe(0);
+							expect(authority.live()).toEqual([]);
+							expect(issued).toHaveLength(
+								boundary === 'admission' || boundary === 'spawn gate' ? 1 : 0
+							);
+							for (const lease of issued) {
+								expect(lease.pid()).toBeUndefined();
+								expect(lease.ended().release).toMatchObject({ outcome: 'spawn-failed' });
+							}
+							enabled = false;
+							changed = false;
+							expect(await turns.run({ purpose: 'task', prompt: 'retry' })).toMatchObject({
+								success: true,
+							});
+							expect(startedProcesses()).toBe(1);
+						}
+					);
+				}
+			);
+		});
 
 		describe('shared turn cancellation and unused custody', () => {
 			it.each(['preparation', 'admission', 'observer'] as const)(
