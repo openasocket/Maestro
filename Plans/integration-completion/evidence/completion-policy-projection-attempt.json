@@ -6,8 +6,8 @@
 	"status": "blocked",
 	"task": "MCOMP-16-01",
 	"stage": "Q16",
-	"recordedAt": "2026-11-08T11:20:10.069Z",
-	"observedRevision": "042a986583b5e6a970e5b420d4c14604cb8b491e",
+	"recordedAt": "2026-11-08T11:23:38.027Z",
+	"observedRevision": "24179c736def9d6decb61b237c1b961ef9a39ded",
 	"inputs": [
 		{
 			"path": "Plans/integration-completion/program.json",
@@ -133,20 +133,6 @@
 	"observations": "Receipt inventory and local archive checks only. No endpoint policy acceptance, tightening, live refresh, offline preservation or endpoint source/revision correlation case was executed.",
 	"nextAction": "Obtain GCOMP-13-10 and GCOMP-12-01 receipts, resolve DESKTOP-LOCAL/1 delivery and credential mappings, verify and rebind immutable paired inputs, then run every required real Electron policy journey.",
 	"imagesAnalyzed": 0,
-	"evidence": [
-		{
-			"path": ".maestro/playbooks/Working/mcomp-16-01/readiness.mjs",
-			"sha256": "7aea35fcc211f5f3fa35fc13fa14aa58c926a07c803742c2280ab59fb8f36768"
-		},
-		{
-			"path": ".maestro/playbooks/Working/mcomp-16-01/readiness-MCOMP-16-01-2026-11-08T11-20-10-069Z.json",
-			"sha256": "c12fb7ef29f59da462154c5c27bd8d9a3b1e952cc346ba2433060bc3770cb4e5"
-		},
-		{
-			"path": "Plans/integration-completion/EXECUTION-RULES.md",
-			"sha256": "b1213bb17719bd4765ad00ed032352e5bf21461b94518f486a9610c5b526d88e"
-		}
-	],
 	"requiredCases": [
 		{
 			"case": "selected-edits-accepted",
@@ -174,12 +160,32 @@
 			"reason": "Missing required counterpart receipts and negotiated DESKTOP-LOCAL/1 producer"
 		}
 	],
-	"probeCorrection": "Replaced the owned MCOMP-16 legacy launcher with the existing manifest-driven MCOMP-14 inventory pattern. Uses Q16 requirements and current policy BUILD archives; retired Tauri, historical M0 and obsolete S10 gates are excluded.",
-	"validation": "Readiness exits 2 for the three named missing counterpart receipts and proposed DESKTOP-LOCAL/1 mapping. Current runtime verifier reports ready with zero source/input drift; compiled desktop SHA-256/SHA-512 match. No application code or tests changed; no real policy case passed or was waived.",
 	"publication": {
 		"qualificationReceiptCreated": false,
 		"blockedAttemptOnly": true,
 		"taskCompleted": false,
 		"git": "Commit/push result is recorded in the local playbook; no remote publication claimed here."
+	},
+	"evidence": [
+		{
+			"path": ".maestro/playbooks/Working/mcomp-16-01/readiness.mjs",
+			"sha256": "7aea35fcc211f5f3fa35fc13fa14aa58c926a07c803742c2280ab59fb8f36768"
+		},
+		{
+			"path": ".maestro/playbooks/Working/mcomp-16-01/readiness-MCOMP-16-01-2026-11-08T11-23-38-027Z.json",
+			"sha256": "c8b83a8fe5c188e6c8e4dccf4c55e876c9805e9ca93d14c91737075d205b211c"
+		},
+		{
+			"path": "Plans/integration-completion/EXECUTION-RULES.md",
+			"sha256": "b1213bb17719bd4765ad00ed032352e5bf21461b94518f486a9610c5b526d88e"
+		}
+	],
+	"probeCorrection": "Replaced the owned MCOMP-16 legacy launcher with the existing manifest-driven MCOMP-14 inventory pattern. Uses Q16 requirements and current policy BUILD archives; retired Tauri, historical M0 and obsolete S10 gates are excluded.",
+	"validation": "Readiness exits 2 for the three named missing counterpart receipts and proposed DESKTOP-LOCAL/1 mapping. Current runtime verifier reports ready with zero source/input drift; compiled desktop SHA-256/SHA-512 match. No application code or tests changed; no real policy case passed or was waived.",
+	"attempt": 8,
+	"previousAttempt": {
+		"recordedAt": "2026-11-08T11:20:10.069Z",
+		"observedRevision": "042a986583b5e6a970e5b420d4c14604cb8b491e",
+		"status": "blocked"
 	}
 }
