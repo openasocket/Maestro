@@ -537,14 +537,7 @@ export function createRuntimeAutoRun(options: RuntimeAutoRunOptions): RuntimeAut
 								if (answer && !isWorkflowFenceRefusal(answer) && answer.lifetime) {
 									const run = runs.get(agentId);
 									const lifetime = answer.lifetime;
-									if (!run || run.abort.signal.aborted || !lifetime.current())
-										return {
-											fence: null,
-											state: 'unavailable',
-											code: 'runtime-unavailable',
-											message: 'Workflow ownership is no longer live.',
-										};
-									run.removeWorkflowListener?.();
+									run?.removeWorkflowListener?.();
 									// The turn settles its attempt; run cleanup may reach the same custody.
 									// Share its result, including rejection, rather than releasing it twice.
 									let settlement: Promise<void> | undefined;
@@ -557,12 +550,28 @@ export function createRuntimeAutoRun(options: RuntimeAutoRunOptions): RuntimeAut
 											return (settlement ??= Promise.resolve().then(() => lifetime.finish(effect)));
 										},
 									};
-									run.workflowLifetime = ownedLifetime;
 									const stop = () => {
-										run.controller.requestStop();
-										run.abort.abort();
+										run?.controller.requestStop();
+										run?.abort.abort();
 										void registry.stopAgent(agentId);
 									};
+									// Even an unusable late claim owns custody. Retain its settlement before
+									// refusing it, so shutdown waits and cleanup preserves a failed release.
+									if (run) run.workflowLifetime = ownedLifetime;
+									if (
+										!run ||
+										run.abort.signal.aborted ||
+										lifetime.signal.aborted ||
+										!lifetime.current()
+									) {
+										await ownedLifetime.finish('no_effect');
+										return {
+											fence: null,
+											state: 'unavailable',
+											code: 'runtime-unavailable',
+											message: 'Workflow ownership is no longer live.',
+										};
+									}
 									lifetime.signal.addEventListener('abort', stop, { once: true });
 									run.removeWorkflowListener = removeListener;
 									if (!lifetime.current()) stop();

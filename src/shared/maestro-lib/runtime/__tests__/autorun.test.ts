@@ -35,7 +35,7 @@ import {
 	type HostAuthority,
 } from '../../managed/authority';
 import { createManagedBinding } from '../../managed/binding';
-import type { WorkflowFenceLifetime } from '../../managed/workflows';
+import type { WorkflowFenceAnswer, WorkflowFenceLifetime } from '../../managed/workflows';
 import { readHistory } from '../../store/read-history';
 import { AUTO_RUN_SESSION_COLUMNS, AUTO_RUN_TASK_COLUMNS } from '../../stats/auto-run-insert';
 import { QUERY_EVENT_COLUMNS } from '../../stats/query-event-insert';
@@ -873,6 +873,104 @@ describe('runtime Auto Run', () => {
 		});
 
 		describe('workflow settlement', () => {
+			describe.each(['playbook', 'goal'] as const)('late %s owner claims', (kind) => {
+				it.each(
+					(['shutdown', 'expired', 'revoked'] as const).flatMap((change) =>
+						[true, false].map((success) => ({ change, success }))
+					)
+				)(
+					'settles $change custody before ending with success=$success',
+					async ({ change, success }) => {
+						const file = doc('tasks', tasks(1));
+						const { authority, asked } = fleetAuthority();
+						const pendingClaim = Promise.withResolvers<WorkflowFenceAnswer>();
+						const pendingFinish = Promise.withResolvers<void>();
+						const owner = new AbortController();
+						const finish = vi.fn<WorkflowFenceLifetime['finish']>(() => pendingFinish.promise);
+						const retryFinish = vi
+							.fn<WorkflowFenceLifetime['finish']>()
+							.mockResolvedValue(undefined);
+						const claim = vi
+							.fn<NonNullable<NonNullable<MaestroRuntimeOptions['managed']>['workflowFence']>>()
+							.mockImplementationOnce(() => pendingClaim.promise)
+							.mockImplementation(() => ({
+								ownerEpoch: 'epoch-2',
+								fencingToken: 'fence-2',
+								lifetime: {
+									signal: new AbortController().signal,
+									current: () => true,
+									finish: retryFinish,
+								},
+							}));
+						const runtime = await startEnrolled(authority, claim);
+						const run = watchRun(runtime);
+						const launch = () =>
+							kind === 'playbook'
+								? runtime.autoRun.launch('a1', { documents: [{ file }] })
+								: runtime.autoRun.launchGoal('a1', { goal: 'Ship the parser', maxIterations: 1 });
+						value<unknown>(await launch());
+						await vi.waitFor(() => expect(claim).toHaveBeenCalledTimes(1));
+						const closing = change === 'shutdown' ? runtime.connection.close() : undefined;
+						if (change === 'revoked') owner.abort();
+						pendingClaim.resolve({
+							ownerEpoch: 'epoch-1',
+							fencingToken: 'fence-1',
+							lifetime: {
+								signal: owner.signal,
+								current: () => change !== 'expired',
+								finish,
+							},
+						});
+						try {
+							await vi.waitFor(() => expect(finish).toHaveBeenCalledWith('no_effect'));
+							expect(run.outcomes).toEqual([]);
+							expect(runtime.runs.activeRuns()).toHaveLength(1);
+							expect(asked).toEqual([]);
+							expect(runLaunches).toEqual([]);
+							expect(envFiles).toEqual([]);
+							expect(read(file)).toBe(tasks(1));
+							expect(errorOf(await launch()).code).toBe(
+								change === 'shutdown' ? 'host-unavailable' : 'rejected'
+							);
+						} finally {
+							// A failing assertion must not leave the test's run or shutdown pending.
+							await runtime.autoRun.stop('a1');
+							if (success) pendingFinish.resolve();
+							else pendingFinish.reject(new Error('late release acknowledgement lost'));
+						}
+						await run.ended();
+						await closing;
+						expect(finish.mock.calls).toEqual([['no_effect']]);
+						expect(run.outcome()).toEqual(
+							success
+								? { status: 'stopped' }
+								: {
+										status: 'error',
+										reason:
+											'Workflow settlement remains uncertain: late release acknowledgement lost',
+									}
+						);
+						expect(runtime.runs.activeRuns()).toEqual([]);
+						if (closing) return;
+						// A fresh attempt gets fresh custody and reaches the real fixture process.
+						script =
+							kind === 'playbook'
+								? [{ text: 'Finished task one. Done.', tick: file }]
+								: [{ text: 'Finished.\n<!-- maestro:goal-complete -->' }];
+						const retry = watchRun(runtime);
+						value<unknown>(await launch());
+						await retry.ended();
+						expect(retry.outcome()).toEqual({ status: 'completed' });
+						expect(retryFinish.mock.calls).toEqual([['applied']]);
+						expect(claim).toHaveBeenCalledTimes(2);
+						expect(claim.mock.calls[1][1].attemptId).not.toBe(claim.mock.calls[0][1].attemptId);
+						expect(asked).toHaveLength(1);
+						expect(runLaunches).toHaveLength(1);
+						expect(envFiles.every((env) => fs.existsSync(env))).toBe(true);
+					}
+				);
+			});
+
 			it('continues to the next task when a successful release ends the old owner signal', async () => {
 				const file = doc('tasks', tasks(2));
 				script = [1, 2].map(() => ({ text: 'Finished this task. Done.', tick: file }));
