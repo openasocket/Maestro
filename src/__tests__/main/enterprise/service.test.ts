@@ -83,6 +83,27 @@ describe('enterprise service', () => {
 		return service;
 	}
 
+	it('includes host approved options in the shared status surface without exposing native policy', () => {
+		const service = compose();
+		expect(service.managed.status().agentOptions).toMatchObject({
+			outcome: 'unavailable',
+			authority: 'none',
+		});
+		const options = {
+			outcome: 'unavailable' as const,
+			authority: 'none' as const,
+			policyRevision: 9,
+			freshness: 'stale' as const,
+			reason: 'Refresh required',
+		};
+		const read = vi.spyOn(service.policy, 'agentOptions').mockReturnValue(options);
+		const state = service.managed.status();
+		expect(read).toHaveBeenCalledOnce();
+		expect(state.agentOptions).toEqual(options);
+		expect(state.agentOptions).not.toBe(options);
+		expect(state).not.toHaveProperty('routes');
+	});
+
 	it.each([false, true])(
 		'holds prepared and effect inputs until desktop recovery: recovered=%s',
 		async (recovered) => {

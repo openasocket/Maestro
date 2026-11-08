@@ -202,7 +202,8 @@ export interface ManagedSupportMatrix {
 
 export interface ManagedOperationsDeps {
 	lifecycle: EnrollmentLifecycle;
-	policy: PolicyStatusService;
+	policy: Omit<PolicyStatusService, 'agentOptions'> &
+		Partial<Pick<PolicyStatusService, 'agentOptions'>>;
 	identity: EnterpriseIdentityStore;
 	inventory: InstallationInventoryService;
 	/** Default: the real ledgers (`DEFAULT_MANAGED_HOLDS`). */
@@ -294,6 +295,7 @@ export function createManagedOperations(deps: ManagedOperationsDeps): ManagedOpe
 			projectManagedState({
 				status: deps.lifecycle.status(),
 				policy: deps.policy.status(),
+				agentOptions: deps.policy.agentOptions?.(locks()),
 				custody: deps.identity.custody(),
 				supported: ENTERPRISE_SUPPORTED_CAPABILITIES,
 				egress: holds.egress(),

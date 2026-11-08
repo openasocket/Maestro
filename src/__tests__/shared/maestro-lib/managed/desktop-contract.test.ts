@@ -165,6 +165,132 @@ describe('desktop authoring mapping against pinned public schema 1', () => {
 		};
 	}
 
+	it('exposes bounded opaque options and explicit execution modes without authority', async () => {
+		const h = nativeHarness();
+		h.source.executionChoices = [
+			{ providerRef: 'provider-1', permissions: ['standard'], transports: ['transport-1'] },
+		];
+		await h.service.refreshProjection();
+		const view = h.service.agentOptions(settings);
+		expect(view).toMatchObject({
+			outcome: 'available',
+			authority: 'none',
+			policyRevision: 7,
+			freshness: 'fresh',
+			fields: {
+				provider: { editable: false, lockedReason: 'This choice is fixed by policy.' },
+				model: {
+					editable: true,
+					choices: [{ kind: 'model', ref: 'model-1', providerRef: 'provider-1' }],
+				},
+				workspace: { editable: true, choices: [{ kind: 'workspace', ref: 'workspace-1' }] },
+				credential: {
+					choices: [{ kind: 'credential', ref: 'credential-1', accountRef: 'account-1' }],
+				},
+				permission: {
+					choices: [{ kind: 'permission', ref: 'standard', providerRef: 'provider-1' }],
+				},
+				transport: {
+					choices: [{ kind: 'transport', ref: 'transport-1', providerRef: 'provider-1' }],
+				},
+			},
+		});
+		expect(JSON.stringify(view)).not.toMatch(
+			/sonnet|claude-code|accountDir|baseUrl|policyDigest|tenantId/
+		);
+		if (view.outcome !== 'available') throw new Error('expected options');
+		expect(Date.parse(view.expiresAt)).toBe(now + 60_000);
+		(view.fields.permission.choices as unknown[]).length = 0;
+		expect(h.service.agentOptions(settings)).not.toEqual(view);
+		const held = h.service.agentOptions({
+			...settings,
+			locks: { 'agentConfig.model': { code: 'locked', pinned: false, message: 'Model held' } },
+		});
+		expect(held).toMatchObject({
+			fields: { model: { editable: false, lockedReason: 'Model held' } },
+		});
+	});
+
+	it('leaves absent execution mappings unavailable and filters disallowed parent references', async () => {
+		const h = nativeHarness();
+		h.source.desktop.fields.provider = { state: 'user_editable', allowed: [] };
+		await h.service.refreshProjection();
+		expect(h.service.agentOptions(settings)).toMatchObject({
+			fields: {
+				model: { editable: false, choices: [] },
+				account: { choices: [] },
+				credential: { choices: [] },
+				permission: {
+					editable: false,
+					choices: [],
+					lockedReason: 'No verified execution choices are available.',
+				},
+				transport: { editable: false, choices: [] },
+			},
+		});
+	});
+
+	it.each([
+		'offline',
+		'actor',
+		'trust',
+		'runtime',
+		'epoch',
+		'revision',
+		'registration expiry',
+		'projection expiry',
+		'stale observation',
+		'settings revision',
+	])('withdraws options after %s without clearing installed restrictions', async (change) => {
+		const h = nativeHarness();
+		await h.service.refreshProjection();
+		if (change === 'offline') h.disconnect();
+		if (change === 'actor') h.record.registration!.actorId = 'another-actor';
+		if (change === 'trust') h.record.endpoint.trustRootDigest = 'c'.repeat(64);
+		if (change === 'runtime') h.record.registration!.runtimeId = 'another-runtime';
+		if (change === 'epoch') h.record.registration!.processEpoch = 'another-epoch';
+		if (change === 'revision')
+			h.record.policy.appliedRevision = h.standing.endpoint!.appliedPolicyRevision = 8;
+		if (change === 'registration expiry')
+			h.record.registration!.expiresAt = new Date(now).toISOString();
+		if (change === 'projection expiry') h.clock.now += 60_000;
+		if (change === 'stale observation')
+			h.record.policy.observedAt = new Date(now - 3_600_000).toISOString();
+		expect(
+			h.service.agentOptions(
+				change === 'settings revision' ? { ...settings, policyRevision: 8 } : settings
+			)
+		).toMatchObject({ outcome: 'unavailable', authority: 'none' });
+		if (change !== 'settings revision')
+			expect(h.service.agentOptions(settings)).not.toHaveProperty('fields');
+		if (change === 'offline')
+			expect(h.service.installedProjection()!.settings.locks).toHaveLength(1);
+	});
+
+	it.each(
+		[
+			[{ providerRef: 'unknown', permissions: ['standard'], transports: [] }],
+			[{ providerRef: 'provider-1', permissions: ['yolo'], transports: [] }],
+			[{ providerRef: 'provider-1', permissions: ['standard', 'standard'], transports: [] }],
+			[{ providerRef: 'provider-1', permissions: [], transports: ['https://secret.example'] }],
+			[
+				{
+					providerRef: 'provider-1',
+					permissions: [],
+					transports: ['transport-1'],
+					secret: 'canary',
+				},
+			],
+		].map((catalog) => [catalog])
+	)('rejects malformed execution catalog %j atomically', async (executionChoices) => {
+		const h = nativeHarness();
+		await h.service.refreshProjection();
+		const before = h.service.installedProjection();
+		Object.assign(h.source, { executionChoices });
+		expect(await h.service.refreshProjection()).toEqual({ installed: false, reason: 'invalid' });
+		expect(h.service.installedProjection()).toEqual(before);
+	});
+
 	it('installs verified settings and restores pins before refresh returns, allowing unheld edits', async () => {
 		const h = nativeHarness();
 		h.source.settings.locks.push(

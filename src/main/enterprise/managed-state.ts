@@ -36,6 +36,7 @@ import type {
 	ManagedEnrollmentStatus,
 	ManagedIdentityManagement,
 } from '../../shared/maestro-lib/managed/endpoint-port';
+import type { ManagedAgentOptions } from '../../shared/maestro-lib/managed/agent-policy';
 import type { ManagedPolicyStatus } from '../../shared/maestro-lib/managed/host-adapter';
 import type { EgressHold } from '../utils/fetchWithTimeout';
 import type { IdentityCustodyState } from './identity-store';
@@ -57,6 +58,8 @@ export type ManagedStanding =
 	| 'unenrolled';
 
 export interface ManagedStateView {
+	/** Optional for older hosts; never interpreted as unrestricted. */
+	agentOptions?: ManagedAgentOptions;
 	at: string;
 	standing: ManagedStanding;
 	/** Why authority is none, in the lifecycle's own sentence; null when it is registered. */
@@ -182,6 +185,7 @@ export function managedStandingOf(
 }
 
 export interface ManagedStateInput {
+	agentOptions?: ManagedAgentOptions;
 	status: ManagedEnrollmentStatus;
 	policy: ManagedPolicyStatus;
 	custody: IdentityCustodyState;
@@ -204,6 +208,7 @@ export function projectManagedState(input: ManagedStateInput): ManagedStateView 
 	const negotiated = live?.capabilities ?? [];
 	return {
 		at: new Date(input.now ?? Date.now()).toISOString(),
+		...(input.agentOptions ? { agentOptions: structuredClone(input.agentOptions) } : {}),
 		standing: managedStandingOf(status, policy),
 		reason: status.reason,
 		custody: {

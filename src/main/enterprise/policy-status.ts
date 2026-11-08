@@ -35,7 +35,14 @@ import {
 	parseManagedSettingsPolicy,
 	type ManagedSettingsPolicy,
 	type ManagedSettingsPolicyPort,
+	type ManagedSettingLocksView,
 } from '../../shared/managedSettingsLock';
+import { mapDesktopPolicy } from '../../shared/maestro-lib/managed/desktop-contract';
+import {
+	projectManagedAgentOptions,
+	type ManagedAgentOptions,
+	type ManagedExecutionChoices,
+} from '../../shared/maestro-lib/managed/agent-policy';
 import type {
 	DesktopPolicyProjection,
 	DesktopPolicySchemaPort,
@@ -103,11 +110,30 @@ const routeSchema = z.strictObject({
 	permissionMode: z.enum(['readonly', 'standard', 'full']).nullable(),
 });
 
+/** Proposed local execution catalog; absence never means all modes/transports. */
+const executionChoicesSchema = z
+	.array(
+		z.strictObject({
+			providerRef: z.string().refine(isEndpointIdentifier),
+			permissions: z
+				.array(z.enum(['readonly', 'standard', 'full']))
+				.max(3)
+				.refine((v) => new Set(v).size === v.length),
+			transports: z
+				.array(z.string().refine(isEndpointIdentifier))
+				.max(128)
+				.refine((v) => new Set(v).size === v.length),
+		})
+	)
+	.max(128)
+	.refine((v) => new Set(v.map((x) => x.providerRef)).size === v.length);
+
 /** One host-only batch. References are metadata; this object grants no execution. */
 export interface NativePolicyProjection {
 	desktop: DesktopPolicyProjection;
 	settings: ManagedSettingsPolicy;
 	routes: ManagedRouteCeiling[];
+	executionChoices?: ManagedExecutionChoices[];
 	ceilings: {
 		[K in keyof typeof ceilingParsers]: Extract<
 			ReturnType<(typeof ceilingParsers)[K]>,
@@ -141,6 +167,7 @@ export type PolicyRecovery =
 
 export interface PolicyStatusService {
 	status(): ManagedPolicyStatus;
+	agentOptions(settings: ManagedSettingLocksView): ManagedAgentOptions;
 	/** Host-only settings consumer port; never a renderer authority. */
 	readonly settings: ManagedSettingsPolicyPort;
 	refreshProjection(): Promise<PolicyProjectionInstall>;
@@ -160,7 +187,12 @@ export interface PolicyStatusService {
 export function createPolicyStatusService(deps: PolicyStatusServiceDeps): PolicyStatusService {
 	const now = deps.now ?? (() => Date.now());
 	const freshnessMs = deps.freshnessMs ?? POLICY_FRESHNESS_MS;
-	let installed: { scope: string; value: NativePolicyProjection; content: string } | null = null;
+	let installed: {
+		scope: string;
+		value: NativePolicyProjection;
+		content: string;
+		port: NativePolicyProjectionPort;
+	} | null = null;
 	let request = 0;
 	const settingsListeners = new Set<() => void>();
 	const scope = () => {
@@ -218,7 +250,8 @@ export function createPolicyStatusService(deps: PolicyStatusServiceDeps): Policy
 				return { installed: false, reason: 'changed' };
 			if (
 				!isPlainObject(raw) ||
-				unknownKeys(raw, ['desktop', 'settings', 'routes', 'ceilings'], '').length ||
+				unknownKeys(raw, ['desktop', 'settings', 'routes', 'ceilings', 'executionChoices'], '')
+					.length ||
 				!isPlainObject(raw.ceilings) ||
 				unknownKeys(raw.ceilings, Object.keys(ceilingParsers), '').length
 			)
@@ -226,15 +259,26 @@ export function createPolicyStatusService(deps: PolicyStatusServiceDeps): Policy
 			const desktop = port.schema.safeParse({ outcome: 'available', projection: raw.desktop });
 			const settings = parseManagedSettingsPolicy(raw.settings);
 			const routes = z.array(routeSchema).max(128).safeParse(raw.routes);
+			const execution = executionChoicesSchema.optional().safeParse(raw.executionChoices);
 			if (
 				!desktop.success ||
 				desktop.data.outcome !== 'available' ||
 				!settings.ok ||
-				!routes.success
+				!routes.success ||
+				!execution.success
 			)
 				return { installed: false, reason: 'invalid' };
 			const projection = desktop.data.projection,
 				binding = projection.binding;
+			if (
+				execution.data?.some(
+					(entry) =>
+						!projection.choices.some(
+							(choice) => choice.kind === 'provider' && choice.ref === entry.providerRef
+						)
+				)
+			)
+				return { installed: false, reason: 'invalid' };
 			const current = projectPolicyStatus({
 				standing: deps.lifecycle.status(),
 				now: now(),
@@ -268,6 +312,7 @@ export function createPolicyStatusService(deps: PolicyStatusServiceDeps): Policy
 				desktop: projection,
 				settings: settings.policy,
 				routes: routes.data,
+				...(execution.data ? { executionChoices: execution.data } : {}),
 				ceilings,
 			};
 			const { issuedAt: _issued, expiresAt: _expires, ...stable } = projection;
@@ -281,7 +326,7 @@ export function createPolicyStatusService(deps: PolicyStatusServiceDeps): Policy
 			)
 				return { installed: false, reason: 'invalid' };
 			// One assignment after every validation. No listener can observe a partial batch.
-			installed = { scope: source, value: structuredClone(value), content };
+			installed = { scope: source, value: structuredClone(value), content, port };
 			return { installed: true, policyRevision: binding.policyRevision };
 		} catch {
 			// A producer may throw with signed/private input in its error; expose no payload.
@@ -312,6 +357,65 @@ export function createPolicyStatusService(deps: PolicyStatusServiceDeps): Policy
 	};
 
 	return {
+		agentOptions(settings) {
+			const standing = deps.lifecycle.status();
+			const policy = projectPolicyStatus({ standing, now: now(), freshnessMs });
+			const unavailable = (reason: string): ManagedAgentOptions => ({
+				outcome: 'unavailable',
+				authority: 'none',
+				policyRevision: policy.appliedRevision,
+				freshness: policy.freshness,
+				reason,
+			});
+			const record = standing.identity.status === 'ok' ? standing.identity.record : null;
+			const registration = record?.registration;
+			if (
+				!installed ||
+				installed.scope !== scope() ||
+				installed.port !== deps.projections?.() ||
+				!policy.admission.possible ||
+				policy.connectivity !== 'online' ||
+				policy.management !== 'managed' ||
+				record?.management !== 'enrolled' ||
+				!registration ||
+				standing.connection?.closed ||
+				standing.connection?.registration !== 'registered' ||
+				!standing.connection.attached
+			)
+				return unavailable('Refresh the authenticated policy to load approved choices.');
+			const binding = installed.value.desktop.binding;
+			if (
+				binding.runtimeId !== registration.runtimeId ||
+				binding.processEpoch !== registration.processEpoch ||
+				binding.policyRevision !== policy.appliedRevision ||
+				binding.policyRevision !== record.policy.appliedRevision ||
+				registration.bindingDigest !== record.endpoint.bindingDigest
+			)
+				return unavailable('The current registration or policy has changed.');
+			const expires = Math.min(
+				Date.parse(installed.value.desktop.expiresAt),
+				Date.parse(registration.expiresAt),
+				Date.parse(policy.observedAt ?? '') + freshnessMs
+			);
+			if (!Number.isFinite(expires) || now() >= expires)
+				return unavailable('Approved choices have expired. Refresh policy.');
+			const view = mapDesktopPolicy(
+				{ outcome: 'available', projection: installed.value.desktop },
+				{
+					schema: installed.port.schema,
+					binding,
+					settings,
+					now: now(),
+				}
+			);
+			return view.outcome === 'available'
+				? projectManagedAgentOptions(
+						view,
+						installed.value.executionChoices,
+						new Date(expires).toISOString()
+					)
+				: unavailable('The policy or settings projection is unavailable.');
+		},
 		settings: {
 			read: () =>
 				installed && installed.scope === scope() ? structuredClone(installed.value.settings) : null,
