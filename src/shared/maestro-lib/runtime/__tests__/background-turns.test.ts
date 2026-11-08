@@ -50,6 +50,7 @@ import {
 	type ManagedDelegationContext,
 } from '../../managed/delegation';
 import { createHeadlessSpawnAuthority } from '../../managed/host-adapter';
+import { CALLER_CREDENTIAL_ENV_VAR } from '../../launch/env';
 import {
 	consultOwner,
 	createBackgroundTurns,
@@ -838,6 +839,118 @@ describe('background turns', () => {
 					expect(background.sourceCustody(PARTICIPANT)).toBeNull();
 				}
 			);
+
+			describe('caller credentials (MCOMP-17-03BJ)', () => {
+				const credentialOf = (env: Record<string, string | undefined> | undefined) =>
+					env?.[CALLER_CREDENTIAL_ENV_VAR];
+
+				it.each(['group-chat', 'consult'] as const)(
+					'stamps a fresh %s credential that resolves to its live process and owner, and never after it stops',
+					async (kind) => {
+						const authority = authorityOf(() => 'allow');
+						const { background, provider } = managedTurns(
+							() => ({ text: 'working', hold: true }),
+							authority
+						);
+						const observer = { onActivity: vi.fn(), onSessionId: vi.fn(), onEnd: vi.fn() };
+						const runner =
+							kind === 'consult'
+								? background.consultRunner()
+								: background.groupChatRunner(handlers);
+						const processId = kind === 'consult' ? 'cross-agent-credential' : PARTICIPANT;
+						const owner = kind === 'consult' ? consultOwner(processId) : groupChatOwner(CHAT_ID);
+						const spawn = spawnOf({ processId, delegation: carried(3) });
+						expect((await runner.start(spawn, observer)).success).toBe(true);
+						const first = credentialOf(provider.calls[0].spec.env);
+						expect(first).toMatch(/^[A-Za-z0-9_-]{43}$/);
+						expect(background.callerSource(first!)).toEqual({ processId, owner });
+						expect(background.callerSource('not-a-credential')).toBeNull();
+						expect(background.callerSource(undefined as unknown as string)).toBeNull();
+						runner.stop(processId);
+						expect(background.callerSource(first!)).toBeNull();
+						await background.whenSettled(() => true);
+						expect(background.callerSource(first!)).toBeNull();
+
+						expect((await runner.start(spawn, observer)).success).toBe(true);
+						const second = credentialOf(provider.calls[1].spec.env);
+						expect(second).toBeDefined();
+						expect(second).not.toBe(first);
+						expect(background.callerSource(second!)).toEqual({ processId, owner });
+						expect(background.callerSource(first!)).toBeNull();
+						runner.stop(processId);
+						await background.whenSettled(() => true);
+					}
+				);
+
+				it('stamps no credential on a standalone host and resolves nothing', async () => {
+					const { background, provider } = managedTurns(
+						() => ({ text: 'working', hold: true }),
+						null
+					);
+					const runner = background.groupChatRunner(handlers);
+					expect((await runner.start(spawnOf())).success).toBe(true);
+					expect(credentialOf(provider.calls[0].spec.env)).toBeUndefined();
+					runner.stop(PARTICIPANT);
+					await background.whenSettled(() => true);
+				});
+
+				it('mints no credential for a refused turn', async () => {
+					const authority = authorityOf(() => 'deny');
+					const { background, provider } = managedTurns(() => ({ text: 'working' }), authority);
+					const started = await background.groupChatRunner(handlers).start(spawnOf());
+					expect(started.success).toBe(false);
+					expect(provider.calls).toHaveLength(0);
+				});
+
+				it('keeps simultaneous credentials apart and drops one whose source scope is withdrawn', async () => {
+					const authority = authorityOf(() => 'allow');
+					let withdrawn = false;
+					const { background, provider } = managedTurns(
+						() => ({ text: 'working', hold: true }),
+						authority
+					);
+					const observer = { onActivity: vi.fn(), onSessionId: vi.fn(), onEnd: vi.fn() };
+					const first = background.consultRunner(() =>
+						withdrawn ? { state: 'denied', code: 'policy-denied', message: 'source gone' } : null
+					);
+					const second = background.consultRunner();
+					await first.start(
+						spawnOf({ processId: 'cross-agent-first', delegation: carried(3) }),
+						observer
+					);
+					await second.start(
+						spawnOf({ processId: 'cross-agent-second', delegation: carried(3) }),
+						observer
+					);
+					const [a, b] = provider.calls.map((call) => credentialOf(call.spec.env)!);
+					expect(a).not.toBe(b);
+					expect(background.callerSource(a)?.processId).toBe('cross-agent-first');
+					expect(background.callerSource(b)?.processId).toBe('cross-agent-second');
+					withdrawn = true;
+					expect(background.callerSource(a)).toBeNull();
+					expect(background.callerSource(b)).toEqual({
+						processId: 'cross-agent-second',
+						owner: consultOwner('cross-agent-second'),
+					});
+					first.stop('cross-agent-first');
+					second.stop('cross-agent-second');
+					await background.whenSettled(() => true);
+				});
+
+				it('drops a credential on registry shutdown before its end is reported', async () => {
+					const authority = authorityOf(() => 'allow');
+					const { background, provider } = managedTurns(
+						() => ({ text: 'working', hold: true }),
+						authority
+					);
+					await background.groupChatRunner(handlers).start(spawnOf({ processId: MODERATOR }));
+					const credential = credentialOf(provider.calls[0].spec.env)!;
+					expect(background.callerSource(credential)?.processId).toBe(MODERATOR);
+					const stopping = registry.stopAll();
+					expect(background.callerSource(credential)).toBeNull();
+					await stopping;
+				});
+			});
 
 			it('clears custody before asynchronous end reporting and on registry shutdown', async () => {
 				const authority = authorityOf(() => 'allow');

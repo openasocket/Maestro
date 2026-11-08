@@ -4562,6 +4562,20 @@
 					"produces": []
 				},
 				{
+					"id": "MCOMP-17-03BJ",
+					"label": "Mint caller credentials for managed background and consult turns",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/shared/maestro-lib/runtime/background-turns.ts",
+						"src/shared/maestro-lib/runtime/__tests__/background-turns.test.ts",
+						"Plans/integration-completion/program.json"
+					],
+					"outcome": "Consume MAESTRO-EFFECT-CONSUMERS-BUILD and its pinned MAESTRO-CONTRACT-INPUTS-BUILD dependency. Bounded prerequisite continuation of MCOMP-17-03 after MCOMP-17-03BI: background-turns.ts mints a fresh caller credential (CALLER_CREDENTIAL_ENV_VAR) for every admitted managed group chat or consult turn, stamped with the delegation record before the SSH wrap, and exposes host-only BackgroundTurns.callerSource(credential) -> {processId, owner} that resolves only while that exact process still holds its live source custody (dropped on stop, scope withdrawal, registry shutdown and end). Standalone and refused turns carry none. Exercise group chat and consult credentials, per-launch freshness, standalone, refusal, isolation under scope withdrawal, shutdown, and a mutation check. Runtime askAsCaller wiring of background callers and room owner lifetime remain pending. Reuse WORKFLOW-CONTEXT/1; no new wire capability, producer mapping or paired/provider/native qualification. Keep to three authored files and fewer than 500 changed lines.",
+					"backlog": ["M-04"],
+					"requires": ["MAESTRO-EFFECT-CONSUMERS-BUILD"],
+					"produces": []
+				},
+				{
 					"label": "Bind Auto Run Cue and nested work at dispatch",
 					"kind": "IMPLEMENT",
 					"targets": [
@@ -4604,7 +4618,7 @@
 			"produces": ["MAESTRO-WORKFLOW-CONSUMERS-BUILD"],
 			"id": "MCOMP-17",
 			"path": ".maestro/playbooks/2026-10-29-Maestro-Integration-Completion/MCOMP-17.md",
-			"taskCount": 66,
+			"taskCount": 67,
 			"stage": "S10"
 		},
 		{
@@ -6394,7 +6408,7 @@
 				"PAIR-DIRECT-EVIDENCE"
 			],
 			"nativeInputs": false,
-			"taskCount": 73
+			"taskCount": 74
 		},
 		{
 			"id": "S11",
@@ -6598,8 +6612,8 @@
 			"taskCount": 1
 		}
 	],
-	"taskCount": 386,
-	"taskCounts": { "IMPLEMENT": 277, "TEST": 49, "VERIFY": 60 },
+	"taskCount": 387,
+	"taskCounts": { "IMPLEMENT": 278, "TEST": 49, "VERIFY": 60 },
 	"artifacts": {
 		"MEGA-CONTRACTS-FOUNDATION-BUILD": {
 			"producerDocument": "GCOMP-01",
@@ -7401,6 +7415,7 @@
 			"MCOMP-17-03BG",
 			"MCOMP-17-03BH",
 			"MCOMP-17-03BI",
+			"MCOMP-17-03BJ",
 			"MCOMP-17-03",
 			"MCOMP-17-04",
 			"MCOMP-17-05",

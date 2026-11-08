@@ -29,11 +29,13 @@
 
 import type { UsageStats } from '../../types';
 import { AsyncResource } from 'node:async_hooks';
+import { randomBytes } from 'node:crypto';
 import { canonicalJson } from '../../canonicalJson';
 import { BACKGROUND_STOP_GRACE_MS } from '../control/termination';
 import { guardTurn, type GuardedTurnStops } from '../control/turn-guard';
 import type { ConsultObserver, ConsultRunner } from '../agents/consult';
 import { logger } from '../host';
+import { CALLER_CREDENTIAL_ENV_VAR } from '../launch/env';
 import {
 	resolveClaudeSpawnModeCore,
 	createStandaloneClaudeSpawnCoreDeps,
@@ -226,6 +228,14 @@ export interface BackgroundTurns {
 	 * This supplies no child spawn permit and is never exposed on the client API.
 	 */
 	sourceCustody(processId: string): ReturnType<RuntimeTurns['sourceCustody']>;
+	/**
+	 * Host-only: the live background process a caller credential (`CALLER_CREDENTIAL_ENV_VAR`)
+	 * was minted for, with the owner it is registered under (MCOMP-17-03BJ). Only a managed turn
+	 * the host admitted carries one, fresh per launch; it resolves only while that exact process
+	 * still holds its source custody, and never again once the turn ends, is stopped or loses it.
+	 * Never exposed on the client API; it names a source, not a permit to run a child.
+	 */
+	callerSource(credential: string): { processId: string; owner: string } | null;
 	/** Turns whose process is running now (group chat and consult). */
 	activeCount(): number;
 	/** Turns still held by the registry: preparing, running, or reporting their end. */
@@ -258,6 +268,11 @@ export function createBackgroundTurns(options: BackgroundTurnsOptions): Backgrou
 	// A turn stays in the process registry until `done` settles, which is after its end has been
 	// reported (and the moderator's report starts the participants). `running` drops it earlier.
 	const registered = new Map<string, { done: Promise<void>; stops: GuardedTurnStops }>();
+	/** Caller credentials of running managed turns: which process, under which owner and reader. */
+	const callers = new Map<
+		string,
+		{ processId: string; owner: string; read: () => ReturnType<BackgroundTurns['sourceCustody']> }
+	>();
 
 	function readCustomShellPath(): string | undefined {
 		const settings = readSettingsStore(paths.settingsFile);
@@ -467,7 +482,7 @@ export function createBackgroundTurns(options: BackgroundTurnsOptions): Backgrou
 		registry.register(owner, processId, { ...stops, done });
 		let started = false;
 		try {
-			const result = await launchTurn(spawn, hooks, controller.signal, settle);
+			const result = await launchTurn(spawn, owner, hooks, controller.signal, settle);
 			started = result.success;
 			return result;
 		} finally {
@@ -477,6 +492,7 @@ export function createBackgroundTurns(options: BackgroundTurnsOptions): Backgrou
 
 	async function launchTurn(
 		spawn: GroupChatSpawn,
+		owner: string,
 		hooks: TurnHooks,
 		signal: AbortSignal,
 		settle: () => void
@@ -515,8 +531,15 @@ export function createBackgroundTurns(options: BackgroundTurnsOptions): Backgrou
 		const boundDelegation = managedTurn.managed
 			? delegationContextOf(managedTurn.context)
 			: delegation;
+		// A managed turn's process gets its own caller credential, fresh per launch, stamped with
+		// the record so what it asks from its shell can be told apart from any other source.
+		const credential = managedTurn.managed ? randomBytes(32).toString('base64url') : null;
 		const customEnvVars = boundDelegation
-			? { ...(spawn.customEnvVars ?? {}), ...delegationContextEnv(boundDelegation) }
+			? {
+					...(spawn.customEnvVars ?? {}),
+					...delegationContextEnv(boundDelegation),
+					...(credential ? { [CALLER_CREDENTIAL_ENV_VAR]: credential } : {}),
+				}
 			: spawn.customEnvVars;
 		const cancellation = (): GroupChatTurnStart | null =>
 			signal.aborted
@@ -759,8 +782,11 @@ export function createBackgroundTurns(options: BackgroundTurnsOptions): Backgrou
 			});
 		}
 		running.set(processId, { turn, stops, sourceCustody });
+		if (credential && managedTurn.managed && lease)
+			callers.set(credential, { processId, owner, read: sourceCustody });
 		void ended.then(async (completed) => {
 			running.delete(processId);
+			if (credential) callers.delete(credential);
 			try {
 				if (completed.sessionId) await hooks.onSessionId?.(completed.sessionId);
 				const usage = completed.usage;
@@ -782,6 +808,14 @@ export function createBackgroundTurns(options: BackgroundTurnsOptions): Backgrou
 
 	return {
 		sourceCustody: (processId) => running.get(processId)?.sourceCustody?.() ?? null,
+		callerSource: (credential) => {
+			const caller = typeof credential === 'string' ? callers.get(credential) : undefined;
+			if (!caller) return null;
+			// The credential holds only while its own reader is still that process's live custody.
+			const entry = running.get(caller.processId);
+			if (!entry || entry.sourceCustody !== caller.read || caller.read() === null) return null;
+			return { processId: caller.processId, owner: caller.owner };
+		},
 		resolveAgent: (providerId) =>
 			resolveProviderAgent(providerId, { paths, probe: deps.probeBinary }),
 		sshStore,
