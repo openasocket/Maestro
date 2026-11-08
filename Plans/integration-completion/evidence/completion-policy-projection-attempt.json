@@ -1,0 +1,185 @@
+{
+	"schemaVersion": 1,
+	"artifactId": "MCOMP-16-01-VERIFY-ATTEMPT",
+	"owner": "maestro",
+	"proofClass": "readiness-only",
+	"status": "blocked",
+	"task": "MCOMP-16-01",
+	"stage": "Q16",
+	"recordedAt": "2026-11-08T11:20:10.069Z",
+	"observedRevision": "042a986583b5e6a970e5b420d4c14604cb8b491e",
+	"inputs": [
+		{
+			"path": "Plans/integration-completion/program.json",
+			"sha256": "06266493bdf7fedfdf7f2dcdc3ae0e508011a7e541f23f0234828e817fb9aa54"
+		},
+		{
+			"path": "Plans/integration-completion/contract-coverage.json",
+			"sha256": "c2b695d56b90eefad7f26a2b2442dd61f46e118062e7449d6f6f560053cd30d5"
+		}
+	],
+	"requirements": [
+		{
+			"artifactId": "MAESTRO-POLICY-CONSUMERS-BUILD",
+			"owner": "maestro",
+			"producerDocument": "MCOMP-15",
+			"producerStage": "S10",
+			"producerTask": "MCOMP-15-06",
+			"expected": ["Plans/integration-completion/evidence/policy-build.json"],
+			"present": true,
+			"receipt": {
+				"path": "Plans/integration-completion/evidence/policy-build.json",
+				"sha256": "e253139055c3b804bbf2ff6e6f155d360e426c48132869d284c42c2a29232b09",
+				"status": "complete-local-consumer-build",
+				"proofClass": "implementation-input"
+			}
+		},
+		{
+			"artifactId": "MEGA-DESKTOP-POLICY-BUILD",
+			"owner": "mega-maestro",
+			"producerDocument": "GCOMP-13",
+			"producerStage": "S09",
+			"producerTask": "GCOMP-13-10",
+			"expected": ["../mega-maestro/docs/evidence/integration-completion/g07-build.json"],
+			"present": false,
+			"receipt": null
+		},
+		{
+			"artifactId": "PAIR-DIRECT-EVIDENCE",
+			"owner": "mega-maestro",
+			"producerDocument": "GCOMP-12",
+			"producerStage": "S07",
+			"producerTask": "GCOMP-12-01",
+			"expected": ["../mega-maestro/docs/evidence/integration-completion/06.json"],
+			"present": false,
+			"receipt": null
+		},
+		{
+			"artifactId": "MEGA-PREPARED-EXECUTION",
+			"owner": "mega-maestro",
+			"producerDocument": "GCOMP-12",
+			"producerStage": "S07",
+			"producerTask": "GCOMP-12-01",
+			"expected": ["../mega-maestro/docs/evidence/integration-completion/06.json"],
+			"present": false,
+			"receipt": null
+		}
+	],
+	"pendingExtensions": [
+		{
+			"id": "DESKTOP-LOCAL/1",
+			"status": "proposed-not-negotiated"
+		}
+	],
+	"localRuntime": {
+		"path": "dist/mega-maestro-runtime/0.36.0/ae601cca94f5fb2f990a0555104b15a54acd9e1fb0f4b967ba37b999def04987/runtime.tgz",
+		"sha256": "ae601cca94f5fb2f990a0555104b15a54acd9e1fb0f4b967ba37b999def04987",
+		"implementationRevision": "d86ddb94c43360d46631a9f88e61f4a931435103",
+		"verification": {
+			"status": "ready",
+			"sourceDrift": 0,
+			"libraryInputDrift": [],
+			"problems": [],
+			"committedPin": false,
+			"qualification": "Archive integrity/source check only; not a paired outcome"
+		},
+		"obligation": "Verify the current archive and rebind the real counterpart adapter to this archive digest before pairing; historical M0 is not this cohort."
+	},
+	"localDesktop": {
+		"path": "dist/mega-maestro-policy-desktop/1/fb2fbae1617dec74e668bf6df9939d68c3e491af5be9d588018bbd05dbb8e2ed/desktop-compiled.tgz",
+		"sha256": "fb2fbae1617dec74e668bf6df9939d68c3e491af5be9d588018bbd05dbb8e2ed",
+		"sha512": "14d6668ae9c12781e5e49b857a8415543c2bfd16c5ae70d5a7241e6be81c14598db4d167809308b3f648921aecdf8c1066b9438ca591a210a5d2239dfc76598d",
+		"hashesMatch": true,
+		"scope": "SHA-256/SHA-512 check only; no native application or live host qualification"
+	},
+	"siblingEvidence": {
+		"directory": "../mega-maestro/docs/evidence/integration-completion",
+		"files": [
+			"01.json",
+			"g01-build-attempt.json",
+			"g01-build.json",
+			"g01-closure-delivery.json",
+			"g03-schema-closure.json",
+			"g16-build-attempt.json",
+			"g17-build-attempt.json",
+			"g18-build-attempt.json",
+			"g19-build-attempt.json",
+			"g20-build-attempt.json",
+			"g21-build-attempt.json",
+			"g22-verify-attempt.json",
+			"g23-verify-attempt.json",
+			"g24-verify-attempt.json",
+			"g25-verify-attempt.json",
+			"g26-verify-attempt.json",
+			"g27-verify-attempt.json",
+			"g28-verify-attempt.json",
+			"g29-build-attempt.json",
+			"g30-verify-attempt.json",
+			"implementation-inputs.json"
+		]
+	},
+	"qualification": {
+		"paired": false,
+		"provider": false,
+		"native": false,
+		"desktopGui": false
+	},
+	"commands": [
+		{
+			"command": "st node .maestro/playbooks/Working/mcomp-16-01/readiness.mjs",
+			"exitCode": 2
+		}
+	],
+	"observations": "Receipt inventory and local archive checks only. No endpoint policy acceptance, tightening, live refresh, offline preservation or endpoint source/revision correlation case was executed.",
+	"nextAction": "Obtain GCOMP-13-10 and GCOMP-12-01 receipts, resolve DESKTOP-LOCAL/1 delivery and credential mappings, verify and rebind immutable paired inputs, then run every required real Electron policy journey.",
+	"imagesAnalyzed": 0,
+	"evidence": [
+		{
+			"path": ".maestro/playbooks/Working/mcomp-16-01/readiness.mjs",
+			"sha256": "7aea35fcc211f5f3fa35fc13fa14aa58c926a07c803742c2280ab59fb8f36768"
+		},
+		{
+			"path": ".maestro/playbooks/Working/mcomp-16-01/readiness-MCOMP-16-01-2026-11-08T11-20-10-069Z.json",
+			"sha256": "c12fb7ef29f59da462154c5c27bd8d9a3b1e952cc346ba2433060bc3770cb4e5"
+		},
+		{
+			"path": "Plans/integration-completion/EXECUTION-RULES.md",
+			"sha256": "b1213bb17719bd4765ad00ed032352e5bf21461b94518f486a9610c5b526d88e"
+		}
+	],
+	"requiredCases": [
+		{
+			"case": "selected-edits-accepted",
+			"status": "not-executed",
+			"reason": "Missing required counterpart receipts and negotiated DESKTOP-LOCAL/1 producer"
+		},
+		{
+			"case": "tightened-policy-denied-without-restart",
+			"status": "not-executed",
+			"reason": "Missing required counterpart receipts and negotiated DESKTOP-LOCAL/1 producer"
+		},
+		{
+			"case": "policy-refresh",
+			"status": "not-executed",
+			"reason": "Missing required counterpart receipts and negotiated DESKTOP-LOCAL/1 producer"
+		},
+		{
+			"case": "offline-preservation",
+			"status": "not-executed",
+			"reason": "Missing required counterpart receipts and negotiated DESKTOP-LOCAL/1 producer"
+		},
+		{
+			"case": "endpoint-source-revision-correlation",
+			"status": "not-executed",
+			"reason": "Missing required counterpart receipts and negotiated DESKTOP-LOCAL/1 producer"
+		}
+	],
+	"probeCorrection": "Replaced the owned MCOMP-16 legacy launcher with the existing manifest-driven MCOMP-14 inventory pattern. Uses Q16 requirements and current policy BUILD archives; retired Tauri, historical M0 and obsolete S10 gates are excluded.",
+	"validation": "Readiness exits 2 for the three named missing counterpart receipts and proposed DESKTOP-LOCAL/1 mapping. Current runtime verifier reports ready with zero source/input drift; compiled desktop SHA-256/SHA-512 match. No application code or tests changed; no real policy case passed or was waived.",
+	"publication": {
+		"qualificationReceiptCreated": false,
+		"blockedAttemptOnly": true,
+		"taskCompleted": false,
+		"git": "Commit/push result is recorded in the local playbook; no remote publication claimed here."
+	}
+}
