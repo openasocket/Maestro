@@ -23,7 +23,7 @@
 import { createHash } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { parseArgs } from 'node:util';
+import { isDeepStrictEqual, parseArgs } from 'node:util';
 import { gunzipSync } from 'node:zlib';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import semver from 'semver';
@@ -197,6 +197,10 @@ const PROVENANCE_KEYS =
 	'formatVersion name version sourceRevision sourceDirty inputSha256 payloadSha256 tooling'.split(
 		' '
 	);
+// The foundation publisher extends format 1; older archives remain readable.
+// These fields are checked as a group and bound to the in-archive provenance.
+const FOUNDATION_PROVENANCE_KEYS =
+	'implementationRevision inputSetVersion inputDigest inputMode contractSchemas'.split(' ');
 
 function checkDigestMap(map, what) {
 	if (!isObject(map) || Object.keys(map).length === 0) fail('manifest-format', `${what} is empty`);
@@ -223,6 +227,36 @@ export function checkManifest(m) {
 	if (typeof m.sourceDirty !== 'boolean') fail('manifest-format', 'sourceDirty must be a boolean');
 	checkDigestMap(m.inputSha256, 'inputSha256');
 	checkDigestMap(m.payloadSha256, 'payloadSha256');
+	if (FOUNDATION_PROVENANCE_KEYS.some((key) => Object.hasOwn(m, key))) {
+		if (
+			m.implementationRevision !== m.sourceRevision ||
+			m.inputSetVersion !== 1 ||
+			!isHex(m.inputDigest, 64)
+		) {
+			fail('manifest-format', 'unsupported foundation input identity');
+		}
+		if (
+			!isObject(m.inputMode) ||
+			!isDeepStrictEqual(Object.keys(m.inputMode).sort(), Object.keys(m.inputSha256).sort()) ||
+			!Object.values(m.inputMode).every((mode) => mode === '100644' || mode === '100755')
+		) {
+			fail('manifest-format', 'inputMode must describe every input as a regular file');
+		}
+		const schemas = m.contractSchemas;
+		if (
+			!isObject(schemas) ||
+			schemas.authority !== 'schemas-only' ||
+			schemas.desktopPolicy !== 1 ||
+			!Array.isArray(schemas.localProtocols) ||
+			schemas.localProtocols.length === 0 ||
+			!schemas.localProtocols.every((p) => Number.isSafeInteger(p) && p > 0) ||
+			new Set(schemas.localProtocols).size !== schemas.localProtocols.length ||
+			!Array.isArray(schemas.features) ||
+			!schemas.features.every((feature) => typeof feature === 'string' && feature.length > 0)
+		) {
+			fail('manifest-format', 'unsupported foundation contractSchemas');
+		}
+	}
 	if (!isObject(m.tooling) || !isExactVersion(m.tooling.node))
 		fail('manifest-format', 'tooling.node');
 	if (m.archive !== 'contracts.tgz') fail('manifest-format', `archive must be contracts.tgz`);
@@ -268,10 +302,11 @@ function checkPackageJson(pkg, manifest, payloadFiles) {
 	}
 }
 
-/** The endpoint protocols the contracts declare, read from `local-endpoint.d.ts` text, never by loading it. */
+/** Read legacy literals and versioned negotiation unions from declaration text, never by loading it. */
 export function declaredEndpointProtocols(declarationText) {
 	const found = new Set();
-	const re = /supportedProtocols:\s*z\.ZodArray<\s*((?:z\.ZodLiteral<\d+>\s*\|?\s*)+)>/g;
+	const re =
+		/supportedProtocols:\s*z\.ZodArray<\s*((?:z\.ZodLiteral<\d+>\s*\|?\s*)+|z\.ZodUnion<readonly\s*\[(?:z\.ZodLiteral<\d+>\s*,?\s*)+\]>)\s*>/g;
 	for (const match of declarationText.matchAll(re)) {
 		for (const literal of match[1].matchAll(/z\.ZodLiteral<(\d+)>/g)) found.add(Number(literal[1]));
 	}
@@ -327,20 +362,32 @@ export function verifyArtifact({
 		fail('payload-missing', 'archive lacks package.json or provenance.json');
 	}
 	const provenance = parseJson(files.get('provenance.json'), 'provenance.json');
-	for (const key of PROVENANCE_KEYS) {
-		if (JSON.stringify(provenance[key]) !== JSON.stringify(manifest[key])) {
+	const provenanceKeys = [...PROVENANCE_KEYS, ...FOUNDATION_PROVENANCE_KEYS];
+	for (const key of provenanceKeys) {
+		if (!isDeepStrictEqual(provenance[key], manifest[key])) {
 			fail('provenance-mismatch', `provenance.json ${key} differs from the manifest`);
 		}
 	}
-	if (Object.keys(provenance).some((key) => !PROVENANCE_KEYS.includes(key))) {
-		fail('provenance-mismatch', 'provenance.json has fields the manifest does not');
+	if (Object.keys(provenance).some((key) => !provenanceKeys.includes(key))) {
+		fail('provenance-mismatch', 'provenance.json has unsupported fields');
 	}
 	const pkg = parseJson(files.get('package.json'), 'package.json');
 	checkPackageJson(pkg, manifest, payload);
 
 	const endpointTypes = files.get('dist/local-endpoint.d.ts');
 	if (!endpointTypes) fail('protocol', 'archive has no dist/local-endpoint.d.ts');
-	const protocols = declaredEndpointProtocols(endpointTypes.toString('utf8'));
+	const protocols = declaredEndpointProtocols(
+		`${endpointTypes.toString('utf8')}\n${files.get('dist/protocol.d.ts')?.toString('utf8') ?? ''}`
+	);
+	if (
+		manifest.contractSchemas &&
+		!isDeepStrictEqual(
+			[...manifest.contractSchemas.localProtocols].sort((a, b) => a - b),
+			protocols
+		)
+	) {
+		fail('protocol', 'contractSchemas.localProtocols differs from the declarations');
+	}
 	const accepted = protocols.filter((p) => ACCEPTED_ENDPOINT_PROTOCOLS.includes(p));
 	if (accepted.length === 0) {
 		fail(
@@ -362,6 +409,14 @@ export function verifyArtifact({
 		integrity: manifest.integrity,
 		sourceRevision: manifest.sourceRevision,
 		sourceDirty: manifest.sourceDirty,
+		...(manifest.contractSchemas
+			? {
+					implementationRevision: manifest.implementationRevision,
+					inputSetVersion: manifest.inputSetVersion,
+					inputDigest: manifest.inputDigest,
+					contractSchemas: manifest.contractSchemas,
+				}
+			: {}),
 		endpointProtocols: protocols,
 		acceptedEndpointProtocols: accepted,
 		dependencies: pkg.dependencies ?? {},

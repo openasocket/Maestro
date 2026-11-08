@@ -1,0 +1,164 @@
+{
+	"schemaVersion": 1,
+	"task": "MCOMP-00-01",
+	"status": "public-contract-inputs-pinned",
+	"owner": "maestro",
+	"foundation": {
+		"artifactId": "MEGA-CONTRACTS-FOUNDATION-BUILD",
+		"owner": "mega-maestro",
+		"receipt": "docs/evidence/integration-completion/g01-build.json",
+		"receiptSha256": "443442d14819ff122a80db2def58af2ee3b016cf844ba92363c01c54d9c5e1df",
+		"implementationRevision": "3ce62fe784079d513c6f3daa0b3225aa7f788f64",
+		"inputDigest": "518780bfbe0997908085067301ca9a45295583927c54ac4f440efbd9af78b3cc",
+		"inputSetVersion": 1,
+		"inputFiles": 498
+	},
+	"archive": {
+		"name": "@mega-maestro/contracts",
+		"version": "0.1.0",
+		"sourceDirty": false,
+		"path": "artifacts/enterprise/0.1.0/c34e6cd0590fdce90cd2ace60f8f43ee278f6d24d62d4b6caab2bb4f720ab177/contracts.tgz",
+		"manifest": "artifact.json",
+		"manifestSha256": "6c346c4fa4a7b7d4ec41b1624c7b155715128ec04c877bf0830910fd49aa127d",
+		"sidecar": "contracts.tgz.sha256",
+		"sha256": "c34e6cd0590fdce90cd2ace60f8f43ee278f6d24d62d4b6caab2bb4f720ab177",
+		"integrity": "sha512-MNZe6OgdHh5LwxRVY85zDkudqUFJjyQHdW/IgfuzH3S0cGnN1lKLaAV4dT1Z4hpyXzMbhIYiKQjpECt9RWNhTA==",
+		"payloadFiles": 46,
+		"publisherPayloadDigest": "12976943661224f30e6461430332d1fefb36f4133bd38e93cb02f006d52296fd",
+		"publisherPayloadDigestEncoding": "sha256(canonical JSON payloadSha256 map)",
+		"importerPayloadDigest": "9374ed1709b52415701d3de976fcf159e76258a5f22225e9848faae82e1353bf",
+		"importerPayloadDigestEncoding": "sha256(JSON sorted payloadSha256 entry pairs)",
+		"pin": "vendor/mega-maestro/contracts.pin.json",
+		"extractedPackage": "vendor/mega-maestro/contracts"
+	},
+	"dependencyClosure": {
+		"direct": {
+			"zod": "4.6.5"
+		},
+		"transitive": {},
+		"installedAt": "vendor/mega-maestro/contracts/node_modules",
+		"scriptsEnabled": false,
+		"rootDependenciesChanged": false,
+		"lockSha256": "3d742b654bdb2d702dbd6138ac28eef968a3009515db5dec20d8df97ee5306ae",
+		"zodIntegrity": "sha512-v5l/aFXZQeai4awLbOpSoHecE9UiMrnfx75tEXLjNonXVARxQ5mOeipTjROUchszUNCqnE+hqAMujRsRHsut2Q==",
+		"note": "The archive declares exact Zod 4.6.5, installed in the ignored import directory; root Zod 4.4.3 was not used for schema validation.",
+		"installCommand": "npm install --prefix vendor/mega-maestro/contracts --ignore-scripts --omit=dev --no-audit --no-fund"
+	},
+	"versions": {
+		"acceptedPackageRange": ">=0.1.0 <0.2.0",
+		"manifestFormat": 1,
+		"pinFormat": 1,
+		"published": {
+			"authority": "schemas-only",
+			"localProtocols": [1, 2],
+			"desktopPolicy": 1,
+			"features": [
+				"registration-use-v2",
+				"delegation-references-v2",
+				"workflow-lifecycle-v2",
+				"command-correlation-v2",
+				"desktop-authoring-projection-v1"
+			]
+		},
+		"acceptedConsumerEndpointProtocols": [1],
+		"liveNegotiationPerformed": false
+	},
+	"publicExports": [
+		"./assurance",
+		"./commands",
+		"./communications",
+		"./content",
+		"./desktop-policy",
+		"./enrollment",
+		"./events",
+		"./execution",
+		"./finance",
+		"./fleet",
+		"./governance",
+		"./http",
+		"./http-operations",
+		"./identity",
+		"./local-endpoint",
+		"./organization",
+		"./policy",
+		"./policy-recovery",
+		"./protocol",
+		"./provenance",
+		"./routing",
+		"./security",
+		"./trace",
+		"./usage"
+	],
+	"schemaFamilies": [
+		{
+			"family": "registration",
+			"module": "./local-endpoint",
+			"exports": [
+				"runtimeChallengeInputV2",
+				"runtimeApprovalInputV2",
+				"runtimeRedemptionInputV2",
+				"runtimeRegistrationViewV2",
+				"runtimeUseReferenceV2"
+			],
+			"version": 2,
+			"consumerPort": "src/main/enterprise/endpoint-client.ts",
+			"binding": "pending",
+			"note": "Purpose-bound runtime_use and fleet_management remain distinct; imported schemas do not supply registration authority."
+		},
+		{
+			"family": "desktop-policy",
+			"module": "./desktop-policy",
+			"exports": ["desktopPolicyBinding", "desktopPolicyProjection", "desktopPolicyResult"],
+			"version": 1,
+			"binding": "pending",
+			"note": "Projection schemas constrain authoring; signature, identity and freshness checks remain consumer obligations."
+		},
+		{
+			"family": "workflow",
+			"module": "./protocol",
+			"exports": [
+				"workflowClaimRequest",
+				"workflowRenewRequest",
+				"workflowSettleRequest",
+				"workflowReleaseRequest",
+				"workflowLease",
+				"localExchangeV2"
+			],
+			"version": 2,
+			"consumerPort": "src/shared/maestro-lib/managed/workflows.ts",
+			"binding": "pending",
+			"note": "Published v2 ownerEpoch is an opaque string; the existing v1 consumer uses numeric epochs. No coercion or v2 negotiation is enabled by importing."
+		}
+	],
+	"validation": {
+		"archiveIntegrity": "passed: explicit SHA-256, sidecar, SHA-512, receipt/manifest/provenance, payload and export paths",
+		"dependencyClosure": "passed: exact installed version, registry integrity and empty transitive closure",
+		"publicModulesLoaded": 23,
+		"declarationModulesTypeChecked": 23,
+		"focusedContractTests": {
+			"command": "npm test -- src/__tests__/shared/maestro-lib/managed/contracts.test.ts",
+			"passed": 42,
+			"failed": 0,
+			"skipped": 0
+		},
+		"localEvidenceDirectory": ".maestro/playbooks/Working/MCOMP-00-01",
+		"contractVectorRegressionTests": {
+			"command": "npm test -- src/__tests__/shared/maestro-lib/managed/contract-vectors.test.ts",
+			"passed": 6,
+			"failed": 0,
+			"skipped": 0
+		}
+	},
+	"remainingWork": {
+		"consumerCoverageAndNegativeCases": "MCOMP-00-02",
+		"inputBuildReceipt": "MCOMP-00-03",
+		"scope": "Inventory and schema compatibility only; complete consumer-family mapping and wire extension proposals remain in MCOMP-00-02.",
+		"executionAuthority": "broker_dispatched is a dispatch receipt, never a local spawn permit or per-effect authorization."
+	},
+	"qualification": {
+		"paired": false,
+		"provider": false,
+		"native": false,
+		"production": false
+	}
+}

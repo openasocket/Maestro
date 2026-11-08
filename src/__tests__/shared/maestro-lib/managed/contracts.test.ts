@@ -111,7 +111,7 @@ interface ArtifactParts {
 	sidecar?: string;
 }
 
-function makeArtifact(dir: string, mutate?: (parts: ArtifactParts) => void) {
+function makeArtifact(dir: string, mutate?: (parts: ArtifactParts) => void, foundation = false) {
 	const payload: Record<string, string> = {
 		'dist/identity.d.ts': 'export declare const identifier: string;\n',
 		'dist/identity.js': 'export const identifier = "id";\n',
@@ -151,6 +151,25 @@ function makeArtifact(dir: string, mutate?: (parts: ArtifactParts) => void) {
 		extraEntries: [],
 		manifestPatch: {},
 	};
+	if (foundation) {
+		Object.assign(parts.provenance, {
+			implementationRevision: 'a'.repeat(40),
+			inputSetVersion: 1,
+			inputDigest: 'b'.repeat(64),
+			inputMode: { 'package.json': '100644' },
+			contractSchemas: {
+				authority: 'schemas-only',
+				localProtocols: [1, 2],
+				desktopPolicy: 1,
+				features: ['registration-use-v2', 'workflow-lifecycle-v2'],
+			},
+		});
+		setPayload(
+			parts,
+			'dist/protocol.d.ts',
+			'export declare const protocolNegotiationRequest: z.ZodObject<{ supportedProtocols: z.ZodArray<z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<2>]>>; }>;'
+		);
+	}
 	mutate?.(parts);
 	const entries: TarInput[] = [
 		...Object.entries(parts.payload).map(([file, text]) => ({
@@ -187,8 +206,8 @@ function setPayload(parts: ArtifactParts, file: string, text: string): void {
 
 let scratch: string;
 let fixtureCount = 0;
-const fixture = (mutate?: (parts: ArtifactParts) => void) =>
-	makeArtifact(path.join(scratch, `artifact-${fixtureCount++}`), mutate);
+const fixture = (mutate?: (parts: ArtifactParts) => void, foundation = false) =>
+	makeArtifact(path.join(scratch, `artifact-${fixtureCount++}`), mutate, foundation);
 
 /** Run `verifyArtifact` and return the ImportError code it refused with. */
 function refusal(
@@ -222,6 +241,89 @@ afterAll(() => {
 // ---------------------------------------------------------------------------
 
 describe('import-mega-maestro verifyArtifact', () => {
+	it('binds foundation provenance and records v2 schemas without enabling a v2 consumer', () => {
+		const artifact = fixture(undefined, true);
+		const record = importer.verifyArtifact({
+			manifestPath: artifact.manifestPath,
+			archivePath: artifact.archivePath,
+			expectedSha256: artifact.sha256,
+		});
+		expect(importer.pinFromRecord(record)).toMatchObject({
+			implementationRevision: 'a'.repeat(40),
+			inputSetVersion: 1,
+			inputDigest: 'b'.repeat(64),
+			endpointProtocols: [1, 2],
+			acceptedEndpointProtocols: [1],
+			contractSchemas: { authority: 'schemas-only', localProtocols: [1, 2], desktopPolicy: 1 },
+		});
+	});
+
+	it.each([
+		'implementationRevision',
+		'inputSetVersion',
+		'inputDigest',
+		'inputMode',
+		'contractSchemas',
+	])('refuses foundation provenance that disagrees on %s', (key) => {
+		const artifact = fixture((p) => {
+			delete p.provenance[key];
+		}, true);
+		const manifest = fixture(undefined, true).manifest;
+		fs.writeFileSync(
+			artifact.manifestPath,
+			JSON.stringify({
+				...manifest,
+				sha256: artifact.manifest.sha256,
+				integrity: artifact.manifest.integrity,
+			})
+		);
+		expect(refusal(artifact)).toBe('provenance-mismatch');
+	});
+
+	it.each([
+		{ inputSetVersion: 2 },
+		{ implementationRevision: 'c'.repeat(40) },
+		{ inputDigest: 'bad' },
+		{ inputMode: {} },
+		{ inputMode: { 'package.json': '120000' } },
+		{
+			contractSchemas: {
+				authority: 'execution-permit',
+				localProtocols: [1, 2],
+				desktopPolicy: 1,
+				features: [],
+			},
+		},
+	])('refuses malformed or unsupported foundation metadata: %j', (patch) => {
+		expect(refusal(fixture((p) => Object.assign(p.provenance, patch), true))).toBe(
+			'manifest-format'
+		);
+	});
+
+	it('refuses unknown provenance extensions and schema versions absent from declarations', () => {
+		expect(
+			refusal(
+				fixture((p) => {
+					p.provenance.unknownAuthority = true;
+				}, true)
+			)
+		).toBe('provenance-mismatch');
+		expect(
+			refusal(
+				fixture((p) => {
+					delete p.payload['dist/protocol.d.ts'];
+					delete (p.provenance.payloadSha256 as Record<string, string>)['dist/protocol.d.ts'];
+				}, true)
+			)
+		).toBe('protocol');
+		const onlyV2 = fixture((p) => {
+			setPayload(p, 'dist/local-endpoint.d.ts', ENDPOINT_DTS(2));
+			setPayload(p, 'dist/protocol.d.ts', ENDPOINT_DTS(2));
+			(p.provenance.contractSchemas as { localProtocols: number[] }).localProtocols = [2];
+		}, true);
+		expect(refusal(onlyV2)).toBe('protocol');
+	});
+
 	it('accepts a consistent artifact and records what was verified', () => {
 		const artifact = fixture();
 		const record = importer.verifyArtifact({

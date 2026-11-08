@@ -1,0 +1,61 @@
+{
+	"formatVersion": 1,
+	"name": "@mega-maestro/contracts",
+	"version": "0.1.0",
+	"sha256": "c34e6cd0590fdce90cd2ace60f8f43ee278f6d24d62d4b6caab2bb4f720ab177",
+	"integrity": "sha512-MNZe6OgdHh5LwxRVY85zDkudqUFJjyQHdW/IgfuzH3S0cGnN1lKLaAV4dT1Z4hpyXzMbhIYiKQjpECt9RWNhTA==",
+	"sourceRevision": "3ce62fe784079d513c6f3daa0b3225aa7f788f64",
+	"sourceDirty": false,
+	"implementationRevision": "3ce62fe784079d513c6f3daa0b3225aa7f788f64",
+	"inputSetVersion": 1,
+	"inputDigest": "518780bfbe0997908085067301ca9a45295583927c54ac4f440efbd9af78b3cc",
+	"contractSchemas": {
+		"authority": "schemas-only",
+		"localProtocols": [1, 2],
+		"desktopPolicy": 1,
+		"features": [
+			"registration-use-v2",
+			"delegation-references-v2",
+			"workflow-lifecycle-v2",
+			"command-correlation-v2",
+			"desktop-authoring-projection-v1"
+		]
+	},
+	"endpointProtocols": [1, 2],
+	"acceptedEndpointProtocols": [1],
+	"dependencies": {
+		"zod": "4.6.5"
+	},
+	"tooling": {
+		"node": "24.21.0",
+		"pnpm": "12.4.2"
+	},
+	"payloadFiles": 46,
+	"payloadDigest": "9374ed1709b52415701d3de976fcf159e76258a5f22225e9848faae82e1353bf",
+	"exports": [
+		"./assurance",
+		"./commands",
+		"./communications",
+		"./content",
+		"./desktop-policy",
+		"./enrollment",
+		"./events",
+		"./execution",
+		"./finance",
+		"./fleet",
+		"./governance",
+		"./http",
+		"./http-operations",
+		"./identity",
+		"./local-endpoint",
+		"./organization",
+		"./policy",
+		"./policy-recovery",
+		"./protocol",
+		"./provenance",
+		"./routing",
+		"./security",
+		"./trace",
+		"./usage"
+	]
+}
