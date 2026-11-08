@@ -26,7 +26,7 @@
 			"phase": "G01",
 			"owner": "mega-maestro",
 			"mode": "implementation",
-			"title": "Versioned public contracts and reproducible producer delivery \u2014 implementation",
+			"title": "Versioned public contracts and reproducible producer delivery — implementation",
 			"tasks": [
 				{
 					"label": "Record immutable implementation input authority",
@@ -165,7 +165,7 @@
 						"packages/contracts/src/governance.ts",
 						"packages/contracts/src/trace.ts"
 					],
-					"outcome": "Added 2026-11-05 (continuation of GCOMP-01-08, inserted ahead of it). GCOMP-01-08 cannot pass because the committed route registry imports modules that exist only as working-tree drafts; the 42-file closure and each file\u2019s recorded working sha256 are in `docs/evidence/integration-completion/g01-build-attempt.json` (`blocker.existingDraftDependencyClosure`). Deliver these 3 existing draft files (475 lines) to the committed implementation exactly as they stand. Where a file\u2019s current sha256 differs from the record, deliver the current content and record the new digest in `docs/evidence/integration-completion/g01-closure-delivery.json`. Stage only these paths and preserve every other staged and working entry. Do not edit behavior, remove a guard or add a stub so that an intermediate commit compiles: the archive-mode API projection is checked once, after the last group, by GCOMP-01-08E.",
+					"outcome": "Added 2026-11-05 (continuation of GCOMP-01-08, inserted ahead of it). GCOMP-01-08 cannot pass because the committed route registry imports modules that exist only as working-tree drafts; the 42-file closure and each file’s recorded working sha256 are in `docs/evidence/integration-completion/g01-build-attempt.json` (`blocker.existingDraftDependencyClosure`). Deliver these 3 existing draft files (475 lines) to the committed implementation exactly as they stand. Where a file’s current sha256 differs from the record, deliver the current content and record the new digest in `docs/evidence/integration-completion/g01-closure-delivery.json`. Stage only these paths and preserve every other staged and working entry. Do not edit behavior, remove a guard or add a stub so that an intermediate commit compiles: the archive-mode API projection is checked once, after the last group, by GCOMP-01-08E.",
 					"backlog": ["BASE-01", "G-01"],
 					"requires": [],
 					"produces": [],
@@ -175,7 +175,7 @@
 					"label": "Deliver draft application closure group 02 of 19 (activity)",
 					"kind": "IMPLEMENT",
 					"targets": ["apps/api/src/activity/routes.ts", "apps/api/src/activity/search.ts"],
-					"outcome": "Added 2026-11-05 (continuation of GCOMP-01-08, inserted ahead of it). GCOMP-01-08 cannot pass because the committed route registry imports modules that exist only as working-tree drafts; the 42-file closure and each file\u2019s recorded working sha256 are in `docs/evidence/integration-completion/g01-build-attempt.json` (`blocker.existingDraftDependencyClosure`). Deliver these 2 existing draft files (164 lines) to the committed implementation exactly as they stand. Where a file\u2019s current sha256 differs from the record, deliver the current content and record the new digest in `docs/evidence/integration-completion/g01-closure-delivery.json`. Stage only these paths and preserve every other staged and working entry. Do not edit behavior, remove a guard or add a stub so that an intermediate commit compiles: the archive-mode API projection is checked once, after the last group, by GCOMP-01-08E.",
+					"outcome": "Added 2026-11-05 (continuation of GCOMP-01-08, inserted ahead of it). GCOMP-01-08 cannot pass because the committed route registry imports modules that exist only as working-tree drafts; the 42-file closure and each file’s recorded working sha256 are in `docs/evidence/integration-completion/g01-build-attempt.json` (`blocker.existingDraftDependencyClosure`). Deliver these 2 existing draft files (164 lines) to the committed implementation exactly as they stand. Where a file’s current sha256 differs from the record, deliver the current content and record the new digest in `docs/evidence/integration-completion/g01-closure-delivery.json`. Stage only these paths and preserve every other staged and working entry. Do not edit behavior, remove a guard or add a stub so that an intermediate commit compiles: the archive-mode API projection is checked once, after the last group, by GCOMP-01-08E.",
 					"backlog": ["BASE-01", "G-01"],
 					"requires": [],
 					"produces": [],
@@ -189,7 +189,7 @@
 						"apps/api/src/admin/integration-health.ts",
 						"apps/api/src/admin/standards-health.ts"
 					],
-					"outcome": "Added 2026-11-05 (continuation of GCOMP-01-08, inserted ahead of it). GCOMP-01-08 cannot pass because the committed route registry imports modules that exist only as working-tree drafts; the 42-file closure and each file\u2019s recorded working sha256 are in `docs/evidence/integration-completion/g01-build-attempt.json` (`blocker.existingDraftDependencyClosure`). Deliver these 3 existing draft files (310 lines) to the committed implementation exactly as they stand. Where a file\u2019s current sha256 differs from the record, deliver the current content and record the new digest in `docs/evidence/integration-completion/g01-closure-delivery.json`. Stage only these paths and preserve every other staged and working entry. Do not edit behavior, remove a guard or add a stub so that an intermediate commit compiles: the archive-mode API projection is checked once, after the last group, by GCOMP-01-08E.",
+					"outcome": "Added 2026-11-05 (continuation of GCOMP-01-08, inserted ahead of it). GCOMP-01-08 cannot pass because the committed route registry imports modules that exist only as working-tree drafts; the 42-file closure and each file’s recorded working sha256 are in `docs/evidence/integration-completion/g01-build-attempt.json` (`blocker.existingDraftDependencyClosure`). Deliver these 3 existing draft files (310 lines) to the committed implementation exactly as they stand. Where a file’s current sha256 differs from the record, deliver the current content and record the new digest in `docs/evidence/integration-completion/g01-closure-delivery.json`. Stage only these paths and preserve every other staged and working entry. Do not edit behavior, remove a guard or add a stub so that an intermediate commit compiles: the archive-mode API projection is checked once, after the last group, by GCOMP-01-08E.",
 					"backlog": ["BASE-01", "G-01"],
 					"requires": [],
 					"produces": [],
@@ -199,7 +199,7 @@
 					"label": "Deliver draft application closure group 04 of 19 (admin)",
 					"kind": "IMPLEMENT",
 					"targets": ["apps/api/src/admin/trace-settings.ts"],
-					"outcome": "Added 2026-11-05 (continuation of GCOMP-01-08, inserted ahead of it). GCOMP-01-08 cannot pass because the committed route registry imports modules that exist only as working-tree drafts; the 42-file closure and each file\u2019s recorded working sha256 are in `docs/evidence/integration-completion/g01-build-attempt.json` (`blocker.existingDraftDependencyClosure`). Deliver these 1 existing draft file (75 lines) to the committed implementation exactly as they stand. Where a file\u2019s current sha256 differs from the record, deliver the current content and record the new digest in `docs/evidence/integration-completion/g01-closure-delivery.json`. Stage only these paths and preserve every other staged and working entry. Do not edit behavior, remove a guard or add a stub so that an intermediate commit compiles: the archive-mode API projection is checked once, after the last group, by GCOMP-01-08E.",
+					"outcome": "Added 2026-11-05 (continuation of GCOMP-01-08, inserted ahead of it). GCOMP-01-08 cannot pass because the committed route registry imports modules that exist only as working-tree drafts; the 42-file closure and each file’s recorded working sha256 are in `docs/evidence/integration-completion/g01-build-attempt.json` (`blocker.existingDraftDependencyClosure`). Deliver these 1 existing draft file (75 lines) to the committed implementation exactly as they stand. Where a file’s current sha256 differs from the record, deliver the current content and record the new digest in `docs/evidence/integration-completion/g01-closure-delivery.json`. Stage only these paths and preserve every other staged and working entry. Do not edit behavior, remove a guard or add a stub so that an intermediate commit compiles: the archive-mode API projection is checked once, after the last group, by GCOMP-01-08E.",
 					"backlog": ["BASE-01", "G-01"],
 					"requires": [],
 					"produces": [],
@@ -213,7 +213,7 @@
 						"apps/api/src/analytics/overview.ts",
 						"apps/api/src/analytics/routes.ts"
 					],
-					"outcome": "Added 2026-11-05 (continuation of GCOMP-01-08, inserted ahead of it). GCOMP-01-08 cannot pass because the committed route registry imports modules that exist only as working-tree drafts; the 42-file closure and each file\u2019s recorded working sha256 are in `docs/evidence/integration-completion/g01-build-attempt.json` (`blocker.existingDraftDependencyClosure`). Deliver these 3 existing draft files (289 lines) to the committed implementation exactly as they stand. Where a file\u2019s current sha256 differs from the record, deliver the current content and record the new digest in `docs/evidence/integration-completion/g01-closure-delivery.json`. Stage only these paths and preserve every other staged and working entry. Do not edit behavior, remove a guard or add a stub so that an intermediate commit compiles: the archive-mode API projection is checked once, after the last group, by GCOMP-01-08E.",
+					"outcome": "Added 2026-11-05 (continuation of GCOMP-01-08, inserted ahead of it). GCOMP-01-08 cannot pass because the committed route registry imports modules that exist only as working-tree drafts; the 42-file closure and each file’s recorded working sha256 are in `docs/evidence/integration-completion/g01-build-attempt.json` (`blocker.existingDraftDependencyClosure`). Deliver these 3 existing draft files (289 lines) to the committed implementation exactly as they stand. Where a file’s current sha256 differs from the record, deliver the current content and record the new digest in `docs/evidence/integration-completion/g01-closure-delivery.json`. Stage only these paths and preserve every other staged and working entry. Do not edit behavior, remove a guard or add a stub so that an intermediate commit compiles: the archive-mode API projection is checked once, after the last group, by GCOMP-01-08E.",
 					"backlog": ["BASE-01", "G-01"],
 					"requires": [],
 					"produces": [],
@@ -223,7 +223,7 @@
 					"label": "Deliver draft application closure group 06 of 19 (content)",
 					"kind": "IMPLEMENT",
 					"targets": ["apps/api/src/content/copies.ts", "apps/api/src/content/trust.ts"],
-					"outcome": "Added 2026-11-05 (continuation of GCOMP-01-08, inserted ahead of it). GCOMP-01-08 cannot pass because the committed route registry imports modules that exist only as working-tree drafts; the 42-file closure and each file\u2019s recorded working sha256 are in `docs/evidence/integration-completion/g01-build-attempt.json` (`blocker.existingDraftDependencyClosure`). Deliver these 2 existing draft files (258 lines) to the committed implementation exactly as they stand. Where a file\u2019s current sha256 differs from the record, deliver the current content and record the new digest in `docs/evidence/integration-completion/g01-closure-delivery.json`. Stage only these paths and preserve every other staged and working entry. Do not edit behavior, remove a guard or add a stub so that an intermediate commit compiles: the archive-mode API projection is checked once, after the last group, by GCOMP-01-08E.",
+					"outcome": "Added 2026-11-05 (continuation of GCOMP-01-08, inserted ahead of it). GCOMP-01-08 cannot pass because the committed route registry imports modules that exist only as working-tree drafts; the 42-file closure and each file’s recorded working sha256 are in `docs/evidence/integration-completion/g01-build-attempt.json` (`blocker.existingDraftDependencyClosure`). Deliver these 2 existing draft files (258 lines) to the committed implementation exactly as they stand. Where a file’s current sha256 differs from the record, deliver the current content and record the new digest in `docs/evidence/integration-completion/g01-closure-delivery.json`. Stage only these paths and preserve every other staged and working entry. Do not edit behavior, remove a guard or add a stub so that an intermediate commit compiles: the archive-mode API projection is checked once, after the last group, by GCOMP-01-08E.",
 					"backlog": ["BASE-01", "G-01"],
 					"requires": [],
 					"produces": [],
@@ -236,7 +236,7 @@
 						"apps/api/src/governance/evidence.ts",
 						"apps/api/src/governance/export-queue.ts"
 					],
-					"outcome": "Added 2026-11-05 (continuation of GCOMP-01-08, inserted ahead of it). GCOMP-01-08 cannot pass because the committed route registry imports modules that exist only as working-tree drafts; the 42-file closure and each file\u2019s recorded working sha256 are in `docs/evidence/integration-completion/g01-build-attempt.json` (`blocker.existingDraftDependencyClosure`). Deliver these 2 existing draft files (298 lines) to the committed implementation exactly as they stand. Where a file\u2019s current sha256 differs from the record, deliver the current content and record the new digest in `docs/evidence/integration-completion/g01-closure-delivery.json`. Stage only these paths and preserve every other staged and working entry. Do not edit behavior, remove a guard or add a stub so that an intermediate commit compiles: the archive-mode API projection is checked once, after the last group, by GCOMP-01-08E.",
+					"outcome": "Added 2026-11-05 (continuation of GCOMP-01-08, inserted ahead of it). GCOMP-01-08 cannot pass because the committed route registry imports modules that exist only as working-tree drafts; the 42-file closure and each file’s recorded working sha256 are in `docs/evidence/integration-completion/g01-build-attempt.json` (`blocker.existingDraftDependencyClosure`). Deliver these 2 existing draft files (298 lines) to the committed implementation exactly as they stand. Where a file’s current sha256 differs from the record, deliver the current content and record the new digest in `docs/evidence/integration-completion/g01-closure-delivery.json`. Stage only these paths and preserve every other staged and working entry. Do not edit behavior, remove a guard or add a stub so that an intermediate commit compiles: the archive-mode API projection is checked once, after the last group, by GCOMP-01-08E.",
 					"backlog": ["BASE-01", "G-01"],
 					"requires": [],
 					"produces": [],
@@ -250,7 +250,7 @@
 						"apps/api/src/governance/iam-source.ts",
 						"apps/api/src/governance/pack-schema.ts"
 					],
-					"outcome": "Added 2026-11-05 (continuation of GCOMP-01-08, inserted ahead of it). GCOMP-01-08 cannot pass because the committed route registry imports modules that exist only as working-tree drafts; the 42-file closure and each file\u2019s recorded working sha256 are in `docs/evidence/integration-completion/g01-build-attempt.json` (`blocker.existingDraftDependencyClosure`). Deliver these 3 existing draft files (376 lines) to the committed implementation exactly as they stand. Where a file\u2019s current sha256 differs from the record, deliver the current content and record the new digest in `docs/evidence/integration-completion/g01-closure-delivery.json`. Stage only these paths and preserve every other staged and working entry. Do not edit behavior, remove a guard or add a stub so that an intermediate commit compiles: the archive-mode API projection is checked once, after the last group, by GCOMP-01-08E.",
+					"outcome": "Added 2026-11-05 (continuation of GCOMP-01-08, inserted ahead of it). GCOMP-01-08 cannot pass because the committed route registry imports modules that exist only as working-tree drafts; the 42-file closure and each file’s recorded working sha256 are in `docs/evidence/integration-completion/g01-build-attempt.json` (`blocker.existingDraftDependencyClosure`). Deliver these 3 existing draft files (376 lines) to the committed implementation exactly as they stand. Where a file’s current sha256 differs from the record, deliver the current content and record the new digest in `docs/evidence/integration-completion/g01-closure-delivery.json`. Stage only these paths and preserve every other staged and working entry. Do not edit behavior, remove a guard or add a stub so that an intermediate commit compiles: the archive-mode API projection is checked once, after the last group, by GCOMP-01-08E.",
 					"backlog": ["BASE-01", "G-01"],
 					"requires": [],
 					"produces": [],
@@ -264,7 +264,7 @@
 						"apps/api/src/governance/reminders.ts",
 						"apps/api/src/governance/repository.ts"
 					],
-					"outcome": "Added 2026-11-05 (continuation of GCOMP-01-08, inserted ahead of it). GCOMP-01-08 cannot pass because the committed route registry imports modules that exist only as working-tree drafts; the 42-file closure and each file\u2019s recorded working sha256 are in `docs/evidence/integration-completion/g01-build-attempt.json` (`blocker.existingDraftDependencyClosure`). Deliver these 3 existing draft files (326 lines) to the committed implementation exactly as they stand. Where a file\u2019s current sha256 differs from the record, deliver the current content and record the new digest in `docs/evidence/integration-completion/g01-closure-delivery.json`. Stage only these paths and preserve every other staged and working entry. Do not edit behavior, remove a guard or add a stub so that an intermediate commit compiles: the archive-mode API projection is checked once, after the last group, by GCOMP-01-08E.",
+					"outcome": "Added 2026-11-05 (continuation of GCOMP-01-08, inserted ahead of it). GCOMP-01-08 cannot pass because the committed route registry imports modules that exist only as working-tree drafts; the 42-file closure and each file’s recorded working sha256 are in `docs/evidence/integration-completion/g01-build-attempt.json` (`blocker.existingDraftDependencyClosure`). Deliver these 3 existing draft files (326 lines) to the committed implementation exactly as they stand. Where a file’s current sha256 differs from the record, deliver the current content and record the new digest in `docs/evidence/integration-completion/g01-closure-delivery.json`. Stage only these paths and preserve every other staged and working entry. Do not edit behavior, remove a guard or add a stub so that an intermediate commit compiles: the archive-mode API projection is checked once, after the last group, by GCOMP-01-08E.",
 					"backlog": ["BASE-01", "G-01"],
 					"requires": [],
 					"produces": [],
@@ -274,7 +274,7 @@
 					"label": "Deliver draft application closure group 10 of 19 (governance)",
 					"kind": "IMPLEMENT",
 					"targets": ["apps/api/src/governance/routes.ts", "apps/api/src/governance/runtime.ts"],
-					"outcome": "Added 2026-11-05 (continuation of GCOMP-01-08, inserted ahead of it). GCOMP-01-08 cannot pass because the committed route registry imports modules that exist only as working-tree drafts; the 42-file closure and each file\u2019s recorded working sha256 are in `docs/evidence/integration-completion/g01-build-attempt.json` (`blocker.existingDraftDependencyClosure`). Deliver these 2 existing draft files (383 lines) to the committed implementation exactly as they stand. Where a file\u2019s current sha256 differs from the record, deliver the current content and record the new digest in `docs/evidence/integration-completion/g01-closure-delivery.json`. Stage only these paths and preserve every other staged and working entry. Do not edit behavior, remove a guard or add a stub so that an intermediate commit compiles: the archive-mode API projection is checked once, after the last group, by GCOMP-01-08E.",
+					"outcome": "Added 2026-11-05 (continuation of GCOMP-01-08, inserted ahead of it). GCOMP-01-08 cannot pass because the committed route registry imports modules that exist only as working-tree drafts; the 42-file closure and each file’s recorded working sha256 are in `docs/evidence/integration-completion/g01-build-attempt.json` (`blocker.existingDraftDependencyClosure`). Deliver these 2 existing draft files (383 lines) to the committed implementation exactly as they stand. Where a file’s current sha256 differs from the record, deliver the current content and record the new digest in `docs/evidence/integration-completion/g01-closure-delivery.json`. Stage only these paths and preserve every other staged and working entry. Do not edit behavior, remove a guard or add a stub so that an intermediate commit compiles: the archive-mode API projection is checked once, after the last group, by GCOMP-01-08E.",
 					"backlog": ["BASE-01", "G-01"],
 					"requires": [],
 					"produces": [],
@@ -284,7 +284,7 @@
 					"label": "Deliver draft application closure group 11 of 19 (governance)",
 					"kind": "IMPLEMENT",
 					"targets": ["apps/api/src/governance/service.ts", "apps/api/src/governance/sources.ts"],
-					"outcome": "Added 2026-11-05 (continuation of GCOMP-01-08, inserted ahead of it). GCOMP-01-08 cannot pass because the committed route registry imports modules that exist only as working-tree drafts; the 42-file closure and each file\u2019s recorded working sha256 are in `docs/evidence/integration-completion/g01-build-attempt.json` (`blocker.existingDraftDependencyClosure`). Deliver these 2 existing draft files (458 lines) to the committed implementation exactly as they stand. Where a file\u2019s current sha256 differs from the record, deliver the current content and record the new digest in `docs/evidence/integration-completion/g01-closure-delivery.json`. Stage only these paths and preserve every other staged and working entry. Do not edit behavior, remove a guard or add a stub so that an intermediate commit compiles: the archive-mode API projection is checked once, after the last group, by GCOMP-01-08E.",
+					"outcome": "Added 2026-11-05 (continuation of GCOMP-01-08, inserted ahead of it). GCOMP-01-08 cannot pass because the committed route registry imports modules that exist only as working-tree drafts; the 42-file closure and each file’s recorded working sha256 are in `docs/evidence/integration-completion/g01-build-attempt.json` (`blocker.existingDraftDependencyClosure`). Deliver these 2 existing draft files (458 lines) to the committed implementation exactly as they stand. Where a file’s current sha256 differs from the record, deliver the current content and record the new digest in `docs/evidence/integration-completion/g01-closure-delivery.json`. Stage only these paths and preserve every other staged and working entry. Do not edit behavior, remove a guard or add a stub so that an intermediate commit compiles: the archive-mode API projection is checked once, after the last group, by GCOMP-01-08E.",
 					"backlog": ["BASE-01", "G-01"],
 					"requires": [],
 					"produces": [],
@@ -297,7 +297,7 @@
 						"apps/api/src/governance/trace-export.ts",
 						"apps/api/src/governance/vibes-source.ts"
 					],
-					"outcome": "Added 2026-11-05 (continuation of GCOMP-01-08, inserted ahead of it). GCOMP-01-08 cannot pass because the committed route registry imports modules that exist only as working-tree drafts; the 42-file closure and each file\u2019s recorded working sha256 are in `docs/evidence/integration-completion/g01-build-attempt.json` (`blocker.existingDraftDependencyClosure`). Deliver these 2 existing draft files (207 lines) to the committed implementation exactly as they stand. Where a file\u2019s current sha256 differs from the record, deliver the current content and record the new digest in `docs/evidence/integration-completion/g01-closure-delivery.json`. Stage only these paths and preserve every other staged and working entry. Do not edit behavior, remove a guard or add a stub so that an intermediate commit compiles: the archive-mode API projection is checked once, after the last group, by GCOMP-01-08E.",
+					"outcome": "Added 2026-11-05 (continuation of GCOMP-01-08, inserted ahead of it). GCOMP-01-08 cannot pass because the committed route registry imports modules that exist only as working-tree drafts; the 42-file closure and each file’s recorded working sha256 are in `docs/evidence/integration-completion/g01-build-attempt.json` (`blocker.existingDraftDependencyClosure`). Deliver these 2 existing draft files (207 lines) to the committed implementation exactly as they stand. Where a file’s current sha256 differs from the record, deliver the current content and record the new digest in `docs/evidence/integration-completion/g01-closure-delivery.json`. Stage only these paths and preserve every other staged and working entry. Do not edit behavior, remove a guard or add a stub so that an intermediate commit compiles: the archive-mode API projection is checked once, after the last group, by GCOMP-01-08E.",
 					"backlog": ["BASE-01", "G-01"],
 					"requires": [],
 					"produces": [],
@@ -310,7 +310,7 @@
 						"apps/api/src/identity/administration.ts",
 						"apps/api/src/identity/workloads.ts"
 					],
-					"outcome": "Added 2026-11-05 (continuation of GCOMP-01-08, inserted ahead of it). GCOMP-01-08 cannot pass because the committed route registry imports modules that exist only as working-tree drafts; the 42-file closure and each file\u2019s recorded working sha256 are in `docs/evidence/integration-completion/g01-build-attempt.json` (`blocker.existingDraftDependencyClosure`). Deliver these 2 existing draft files (279 lines) to the committed implementation exactly as they stand. Where a file\u2019s current sha256 differs from the record, deliver the current content and record the new digest in `docs/evidence/integration-completion/g01-closure-delivery.json`. Stage only these paths and preserve every other staged and working entry. Do not edit behavior, remove a guard or add a stub so that an intermediate commit compiles: the archive-mode API projection is checked once, after the last group, by GCOMP-01-08E.",
+					"outcome": "Added 2026-11-05 (continuation of GCOMP-01-08, inserted ahead of it). GCOMP-01-08 cannot pass because the committed route registry imports modules that exist only as working-tree drafts; the 42-file closure and each file’s recorded working sha256 are in `docs/evidence/integration-completion/g01-build-attempt.json` (`blocker.existingDraftDependencyClosure`). Deliver these 2 existing draft files (279 lines) to the committed implementation exactly as they stand. Where a file’s current sha256 differs from the record, deliver the current content and record the new digest in `docs/evidence/integration-completion/g01-closure-delivery.json`. Stage only these paths and preserve every other staged and working entry. Do not edit behavior, remove a guard or add a stub so that an intermediate commit compiles: the archive-mode API projection is checked once, after the last group, by GCOMP-01-08E.",
 					"backlog": ["BASE-01", "G-01"],
 					"requires": [],
 					"produces": [],
@@ -324,7 +324,7 @@
 						"apps/api/src/integrations/routes.ts",
 						"apps/api/src/integrations/schedules.ts"
 					],
-					"outcome": "Added 2026-11-05 (continuation of GCOMP-01-08, inserted ahead of it). GCOMP-01-08 cannot pass because the committed route registry imports modules that exist only as working-tree drafts; the 42-file closure and each file\u2019s recorded working sha256 are in `docs/evidence/integration-completion/g01-build-attempt.json` (`blocker.existingDraftDependencyClosure`). Deliver these 3 existing draft files (405 lines) to the committed implementation exactly as they stand. Where a file\u2019s current sha256 differs from the record, deliver the current content and record the new digest in `docs/evidence/integration-completion/g01-closure-delivery.json`. Stage only these paths and preserve every other staged and working entry. Do not edit behavior, remove a guard or add a stub so that an intermediate commit compiles: the archive-mode API projection is checked once, after the last group, by GCOMP-01-08E.",
+					"outcome": "Added 2026-11-05 (continuation of GCOMP-01-08, inserted ahead of it). GCOMP-01-08 cannot pass because the committed route registry imports modules that exist only as working-tree drafts; the 42-file closure and each file’s recorded working sha256 are in `docs/evidence/integration-completion/g01-build-attempt.json` (`blocker.existingDraftDependencyClosure`). Deliver these 3 existing draft files (405 lines) to the committed implementation exactly as they stand. Where a file’s current sha256 differs from the record, deliver the current content and record the new digest in `docs/evidence/integration-completion/g01-closure-delivery.json`. Stage only these paths and preserve every other staged and working entry. Do not edit behavior, remove a guard or add a stub so that an intermediate commit compiles: the archive-mode API projection is checked once, after the last group, by GCOMP-01-08E.",
 					"backlog": ["BASE-01", "G-01"],
 					"requires": [],
 					"produces": [],
@@ -334,7 +334,7 @@
 					"label": "Deliver draft application closure group 15 of 19 (integrations)",
 					"kind": "IMPLEMENT",
 					"targets": ["apps/api/src/integrations/webhooks.ts"],
-					"outcome": "Added 2026-11-05 (continuation of GCOMP-01-08, inserted ahead of it). GCOMP-01-08 cannot pass because the committed route registry imports modules that exist only as working-tree drafts; the 42-file closure and each file\u2019s recorded working sha256 are in `docs/evidence/integration-completion/g01-build-attempt.json` (`blocker.existingDraftDependencyClosure`). Deliver these 1 existing draft file (129 lines) to the committed implementation exactly as they stand. Where a file\u2019s current sha256 differs from the record, deliver the current content and record the new digest in `docs/evidence/integration-completion/g01-closure-delivery.json`. Stage only these paths and preserve every other staged and working entry. Do not edit behavior, remove a guard or add a stub so that an intermediate commit compiles: the archive-mode API projection is checked once, after the last group, by GCOMP-01-08E.",
+					"outcome": "Added 2026-11-05 (continuation of GCOMP-01-08, inserted ahead of it). GCOMP-01-08 cannot pass because the committed route registry imports modules that exist only as working-tree drafts; the 42-file closure and each file’s recorded working sha256 are in `docs/evidence/integration-completion/g01-build-attempt.json` (`blocker.existingDraftDependencyClosure`). Deliver these 1 existing draft file (129 lines) to the committed implementation exactly as they stand. Where a file’s current sha256 differs from the record, deliver the current content and record the new digest in `docs/evidence/integration-completion/g01-closure-delivery.json`. Stage only these paths and preserve every other staged and working entry. Do not edit behavior, remove a guard or add a stub so that an intermediate commit compiles: the archive-mode API projection is checked once, after the last group, by GCOMP-01-08E.",
 					"backlog": ["BASE-01", "G-01"],
 					"requires": [],
 					"produces": [],
@@ -344,7 +344,7 @@
 					"label": "Deliver draft application closure group 16 of 19 (security)",
 					"kind": "IMPLEMENT",
 					"targets": ["apps/api/src/security/incident-export-custody.ts"],
-					"outcome": "Added 2026-11-05 (continuation of GCOMP-01-08, inserted ahead of it). GCOMP-01-08 cannot pass because the committed route registry imports modules that exist only as working-tree drafts; the 42-file closure and each file\u2019s recorded working sha256 are in `docs/evidence/integration-completion/g01-build-attempt.json` (`blocker.existingDraftDependencyClosure`). Deliver these 1 existing draft file (334 lines) to the committed implementation exactly as they stand. Where a file\u2019s current sha256 differs from the record, deliver the current content and record the new digest in `docs/evidence/integration-completion/g01-closure-delivery.json`. Stage only these paths and preserve every other staged and working entry. Do not edit behavior, remove a guard or add a stub so that an intermediate commit compiles: the archive-mode API projection is checked once, after the last group, by GCOMP-01-08E.",
+					"outcome": "Added 2026-11-05 (continuation of GCOMP-01-08, inserted ahead of it). GCOMP-01-08 cannot pass because the committed route registry imports modules that exist only as working-tree drafts; the 42-file closure and each file’s recorded working sha256 are in `docs/evidence/integration-completion/g01-build-attempt.json` (`blocker.existingDraftDependencyClosure`). Deliver these 1 existing draft file (334 lines) to the committed implementation exactly as they stand. Where a file’s current sha256 differs from the record, deliver the current content and record the new digest in `docs/evidence/integration-completion/g01-closure-delivery.json`. Stage only these paths and preserve every other staged and working entry. Do not edit behavior, remove a guard or add a stub so that an intermediate commit compiles: the archive-mode API projection is checked once, after the last group, by GCOMP-01-08E.",
 					"backlog": ["BASE-01", "G-01"],
 					"requires": [],
 					"produces": [],
@@ -357,7 +357,7 @@
 						"apps/api/src/security/incident-exports.ts",
 						"apps/api/src/security/incident-routes.ts"
 					],
-					"outcome": "Added 2026-11-05 (continuation of GCOMP-01-08, inserted ahead of it). GCOMP-01-08 cannot pass because the committed route registry imports modules that exist only as working-tree drafts; the 42-file closure and each file\u2019s recorded working sha256 are in `docs/evidence/integration-completion/g01-build-attempt.json` (`blocker.existingDraftDependencyClosure`). Deliver these 2 existing draft files (462 lines) to the committed implementation exactly as they stand. Where a file\u2019s current sha256 differs from the record, deliver the current content and record the new digest in `docs/evidence/integration-completion/g01-closure-delivery.json`. Stage only these paths and preserve every other staged and working entry. Do not edit behavior, remove a guard or add a stub so that an intermediate commit compiles: the archive-mode API projection is checked once, after the last group, by GCOMP-01-08E.",
+					"outcome": "Added 2026-11-05 (continuation of GCOMP-01-08, inserted ahead of it). GCOMP-01-08 cannot pass because the committed route registry imports modules that exist only as working-tree drafts; the 42-file closure and each file’s recorded working sha256 are in `docs/evidence/integration-completion/g01-build-attempt.json` (`blocker.existingDraftDependencyClosure`). Deliver these 2 existing draft files (462 lines) to the committed implementation exactly as they stand. Where a file’s current sha256 differs from the record, deliver the current content and record the new digest in `docs/evidence/integration-completion/g01-closure-delivery.json`. Stage only these paths and preserve every other staged and working entry. Do not edit behavior, remove a guard or add a stub so that an intermediate commit compiles: the archive-mode API projection is checked once, after the last group, by GCOMP-01-08E.",
 					"backlog": ["BASE-01", "G-01"],
 					"requires": [],
 					"produces": [],
@@ -371,7 +371,7 @@
 						"apps/api/src/security/trace-routes.ts",
 						"apps/api/src/security/trace-runtime.ts"
 					],
-					"outcome": "Added 2026-11-05 (continuation of GCOMP-01-08, inserted ahead of it). GCOMP-01-08 cannot pass because the committed route registry imports modules that exist only as working-tree drafts; the 42-file closure and each file\u2019s recorded working sha256 are in `docs/evidence/integration-completion/g01-build-attempt.json` (`blocker.existingDraftDependencyClosure`). Deliver these 3 existing draft files (406 lines) to the committed implementation exactly as they stand. Where a file\u2019s current sha256 differs from the record, deliver the current content and record the new digest in `docs/evidence/integration-completion/g01-closure-delivery.json`. Stage only these paths and preserve every other staged and working entry. Do not edit behavior, remove a guard or add a stub so that an intermediate commit compiles: the archive-mode API projection is checked once, after the last group, by GCOMP-01-08E.",
+					"outcome": "Added 2026-11-05 (continuation of GCOMP-01-08, inserted ahead of it). GCOMP-01-08 cannot pass because the committed route registry imports modules that exist only as working-tree drafts; the 42-file closure and each file’s recorded working sha256 are in `docs/evidence/integration-completion/g01-build-attempt.json` (`blocker.existingDraftDependencyClosure`). Deliver these 3 existing draft files (406 lines) to the committed implementation exactly as they stand. Where a file’s current sha256 differs from the record, deliver the current content and record the new digest in `docs/evidence/integration-completion/g01-closure-delivery.json`. Stage only these paths and preserve every other staged and working entry. Do not edit behavior, remove a guard or add a stub so that an intermediate commit compiles: the archive-mode API projection is checked once, after the last group, by GCOMP-01-08E.",
 					"backlog": ["BASE-01", "G-01"],
 					"requires": [],
 					"produces": [],
@@ -384,7 +384,7 @@
 						"apps/api/src/security/trace-service.ts",
 						"apps/api/src/security/trace-store.ts"
 					],
-					"outcome": "Added 2026-11-05 (continuation of GCOMP-01-08, inserted ahead of it). GCOMP-01-08 cannot pass because the committed route registry imports modules that exist only as working-tree drafts; the 42-file closure and each file\u2019s recorded working sha256 are in `docs/evidence/integration-completion/g01-build-attempt.json` (`blocker.existingDraftDependencyClosure`). Deliver these 2 existing draft files (462 lines) to the committed implementation exactly as they stand. Where a file\u2019s current sha256 differs from the record, deliver the current content and record the new digest in `docs/evidence/integration-completion/g01-closure-delivery.json`. Stage only these paths and preserve every other staged and working entry. Do not edit behavior, remove a guard or add a stub so that an intermediate commit compiles: the archive-mode API projection is checked once, after the last group, by GCOMP-01-08E.",
+					"outcome": "Added 2026-11-05 (continuation of GCOMP-01-08, inserted ahead of it). GCOMP-01-08 cannot pass because the committed route registry imports modules that exist only as working-tree drafts; the 42-file closure and each file’s recorded working sha256 are in `docs/evidence/integration-completion/g01-build-attempt.json` (`blocker.existingDraftDependencyClosure`). Deliver these 2 existing draft files (462 lines) to the committed implementation exactly as they stand. Where a file’s current sha256 differs from the record, deliver the current content and record the new digest in `docs/evidence/integration-completion/g01-closure-delivery.json`. Stage only these paths and preserve every other staged and working entry. Do not edit behavior, remove a guard or add a stub so that an intermediate commit compiles: the archive-mode API projection is checked once, after the last group, by GCOMP-01-08E.",
 					"backlog": ["BASE-01", "G-01"],
 					"requires": [],
 					"produces": [],
@@ -423,13 +423,13 @@
 			"phase": "G01",
 			"owner": "mega-maestro",
 			"mode": "qualification",
-			"title": "Versioned public contracts and reproducible producer delivery \u2014 qualification",
+			"title": "Versioned public contracts and reproducible producer delivery — qualification",
 			"tasks": [
 				{
 					"label": "Verify versioned public contracts and reproducible producer delivery",
 					"kind": "VERIFY",
 					"targets": ["docs/evidence/integration-completion/01.json"],
-					"outcome": "Run focused contracts/distribution tests, relevant strict compilation and existing isolated archivers on a reviewed committed input snapshot. Load exported schemas from the produced archive in plain Node, verify service entrypoints and native metadata, and emit MEGA-CONTRACTS-FOUNDATION with exact provenance. This is packaging readiness, not a passed pair or execution authority. Where the paired consumer BUILD supersedes the M0 archive, consume its actual new archive, rebuild this owner\u2019s adapter/pins and rerun affected conformance before the pair. Preserve prior immutable archives; never substitute old qualifiedAgainst evidence for changed runtime bytes.",
+					"outcome": "Run focused contracts/distribution tests, relevant strict compilation and existing isolated archivers on a reviewed committed input snapshot. Load exported schemas from the produced archive in plain Node, verify service entrypoints and native metadata, and emit MEGA-CONTRACTS-FOUNDATION with exact provenance. This is packaging readiness, not a passed pair or execution authority. Where the paired consumer BUILD supersedes the M0 archive, consume its actual new archive, rebuild this owner’s adapter/pins and rerun affected conformance before the pair. Preserve prior immutable archives; never substitute old qualifiedAgainst evidence for changed runtime bytes.",
 					"backlog": ["BASE-01", "G-01"],
 					"requires": ["MEGA-CONTRACTS-FOUNDATION-BUILD"],
 					"produces": ["MEGA-CONTRACTS-FOUNDATION"],
@@ -448,7 +448,7 @@
 			"phase": "SOURCE",
 			"owner": "maestro",
 			"mode": "implementation",
-			"title": "Stabilize the current Maestro integration and preserve upstream work \u2014 implementation",
+			"title": "Stabilize the current Maestro integration and preserve upstream work — implementation",
 			"tasks": [
 				{
 					"label": "Checkpoint implementation sources and task state",
@@ -832,7 +832,7 @@
 			"phase": "SOURCE",
 			"owner": "maestro",
 			"mode": "qualification",
-			"title": "Stabilize the current Maestro integration and preserve upstream work \u2014 qualification",
+			"title": "Stabilize the current Maestro integration and preserve upstream work — qualification",
 			"tasks": [
 				{
 					"label": "VERIFY: reproducible baseline",
@@ -857,7 +857,7 @@
 			"phase": "M0",
 			"owner": "maestro",
 			"mode": "implementation",
-			"title": "Publish the current public runtime bootstrap before counterpart adapter work \u2014 implementation",
+			"title": "Publish the current public runtime bootstrap before counterpart adapter work — implementation",
 			"tasks": [
 				{
 					"label": "Export source-bound bootstrap manifest",
@@ -965,7 +965,7 @@
 			"phase": "M0",
 			"owner": "maestro",
 			"mode": "qualification",
-			"title": "Publish the current public runtime bootstrap before counterpart adapter work \u2014 qualification",
+			"title": "Publish the current public runtime bootstrap before counterpart adapter work — qualification",
 			"tasks": [
 				{
 					"label": "Build and record the bootstrap runtime",
@@ -990,7 +990,7 @@
 			"phase": "G02",
 			"owner": "mega-maestro",
 			"mode": "implementation",
-			"title": "Scoped actor registration and real signed policy consumer \u2014 implementation",
+			"title": "Scoped actor registration and real signed policy consumer — implementation",
 			"tasks": [
 				{
 					"label": "Separate runtime-use permission from fleet administration",
@@ -1108,7 +1108,7 @@
 			"phase": "G03",
 			"owner": "mega-maestro",
 			"mode": "implementation",
-			"title": "Pinned public Maestro runtime adapter \u2014 implementation",
+			"title": "Pinned public Maestro runtime adapter — implementation",
 			"tasks": [
 				{
 					"label": "Verify runtime archive before code import",
@@ -1225,13 +1225,13 @@
 			"phase": "G03",
 			"owner": "mega-maestro",
 			"mode": "qualification",
-			"title": "Pinned public Maestro runtime adapter \u2014 qualification",
+			"title": "Pinned public Maestro runtime adapter — qualification",
 			"tasks": [
 				{
 					"label": "Verify pinned public Maestro runtime adapter",
 					"kind": "VERIFY",
 					"targets": ["docs/evidence/integration-completion/03.json"],
-					"outcome": "Run runtime-adapter checks/tests and build. Exercise supported public operations against the actual MAESTRO-M0-RUNTIME artifact under controlled synthetic identities, retaining unknown/cancel semantics and no-secret assertions. Emit MEGA-RUNTIME-ADAPTER. Explicitly state this adapter maps APIs and does not qualify process confinement or all execution leases. Where the paired consumer BUILD supersedes the M0 archive, consume its actual new archive, rebuild this owner\u2019s adapter/pins and rerun affected conformance before the pair. Preserve prior immutable archives; never substitute old qualifiedAgainst evidence for changed runtime bytes.",
+					"outcome": "Run runtime-adapter checks/tests and build. Exercise supported public operations against the actual MAESTRO-M0-RUNTIME artifact under controlled synthetic identities, retaining unknown/cancel semantics and no-secret assertions. Emit MEGA-RUNTIME-ADAPTER. Explicitly state this adapter maps APIs and does not qualify process confinement or all execution leases. Where the paired consumer BUILD supersedes the M0 archive, consume its actual new archive, rebuild this owner’s adapter/pins and rerun affected conformance before the pair. Preserve prior immutable archives; never substitute old qualifiedAgainst evidence for changed runtime bytes.",
 					"backlog": ["G-01", "G-04"],
 					"requires": [
 						"MAESTRO-M0-RUNTIME-BUILD",
@@ -1254,7 +1254,7 @@
 			"phase": "G04",
 			"owner": "mega-maestro",
 			"mode": "implementation",
-			"title": "Protected Linux endpoint custody and service identity \u2014 implementation",
+			"title": "Protected Linux endpoint custody and service identity — implementation",
 			"tasks": [
 				{
 					"label": "Define protected service custody port",
@@ -1373,7 +1373,7 @@
 			"phase": "G05",
 			"owner": "mega-maestro",
 			"mode": "implementation",
-			"title": "Exact prepared execution and durable authority leases \u2014 implementation",
+			"title": "Exact prepared execution and durable authority leases — implementation",
 			"tasks": [
 				{
 					"label": "Extend execution authority wire bindings",
@@ -1553,7 +1553,7 @@
 			"phase": "G06",
 			"owner": "mega-maestro",
 			"mode": "implementation",
-			"title": "Constrained effect backend and first real managed run \u2014 implementation",
+			"title": "Constrained effect backend and first real managed run — implementation",
 			"tasks": [
 				{
 					"label": "Implement protected Linux effect dispatch",
@@ -1680,7 +1680,7 @@
 			"phase": "EARLY",
 			"owner": "maestro",
 			"mode": "implementation",
-			"title": "Publish early actor, desktop and provider consumer contracts \u2014 implementation",
+			"title": "Publish early actor, desktop and provider consumer contracts — implementation",
 			"tasks": [
 				{
 					"label": "Implement authenticated actor approval bridge",
@@ -1764,7 +1764,7 @@
 			"phase": "EARLY",
 			"owner": "maestro",
 			"mode": "qualification",
-			"title": "Publish early actor, desktop and provider consumer contracts \u2014 qualification",
+			"title": "Publish early actor, desktop and provider consumer contracts — qualification",
 			"tasks": [
 				{
 					"label": "VERIFY: publish early consumer implementation inputs",
@@ -1797,7 +1797,7 @@
 			"phase": "P0",
 			"owner": "maestro",
 			"mode": "implementation",
-			"title": "Close mandatory admission and protected headless standing defects \u2014 implementation",
+			"title": "Close mandatory admission and protected headless standing defects — implementation",
 			"tasks": [
 				{
 					"label": "Make normal turn admission host mandatory",
@@ -1844,7 +1844,7 @@
 						"src/shared/maestro-lib/managed/host-adapter.ts",
 						"src/main/enterprise/credential-custody.ts"
 					],
-					"outcome": "Reuse the Electron host\u2019s protected credential/custody service (the safeStorage seal and keyring anchor) or an independently protected endpoint-owned host identity. Plain Node must not fall back to no adapter when sealed enrollment exists. Do not copy Electron vault keys, install shared obscuring keys, expose secrets to renderer or claim same-user tamper immunity. These Rust paths are proposed additions, not existing source. Keep the task to these 1-3 authored files and fewer than 500 changed lines; insert a bounded continuation before the dependent check when necessary.",
+					"outcome": "Reuse the Electron host’s protected credential/custody service (the safeStorage seal and keyring anchor) or an independently protected endpoint-owned host identity. Plain Node must not fall back to no adapter when sealed enrollment exists. Do not copy Electron vault keys, install shared obscuring keys, expose secrets to renderer or claim same-user tamper immunity. These Rust paths are proposed additions, not existing source. Keep the task to these 1-3 authored files and fewer than 500 changed lines; insert a bounded continuation before the dependent check when necessary.",
 					"backlog": ["M-02"],
 					"requires": [],
 					"produces": [],
@@ -1973,13 +1973,13 @@
 			"phase": "G02",
 			"owner": "mega-maestro",
 			"mode": "qualification",
-			"title": "Scoped actor registration and real signed policy consumer \u2014 qualification",
+			"title": "Scoped actor registration and real signed policy consumer — qualification",
 			"tasks": [
 				{
 					"label": "Verify scoped actor registration and real signed policy consumer",
 					"kind": "VERIFY",
 					"targets": ["docs/evidence/integration-completion/02.json"],
-					"outcome": "Run relevant API/endpoint/console tests and type/build checks, then use MAESTRO-M0-RUNTIME and MAESTRO-ACTOR-BRIDGE to drive real challenge/browser approval/mTLS redemption/attachment and signed policy delivery/install receipt. Negative signature, revoked actor and peer substitution must deny. Emit MEGA-ACTOR-POLICY only for the actual paired slice; missing consumers leave this verification incomplete without blocking independent artifact implementation. Where the paired consumer BUILD supersedes the M0 archive, consume its actual new archive, rebuild this owner\u2019s adapter/pins and rerun affected conformance before the pair. Preserve prior immutable archives; never substitute old qualifiedAgainst evidence for changed runtime bytes.",
+					"outcome": "Run relevant API/endpoint/console tests and type/build checks, then use MAESTRO-M0-RUNTIME and MAESTRO-ACTOR-BRIDGE to drive real challenge/browser approval/mTLS redemption/attachment and signed policy delivery/install receipt. Negative signature, revoked actor and peer substitution must deny. Emit MEGA-ACTOR-POLICY only for the actual paired slice; missing consumers leave this verification incomplete without blocking independent artifact implementation. Where the paired consumer BUILD supersedes the M0 archive, consume its actual new archive, rebuild this owner’s adapter/pins and rerun affected conformance before the pair. Preserve prior immutable archives; never substitute old qualifiedAgainst evidence for changed runtime bytes.",
 					"backlog": ["G-02", "G-03", "G-09", "PAIR-01"],
 					"requires": [
 						"MAESTRO-ACTOR-BRIDGE-BUILD",
@@ -2004,13 +2004,13 @@
 			"phase": "G04",
 			"owner": "mega-maestro",
 			"mode": "qualification",
-			"title": "Protected Linux endpoint custody and service identity \u2014 qualification",
+			"title": "Protected Linux endpoint custody and service identity — qualification",
 			"tasks": [
 				{
 					"label": "Verify protected Linux endpoint custody and service identity",
 					"kind": "VERIFY",
 					"targets": ["docs/evidence/integration-completion/04.json"],
-					"outcome": "Run focused Linux native/custody/endpoint checks in the isolated fixture. Record independent kernel UID/process and denied agent file/key access, actor registration through the real API, restart/revocation and source hashes. Emit MEGA-PROTECTED-LINUX only for the verified service boundary; do not count a container synthetic program or chmod alone as full provider confinement. Where the paired consumer BUILD supersedes the M0 archive, consume its actual new archive, rebuild this owner\u2019s adapter/pins and rerun affected conformance before the pair. Preserve prior immutable archives; never substitute old qualifiedAgainst evidence for changed runtime bytes.",
+					"outcome": "Run focused Linux native/custody/endpoint checks in the isolated fixture. Record independent kernel UID/process and denied agent file/key access, actor registration through the real API, restart/revocation and source hashes. Emit MEGA-PROTECTED-LINUX only for the verified service boundary; do not count a container synthetic program or chmod alone as full provider confinement. Where the paired consumer BUILD supersedes the M0 archive, consume its actual new archive, rebuild this owner’s adapter/pins and rerun affected conformance before the pair. Preserve prior immutable archives; never substitute old qualifiedAgainst evidence for changed runtime bytes.",
 					"backlog": ["G-03", "G-05", "M-02", "QUAL-01"],
 					"requires": [
 						"MEGA-ACTOR-POLICY",
@@ -2033,13 +2033,13 @@
 			"phase": "G05",
 			"owner": "mega-maestro",
 			"mode": "qualification",
-			"title": "Exact prepared execution and durable authority leases \u2014 qualification",
+			"title": "Exact prepared execution and durable authority leases — qualification",
 			"tasks": [
 				{
 					"label": "Verify exact prepared execution and durable authority leases",
 					"kind": "VERIFY",
 					"targets": ["docs/evidence/integration-completion/05.json"],
-					"outcome": "Run focused real database authority and endpoint resource/receipt tests and strict builds. Produce an actual authority reservation, grant consumption and settled or honestly unknown receipt under the protected Linux fixture, then record all bound generations/digests. Emit MEGA-PREPARED-AUTHORITY; separate from positive Maestro dispatch until the consumer effect boundary is composed. Where the paired consumer BUILD supersedes the M0 archive, consume its actual new archive, rebuild this owner\u2019s adapter/pins and rerun affected conformance before the pair. Preserve prior immutable archives; never substitute old qualifiedAgainst evidence for changed runtime bytes.",
+					"outcome": "Run focused real database authority and endpoint resource/receipt tests and strict builds. Produce an actual authority reservation, grant consumption and settled or honestly unknown receipt under the protected Linux fixture, then record all bound generations/digests. Emit MEGA-PREPARED-AUTHORITY; separate from positive Maestro dispatch until the consumer effect boundary is composed. Where the paired consumer BUILD supersedes the M0 archive, consume its actual new archive, rebuild this owner’s adapter/pins and rerun affected conformance before the pair. Preserve prior immutable archives; never substitute old qualifiedAgainst evidence for changed runtime bytes.",
 					"backlog": ["G-05"],
 					"requires": [
 						"MEGA-ACTOR-POLICY",
@@ -2063,7 +2063,7 @@
 			"phase": "P0",
 			"owner": "maestro",
 			"mode": "qualification",
-			"title": "Close mandatory admission and protected headless standing defects \u2014 qualification",
+			"title": "Close mandatory admission and protected headless standing defects — qualification",
 			"tasks": [
 				{
 					"label": "Verify P0 closure through actual public runtime",
@@ -2088,7 +2088,7 @@
 			"phase": "EFFECT",
 			"owner": "maestro",
 			"mode": "implementation",
-			"title": "Consume prepared execution and per-effect authority with an early real pair \u2014 implementation",
+			"title": "Consume prepared execution and per-effect authority with an early real pair — implementation",
 			"tasks": [
 				{
 					"label": "Implement negotiated prepared execution mapping",
@@ -2306,13 +2306,13 @@
 			"phase": "G06",
 			"owner": "mega-maestro",
 			"mode": "qualification",
-			"title": "Constrained effect backend and first real managed run \u2014 qualification",
+			"title": "Constrained effect backend and first real managed run — qualification",
 			"tasks": [
 				{
 					"label": "Verify constrained effect backend and first real managed run",
 					"kind": "VERIFY",
 					"targets": ["docs/evidence/integration-completion/06.json"],
-					"outcome": "Run the actual Linux pair with MAESTRO-EFFECT-CONSUMERS. Require observed bounded file effect, durable lease/receipt and central lifecycle event plus zero effect on all denials and correct crash/lost-response reconciliation. Emit PAIR-DIRECT-EVIDENCE and MEGA-PREPARED-EXECUTION only from this real run. The harmless fixture proves this slice and is not real model/provider or native desktop qualification. Where the paired consumer BUILD supersedes the M0 archive, consume its actual new archive, rebuild this owner\u2019s adapter/pins and rerun affected conformance before the pair. Preserve prior immutable archives; never substitute old qualifiedAgainst evidence for changed runtime bytes.",
+					"outcome": "Run the actual Linux pair with MAESTRO-EFFECT-CONSUMERS. Require observed bounded file effect, durable lease/receipt and central lifecycle event plus zero effect on all denials and correct crash/lost-response reconciliation. Emit PAIR-DIRECT-EVIDENCE and MEGA-PREPARED-EXECUTION only from this real run. The harmless fixture proves this slice and is not real model/provider or native desktop qualification. Where the paired consumer BUILD supersedes the M0 archive, consume its actual new archive, rebuild this owner’s adapter/pins and rerun affected conformance before the pair. Preserve prior immutable archives; never substitute old qualifiedAgainst evidence for changed runtime bytes.",
 					"backlog": ["G-05", "PAIR-02", "QUAL-01"],
 					"requires": [
 						"MAESTRO-EFFECT-CONSUMERS-BUILD",
@@ -2335,7 +2335,7 @@
 			"phase": "EFFECT",
 			"owner": "maestro",
 			"mode": "qualification",
-			"title": "Consume prepared execution and per-effect authority with an early real pair \u2014 qualification",
+			"title": "Consume prepared execution and per-effect authority with an early real pair — qualification",
 			"tasks": [
 				{
 					"label": "Record first actual positive direct pair",
@@ -2365,7 +2365,7 @@
 			"phase": "G07",
 			"owner": "mega-maestro",
 			"mode": "implementation",
-			"title": "Principal-scoped desktop authoring and settings policies \u2014 implementation",
+			"title": "Principal-scoped desktop authoring and settings policies — implementation",
 			"tasks": [
 				{
 					"label": "Add signed desktop authoring constraints",
@@ -2551,13 +2551,13 @@
 			"phase": "G07",
 			"owner": "mega-maestro",
 			"mode": "qualification",
-			"title": "Principal-scoped desktop authoring and settings policies \u2014 qualification",
+			"title": "Principal-scoped desktop authoring and settings policies — qualification",
 			"tasks": [
 				{
 					"label": "Verify principal-scoped desktop authoring and settings policies",
 					"kind": "VERIFY",
 					"targets": ["docs/evidence/integration-completion/07.json"],
-					"outcome": "Run compiler/API/endpoint/console tests and build. Drive the real actor/policy pair to read permitted desktop choices and authorize allowed/denied exact configuration mutations for two users with different permissions; verify no administrative escalation. Emit MEGA-DESKTOP-POLICY for the real service protocol and mapping; full GUI completion remains dependent on the actual Maestro desktop acceptance artifact. Where the paired consumer BUILD supersedes the M0 archive, consume its actual new archive, rebuild this owner\u2019s adapter/pins and rerun affected conformance before the pair. Preserve prior immutable archives; never substitute old qualifiedAgainst evidence for changed runtime bytes.",
+					"outcome": "Run compiler/API/endpoint/console tests and build. Drive the real actor/policy pair to read permitted desktop choices and authorize allowed/denied exact configuration mutations for two users with different permissions; verify no administrative escalation. Emit MEGA-DESKTOP-POLICY for the real service protocol and mapping; full GUI completion remains dependent on the actual Maestro desktop acceptance artifact. Where the paired consumer BUILD supersedes the M0 archive, consume its actual new archive, rebuild this owner’s adapter/pins and rerun affected conformance before the pair. Preserve prior immutable archives; never substitute old qualifiedAgainst evidence for changed runtime bytes.",
 					"backlog": ["G-02", "G-03", "G-09"],
 					"requires": [
 						"MAESTRO-DESKTOP-CONTRACT-BUILD",
@@ -2582,7 +2582,7 @@
 			"phase": "G08",
 			"owner": "mega-maestro",
 			"mode": "implementation",
-			"title": "Authenticated delegation and durable workflow fencing \u2014 implementation",
+			"title": "Authenticated delegation and durable workflow fencing — implementation",
 			"tasks": [
 				{
 					"label": "Publish complete workflow and delegation DTOs",
@@ -2705,7 +2705,7 @@
 			"phase": "G09",
 			"owner": "mega-maestro",
 			"mode": "implementation",
-			"title": "Actual signed run commands and private notice actions \u2014 implementation",
+			"title": "Actual signed run commands and private notice actions — implementation",
 			"tasks": [
 				{
 					"label": "Extend typed local run-control commands",
@@ -2825,7 +2825,7 @@
 			"phase": "G10",
 			"owner": "mega-maestro",
 			"mode": "implementation",
-			"title": "Governed usage content provenance and detection telemetry \u2014 implementation",
+			"title": "Governed usage content provenance and detection telemetry — implementation",
 			"tasks": [
 				{
 					"label": "Extend bounded collection wire protocol",
@@ -2960,7 +2960,7 @@
 			"phase": "G11",
 			"owner": "mega-maestro",
 			"mode": "implementation",
-			"title": "Offline budget and policy freshness on real runtime routes \u2014 implementation",
+			"title": "Offline budget and policy freshness on real runtime routes — implementation",
 			"tasks": [
 				{
 					"label": "Serve exact offline and budget operations",
@@ -3106,7 +3106,7 @@
 			"phase": "G12",
 			"owner": "mega-maestro",
 			"mode": "implementation",
-			"title": "Native macOS peer service custody and constrained effects \u2014 implementation",
+			"title": "Native macOS peer service custody and constrained effects — implementation",
 			"tasks": [
 				{
 					"label": "Implement native Darwin connected-peer identity",
@@ -3236,7 +3236,7 @@
 			"phase": "G13",
 			"owner": "mega-maestro",
 			"mode": "implementation",
-			"title": "Native Windows peer service custody and constrained effects \u2014 implementation",
+			"title": "Native Windows peer service custody and constrained effects — implementation",
 			"tasks": [
 				{
 					"label": "Implement Windows named-pipe peer identity",
@@ -3366,7 +3366,7 @@
 			"phase": "G14",
 			"owner": "mega-maestro",
 			"mode": "implementation",
-			"title": "Real provider transport qualification without customer account gates \u2014 implementation",
+			"title": "Real provider transport qualification without customer account gates — implementation",
 			"tasks": [
 				{
 					"label": "Define immutable route qualification receipts",
@@ -3555,7 +3555,7 @@
 			"phase": "POLICY",
 			"owner": "maestro",
 			"mode": "implementation",
-			"title": "Consume policy projections and usable approved desktop choices \u2014 implementation",
+			"title": "Consume policy projections and usable approved desktop choices — implementation",
 			"tasks": [
 				{
 					"label": "Install authenticated native desktop policy projections",
@@ -3649,7 +3649,7 @@
 			"phase": "POLICY",
 			"owner": "maestro",
 			"mode": "qualification",
-			"title": "Consume policy projections and usable approved desktop choices \u2014 qualification",
+			"title": "Consume policy projections and usable approved desktop choices — qualification",
 			"tasks": [
 				{
 					"label": "Verify endpoint projection changes real host behavior",
@@ -3678,7 +3678,7 @@
 			"phase": "WORKFLOW",
 			"owner": "maestro",
 			"mode": "implementation",
-			"title": "Consume workflow ownership and authenticated delegation without hardcoded denial \u2014 implementation",
+			"title": "Consume workflow ownership and authenticated delegation without hardcoded denial — implementation",
 			"tasks": [
 				{
 					"label": "Negotiate delegation and workflow envelopes",
@@ -4038,13 +4038,13 @@
 			"phase": "G08",
 			"owner": "mega-maestro",
 			"mode": "qualification",
-			"title": "Authenticated delegation and durable workflow fencing \u2014 qualification",
+			"title": "Authenticated delegation and durable workflow fencing — qualification",
 			"tasks": [
 				{
 					"label": "Verify authenticated delegation and durable workflow fencing",
 					"kind": "VERIFY",
 					"targets": ["docs/evidence/integration-completion/08.json"],
-					"outcome": "Run focused contracts/database/endpoint/adapter tests and real pair Auto Run/Cue/delegated journeys using MAESTRO-WORKFLOW-CONSUMERS. Require actual parent/child effects and receipts with owner transitions/revocation/restart fences. Publish MEGA-WORKFLOW pin with same-source producers and exact public runtime digest; schema-only or rejection-only success leaves verification incomplete. Where the paired consumer BUILD supersedes the M0 archive, consume its actual new archive, rebuild this owner\u2019s adapter/pins and rerun affected conformance before the pair. Preserve prior immutable archives; never substitute old qualifiedAgainst evidence for changed runtime bytes.",
+					"outcome": "Run focused contracts/database/endpoint/adapter tests and real pair Auto Run/Cue/delegated journeys using MAESTRO-WORKFLOW-CONSUMERS. Require actual parent/child effects and receipts with owner transitions/revocation/restart fences. Publish MEGA-WORKFLOW pin with same-source producers and exact public runtime digest; schema-only or rejection-only success leaves verification incomplete. Where the paired consumer BUILD supersedes the M0 archive, consume its actual new archive, rebuild this owner’s adapter/pins and rerun affected conformance before the pair. Preserve prior immutable archives; never substitute old qualifiedAgainst evidence for changed runtime bytes.",
 					"backlog": ["G-06"],
 					"requires": [
 						"MAESTRO-WORKFLOW-CONSUMERS-BUILD",
@@ -4068,13 +4068,13 @@
 			"phase": "G11",
 			"owner": "mega-maestro",
 			"mode": "qualification",
-			"title": "Offline budget and policy freshness on real runtime routes \u2014 qualification",
+			"title": "Offline budget and policy freshness on real runtime routes — qualification",
 			"tasks": [
 				{
 					"label": "Verify offline budget and policy freshness on real runtime routes",
 					"kind": "VERIFY",
 					"targets": ["docs/evidence/integration-completion/11.json"],
-					"outcome": "Run focused policy/clock/finance/endpoint checks, then disconnect/reconnect actual paired services while a declared supported local fixture route exercises signed allowance and same-owner execution. Observe durable debit and denied forbidden fallback. Emit MEGA-OFFLINE-RUNTIME; unsupported actual routes remain incomplete rather than passing on denial tests alone. Where the paired consumer BUILD supersedes the M0 archive, consume its actual new archive, rebuild this owner\u2019s adapter/pins and rerun affected conformance before the pair. Preserve prior immutable archives; never substitute old qualifiedAgainst evidence for changed runtime bytes.",
+					"outcome": "Run focused policy/clock/finance/endpoint checks, then disconnect/reconnect actual paired services while a declared supported local fixture route exercises signed allowance and same-owner execution. Observe durable debit and denied forbidden fallback. Emit MEGA-OFFLINE-RUNTIME; unsupported actual routes remain incomplete rather than passing on denial tests alone. Where the paired consumer BUILD supersedes the M0 archive, consume its actual new archive, rebuild this owner’s adapter/pins and rerun affected conformance before the pair. Preserve prior immutable archives; never substitute old qualifiedAgainst evidence for changed runtime bytes.",
 					"backlog": ["G-03", "G-05", "G-09"],
 					"requires": [
 						"MEGA-DESKTOP-POLICY",
@@ -4098,7 +4098,7 @@
 			"phase": "WORKFLOW",
 			"owner": "maestro",
 			"mode": "qualification",
-			"title": "Consume workflow ownership and authenticated delegation without hardcoded denial \u2014 qualification",
+			"title": "Consume workflow ownership and authenticated delegation without hardcoded denial — qualification",
 			"tasks": [
 				{
 					"label": "Verify actual automated and delegated pair",
@@ -4127,7 +4127,7 @@
 			"phase": "RESIDUAL",
 			"owner": "maestro",
 			"mode": "implementation",
-			"title": "Close native desktop residual effects and CLI parity \u2014 implementation",
+			"title": "Close native desktop residual effects and CLI parity — implementation",
 			"tasks": [
 				{
 					"label": "Apply egress and listener ceilings to desktop host",
@@ -4234,7 +4234,7 @@
 			"phase": "RESIDUAL",
 			"owner": "maestro",
 			"mode": "qualification",
-			"title": "Close native desktop residual effects and CLI parity \u2014 qualification",
+			"title": "Close native desktop residual effects and CLI parity — qualification",
 			"tasks": [
 				{
 					"label": "Verify residual native and shared effects",
@@ -4263,7 +4263,7 @@
 			"phase": "GAPS01",
 			"owner": "maestro",
 			"mode": "implementation",
-			"title": "Close concrete remaining headless custody lock and after-effect gaps \u2014 implementation",
+			"title": "Close concrete remaining headless custody lock and after-effect gaps — implementation",
 			"tasks": [
 				{
 					"label": "Compose managed authority into standalone Cue service",
@@ -4498,7 +4498,7 @@
 			"phase": "GAPS01",
 			"owner": "maestro",
 			"mode": "qualification",
-			"title": "Close concrete remaining headless custody lock and after-effect gaps \u2014 qualification",
+			"title": "Close concrete remaining headless custody lock and after-effect gaps — qualification",
 			"tasks": [
 				{
 					"label": "Verify residual authority closure through actual sinks",
@@ -4523,7 +4523,7 @@
 			"phase": "AUTHOR",
 			"owner": "maestro",
 			"mode": "implementation",
-			"title": "Build complete policy-guided native GUI agent creation and editing \u2014 implementation",
+			"title": "Build complete policy-guided native GUI agent creation and editing — implementation",
 			"tasks": [
 				{
 					"label": "Implement host-owned create and edit validation",
@@ -4628,7 +4628,7 @@
 			"phase": "AUTHOR",
 			"owner": "maestro",
 			"mode": "qualification",
-			"title": "Build complete policy-guided native GUI agent creation and editing \u2014 qualification",
+			"title": "Build complete policy-guided native GUI agent creation and editing — qualification",
 			"tasks": [
 				{
 					"label": "Verify real native GUI create edit flow",
@@ -4657,7 +4657,7 @@
 			"phase": "INTERACTIVE",
 			"owner": "maestro",
 			"mode": "implementation",
-			"title": "Deliver visible policy-governed native GUI execution and recovery \u2014 implementation",
+			"title": "Deliver visible policy-governed native GUI execution and recovery — implementation",
 			"tasks": [
 				{
 					"label": "Bind native compose send stop and resume",
@@ -4734,7 +4734,7 @@
 			"phase": "INTERACTIVE",
 			"owner": "maestro",
 			"mode": "qualification",
-			"title": "Deliver visible policy-governed native GUI execution and recovery \u2014 qualification",
+			"title": "Deliver visible policy-governed native GUI execution and recovery — qualification",
 			"tasks": [
 				{
 					"label": "Verify complete native end-user loop",
@@ -4764,7 +4764,7 @@
 			"phase": "COLLECTION",
 			"owner": "maestro",
 			"mode": "implementation",
-			"title": "Wire actual lifecycle usage content and evidence delivery \u2014 implementation",
+			"title": "Wire actual lifecycle usage content and evidence delivery — implementation",
 			"tasks": [
 				{
 					"label": "Connect real runtime usage producer",
@@ -4844,13 +4844,13 @@
 			"phase": "G10",
 			"owner": "mega-maestro",
 			"mode": "qualification",
-			"title": "Governed usage content provenance and detection telemetry \u2014 qualification",
+			"title": "Governed usage content provenance and detection telemetry — qualification",
 			"tasks": [
 				{
 					"label": "Verify governed usage content provenance and detection telemetry",
 					"kind": "VERIFY",
 					"targets": ["docs/evidence/integration-completion/10.json"],
-					"outcome": "Run focused adapter/endpoint/ingest/worker/content/TRACE/governance checks, then actual paired provider-visible content and usage through API/vault/detection projections with MAESTRO-COLLECTION-CONSUMERS. Verify authorized and denied displays/exports for different users and durable restart recovery. Emit MEGA-COLLECTION; screenshots or fixture-only findings are insufficient. Where the paired consumer BUILD supersedes the M0 archive, consume its actual new archive, rebuild this owner\u2019s adapter/pins and rerun affected conformance before the pair. Preserve prior immutable archives; never substitute old qualifiedAgainst evidence for changed runtime bytes.",
+					"outcome": "Run focused adapter/endpoint/ingest/worker/content/TRACE/governance checks, then actual paired provider-visible content and usage through API/vault/detection projections with MAESTRO-COLLECTION-CONSUMERS. Verify authorized and denied displays/exports for different users and durable restart recovery. Emit MEGA-COLLECTION; screenshots or fixture-only findings are insufficient. Where the paired consumer BUILD supersedes the M0 archive, consume its actual new archive, rebuild this owner’s adapter/pins and rerun affected conformance before the pair. Preserve prior immutable archives; never substitute old qualifiedAgainst evidence for changed runtime bytes.",
 					"backlog": ["G-08"],
 					"requires": [
 						"MAESTRO-COLLECTION-CONSUMERS-BUILD",
@@ -4874,7 +4874,7 @@
 			"phase": "COLLECTION",
 			"owner": "maestro",
 			"mode": "qualification",
-			"title": "Wire actual lifecycle usage content and evidence delivery \u2014 qualification",
+			"title": "Wire actual lifecycle usage content and evidence delivery — qualification",
 			"tasks": [
 				{
 					"label": "Verify native run reaches central evidence and detection",
@@ -4903,7 +4903,7 @@
 			"phase": "COMMANDS",
 			"owner": "maestro",
 			"mode": "implementation",
-			"title": "Complete typed communications and usable end-user notices \u2014 implementation",
+			"title": "Complete typed communications and usable end-user notices — implementation",
 			"tasks": [
 				{
 					"label": "Consume actual inbound commands and receipts",
@@ -4982,13 +4982,13 @@
 			"phase": "G09",
 			"owner": "mega-maestro",
 			"mode": "qualification",
-			"title": "Actual signed run commands and private notice actions \u2014 qualification",
+			"title": "Actual signed run commands and private notice actions — qualification",
 			"tasks": [
 				{
 					"label": "Verify actual signed run commands and private notice actions",
 					"kind": "VERIFY",
 					"targets": ["docs/evidence/integration-completion/09.json"],
-					"outcome": "Run command/inbox tests and actual paired desktop/runtime command flows with MAESTRO-COMMAND-CONSUMERS. Independently observe process pause/resume/cancel and durable signed receipts, plus notice delivery/read/ack/private reply under correct actors. Emit MEGA-COMMANDS only when actual owned effect semantics and recovery pass. Where the paired consumer BUILD supersedes the M0 archive, consume its actual new archive, rebuild this owner\u2019s adapter/pins and rerun affected conformance before the pair. Preserve prior immutable archives; never substitute old qualifiedAgainst evidence for changed runtime bytes.",
+					"outcome": "Run command/inbox tests and actual paired desktop/runtime command flows with MAESTRO-COMMAND-CONSUMERS. Independently observe process pause/resume/cancel and durable signed receipts, plus notice delivery/read/ack/private reply under correct actors. Emit MEGA-COMMANDS only when actual owned effect semantics and recovery pass. Where the paired consumer BUILD supersedes the M0 archive, consume its actual new archive, rebuild this owner’s adapter/pins and rerun affected conformance before the pair. Preserve prior immutable archives; never substitute old qualifiedAgainst evidence for changed runtime bytes.",
 					"backlog": ["G-07"],
 					"requires": [
 						"MAESTRO-COMMAND-CONSUMERS-BUILD",
@@ -5012,7 +5012,7 @@
 			"phase": "COMMANDS",
 			"owner": "maestro",
 			"mode": "qualification",
-			"title": "Complete typed communications and usable end-user notices \u2014 qualification",
+			"title": "Complete typed communications and usable end-user notices — qualification",
 			"tasks": [
 				{
 					"label": "Verify central native communication outcomes",
@@ -5041,7 +5041,7 @@
 			"phase": "ROUTES",
 			"owner": "maestro",
 			"mode": "implementation",
-			"title": "Qualify actual provider routes and native platforms without fallback \u2014 implementation",
+			"title": "Qualify actual provider routes and native platforms without fallback — implementation",
 			"tasks": [
 				{
 					"label": "Bind one actual provider to protected approved route",
@@ -5144,13 +5144,13 @@
 			"phase": "G12",
 			"owner": "mega-maestro",
 			"mode": "qualification",
-			"title": "Native macOS peer service custody and constrained effects \u2014 qualification",
+			"title": "Native macOS peer service custody and constrained effects — qualification",
 			"tasks": [
 				{
 					"label": "Verify native macOS peer service custody and constrained effects",
 					"kind": "VERIFY",
 					"targets": ["docs/evidence/integration-completion/12.json"],
-					"outcome": "Build Darwin packages and run actual native peer/custody/constrained-effect cases on RUNNER-MACOS with MAESTRO-APP-MACOS. Require real actor/policy pair, allowed effect and zero denied effects; record code identity and artifacts. Emit MEGA-NATIVE-MACOS only from actual native evidence. If native runner/desktop application artifacts are absent this verification stays incomplete; do not waive the platform delivery requirement. Where the paired consumer BUILD supersedes the M0 archive, consume its actual new archive, rebuild this owner\u2019s adapter/pins and rerun affected conformance before the pair. Preserve prior immutable archives; never substitute old qualifiedAgainst evidence for changed runtime bytes.",
+					"outcome": "Build Darwin packages and run actual native peer/custody/constrained-effect cases on RUNNER-MACOS with MAESTRO-APP-MACOS. Require real actor/policy pair, allowed effect and zero denied effects; record code identity and artifacts. Emit MEGA-NATIVE-MACOS only from actual native evidence. If native runner/desktop application artifacts are absent this verification stays incomplete; do not waive the platform delivery requirement. Where the paired consumer BUILD supersedes the M0 archive, consume its actual new archive, rebuild this owner’s adapter/pins and rerun affected conformance before the pair. Preserve prior immutable archives; never substitute old qualifiedAgainst evidence for changed runtime bytes.",
 					"backlog": ["G-05", "QUAL-02"],
 					"requires": [
 						"MAESTRO-APP-MACOS-BUILD",
@@ -5175,13 +5175,13 @@
 			"phase": "G13",
 			"owner": "mega-maestro",
 			"mode": "qualification",
-			"title": "Native Windows peer service custody and constrained effects \u2014 qualification",
+			"title": "Native Windows peer service custody and constrained effects — qualification",
 			"tasks": [
 				{
 					"label": "Verify native Windows peer service custody and constrained effects",
 					"kind": "VERIFY",
 					"targets": ["docs/evidence/integration-completion/13.json"],
-					"outcome": "Build Windows artifact and run the real actor/policy/effect pair on RUNNER-WINDOWS with MAESTRO-APP-WINDOWS. Require actual allowed effects and denied unauthorized file/network/credential/descendant paths, observed cleanup and current receipts. Emit MEGA-NATIVE-WINDOWS only on native evidence; absent runner/artifact remains an open mandatory requirement, not an accepted omission. Where the paired consumer BUILD supersedes the M0 archive, consume its actual new archive, rebuild this owner\u2019s adapter/pins and rerun affected conformance before the pair. Preserve prior immutable archives; never substitute old qualifiedAgainst evidence for changed runtime bytes.",
+					"outcome": "Build Windows artifact and run the real actor/policy/effect pair on RUNNER-WINDOWS with MAESTRO-APP-WINDOWS. Require actual allowed effects and denied unauthorized file/network/credential/descendant paths, observed cleanup and current receipts. Emit MEGA-NATIVE-WINDOWS only on native evidence; absent runner/artifact remains an open mandatory requirement, not an accepted omission. Where the paired consumer BUILD supersedes the M0 archive, consume its actual new archive, rebuild this owner’s adapter/pins and rerun affected conformance before the pair. Preserve prior immutable archives; never substitute old qualifiedAgainst evidence for changed runtime bytes.",
 					"backlog": ["G-05", "QUAL-02"],
 					"requires": [
 						"MAESTRO-APP-WINDOWS-BUILD",
@@ -5206,13 +5206,13 @@
 			"phase": "G14",
 			"owner": "mega-maestro",
 			"mode": "qualification",
-			"title": "Real provider transport qualification without customer account gates \u2014 qualification",
+			"title": "Real provider transport qualification without customer account gates — qualification",
 			"tasks": [
 				{
 					"label": "Verify real provider transport qualification without customer account gates",
 					"kind": "VERIFY",
 					"targets": ["docs/evidence/integration-completion/14.json"],
-					"outcome": "Run the actual pinned provider binaries via all declared supported CLI/SDK/PTY/SSH routes and native backends, using deterministic local model protocol fixtures and real protected effects. Record exact versions and separate fixture model evidence from optional live paid model follow-up. Publish MEGA-QUALIFIED-PROVIDERS only for positively exercised complete route tuples; required unsupported routes remain open, not passed by refusal-only tests. First exercise the actual provider adapter and protected backend in the owned qualification harness without promoting production registry support. Publish current proof only after those independent cases pass, then exercise the actual endpoint/GUI route using that proof. A test flag that enables an unqualified production route is not an acceptable bootstrap mechanism. Where the paired consumer BUILD supersedes the M0 archive, consume its actual new archive, rebuild this owner\u2019s adapter/pins and rerun affected conformance before the pair. Preserve prior immutable archives; never substitute old qualifiedAgainst evidence for changed runtime bytes.",
+					"outcome": "Run the actual pinned provider binaries via all declared supported CLI/SDK/PTY/SSH routes and native backends, using deterministic local model protocol fixtures and real protected effects. Record exact versions and separate fixture model evidence from optional live paid model follow-up. Publish MEGA-QUALIFIED-PROVIDERS only for positively exercised complete route tuples; required unsupported routes remain open, not passed by refusal-only tests. First exercise the actual provider adapter and protected backend in the owned qualification harness without promoting production registry support. Publish current proof only after those independent cases pass, then exercise the actual endpoint/GUI route using that proof. A test flag that enables an unqualified production route is not an acceptable bootstrap mechanism. Where the paired consumer BUILD supersedes the M0 archive, consume its actual new archive, rebuild this owner’s adapter/pins and rerun affected conformance before the pair. Preserve prior immutable archives; never substitute old qualifiedAgainst evidence for changed runtime bytes.",
 					"backlog": ["G-05", "QUAL-01", "QUAL-03"],
 					"requires": [
 						"MAESTRO-PROVIDER-CONTRACT-BUILD",
@@ -5240,7 +5240,7 @@
 			"phase": "ROUTES",
 			"owner": "maestro",
 			"mode": "qualification",
-			"title": "Qualify actual provider routes and native platforms without fallback \u2014 qualification",
+			"title": "Qualify actual provider routes and native platforms without fallback — qualification",
 			"tasks": [
 				{
 					"label": "Verify route and native platform support matrix",
@@ -5274,7 +5274,7 @@
 			"phase": "FINAL",
 			"owner": "maestro",
 			"mode": "implementation",
-			"title": "Package repaired public runtime and verify the complete native application pair \u2014 implementation",
+			"title": "Package repaired public runtime and verify the complete native application pair — implementation",
 			"tasks": [
 				{
 					"label": "Refresh the upstream integration to the current upstream rc before final packaging",
@@ -5368,7 +5368,7 @@
 			"phase": "G15",
 			"owner": "mega-maestro",
 			"mode": "implementation",
-			"title": "Final immutable delivery and full desktop integration acceptance \u2014 implementation",
+			"title": "Final immutable delivery and full desktop integration acceptance — implementation",
 			"tasks": [
 				{
 					"label": "Freeze tested implementation inputs and rebuild artifacts",
@@ -5565,13 +5565,13 @@
 			"phase": "G15",
 			"owner": "mega-maestro",
 			"mode": "qualification",
-			"title": "Final immutable delivery and full desktop integration acceptance \u2014 qualification",
+			"title": "Final immutable delivery and full desktop integration acceptance — qualification",
 			"tasks": [
 				{
 					"label": "Verify final immutable delivery and full desktop integration acceptance",
 					"kind": "VERIFY",
 					"targets": ["docs/evidence/integration-completion/15.json"],
-					"outcome": "Run focused changed suites/builds and existing required checks, then real joint thirteen-row plus full desktop journeys against final immutable artifacts on Linux/macOS/Windows. Verify actor/desktop policy/create/edit/interactive run, actual allowed/denied effects, workflows/commands/telemetry/offline and recovery under required real provider routes. Emit PAIR-FINAL-EVIDENCE and MEGA-FINAL-INTEGRATION only when every required positive/negative/native/desktop row passes. Missing counterpart artifact or native runner leaves verification and final completion unchecked with owner-specific evidence; no new CI/CD project or launched peer playbook. Use the FINAL Maestro implementation snapshot and archive, rebuild the adapter qualifiedAgainst pin and rerun every affected earlier acceptance against this final cohort. Early M0 or intermediate receipts alone cannot qualify final changed bytes. Where the paired consumer BUILD supersedes the M0 archive, consume its actual new archive, rebuild this owner\u2019s adapter/pins and rerun affected conformance before the pair. Preserve prior immutable archives; never substitute old qualifiedAgainst evidence for changed runtime bytes.",
+					"outcome": "Run focused changed suites/builds and existing required checks, then real joint thirteen-row plus full desktop journeys against final immutable artifacts on Linux/macOS/Windows. Verify actor/desktop policy/create/edit/interactive run, actual allowed/denied effects, workflows/commands/telemetry/offline and recovery under required real provider routes. Emit PAIR-FINAL-EVIDENCE and MEGA-FINAL-INTEGRATION only when every required positive/negative/native/desktop row passes. Missing counterpart artifact or native runner leaves verification and final completion unchecked with owner-specific evidence; no new CI/CD project or launched peer playbook. Use the FINAL Maestro implementation snapshot and archive, rebuild the adapter qualifiedAgainst pin and rerun every affected earlier acceptance against this final cohort. Early M0 or intermediate receipts alone cannot qualify final changed bytes. Where the paired consumer BUILD supersedes the M0 archive, consume its actual new archive, rebuild this owner’s adapter/pins and rerun affected conformance before the pair. Preserve prior immutable archives; never substitute old qualifiedAgainst evidence for changed runtime bytes.",
 					"backlog": ["G-01", "G-09", "PAIR-02", "QUAL-01", "QUAL-02", "QUAL-03", "VERIFY-01"],
 					"requires": [
 						"MAESTRO-FINAL-CONSUMERS-BUILD",
@@ -5614,7 +5614,7 @@
 			"phase": "FINAL",
 			"owner": "maestro",
 			"mode": "qualification",
-			"title": "Package repaired public runtime and verify the complete native application pair \u2014 qualification",
+			"title": "Package repaired public runtime and verify the complete native application pair — qualification",
 			"tasks": [
 				{
 					"label": "Verify final native GUI and runtime pair",
