@@ -15,6 +15,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { canonicalJson } from '../../../../shared/canonicalJson';
 
 import { createLocalEndpointClient } from '../../../../main/enterprise/endpoint-client';
 import { DEFAULT_TAB_DEFAULTS } from '../../../../shared/maestro-lib/agents/rules';
@@ -31,7 +32,10 @@ import type {
 	ManagedIdentityView,
 } from '../../../../shared/maestro-lib/managed/endpoint-port';
 import type { LifecycleFact } from '../../../../shared/maestro-lib/managed/events';
-import type { ManagedDelegationRef } from '../../../../shared/maestro-lib/managed/types';
+import type {
+	ManagedDelegationRef,
+	ManagedWorkflowRef,
+} from '../../../../shared/maestro-lib/managed/types';
 import {
 	admitProbeTurn,
 	bindingEnrollment,
@@ -45,6 +49,7 @@ import {
 	probeRouteRefusal,
 	probeTurnIdentity,
 	projectPolicyStatus,
+	type ManagedHostAdapterDeps,
 	type ProbeRefusalKey,
 } from '../../../../shared/maestro-lib/managed/host-adapter';
 import { inProcessContext } from '../../../../shared/maestro-lib/managed/operations';
@@ -132,7 +137,8 @@ function standing(
 
 function admission(
 	snapshotArgs: string[] = ['--print'],
-	delegation: ManagedDelegationRef = { chain: [], grantRef: null }
+	delegation: ManagedDelegationRef = { chain: [], grantRef: null },
+	workflow: ManagedWorkflowRef | null = null
 ): AdmissionRequest {
 	const verifier = createContextVerifier({
 		verifierId: 'test',
@@ -154,7 +160,7 @@ function admission(
 				parentRunId: null,
 			},
 			policyRevision: 3,
-			workflow: null,
+			workflow,
 			traceId: 'trace-1',
 			requestedCapabilities: ['runs.submit'],
 		})
@@ -589,6 +595,159 @@ describe('managed host adapter', () => {
 		expect(adapter.authority.live()).toHaveLength(0);
 	});
 
+	it.each([
+		'live',
+		'chain-only',
+		'grant-only',
+		'workflow-only',
+		'no-source',
+		'no-negotiation',
+		'v1',
+		'legacy-workflow',
+		'execution',
+		'registration_use',
+		'delegation',
+		'workflow_claim',
+		'workflow_renew',
+		'workflow_settle',
+		'workflow_release',
+		'duplicate',
+		'malformed',
+		'oversized',
+		'withdraw-during-admit',
+		'withdraw-before-sink',
+		'grant-before-sink',
+		'fence-before-sink',
+		'revoked-grant',
+		'fenced-owner',
+	] as const)('requires authenticated workflow/delegation support: %s', async (change) => {
+		const fake = await endpoint();
+		const port = await attachedPort(fake);
+		const r = managedRecord('ada');
+		r.endpoint.socketPath = fake.socketPath;
+		const view = okView(r);
+		let negotiated: ReturnType<NonNullable<ManagedHostAdapterDeps['workflowNegotiation']>> = {
+			outcome: 'negotiated',
+			protocol: 2,
+			capabilities: [
+				'execution',
+				'registration_use',
+				'delegation',
+				'workflow_claim',
+				'workflow_renew',
+				'workflow_settle',
+				'workflow_release',
+			],
+		};
+		const decide = vi.fn(() => {
+			if (change === 'withdraw-during-admit') negotiated = null;
+			return change === 'revoked-grant' || change === 'fenced-owner'
+				? { decision: 'deny' as const, reason: change, policyRevision: 3 }
+				: { decision: 'allow' as const, policyRevision: 3 };
+		});
+		const producer = createLocalHostAuthority({
+			authorityId: managedAuthorityId(r),
+			now: () => NOW,
+			newId: () => 'workflow-fixture-lease',
+			decide,
+		});
+		Object.defineProperty(port, 'preparedExecution', { value: { ...producer, version: 1 } });
+		const workflowNegotiation = vi.fn((binding) => {
+			expect(binding.preparedExecution).toBe(port.preparedExecution);
+			expect(binding.identity).toEqual(r);
+			expect(binding.identity).not.toBe(r);
+			expect(binding.connection).toBe(port.state().connection);
+			return negotiated;
+		});
+		const adapter = createManagedHostAdapter({
+			installation: INSTALLATION,
+			identity: { read: () => view },
+			endpoint: port,
+			status: () => standing(port, view),
+			now: () => NOW,
+			workflowNegotiation: change === 'no-source' ? undefined : workflowNegotiation,
+		});
+		const workflow = {
+			workflowId: 'workflow-1',
+			version: 'version-1',
+			triggerEventId: 'trigger-1',
+			ownerEpoch: 'opaque-epoch',
+			fencingToken: 'opaque-fence',
+		};
+		const request = admission(
+			[],
+			{
+				chain:
+					change === 'workflow-only' || change === 'grant-only'
+						? []
+						: [
+								{ kind: 'human', id: 'initiator' },
+								{ kind: 'agent', id: 'parent' },
+							],
+				grantRef: change === 'workflow-only' || change === 'chain-only' ? null : 'opaque-grant',
+			},
+			change === 'chain-only' || change === 'grant-only' ? null : workflow
+		);
+		request.context.identity.rootRunId = 'root-run';
+		request.context.identity.parentRunId = 'parent-run';
+		if (change === 'v1') Object.assign(negotiated, { protocol: 1 });
+		if (change === 'legacy-workflow')
+			negotiated.capabilities = ['execution', 'registration_use', 'delegation', 'workflow'];
+		if (change === 'duplicate')
+			negotiated.capabilities = [...negotiated.capabilities, 'delegation'];
+		if (change === 'malformed')
+			negotiated.capabilities = [...negotiated.capabilities, 'invalid capability'];
+		if (change === 'oversized')
+			negotiated.capabilities = [
+				...negotiated.capabilities,
+				...Array.from({ length: 128 }, (_, i) => `extra-${i}`),
+			];
+		negotiated.capabilities = negotiated.capabilities.filter((capability) => capability !== change);
+		if (change === 'no-negotiation') negotiated = null;
+		const before = canonicalJson(request);
+		const result = await adapter.authority.admit(request);
+		expect(canonicalJson(request)).toBe(before);
+		expect(
+			fake.calls.filter((c) => (c.body as { operation: string }).operation === 'execution')
+		).toHaveLength(0);
+		if (change === 'revoked-grant' || change === 'fenced-owner') {
+			expect(result).toMatchObject({ state: 'denied' });
+			expect(producer.live()).toHaveLength(0);
+		} else if (change === 'withdraw-during-admit') {
+			expect(result).toMatchObject({ state: 'unknown' });
+			expect(producer.live()).toHaveLength(0);
+			expect(await adapter.authority.admit(request)).toMatchObject({ state: 'unknown' });
+			expect(decide).toHaveBeenCalledTimes(1);
+		} else if (
+			[
+				'live',
+				'chain-only',
+				'grant-only',
+				'workflow-only',
+				'withdraw-before-sink',
+				'grant-before-sink',
+				'fence-before-sink',
+			].includes(change)
+		) {
+			expect(result.state).toBe('admitted');
+			if (result.state !== 'admitted') throw new Error(result.state);
+			expect(decide).toHaveBeenCalledWith(request);
+			expect(result.lease).toBe(producer.live()[0]);
+			if (change === 'withdraw-before-sink') negotiated = null;
+			if (change === 'grant-before-sink') request.context.delegation.grantRef = 'replaced';
+			if (change === 'fence-before-sink') request.context.workflow!.fencingToken = 'replaced';
+			const revoked = change.endsWith('before-sink');
+			expect(
+				adapter.authority.check(result.lease, dispatchSnapshotDigest(request.snapshot)).ok
+			).toBe(!revoked);
+			if (revoked) expect(producer.live()).toHaveLength(0);
+			else result.lease.release({ outcome: 'stopped', by: 'caller' });
+		} else {
+			expect(result).toMatchObject({ state: 'unavailable', code: 'runtime-unavailable' });
+			expect(decide).not.toHaveBeenCalled();
+		}
+	});
+
 	it('forwards exact prepared inputs and preserves the producer lease and unknown outcomes', async () => {
 		const fake = await endpoint();
 		const port = await attachedPort(fake);
@@ -645,6 +804,11 @@ describe('managed host adapter', () => {
 			endpoint: port,
 			status: () => standing(port, view),
 			now: () => clock,
+			workflowNegotiation: () => ({
+				outcome: 'negotiated',
+				protocol: 2,
+				capabilities: ['execution', 'registration_use', 'delegation'],
+			}),
 		});
 		const preparedPort = port.preparedExecution!;
 		Object.defineProperty(port, 'preparedExecution', { value: { ...preparedPort, version: 2 } });

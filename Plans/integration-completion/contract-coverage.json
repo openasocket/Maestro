@@ -130,7 +130,7 @@
 			"version": 2,
 			"consumerPort": "src/shared/maestro-lib/managed/workflows.ts",
 			"binding": "pending",
-			"note": "V2 publishes workflow_claim/renew/settle/release and opaque ownerEpoch. Existing WorkflowOwnerPort has claim only and numeric epochs. MCOMP-17 must implement lifecycle and preserve delegation; never coerce or strip.",
+			"note": "V2 publishes workflow_claim/renew/settle/release and opaque ownerEpoch. MCOMP-17-01 gates prepared workflow admission on all four negotiated lifecycle capabilities through WORKFLOW-CONTEXT/1, preserving opaque epochs/fences and the original producer lease. Existing WorkflowOwnerPort still has claim only and numeric epochs; lifecycle composition remains MCOMP-17-02. No production producer or v2 transport is installed.",
 			"pairedVerification": ["MCOMP-18-01"]
 		},
 		{
@@ -169,9 +169,9 @@
 			"exports": ["delegationReference", "operationAuthorityReferences", "executionRequestV2"],
 			"version": 2,
 			"consumerPort": "src/shared/maestro-lib/managed/delegation.ts",
-			"binding": "pending",
+			"binding": "local-negotiation-gate-tested-external-mapping-pending",
 			"pairedVerification": ["MCOMP-18-01"],
-			"note": "V2 grant UUID/digest chains differ from local principal chains/grantRef. Resolve authenticated custody and preserve root/parent lineage in MCOMP-17; legacy host refuses nonempty delegation."
+			"note": "MCOMP-17-01 preserves local principal chains/grantRef and root/parent lineage through the existing prepared port, requiring authenticated v2 execution/registration_use/delegation negotiation. V2 grant UUID/digest chains require producer custody resolution under WORKFLOW-CONTEXT/1; no local principal is converted to a grant or dropped to fit v1. External authenticated mapping remains unavailable."
 		},
 		{
 			"family": "commands",
@@ -305,6 +305,18 @@
 		"production": false
 	},
 	"extensionProposals": [
+		{
+			"id": "WORKFLOW-CONTEXT/1",
+			"status": "proposed-not-negotiated",
+			"owner": "mega-maestro",
+			"version": "prepared context binding extension on protocol 2; package version to be agreed",
+			"operations": "No new wire operation is sent. Published v2 execution and workflow lifecycle schemas remain unchanged; the proposal binds their authenticated custody to PREPARED/1.",
+			"missing": "Resolve Maestro principal chains and opaque grantRef into v2 grant UUID/digest references without losing root/parent lineage or narrowing away context. Bind workflowId/version/triggerEventId plus opaque ownerEpoch/fencingToken to the producer-owned ownerId, exact prepared snapshot, actor registration and current connection. Public executionRequestV2 has no workflow owner/fence fields and does not authorize a local spawn; a broker receipt cannot replace this binding.",
+			"localConsumer": "ManagedHostAdapterDeps.workflowNegotiation is a trusted host-only read of actual v2 support for the supplied PreparedExecutionPort, cloned protected identity and socket generation. Absent, v1, malformed or incomplete negotiation is unavailable. Delegation requires execution/registration_use/delegation; workflows additionally require all four workflow lifecycle capabilities. Admission sends the existing complete request unchanged, retains the original producer lease and checks negotiation again after admission and at the sink. No producer, wire transport or advertised capability is installed.",
+			"lifetime": "The producer must resolve and authenticate every delegation hop/grant and owner fence, reauthorize each attempt, durably reject replay/stale/revoked grants and fence loss, and revoke descendant effects. Changed negotiation or context prevents local use of the lease; lost admission remains unknown. Local fixture tests are not authenticated producer, native or paired qualification.",
+			"implementationTasks": ["MCOMP-17-01", "MCOMP-17-02", "MCOMP-17-03"],
+			"pairedVerification": ["MCOMP-18-01"]
+		},
 		{
 			"id": "REGISTRATION-HTTP/2",
 			"status": "proposed-not-negotiated",

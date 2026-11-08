@@ -316,6 +316,20 @@ export interface ManagedHostAdapterDeps {
 	endpoint: EndpointPort | null;
 	/** Trusted host injection only, after EFFECT/1 authentication and negotiation. */
 	effectProducer?: () => ManagedEffectProducer | null;
+	/**
+	 * WORKFLOW-CONTEXT/1 local seam, not a wire capability. The trusted host
+	 * returns actual v2 negotiation only for this prepared producer and current
+	 * authenticated identity/socket binding, or null. The producer must resolve
+	 * principal chains/grantRef and owner fences through authenticated custody,
+	 * reauthorize each admission and revoke its leases when that custody changes.
+	 * Published v2 references alone cannot provide that mapping. No production
+	 * implementation is installed until the extension is agreed and negotiated.
+	 */
+	workflowNegotiation?(binding: {
+		preparedExecution: PreparedExecutionPort;
+		identity: ManagedIdentityRecord;
+		connection: number;
+	}): { outcome: 'negotiated'; protocol: 2; capabilities: readonly string[] } | null;
 	/** This process's standing, as the enrollment lifecycle sees it. */
 	status(): ManagedEnrollmentStatus;
 	now?: () => number;
@@ -691,10 +705,46 @@ export function createManagedHostAdapter(deps: ManagedHostAdapterDeps): ManagedH
 			generation: string;
 			request: AdmissionRequest;
 			input: string;
+			workflowKey: string;
 			ended: AbortController;
 		}
 	>();
 	let invalidation = 0;
+	function workflowNegotiationKey(request: AdmissionRequest, port: PreparedExecutionPort) {
+		const { delegation, workflow } = request.context;
+		const delegated = delegation.chain.length > 0 || delegation.grantRef !== null;
+		if (!delegated && workflow === null) return 'direct';
+		const identity = deps.identity.read();
+		const standing = deps.status();
+		if (
+			identity.status !== 'ok' ||
+			!identity.record ||
+			standing.authority !== 'registered' ||
+			!standing.connection?.attached
+		)
+			return null;
+		const negotiated = deps.workflowNegotiation?.({
+			preparedExecution: port,
+			identity: structuredClone(identity.record),
+			connection: standing.connection.connection,
+		});
+		if (
+			negotiated?.outcome !== 'negotiated' ||
+			negotiated.protocol !== 2 ||
+			!Array.isArray(negotiated.capabilities) ||
+			negotiated.capabilities.length > 128 ||
+			!negotiated.capabilities.every(isEndpointIdentifier) ||
+			new Set(negotiated.capabilities).size !== negotiated.capabilities.length
+		)
+			return null;
+		const required = ['execution', 'registration_use'];
+		if (delegated) required.push('delegation');
+		if (workflow !== null)
+			required.push('workflow_claim', 'workflow_renew', 'workflow_settle', 'workflow_release');
+		if (!required.every((capability) => negotiated.capabilities.includes(capability))) return null;
+		return canonicalJson(negotiated);
+	}
+
 	function generation(): string {
 		const standing = deps.status();
 		const identity = deps.identity.read();
@@ -789,6 +839,11 @@ export function createManagedHostAdapter(deps: ManagedHostAdapterDeps): ManagedH
 			port.authorityId !== authorityId()
 		)
 			return unavailable('The prepared authority or policy generation is no longer current.');
+		const workflowKey = workflowNegotiationKey(request, port);
+		if (workflowKey === null)
+			return unavailable(
+				'No authenticated v2 workflow/delegation negotiation for this prepared authority; the complete context must be preserved.'
+			);
 		if (previous)
 			return {
 				state: 'denied',
@@ -823,6 +878,7 @@ export function createManagedHostAdapter(deps: ManagedHostAdapterDeps): ManagedH
 				before !== generation() ||
 				input !== canonicalJson(request) ||
 				deps.endpoint.preparedExecution !== port ||
+				workflowNegotiationKey(request, port) !== workflowKey ||
 				!projectPolicyStatus({ standing: deps.status(), now: now(), freshnessMs: deps.freshnessMs })
 					.admission.possible ||
 				lease.authorityId !== authorityId() ||
@@ -847,7 +903,7 @@ export function createManagedHostAdapter(deps: ManagedHostAdapterDeps): ManagedH
 				release(result);
 			};
 			lease.onRevoked(() => ended.abort());
-			owners.set(lease, { port, generation: before, request, input, ended });
+			owners.set(lease, { port, generation: before, request, input, workflowKey, ended });
 		}
 		if (outcome.state === 'unavailable') attempts.delete(key);
 		else attempts.set(key, outcome);
@@ -866,6 +922,7 @@ export function createManagedHostAdapter(deps: ManagedHostAdapterDeps): ManagedH
 				owner.generation !== generation() ||
 				owner.input !== canonicalJson(owner.request) ||
 				deps.endpoint?.preparedExecution !== owner.port ||
+				workflowNegotiationKey(owner.request, owner.port) !== owner.workflowKey ||
 				!projectPolicyStatus({ standing: deps.status(), now: now(), freshnessMs: deps.freshnessMs })
 					.admission.possible
 			) {
