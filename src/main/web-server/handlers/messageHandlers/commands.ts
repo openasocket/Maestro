@@ -548,6 +548,24 @@ function callerConsultWithdrawerOf(
 }
 
 /**
+ * The host-only hook that binds the asking Auto Run attempt's admitted lineage to the dispatch
+ * ticket its ask carries (MCOMP-17-03BG), so the consult that ticket starts is admitted as that
+ * run's child. Called with the credential (never echoed) and the fresh ticket; true only when
+ * the binding is held. Optional: absent, the consult is admitted as the transport that asked.
+ */
+export type AutoRunConsultLineageBinder = (credential: string, dispatchTicket: string) => boolean;
+
+/** The lineage binder the desktop composed for the ask handler, when it composed one. */
+function autoRunConsultLineageBinderOf(
+	ctx: MessageHandlerContext
+): AutoRunConsultLineageBinder | undefined {
+	const { bindAutoRunConsultLineage } = ctx.callbacks as MessageHandlerContext['callbacks'] & {
+		bindAutoRunConsultLineage?: AutoRunConsultLineageBinder;
+	};
+	return typeof bindAutoRunConsultLineage === 'function' ? bindAutoRunConsultLineage : undefined;
+}
+
+/**
  * Authenticate a forwarded caller credential (MCOMP-17-03AP): the exact source it names, or the
  * refusal that leaves nothing asked. A chat turn's credential is tried first; the stated ids must
  * both be present and be exactly that agent and tab, so a credential never lends one turn's
@@ -698,6 +716,23 @@ export function handleCrossAgentAsk(
 	// create), and the `cross-agent:send` handler claims it so the consult is
 	// admitted for the CLI or device that asked (MRC-08-01C).
 	const dispatchTicket = issueDispatchTicket(admission, { agentId: targetSessionId });
+
+	// An Auto Run attempt's ask (MCOMP-17-03BG): the attempt's admitted lineage is bound to the
+	// ticket before the consult is dispatched, so the consult is the run's child on its fenced
+	// workflow. A composed binder that cannot hold the binding refuses the ask: the ticket is
+	// withdrawn and the target is never consulted under a lineage it was not given.
+	if (custodyCredential !== undefined && custodyProcessId !== undefined) {
+		const bindLineage = autoRunConsultLineageBinderOf(ctx);
+		if (bindLineage && bindLineage(custodyCredential, dispatchTicket) !== true) {
+			withdrawDispatchTicket(dispatchTicket);
+			reply({
+				success: false,
+				error:
+					'The asking Auto Run attempt has no lineage this host can bind to the consult; nothing was asked.',
+			});
+			return;
+		}
+	}
 
 	// Source custody (MCOMP-17-03AS): a credentialed ask stands only while the chat turn that
 	// asked still holds its admission. The credential is re-read on an interval while the consult

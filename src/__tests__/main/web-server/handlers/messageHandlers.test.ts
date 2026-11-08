@@ -1084,6 +1084,88 @@ describe('WebSocketMessageHandler', () => {
 						expect(replies()[0].error).toContain('the ask was withdrawn');
 					});
 				});
+
+				describe('binding the attempt lineage to the ask ticket (MCOMP-17-03BG)', () => {
+					let bindAutoRunConsultLineage: ReturnType<typeof vi.fn>;
+					let boundTickets: string[];
+					const runAsk = () =>
+						ask({ fromSessionId: 'runner-1', fromTabId: 'runner-tab', callerCredential: RUN });
+
+					beforeEach(() => {
+						boundTickets = [];
+						bindAutoRunConsultLineage = vi.fn((_credential: string, ticket: string) => {
+							// The consult must not have been dispatched yet when the binding is made.
+							expect(callbacks.consultAgent).not.toHaveBeenCalled();
+							boundTickets.push(ticket);
+							return true;
+						});
+						handler.setCallbacks({
+							callerSourceOf,
+							autoRunCallerSourceOf,
+							bindAutoRunConsultLineage,
+						} as Partial<MessageHandlerCallbacks>);
+					});
+
+					it('binds the credential to exactly the ticket the consult then carries, before dispatch', async () => {
+						runAsk();
+						await vi.waitFor(() => expect(callbacks.consultAgent).toHaveBeenCalled());
+						expect(bindAutoRunConsultLineage).toHaveBeenCalledTimes(1);
+						expect(bindAutoRunConsultLineage).toHaveBeenCalledWith(RUN, ticketSent());
+						expect(boundTickets).toEqual([ticketSent()]);
+						const params = vi.mocked(callbacks.consultAgent).mock.calls[0][0];
+						expect(JSON.stringify(params)).not.toContain(RUN);
+						expect(lastReply()).toMatchObject({ success: true, requestId: 'r-run' });
+					});
+
+					it.each([
+						['refuses', false],
+						['answers no boolean', undefined],
+					])('a binder that %s refuses the ask and withdraws the ticket', (_label, answer) => {
+						bindAutoRunConsultLineage.mockImplementation((_c: string, ticket: string) => {
+							boundTickets.push(ticket);
+							return answer;
+						});
+						runAsk();
+						expect(callbacks.consultAgent).not.toHaveBeenCalled();
+						const response = lastReply();
+						expect(response).toMatchObject({ success: false, requestId: 'r-run' });
+						expect(response.error).toContain('no lineage this host can bind');
+						expect(response.error).toContain('nothing was asked');
+						expect(JSON.stringify(response)).not.toContain(RUN);
+						expect(boundTickets).toHaveLength(1);
+						expect(
+							claimDispatchTicket(boundTickets[0], { agentId: 'session-1', tabId: 'x' })
+						).toBeUndefined();
+					});
+
+					it('a chat credential is never offered to the binder', async () => {
+						ask({ fromSessionId: 'caller-1', fromTabId: 'caller-tab', callerCredential: CHAT });
+						await vi.waitFor(() => expect(callbacks.consultAgent).toHaveBeenCalled());
+						expect(bindAutoRunConsultLineage).not.toHaveBeenCalled();
+						expect(lastReply()).toMatchObject({ success: true });
+					});
+
+					it('an uncredentialed ask is never offered to the binder', async () => {
+						ask({ fromSessionId: 'runner-1', fromTabId: 'runner-tab' });
+						await vi.waitFor(() => expect(callbacks.consultAgent).toHaveBeenCalled());
+						expect(bindAutoRunConsultLineage).not.toHaveBeenCalled();
+					});
+
+					it('a refused credential binds nothing', () => {
+						ask({ fromSessionId: 'runner-2', fromTabId: 'runner-tab', callerCredential: RUN });
+						expect(bindAutoRunConsultLineage).not.toHaveBeenCalled();
+						expect(callbacks.consultAgent).not.toHaveBeenCalled();
+					});
+
+					it('without a composed binder the attempt still asks unbound', async () => {
+						handler.setCallbacks({
+							bindAutoRunConsultLineage: undefined,
+						} as Partial<MessageHandlerCallbacks>);
+						runAsk();
+						await vi.waitFor(() => expect(callbacks.consultAgent).toHaveBeenCalled());
+						expect(lastReply()).toMatchObject({ success: true });
+					});
+				});
 			});
 
 			it('a request without the field keeps the existing consult path', async () => {
