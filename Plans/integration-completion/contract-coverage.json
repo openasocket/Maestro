@@ -262,6 +262,16 @@
 			"binding": "pending",
 			"pairedVerification": ["MCOMP-32-01"],
 			"note": "Route receipts bind binary/version/transport/OS/backend; parsing is not verification. Native authenticated peer transport and prepared confinement still need actual platform/provider proofs (PREPARED/1)."
+		},
+		{
+			"family": "headless-host",
+			"module": "./local-endpoint",
+			"exports": ["attachmentRequest", "endpointStatus", "enrollmentRequest", "enrollmentResult"],
+			"version": 1,
+			"consumerPort": "src/cli/services/host-managed.ts",
+			"binding": "local-composition-tested-external-custody-unavailable",
+			"note": "MCOMP-09-05 composes the existing v1 enrollment/registration/attachment transport with protected custody ports, live standing, refresh/reconnect and terminal shutdown. startRuntimeHost composes by default and carries one composition through its lifetime. Plain Node has no protected seal and remains held; v2 runtime_use registration remains pending under REGISTRATION-HTTP/2. Fixture registration is not actor or native qualification.",
+			"pairedVerification": ["MCOMP-14-01", "MCOMP-32-01", "MCOMP-34-01"]
 		}
 	],
 	"validation": {
@@ -360,6 +370,16 @@
 			"missing": "Registration-bound campaign/message/idempotency/requestDigest lookup and receipt custody; missing/unbound returns unavailable. No actor selector or automatic replay of private replies.",
 			"implementationTasks": ["MCOMP-29-02", "MCOMP-29-03"],
 			"pairedVerification": ["MCOMP-30-01"]
+		},
+		{
+			"id": "HEADLESS-CUSTODY/1",
+			"status": "proposed-not-negotiated",
+			"owner": "mega-maestro",
+			"version": "protected independent headless identity custody extension; protocol/package version to be agreed",
+			"operations": "No public local operation delegates protected identity custody to a Node host. Propose an authenticated endpoint-owned host identity/custody binding; no speculative operation is sent.",
+			"missing": "Bind installation/runtime/process epoch and verified OS peer to an independently protected enrollment, freshness/rollback anchor, revocation and authenticated release. Never export Electron safeStorage keys, copy bearer credentials, or interpret schema imports as native support. Maestro uses the existing SealProvider/AnchorStore and EndpointPort when protected custody is supplied; default Node remains unavailable.",
+			"implementationTasks": ["MCOMP-09-05", "MCOMP-09-05A"],
+			"pairedVerification": ["MCOMP-14-01", "MCOMP-32-01", "MCOMP-34-01"]
 		}
 	],
 	"localTestBoundary": {

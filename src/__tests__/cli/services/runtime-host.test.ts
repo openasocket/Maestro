@@ -15,6 +15,7 @@ import {
 	HostStartError,
 	startRuntimeHost,
 	type RunningHost,
+	type RuntimeHostDeps,
 } from '../../../cli/services/runtime-host';
 import { createEnterpriseIdentityStore } from '../../../main/enterprise/identity-store';
 import type { Anchor } from '../../../main/utils/keyring-anchor';
@@ -53,7 +54,15 @@ describe('startRuntimeHost', () => {
 		stop: async () => undefined,
 	});
 	// The temp directory is no bundle, so the prompt probe is answered for it.
-	const noCue = { startCue: async () => idleCue(), promptsLoad: () => true };
+	const noCue = {
+		startCue: async () => idleCue(),
+		promptsLoad: () => true,
+		composeManaged: (input: Parameters<RuntimeHostDeps['composeManaged']>[0]) =>
+			composeHostManaged({
+				...input,
+				anchorFor: () => fakeAnchor({ value: null }),
+			}),
+	};
 
 	async function start(): Promise<RunningHost> {
 		const host = await startRuntimeHost(options(), noCue);
@@ -123,6 +132,64 @@ describe('startRuntimeHost', () => {
 		});
 		// No managed host composed: a standalone host attests no managed standing.
 		expect('managed' in report).toBe(false);
+	});
+
+	it('composes the directory standing by default, even without a caller supplying managed options', async () => {
+		fs.writeFileSync(path.join(dir, 'enterprise-identity.bin'), 'unopenable sealed record');
+		const composeManaged = vi.fn(noCue.composeManaged);
+		const host = await startRuntimeHost(options(), { ...noCue, composeManaged });
+		running.push(host);
+		expect(composeManaged).toHaveBeenCalledWith({
+			userDataDir: dir,
+			productionDataDir: dir,
+			version: '1.2.3',
+		});
+		expect(host.managedComposition?.composed).toBe(false);
+		expect(host.runtime.managedBinding.state().state).toBe('unreadable');
+		expect(host.runtime.managedHost?.identity.read().status).toBe('unprotected');
+		const result = await host.runtime.turns.send('a1', 't1', { text: 'must not run' });
+		expect(result.ok).toBe(false);
+		expect(host.runtime.turnsInFlight()).toBe(0);
+	});
+
+	it('keeps a supplied composition and its controls together through shutdown', async () => {
+		const composition = composeHostManaged({
+			userDataDir: dir,
+			productionDataDir: dir,
+			version: '1.2.3',
+			custody: { ok: true, seal: fakeSeal(), anchor: fakeAnchor({ value: null }) },
+		});
+		if (!composition.composed) throw new Error(composition.reason);
+		const composeManaged = vi.fn(noCue.composeManaged);
+		const host = await startRuntimeHost(
+			{ ...options(), managedComposition: composition },
+			{ ...noCue, composeManaged }
+		);
+		running.push(host);
+		expect(composeManaged).not.toHaveBeenCalled();
+		expect(host.managedComposition).toBe(composition);
+		expect(await composition.control.beginRegistration()).toMatchObject({
+			status: 'refused',
+			reason: 'not-enrolled',
+		});
+		await host.stop();
+		expect(await composition.control.beginRegistration()).toMatchObject({ status: 'unavailable' });
+		expect(fs.existsSync(path.join(dir, 'maestro-runtime.lock'))).toBe(false);
+	});
+
+	it('rejects a composition mixed with an unrelated lifecycle before starting the runtime', async () => {
+		const createRuntime = vi.fn();
+		await expect(
+			startRuntimeHost(
+				{
+					...options(),
+					managedComposition: noCue.composeManaged({ userDataDir: dir, version: '1' }),
+					managed: {},
+				},
+				{ ...noCue, createRuntime }
+			)
+		).rejects.toThrow('without separate managed options');
+		expect(createRuntime).not.toHaveBeenCalled();
 	});
 
 	it('hands a composed managed host to the runtime, which then attests its standing in status', async () => {
@@ -297,16 +364,16 @@ describe('startRuntimeHost', () => {
 				noCue
 			);
 			running.push(host);
-			expect(host.runtime.managedHost).toBeNull();
-			// An enrolled directory with no standing stays enrolled-unavailable, never standalone.
+			expect(host.runtime.managedHost?.identity.read().status).toBe('unprotected');
+			// The existing binding stays enrolled-unavailable under the default held adapter.
 			expect(host.runtime.managedBinding.state().state).toBe('enrolled-unavailable');
 			const report = await requestHostStatus(dir);
 			expect('managed' in report).toBe(false);
-			expect(report.managedUnavailable).toBe(standing.reason);
+			expect(report.managedUnavailable).toContain('cannot be opened');
 			expect(report.managedUnavailable).toContain(
 				'no protected seal exists in a plain Node process'
 			);
-			expect(report.managedUnavailable).toContain('cannot be opened here');
+			expect(report.managedUnavailable).toContain('no protected custody');
 		});
 
 		it('logs a lifecycle that fails to attach or close, and finishes either way', async () => {
@@ -375,13 +442,21 @@ describe('startRuntimeHost', () => {
 	});
 
 	it('refuses to start from a bundle whose prompts cannot load, before it takes the directory', async () => {
-		// `dir` holds no prompts/core, which is the bundle copied without its prompts.
+		// Explicitly model a bundle copied without prompts, even if TMPDIR is inside this checkout.
 		const createRuntime = vi.fn();
 		await expect(
-			startRuntimeHost(options(), { startCue: async () => idleCue(), createRuntime })
+			startRuntimeHost(options(), {
+				startCue: async () => idleCue(),
+				promptsLoad: () => false,
+				createRuntime,
+			})
 		).rejects.toBeInstanceOf(HostPromptsMissingError);
 		await expect(
-			startRuntimeHost(options(), { startCue: async () => idleCue(), createRuntime })
+			startRuntimeHost(options(), {
+				startCue: async () => idleCue(),
+				promptsLoad: () => false,
+				createRuntime,
+			})
 		).rejects.toThrow(/prompts/);
 
 		expect(createRuntime).not.toHaveBeenCalled();
@@ -393,7 +468,7 @@ describe('startRuntimeHost', () => {
 		// `dist/cli` is where the CLI bundle sits in a checkout; the probe is the real one.
 		const host = await startRuntimeHost(
 			{ ...options(), moduleDirectory: path.resolve(__dirname, '../../../../dist/cli') },
-			{ startCue: async () => idleCue() }
+			{ startCue: async () => idleCue(), composeManaged: noCue.composeManaged }
 		);
 		running.push(host);
 		expect(readCliServerInfoFrom(dir)?.pid).toBe(process.pid);

@@ -9,7 +9,9 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { readPin } from '../../../../scripts/import-mega-maestro.mjs';
+import { inspectContractsDir } from '../../../../scripts/check-mega-contract-vectors.mjs';
 
 import {
 	composeHostManaged,
@@ -137,6 +139,178 @@ describe('composeHostManaged', () => {
 		await fake?.close();
 		fake = undefined;
 		fs.rmSync(dir, { recursive: true, force: true });
+	});
+
+	let endpointSchemas: typeof import('../../../../vendor/mega-maestro/contracts/dist/local-endpoint.js');
+	beforeAll(async () => {
+		const pin = readPin(path.resolve('vendor/mega-maestro/contracts.pin.json'));
+		const checked = inspectContractsDir({
+			contractsDir: path.resolve('vendor/mega-maestro/contracts'),
+			expectedSha256: pin.payloadDigest,
+		});
+		expect(checked.sourceRevision).toBe(pin.sourceRevision);
+		endpointSchemas =
+			await import('../../../../vendor/mega-maestro/contracts/dist/local-endpoint.js');
+	});
+
+	it('registers, refreshes policy, reconnects and closes through the composed controls (local contract fixture)', async () => {
+		fake = await startFakeEndpoint({ registrationRequired: true, now: () => NOW });
+		await enroll(fake.socketPath);
+		const composed = composeHostManaged({
+			userDataDir: dir,
+			version: '1.1.0',
+			custody: custody(),
+			now: () => NOW,
+		});
+		if (!composed.composed) throw new Error(composed.reason);
+		expect(await composed.control.connect()).toMatchObject({ status: 'unavailable' });
+		expect(fake.calls).toHaveLength(0);
+		const adapter = composed.managed.host!(installation);
+		expect(composed.managed.host!(installation)).toBe(adapter);
+		expect(() => composed.managed.host!({ ...installation, processEpoch: 'another' })).toThrow(
+			'one runtime'
+		);
+		await composed.lifecycle.attach();
+		expect(composed.status()?.authority).toBe('none');
+		const approval = await composed.control.beginRegistration();
+		expect(approval.status).toBe('ok');
+		if (approval.status !== 'ok') throw new Error('No approval');
+		expect(JSON.stringify(composed.status())).not.toContain(approval.value.nonce);
+		expect(await composed.control.completeRegistration()).toMatchObject({ status: 'ok' });
+		expect(composed.status()?.authority).toBe('registered');
+		expect(fs.readFileSync(path.join(dir, 'enterprise-identity.bin'), 'utf8')).not.toContain(
+			approval.value.nonce
+		);
+
+		fake.options.status = { desiredPolicyRevision: 9, appliedPolicyRevision: 9 };
+		expect(await composed.control.connect()).toMatchObject({ status: 'ok' });
+		expect(adapter.policy().policyRevision).toBe(9);
+		fake.dropConnections();
+		fake.revokeRegistration();
+		expect(await composed.control.connect()).toMatchObject({
+			status: 'denied',
+			reason: 'unauthenticated',
+		});
+		expect(composed.status()?.authority).toBe('none');
+		fake.options.peerAuthenticated = false;
+		expect(await composed.control.beginRegistration()).toMatchObject({ status: 'denied' });
+		fake.options.peerAuthenticated = true;
+		expect(await composed.control.beginRegistration()).toMatchObject({ status: 'ok' });
+		expect(await composed.control.completeRegistration()).toMatchObject({ status: 'ok' });
+		expect(composed.status()?.authority).toBe('registered');
+		for (const call of fake.calls.filter((c) => c.path === '/v1/invoke')) {
+			const envelope = endpointSchemas.localRequestEnvelope.parse(call.body);
+			if (envelope.operation === 'attachment')
+				endpointSchemas.attachmentRequest.parse(envelope.payload);
+		}
+		endpointSchemas.endpointStatus.parse(composed.status()!.endpoint);
+		const calls = fake.calls.length;
+		const closing = composed.lifecycle.close();
+		expect(adapter.status().authority).toBe('none');
+		expect(adapter.telemetry).toBeNull();
+		expect(await composed.control.connect()).toMatchObject({ status: 'unavailable' });
+		await closing;
+		await composed.lifecycle.attach();
+		await composed.lifecycle.close();
+		expect(composed.status()?.authority).toBe('none');
+		expect(adapter.telemetry).toBeNull();
+		expect(fake.calls).toHaveLength(calls);
+		expect(() => composed.managed.host!(installation)).toThrow('closed');
+		expect(composed.standing.read().standing).toBe('managed');
+	});
+
+	it('relays supported enrollment without promoting the pending record to authority', async () => {
+		fake = await startFakeEndpoint({
+			capabilities: ['enrollment'],
+			now: () => NOW,
+			operations: {
+				enrollment: () => ({ outcome: 'enrollment_pending', enrollmentId: 'enr-local' }),
+			},
+		});
+		const composed = composeHostManaged({
+			userDataDir: dir,
+			version: '1.1.0',
+			custody: custody(),
+			now: () => NOW,
+		});
+		if (!composed.composed) throw new Error(composed.reason);
+		composed.managed.host!(installation);
+		try {
+			const result = await composed.control.requestEnrollment({
+				socketPath: fake.socketPath,
+				tenantId: 'tenant-1',
+				orgId: 'org-1',
+				mode: 'attended',
+				invitation: 'fixture-invitation',
+				collectionProfile: 'metadata',
+				trustRootDigest: 'a'.repeat(64),
+				keyPossessionProof: 'fixture-proof',
+			});
+			expect(result).toMatchObject({ status: 'ok', value: { enrollmentId: 'enr-local' } });
+			expect(composed.identity.read()).toMatchObject({
+				status: 'ok',
+				record: { management: 'enrolling' },
+			});
+			expect(composed.status()?.authority).toBe('none');
+			const request = fake.calls.find(
+				(c) => (c.body as { operation?: string }).operation === 'enrollment'
+			)?.body;
+			const envelope = endpointSchemas.localRequestEnvelope.parse(request);
+			endpointSchemas.enrollmentRequest.parse(envelope.payload);
+		} finally {
+			await composed.lifecycle.close();
+		}
+	});
+
+	it('refuses foreign installation and lost custody before opening a transport or changing the record', async () => {
+		await enroll('/tmp/unused.sock');
+		const openPort = vi.fn();
+		const composed = composeHostManaged({
+			userDataDir: dir,
+			version: '1',
+			custody: custody(),
+			openPort,
+		});
+		if (!composed.composed) throw new Error(composed.reason);
+		const bytes = fs.readFileSync(path.join(dir, 'enterprise-identity.bin'));
+		composed.managed.host!({ ...installation, installationId: 'foreign' });
+		expect(await composed.control.beginRegistration()).toMatchObject({
+			status: 'refused',
+			reason: 'installation-mismatch',
+		});
+		await composed.lifecycle.attach();
+		expect(openPort).not.toHaveBeenCalled();
+		expect(fs.readFileSync(path.join(dir, 'enterprise-identity.bin'))).toEqual(bytes);
+		await composed.lifecycle.close();
+
+		const current = composeHostManaged({
+			userDataDir: dir,
+			version: '1',
+			custody: custody(),
+			openPort,
+		});
+		if (!current.composed) throw new Error(current.reason);
+		current.managed.host!(installation);
+		holder.value = null;
+		expect(await current.control.connect()).toMatchObject({
+			status: 'refused',
+			reason: 'custody-untrusted',
+		});
+		expect(current.standing.read().standing).toBe('managed');
+		expect(openPort).not.toHaveBeenCalled();
+		await current.lifecycle.close();
+	});
+
+	it('rechecks a supplied custody probe instead of trusting its ok flag', () => {
+		const composed = composeHostManaged({
+			userDataDir: dir,
+			version: '1',
+			custody: { ok: true, seal: obscuringSeal(), anchor: fakeAnchor(holder) },
+		});
+		expect(composed).toMatchObject({
+			composed: false,
+			reason: expect.stringContaining('not credential protection'),
+		});
 	});
 
 	it('composes nothing in a plain Node process and says whether a record is present', async () => {
