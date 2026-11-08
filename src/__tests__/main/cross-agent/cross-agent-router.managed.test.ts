@@ -42,13 +42,17 @@ import {
 	cancelCrossAgentRequestsForSource,
 	consultLineage,
 	consultRefusal,
+	getCrossAgentConsultParties,
+	MAX_WITHDRAWN_CONSULT_TICKETS,
 	resolveConsultInitiator,
 	startCrossAgentRequest,
+	withdrawCrossAgentConsult,
 	type ConsultInitiator,
 	type CrossAgentTargetSession,
 	type StartCrossAgentRequestOptions,
 } from '../../../main/cross-agent/cross-agent-router';
 import { createProcessSpawnAuthority } from '../../../main/enterprise/spawn-authority';
+import { DISPATCH_TICKET_TTL_MS } from '../../../main/web-server/auth/transport-actor';
 import type { IdentityRead } from '../../../main/enterprise/identity-store';
 import { ProcessManager } from '../../../main/process-manager/ProcessManager';
 import type { ProcessConfig, ProcessSpawnAuthorityPort } from '../../../main/process-manager/types';
@@ -129,7 +133,7 @@ function stampedOn(config: ProcessConfig): ManagedDelegationContext {
 }
 
 type DispatchOptions = Partial<
-	Pick<StartCrossAgentRequestOptions, 'writable' | 'actor' | 'initiator'>
+	Pick<StartCrossAgentRequestOptions, 'writable' | 'actor' | 'initiator' | 'dispatchTicket'>
 > & { target?: Partial<CrossAgentTargetSession> | null };
 
 /**
@@ -158,6 +162,7 @@ function harness(port: ProcessSpawnAuthorityPort | null) {
 			writable: opts.writable,
 			actor: opts.actor,
 			initiator: opts.initiator,
+			dispatchTicket: opts.dispatchTicket,
 			onChunk: (c) => chunks.push(c),
 		});
 	return { manager, spawned, chunks, listeners, dispatch };
@@ -410,5 +415,70 @@ describe('standalone: unchanged', () => {
 		expect(spawned).toHaveLength(1);
 		expect(spawned[0].admission).toBeUndefined();
 		expect(port.asked).toHaveLength(0);
+	});
+});
+
+describe('withdrawing a consult by its ask ticket (MCOMP-17-03AT)', () => {
+	it('stops the consult in flight that the withdrawn ticket started, settled as canceled, once', async () => {
+		const { spawned, chunks, dispatch } = harness(null);
+		await dispatch({ requestId: 'r-at1' }, { dispatchTicket: 'ticket-at1' });
+		expect(spawned).toHaveLength(1);
+		expect(getCrossAgentConsultParties('r-at1')).not.toBeNull();
+
+		expect(withdrawCrossAgentConsult('ticket-at1')).toBe(true);
+		expect(getCrossAgentConsultParties('r-at1')).toBeNull();
+		expect(chunks).toHaveLength(1);
+		expect(chunks[0]).toMatchObject({ requestId: 'r-at1', done: true, canceled: true });
+		expect(chunks[0].error).toBeUndefined();
+		// A second withdrawal finds nothing left to stop.
+		expect(withdrawCrossAgentConsult('ticket-at1')).toBe(false);
+		expect(chunks).toHaveLength(1);
+	});
+
+	it('refuses a consult whose ask was withdrawn before it arrived: nothing spawns, no listener stays', async () => {
+		const { spawned, chunks, listeners, dispatch } = harness(null);
+		const before = listeners();
+		expect(withdrawCrossAgentConsult('ticket-at2')).toBe(false);
+		await dispatch({ requestId: 'r-at2' }, { dispatchTicket: 'ticket-at2' });
+		expect(spawned).toHaveLength(0);
+		expect(listeners()).toBe(before);
+		expect(getCrossAgentConsultParties('r-at2')).toBeNull();
+		expect(chunks).toHaveLength(1);
+		expect(chunks[0]).toMatchObject({ requestId: 'r-at2', done: true, canceled: true });
+	});
+
+	it('stops only the consult its own ticket started', async () => {
+		const { chunks, dispatch } = harness(null);
+		await dispatch({ requestId: 'r-at3' }, { dispatchTicket: 'ticket-at3' });
+		await dispatch({ requestId: 'r-at4' }, { dispatchTicket: 'ticket-at4' });
+		await dispatch({ requestId: 'r-at5' });
+		expect(withdrawCrossAgentConsult('ticket-at3')).toBe(true);
+		expect(chunks.map((c) => c.requestId)).toEqual(['r-at3']);
+		expect(getCrossAgentConsultParties('r-at4')).not.toBeNull();
+		expect(getCrossAgentConsultParties('r-at5')).not.toBeNull();
+		// An unknown or empty ticket stops nothing.
+		expect(withdrawCrossAgentConsult('ticket-unknown')).toBe(false);
+		expect(withdrawCrossAgentConsult('')).toBe(false);
+		expect(chunks).toHaveLength(1);
+	});
+
+	it('forgets a withdrawn ticket once it could no longer be claimed', async () => {
+		const { spawned, dispatch } = harness(null);
+		withdrawCrossAgentConsult('ticket-at6');
+		vi.setSystemTime(Date.now() + DISPATCH_TICKET_TTL_MS + 1);
+		await dispatch({ requestId: 'r-at6' }, { dispatchTicket: 'ticket-at6' });
+		expect(spawned).toHaveLength(1);
+	});
+
+	it('remembers at most the cap of withdrawn tickets, forgetting the oldest first', async () => {
+		const { spawned, chunks, dispatch } = harness(null);
+		withdrawCrossAgentConsult('ticket-oldest');
+		for (let i = 0; i < MAX_WITHDRAWN_CONSULT_TICKETS; i++)
+			withdrawCrossAgentConsult(`ticket-cap-${i}`);
+		await dispatch({ requestId: 'r-at7' }, { dispatchTicket: 'ticket-oldest' });
+		expect(spawned).toHaveLength(1);
+		await dispatch({ requestId: 'r-at8' }, { dispatchTicket: 'ticket-cap-0' });
+		expect(spawned).toHaveLength(1);
+		expect(chunks.at(-1)).toMatchObject({ requestId: 'r-at8', done: true, canceled: true });
 	});
 });

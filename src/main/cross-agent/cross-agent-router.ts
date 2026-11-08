@@ -55,6 +55,7 @@ import type { GroupChatSpawnLineage } from '../group-chat/spawnGroupChatAgent';
 import { dispatchedChildContext } from '../process-manager/ProcessManager';
 import type { ProcessSpawnActor, ProcessSpawnAuthorityPort } from '../process-manager/types';
 import { logger } from '../utils/logger';
+import { DISPATCH_TICKET_TTL_MS } from '../web-server/auth/transport-actor';
 import { buildMaestroSystemPromptForSession } from '../utils/maestro-system-prompt';
 
 const LOG_CONTEXT = '[CrossAgentRouter]';
@@ -78,6 +79,63 @@ const running = new Map<
 	string,
 	{ targetSessionId: string; delegation: ManagedDelegationContext; writable: boolean }
 >();
+
+/**
+ * The consults a credentialed `maestro-cli ask` started, by the dispatch ticket it carried
+ * (MCOMP-17-03AT). The ticket is the one handle the asking side and this sink share: the WS ask
+ * handler issued it, `cross-agent:send` hands it here, and the consult's request id is minted on
+ * this side of the renderer hop, so the ask handler never learns it.
+ */
+const consultsByTicket = new Map<string, string>();
+
+/**
+ * Tickets whose ask was withdrawn, until the ticket could no longer be claimed anyway: a
+ * withdrawal that lands before the renderer forwards the consult must still keep it from
+ * starting. Bounded by the ticket TTL and by {@link MAX_WITHDRAWN_CONSULT_TICKETS}.
+ */
+const withdrawnTickets = new Map<string, number>();
+
+/** The most withdrawn tickets remembered at once; the oldest is forgotten first. */
+export const MAX_WITHDRAWN_CONSULT_TICKETS = 1024;
+
+/**
+ * Withdraw the consult a credentialed ask started, by the dispatch ticket the ask carried
+ * (MCOMP-17-03AT): the ask's source lost custody (its chat turn was stopped, ended or revoked),
+ * so the consult must not keep running for a source that no longer exists. A consult in flight
+ * is stopped like Stop stops it (killed, its partial answer flushed, stamped `canceled`); one
+ * not started yet is refused when it arrives. The ticket itself is left alone: a ticket the sink
+ * could not claim would bind the consult as the desktop operator, which is weaker attribution.
+ *
+ * @returns Whether a consult in flight was stopped.
+ */
+export function withdrawCrossAgentConsult(dispatchTicket: string, now = Date.now()): boolean {
+	if (typeof dispatchTicket !== 'string' || dispatchTicket.length === 0) return false;
+	for (const [ticket, expiresAt] of withdrawnTickets) {
+		if (expiresAt <= now) withdrawnTickets.delete(ticket);
+	}
+	withdrawnTickets.delete(dispatchTicket);
+	withdrawnTickets.set(dispatchTicket, now + DISPATCH_TICKET_TTL_MS);
+	while (withdrawnTickets.size > MAX_WITHDRAWN_CONSULT_TICKETS) {
+		withdrawnTickets.delete(withdrawnTickets.keys().next().value as string);
+	}
+	const requestId = consultsByTicket.get(dispatchTicket);
+	if (requestId === undefined) return false;
+	consultsByTicket.delete(dispatchTicket);
+	const stopped = consultService.cancel(requestId);
+	if (stopped) {
+		logger.info('Withdrew a consult whose asking turn lost custody', LOG_CONTEXT, { requestId });
+	}
+	return stopped;
+}
+
+/** Whether an ask carrying this ticket was withdrawn (and the ticket has not expired). */
+function isConsultTicketWithdrawn(dispatchTicket: string, now = Date.now()): boolean {
+	const expiresAt = withdrawnTickets.get(dispatchTicket);
+	if (expiresAt === undefined) return false;
+	if (expiresAt > now) return true;
+	withdrawnTickets.delete(dispatchTicket);
+	return false;
+}
 
 /**
  * Stop every consult the given source agent still has in flight. Each is killed and settles
@@ -154,6 +212,12 @@ export interface StartCrossAgentRequestOptions {
 	 * policy generation), as `createRuntimeConsults()` derives it headless.
 	 */
 	initiator?: ConsultInitiator;
+	/**
+	 * The dispatch ticket a `maestro-cli ask` carried, as it arrived. When given, the consult can
+	 * be withdrawn by it ({@link withdrawCrossAgentConsult}), and one whose ask was already
+	 * withdrawn is refused before anything runs (MCOMP-17-03AT).
+	 */
+	dispatchTicket?: string;
 	/** Called with each response chunk; `done: true` marks completion/failure. */
 	onChunk: (chunk: CrossAgentResponseChunk) => void;
 }
@@ -305,6 +369,31 @@ export async function startCrossAgentRequest(
 	// Refused (or not) on the host's standing now, before a listener attaches, a tab is written
 	// or a process starts: a refused consult leaves nothing on the target and names why.
 	const target = opts.getTargetSession(request.targetSessionId);
+	const dispatchTicket =
+		typeof opts.dispatchTicket === 'string' && opts.dispatchTicket.length > 0
+			? opts.dispatchTicket
+			: undefined;
+	if (dispatchTicket !== undefined && isConsultTicketWithdrawn(dispatchTicket)) {
+		// The ask was withdrawn while the consult was on its way here: nothing runs.
+		withdrawnTickets.delete(dispatchTicket);
+		logger.info('A withdrawn ask arrived; the consult was not started', LOG_CONTEXT, {
+			requestId: request.requestId,
+			targetSessionId: request.targetSessionId,
+		});
+		opts.onChunk({
+			requestId: request.requestId,
+			sourceSessionId: request.sourceSessionId,
+			sourceTabId: request.sourceTabId,
+			targetSessionId: request.targetSessionId,
+			targetTabId: request.targetTabId,
+			targetAgentName: target?.name ?? request.targetSessionId,
+			targetToolType: (target?.toolType ?? 'claude-code') as ToolType,
+			chunk: '',
+			done: true,
+			canceled: true,
+		});
+		return;
+	}
 	const refusal = consultRefusal(managedPortOf(opts.processManager), initiator.delegation, target);
 	if (refusal) {
 		logger.warn(
@@ -332,8 +421,22 @@ export async function startCrossAgentRequest(
 		delegation: child,
 		writable,
 	});
+	// Registered before the service starts the consult (which registers it synchronously), so a
+	// withdrawal at any later point finds it.
+	if (dispatchTicket !== undefined) consultsByTicket.set(dispatchTicket, request.requestId);
+	const forgetTicket = (): void => {
+		if (
+			dispatchTicket !== undefined &&
+			consultsByTicket.get(dispatchTicket) === request.requestId
+		) {
+			consultsByTicket.delete(dispatchTicket);
+		}
+	};
 	const onChunk = (chunk: CrossAgentResponseChunk): void => {
-		if (chunk.done) running.delete(request.requestId);
+		if (chunk.done) {
+			running.delete(request.requestId);
+			forgetTicket();
+		}
 		opts.onChunk(chunk);
 	};
 	try {
@@ -356,6 +459,7 @@ export async function startCrossAgentRequest(
 		});
 	} catch (err) {
 		running.delete(request.requestId);
+		forgetTicket();
 		throw err;
 	}
 }
