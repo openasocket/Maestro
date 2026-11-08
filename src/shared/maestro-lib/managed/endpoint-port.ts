@@ -20,6 +20,8 @@
  * re-validates everything with its own schemas and is the authority on them.
  */
 
+import type { AdmissionOutcome, AdmissionRequest, HostAuthority } from './authority';
+
 export const LOCAL_ENDPOINT_PROTOCOL = 1 as const;
 export const LOCAL_ENDPOINT_SCHEMA_VERSION = 1 as const;
 export const LOCAL_ENDPOINT_INVOKE_PATH = '/v1/invoke';
@@ -373,12 +375,34 @@ export interface EndpointConnectionState {
 }
 
 /**
+ * Local PREPARED/1 consumer seam, not a published wire operation. Only an
+ * authenticated, negotiated producer may install this port. It resolves and
+ * pins executable/resource identities, policy/DLP/route/credential constraints,
+ * consumes once durably, and owns reconciliation and descendant revocation.
+ * Its original lease owns bind/release/unknown settlement; never remint one
+ * from executionBinding, executionConsumption or a broker_dispatched receipt.
+ */
+export interface PreparedExecutionPort extends Omit<HostAuthority, 'admit'> {
+	readonly version: 1;
+	admit(
+		request: AdmissionRequest,
+		binding: {
+			identity: ManagedIdentityRecord;
+			/** Socket generation under which the actor registration was authenticated. */
+			connection: number;
+		}
+	): Promise<AdmissionOutcome>;
+}
+
+/**
  * The transport port. Everything it answers is an `EndpointInvokeOutcome`;
  * nothing it answers is authority. A host decides what to believe from a
  * status it received over a registered, attached connection, never from the
  * fact that a socket accepted bytes.
  */
 export interface EndpointPort {
+	/** Absent until a prepared protocol is published and authenticated negotiation succeeds. */
+	readonly preparedExecution?: PreparedExecutionPort;
 	readonly socketPath: string;
 	state(): EndpointConnectionState;
 	compatibility(

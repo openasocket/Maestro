@@ -5,7 +5,7 @@
  * The endpoint is the fake daemon from the main-process tests and the custody
  * is an in-memory port, both declared doubles: what is proven is that the
  * adapter asks the endpoint for every decision, maps the endpoint's answers
- * onto the four admission states without deciding anything itself, answers
+ * through the prepared port without deciding anything itself, answers
  * `unavailable` for every standing short of registered-attached-managed, and
  * that a runtime given the adapter mirrors the enrollment into its own
  * binding under the lock and never runs standalone over it.
@@ -21,6 +21,7 @@ import { DEFAULT_TAB_DEFAULTS } from '../../../../shared/maestro-lib/agents/rule
 import {
 	buildDispatchSnapshot,
 	createContextVerifier,
+	createLocalHostAuthority,
 	type AdmissionRequest,
 } from '../../../../shared/maestro-lib/managed/authority';
 import type {
@@ -428,20 +429,20 @@ describe('managed host adapter', () => {
 			})
 		);
 		expect(chained).toMatchObject({ state: 'unavailable' });
-		expect((chained as { message: string }).message).toContain('a delegation chain of 2');
+		expect((chained as { message: string }).message).toContain('delegation authority');
 		const granted = await adapter.authority.admit(
 			admission(['--print'], { chain: [], grantRef: 'grant-1' })
 		);
 		expect(granted).toMatchObject({ state: 'unavailable' });
-		expect((granted as { message: string }).message).toContain('a grant reference');
+		expect((granted as { message: string }).message).toContain('delegation authority');
 		expect(asked).toBe(0);
 
-		// A direct action still reaches the endpoint, as before.
-		expect((await adapter.authority.admit(admission())).state).toBe('admitted');
-		expect(asked).toBe(1);
+		// A direct action also requires prepared authority.
+		expect((await adapter.authority.admit(admission())).state).toBe('unavailable');
+		expect(asked).toBe(0);
 	});
 
-	it('asks the endpoint for every decision and admits on a matching dispatch receipt', async () => {
+	it('never dispatches an endpoint effect to obtain permission for a local launch', async () => {
 		const fake = await endpoint();
 		const port = await attachedPort(fake);
 		const view = okView(record(fake.socketPath));
@@ -451,105 +452,241 @@ describe('managed host adapter', () => {
 			endpoint: port,
 			status: () => standing(port, view),
 			now: () => T0,
-			newId: () => 'lease-1',
 		});
-		expect(adapter.authority.authorityId).toBe(managedAuthorityId(view.record!));
 		expect(adapter.policy()).toEqual({
 			sources: [{ id: adapter.authority.authorityId, kind: 'endpoint', revision: 3 }],
 			policyRevision: 3,
 		});
-
-		const outcome = await adapter.authority.admit(admission());
-		expect(outcome.state).toBe('admitted');
-		if (outcome.state === 'admitted') {
-			expect(outcome.lease.leaseId).toBe('lease-1');
-			expect(outcome.policyRevision).toBe(3);
-		}
-		const sent = fake.calls.find(
-			(c) => (c.body as { operation: string }).operation === 'execution'
-		);
-		expect((sent?.body as { payload: unknown }).payload).toEqual({
-			requestId: 'req-1',
-			attemptId: 'att-1',
-			runId: 'run-1',
-			source: 'cli',
-			operation: 'start',
-			arguments: [],
-			resources: [],
-			provider: 'claude-code',
-			model: 'sonnet',
-			policyRevision: 3,
-		});
-		if (outcome.state === 'admitted') {
-			expect(outcome.receipt).toEqual({
-				decisionId: 'decision-1',
-				requestDigest: 'd'.repeat(64),
-				brokerId: 'broker-1',
-				policyRevision: 3,
+		for (const payload of [
+			RECEIPT({}),
+			{ outcome: 'denied', reason: 'policy_denied' },
+			{ outcome: 'prepared', version: 1 },
+		]) {
+			fake.options.operations = { execution: () => payload };
+			expect(await adapter.authority.admit(admission())).toMatchObject({
+				state: 'unavailable',
+				message: expect.stringContaining('PREPARED/1'),
 			});
-			expect(outcome.lease.decision).toEqual(outcome.receipt);
 		}
+		expect(
+			fake.calls.filter((c) => (c.body as { operation: string }).operation === 'execution')
+		).toHaveLength(0);
+		expect(adapter.authority.live()).toHaveLength(0);
 	});
 
-	it('maps the endpoint refusals: a policy refusal denies, no decision is unavailable, a wrong receipt is unknown', async () => {
+	it('forwards exact prepared inputs and preserves the producer lease and unknown outcomes', async () => {
 		const fake = await endpoint();
 		const port = await attachedPort(fake);
-		const view = okView(record(fake.socketPath));
+		const r = record(fake.socketPath);
+		r.registration = {
+			actorId: 'ada',
+			runtimeId: INSTALLATION.runtimeId,
+			processEpoch: INSTALLATION.processEpoch,
+			challengeId: 'challenge-1',
+			bindingDigest: 'b'.repeat(64),
+			processBirthDigest: 'c'.repeat(64),
+			challengeDigest: 'd'.repeat(64),
+			registeredAt: new Date(T0).toISOString(),
+			expiresAt: new Date(T0 + 60_000).toISOString(),
+		};
+		const view = okView(r);
+		let asked = 0;
+		let clock = T0;
+		let decision: 'allow' | 'deny' | 'unavailable' | 'unknown' = 'allow';
+		let mutate = () => {};
+		let sent: AdmissionRequest | undefined;
+		const producer = createLocalHostAuthority({
+			authorityId: managedAuthorityId(r),
+			now: () => clock,
+			newId: () => `lease-${asked}`,
+			leaseTtlMs: 10,
+			decide: async (request) => {
+				asked++;
+				sent = request;
+				mutate();
+				return decision === 'allow'
+					? { decision, policyRevision: 3 }
+					: { decision, reason: 'fixture decision', policyRevision: 3 };
+			},
+		});
+		Object.defineProperty(port, 'preparedExecution', {
+			configurable: true,
+			value: {
+				...producer,
+				version: 1,
+				admit: (
+					request: AdmissionRequest,
+					binding: { identity: ManagedIdentityRecord; connection: number }
+				) => {
+					expect(binding.identity).toEqual(r);
+					expect(binding.connection).toBe(port.state().connection);
+					return producer.admit(request);
+				},
+			},
+		});
 		const adapter = createManagedHostAdapter({
 			installation: INSTALLATION,
 			identity: { read: () => view },
 			endpoint: port,
 			status: () => standing(port, view),
-			now: () => T0,
+			now: () => clock,
 		});
-
-		fake.options.operations = { execution: () => ({ outcome: 'denied', reason: 'policy_denied' }) };
-		expect(await adapter.authority.admit(admission())).toMatchObject({
+		const preparedPort = port.preparedExecution!;
+		Object.defineProperty(port, 'preparedExecution', { value: { ...preparedPort, version: 2 } });
+		expect(await adapter.authority.admit(admission())).toMatchObject({ state: 'unavailable' });
+		Object.defineProperty(port, 'preparedExecution', { value: preparedPort });
+		const unasked = asked;
+		const wrongActor = admission();
+		wrongActor.context.actor.id = 'other';
+		expect(await adapter.authority.admit(wrongActor)).toMatchObject({
 			state: 'denied',
-			code: 'policy-denied',
-			policyRevision: 3,
+			code: 'unauthenticated',
 		});
-
-		fake.options.operations = { execution: () => ({ outcome: 'denied', reason: 'unavailable' }) };
-		expect(await adapter.authority.admit(admission())).toMatchObject({
-			state: 'unavailable',
-			code: 'runtime-unavailable',
+		expect(
+			await adapter.authority.admit({ ...admission(), context: { ...admission().context } })
+		).toMatchObject({ state: 'denied', code: 'unauthenticated' });
+		expect(
+			await adapter.authority.admit({ ...admission(), policy: { sources: [], policyRevision: 4 } })
+		).toMatchObject({ state: 'unavailable' });
+		expect(asked).toBe(unasked);
+		const request = admission(['--print', 'exact'], {
+			chain: [{ kind: 'agent', id: 'caller' }],
+			grantRef: 'grant-1',
 		});
-
-		// A replay is the broker saying it consumed this request already: a denial, not an outage.
-		fake.options.operations = { execution: () => ({ outcome: 'denied', reason: 'replay' }) };
-		expect(await adapter.authority.admit(admission())).toMatchObject({
+		request.snapshot = buildDispatchSnapshot(
+			{
+				command: '/bin/claude',
+				args: ['--print', 'exact'],
+				cwd: '/work',
+				env: { EXACT: 'value' },
+				stdin: 'prompt',
+			},
+			{ provider: 'claude-code', model: 'sonnet', account: 'account-1', resourceIds: ['doc-1'] }
+		);
+		const admitted = await adapter.authority.admit(request);
+		expect(admitted.state).toBe('admitted');
+		if (admitted.state !== 'admitted') throw new Error('expected prepared lease');
+		expect(sent).toBe(request);
+		expect(admitted.lease).toBe(producer.live()[0]);
+		expect(
+			adapter.authority.check(admitted.lease, dispatchSnapshotDigest(request.snapshot))
+		).toEqual({ ok: true });
+		expect(
+			adapter.authority.check(
+				admitted.lease,
+				dispatchSnapshotDigest(admission(['changed']).snapshot)
+			)
+		).toEqual({ ok: false, reason: 'snapshot-mismatch' });
+		expect(await adapter.authority.admit(request)).toMatchObject({
 			state: 'denied',
 			code: 'idempotency-conflict',
 		});
-
-		// A receipt whose broker identifiers are not the contract's is not a decision this host knows.
-		fake.options.operations = {
-			execution: (payload) => ({
-				...RECEIPT(payload as Record<string, unknown>),
-				requestDigest: 'not a digest',
-			}),
-		};
-		expect(await adapter.authority.admit(admission())).toMatchObject({
-			state: 'unknown',
-			code: 'outcome-unknown',
+		expect(asked).toBe(1);
+		admitted.lease.bind(123);
+		let revoked = false;
+		admitted.lease.onRevoked(() => {
+			revoked = true;
 		});
-
-		fake.options.operations = {
-			execution: (payload) => ({
-				...RECEIPT(payload as Record<string, unknown>),
-				runId: 'another-run',
-			}),
-		};
-		expect(await adapter.authority.admit(admission())).toMatchObject({
-			state: 'unknown',
-			code: 'outcome-unknown',
-		});
-
-		// An endpoint that never provisioned a broker advertises no execution: no decision, not a denial.
-		fake.revokeRegistration();
-		expect(await adapter.authority.admit(admission())).toMatchObject({ state: 'unavailable' });
+		producer.revoke(admitted.lease.leaseId, 'cancelled');
+		expect(revoked).toBe(true);
 		expect(adapter.authority.live()).toHaveLength(0);
+		for (const state of ['deny', 'unavailable', 'unknown'] as const) {
+			decision = state;
+			const next = admission();
+			next.context.identity.attemptId = state;
+			expect(await adapter.authority.admit(next)).toMatchObject({
+				state: state === 'deny' ? 'denied' : state,
+			});
+			if (state === 'unknown') {
+				const before = asked;
+				expect(await adapter.authority.admit(next)).toMatchObject({ state: 'unknown' });
+				expect(asked).toBe(before);
+			}
+		}
+		decision = 'allow';
+		for (const change of [
+			() => {
+				r.endpoint.trustRootDigest = 'e'.repeat(64);
+			},
+			() => {
+				r.registration!.actorId = 'someone-else';
+			},
+			() => {
+				request.snapshot.args = ['changed'];
+			},
+		]) {
+			r.registration.actorId = 'ada';
+			request.context.identity.attemptId = `changed-${asked}`;
+			mutate = change;
+			expect(await adapter.authority.admit(request)).toMatchObject({ state: 'unknown' });
+			expect(producer.live()).toHaveLength(0);
+		}
+		r.registration.actorId = 'ada';
+		mutate = () => {};
+		const released = admission();
+		released.context.identity.attemptId = 'release';
+		const result = await adapter.authority.admit(released);
+		if (result.state !== 'admitted') throw new Error('expected prepared lease');
+		result.lease.bind(124);
+		result.lease.release({ outcome: 'unknown', message: 'child settlement lost' });
+		expect(result.lease.ended().release).toEqual({
+			outcome: 'unknown',
+			message: 'child settlement lost',
+		});
+		expect(producer.live()).toHaveLength(0);
+		for (const change of [
+			() => {
+				clock += 11;
+			},
+			() => {
+				r.endpoint.bindingDigest = 'f'.repeat(64);
+			},
+			() => {
+				released.context.actor.id = 'changed';
+			},
+		]) {
+			released.context.actor.id = 'ada';
+			released.context.identity.attemptId = `sink-${asked}`;
+			const result = await adapter.authority.admit(released);
+			if (result.state !== 'admitted') throw new Error('expected prepared lease');
+			change();
+			expect(
+				adapter.authority.check(result.lease, dispatchSnapshotDigest(released.snapshot)).ok
+			).toBe(false);
+		}
+		released.context.actor.id = 'ada';
+		released.context.identity.attemptId = 'cancel-during-prepare';
+		mutate = () => {
+			adapter.authority.revokeAll('cancelled while preparing');
+		};
+		expect(await adapter.authority.admit(released)).toMatchObject({ state: 'unknown' });
+		expect(producer.live()).toHaveLength(0);
+		mutate = () => {};
+		released.context.identity.attemptId = 'concurrent';
+		const pending = adapter.authority.admit(released);
+		expect(await adapter.authority.admit(released)).toMatchObject({ state: 'unknown' });
+		const concurrent = await pending;
+		if (concurrent.state !== 'admitted') throw new Error('expected prepared lease');
+		concurrent.lease.release({ outcome: 'stopped', by: 'caller' });
+		let lostCalls = 0;
+		Object.defineProperty(port, 'preparedExecution', {
+			value: {
+				...producer,
+				version: 1,
+				admit: async () => {
+					lostCalls++;
+					throw new Error('lost response');
+				},
+			},
+		});
+		released.context.identity.attemptId = 'lost-response';
+		expect(await adapter.authority.admit(released)).toMatchObject({ state: 'unknown' });
+		await port.close();
+		expect(await adapter.authority.admit(released)).toMatchObject({ state: 'unknown' });
+		expect(lostCalls).toBe(1);
+		expect(
+			fake.calls.filter((c) => (c.body as { operation: string }).operation === 'execution')
+		).toHaveLength(0);
 	});
 
 	it('is unavailable, without asking, for every standing short of registered-attached-managed', async () => {

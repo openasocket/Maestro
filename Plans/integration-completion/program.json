@@ -2109,6 +2109,20 @@
 					"id": "MCOMP-13-01"
 				},
 				{
+					"label": "Test prepared authority mapping and document the consumer boundary",
+					"kind": "TEST",
+					"targets": [
+						"src/__tests__/shared/maestro-lib/managed/host-adapter.test.ts",
+						"src/__tests__/main/enterprise/dispatch.test.ts",
+						"docs/agent-guides/CANONICAL-UTILITIES.md"
+					],
+					"outcome": "Bounded continuation of MCOMP-13-01: replace receipt-as-permit fixtures with an explicit local prepared authority; test exact input, actor/policy/trust changes, lease ownership/lifetime, cancellation, replay and unknown outcomes with no execution wire calls. Preserve dispatch ledger coverage and document the local-only boundary. Fewer than 500 changed lines across these three authored files; real paired/native/provider proof remains in qualification tasks.",
+					"backlog": ["M-03"],
+					"requires": ["MAESTRO-CONTRACT-INPUTS-BUILD"],
+					"produces": [],
+					"id": "MCOMP-13-01A"
+				},
+				{
 					"label": "Implement actual tool-effect authority consumer",
 					"kind": "IMPLEMENT",
 					"targets": [
@@ -2182,7 +2196,7 @@
 			"produces": ["MAESTRO-EFFECT-CONSUMERS-BUILD"],
 			"id": "MCOMP-13",
 			"path": ".maestro/playbooks/2026-10-29-Maestro-Integration-Completion/MCOMP-13.md",
-			"taskCount": 6,
+			"taskCount": 7,
 			"stage": "S06"
 		},
 		{
@@ -5350,7 +5364,7 @@
 				"MEGA-RUNTIME-ADAPTER-BUILD"
 			],
 			"nativeInputs": false,
-			"taskCount": 7
+			"taskCount": 8
 		},
 		{
 			"id": "S07",
@@ -5628,8 +5642,8 @@
 			"taskCount": 1
 		}
 	],
-	"taskCount": 316,
-	"taskCounts": { "IMPLEMENT": 213, "TEST": 43, "VERIFY": 60 },
+	"taskCount": 317,
+	"taskCounts": { "IMPLEMENT": 213, "TEST": 44, "VERIFY": 60 },
 	"artifacts": {
 		"MEGA-CONTRACTS-FOUNDATION-BUILD": {
 			"producerDocument": "GCOMP-01",
@@ -6316,7 +6330,14 @@
 			"GCOMP-27-01",
 			"GCOMP-28-01"
 		],
-		"M-03": ["MCOMP-13-01", "MCOMP-13-02", "MCOMP-13-03", "MCOMP-13-05", "MCOMP-13-06"],
+		"M-03": [
+			"MCOMP-13-01",
+			"MCOMP-13-02",
+			"MCOMP-13-03",
+			"MCOMP-13-05",
+			"MCOMP-13-06",
+			"MCOMP-13-01A"
+		],
 		"PAIR-02": [
 			"GCOMP-08-01",
 			"GCOMP-08-02",

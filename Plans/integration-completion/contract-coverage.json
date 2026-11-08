@@ -151,7 +151,7 @@
 			"consumerPort": "src/shared/maestro-lib/managed/host-adapter.ts",
 			"binding": "pending",
 			"pairedVerification": ["MCOMP-14-01"],
-			"note": "No prepare/consume/settle/reconcile local operation. Existing decide() converts broker_dispatched to allow and a local lease: an OPEN defect, not qualified authority. Repair in MCOMP-13-01/03/05 (PREPARED/1)."
+			"note": "No prepare/consume/settle/reconcile wire operation. MCOMP-13-01 uses the local version-1 EndpointPort.preparedExecution seam to forward exact AdmissionRequest and authenticated identity/connection generation, retaining the producer lease. The real client supplies no such port: admission is unavailable and never invokes execution to obtain a permit. Wire mapping remains pending (PREPARED/1)."
 		},
 		{
 			"family": "per-effect",
@@ -321,6 +321,9 @@
 			"owner": "mega-maestro",
 			"version": "new versioned capability on protocol 2; package version to be agreed",
 			"operations": "Propose execution_prepare, execution_consume, execution_settle, execution_reconcile; none is shipped.",
+			"localConsumer": "EndpointPort.preparedExecution, PreparedExecutionPort.version=1, extends the existing HostAuthority lifetime. admit receives the unchanged AdmissionRequest plus a cloned ManagedIdentityRecord and socket connection generation. Match registered actor/installation, exact snapshot digest, policy revision, trust/registration generation and original producer lease before returning admission; recheck at the sink. No production producer or capability advertisement is installed.",
+			"lifetime": "The negotiated producer must durably consume once, pin native executable/resource identities and descendant ownership, revoke on policy/registration/trust/disconnect, and settle/reconcile through its original lease. Local cancellation invalidates pending admission, duplicate attempts are refused, and thrown/lost outcomes remain unknown even after disconnect. In-memory retry fences do not replace producer durable reconciliation after restart.",
+			"publishedSchemas": "executionBinding describes trusted resolved handles; executionConsumption is already consumed with unknown outcome; executionCompletion is settlement evidence. None grants a new local effect. Missing transport negotiation and prepare/consume/settle/reconcile mapping remain proposed-not-negotiated.",
 			"missing": "Prepare binds registration/delegation/workflow, request/attempt/run, exact argv/env/cwd/resources and digests, provider/model/route/credential, policy/DLP/budget/egress/backend. Return single-use expiring grant/handle and bindingDigest; consume/settle/reconcile preserve durable unknown outcomes and process/descendant ownership.",
 			"implementationTasks": ["MCOMP-13-01", "MCOMP-13-03", "MCOMP-13-05"],
 			"pairedVerification": ["MCOMP-14-01", "MCOMP-32-01"]
@@ -390,7 +393,7 @@
 			"Plans/integration-completion/runtime-conformance.json"
 		],
 		"cases": "Public exports/ports/tasks, unsupported version/operation, forged actor/fleet purpose, actual transport replay, expired registration with fresh policy, endpoint denials, lost execution response with no retry, receipt versus permit, absent effect authority; existing public facade conformance remains exercised.",
-		"limits": "Endpoint is a declared local double; denial parsing is not policy enforcement. No provider process, signed production policy, live actor authentication or paired/native security receipt. Legacy broker-receipt-to-lease defect remains OPEN under MCOMP-13.",
+		"limits": "Endpoint is a declared local double; denial parsing is not policy enforcement. No provider process, signed production policy, live actor authentication or paired/native security receipt. MCOMP-13-01 removes the broker-receipt-to-local-lease path. Prepared local tests inject an explicit authority; production prepared/per-effect wire mapping and all paired/native proof remain pending.",
 		"results": {
 			"command": "npm test -- src/__tests__/integration/mega-maestro/conformance.test.ts src/__tests__/shared/maestro-lib/managed/contracts.test.ts src/__tests__/shared/maestro-lib/managed/contract-vectors.test.ts src/__tests__/main/enterprise/endpoint-client.test.ts",
 			"passed": 85,

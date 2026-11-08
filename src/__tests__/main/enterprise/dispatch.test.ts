@@ -1,7 +1,7 @@
 /**
  * The broker dispatch bridge: the ledger that joins a broker decision to the
  * local lease and the effect it covered. The endpoint is the fake daemon
- * (a declared double) answering `broker_dispatched` receipts; the authority
+ * (a declared double) plus an explicit test-only prepared producer; the authority
  * is the real host adapter over the real socket client; the lease lifetime
  * is driven the way a sink drives it (`bind`, `release`, a revocation).
  * What is defended: every admitted dispatch is recorded with the broker's
@@ -36,7 +36,10 @@ import type {
 	ManagedIdentityRecord,
 	ManagedIdentityView,
 } from '../../../shared/maestro-lib/managed/endpoint-port';
-import { createManagedHostAdapter } from '../../../shared/maestro-lib/managed/host-adapter';
+import {
+	createManagedHostAdapter,
+	managedAuthorityId,
+} from '../../../shared/maestro-lib/managed/host-adapter';
 import { inProcessContext } from '../../../shared/maestro-lib/managed/operations';
 import { startFakeEndpoint, type FakeEndpoint } from './fakeEndpoint';
 
@@ -58,7 +61,7 @@ function record(socketPath: string): ManagedIdentityRecord {
 		management: 'enrolled',
 		registration: {
 			challengeId: 'challenge-7',
-			actorId: null,
+			actorId: 'ada',
 			runtimeId: 'desktop-100',
 			processEpoch: 'epoch-1',
 			bindingDigest: 'a'.repeat(64),
@@ -132,10 +135,12 @@ describe('broker dispatch bridge', () => {
 	let fake: FakeEndpoint;
 	let port: EndpointPort;
 	let decisions = 0;
+	let deny = false;
 
 	beforeEach(async () => {
 		dir = fs.mkdtempSync(path.join(os.tmpdir(), 'broker-dispatch-'));
 		decisions = 0;
+		deny = false;
 		fake = await startFakeEndpoint({
 			registrationRequired: true,
 			capabilities: ['execution'],
@@ -184,6 +189,29 @@ describe('broker dispatch bridge', () => {
 		};
 		let clock = T0;
 		let leases = 0;
+		const prepared = createLocalHostAuthority({
+			authorityId: managedAuthorityId(view.record!),
+			now: () => clock,
+			newId: () => `lease-${++leases}`,
+			decide: () =>
+				deny
+					? { decision: 'deny', reason: 'fixture policy', policyRevision: 3 }
+					: {
+							decision: 'allow',
+							policyRevision: 3,
+							receipt: {
+								decisionId: `decision-${++decisions}`,
+								requestDigest: 'd'.repeat(64),
+								brokerId: 'broker-1',
+								policyRevision: 3,
+							},
+						},
+		});
+		// Test-only prepared producer. The real v1 client has no such port.
+		Object.defineProperty(port, 'preparedExecution', {
+			configurable: true,
+			value: { ...prepared, version: 1 },
+		});
 		const host = createManagedHostAdapter({
 			installation: INSTALLATION,
 			identity: { read: () => view },
@@ -250,26 +278,11 @@ describe('broker dispatch bridge', () => {
 	it('leaves no record for a refusal and writes a revocation as the authority’s stop', async () => {
 		const { dispatch } = bridge();
 		await dispatch.load();
-		fake.options.operations = { execution: () => ({ outcome: 'denied', reason: 'policy_denied' }) };
+		deny = true;
 		expect(await dispatch.authority.admit(admission('req-d'))).toMatchObject({ state: 'denied' });
 		expect(dispatch.receipts()).toHaveLength(0);
 
-		fake.options.operations = {
-			execution: (payload) => {
-				const p = payload as Record<string, unknown>;
-				decisions += 1;
-				return {
-					outcome: 'broker_dispatched',
-					requestId: p.requestId,
-					attemptId: p.attemptId,
-					runId: p.runId,
-					decisionId: `decision-${decisions}`,
-					requestDigest: 'e'.repeat(64),
-					brokerId: 'broker-1',
-					policyRevision: p.policyRevision,
-				};
-			},
-		};
+		deny = false;
 		const admitted = await dispatch.authority.admit(admission('req-r', 'att-r'));
 		expect(admitted.state).toBe('admitted');
 		if (admitted.state !== 'admitted') return;

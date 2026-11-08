@@ -11,23 +11,13 @@
  * `status()` that says whether this process holds a registered, attached,
  * managed standing (the enrollment lifecycle's answer). From those it builds:
  *
- *   - `authority`: the existing lease authority (`createLocalHostAuthority`)
- *     with a policy reader that asks the ENDPOINT. An admission becomes one
- *     `execution` request over the attached socket; `broker_dispatched`
- *     with a matching receipt is `allow` (and the lease carries the broker's
- *     decision id, request digest and broker id, so it joins the broker's
- *     own receipt ledger), the endpoint's policy refusals are `deny`, a
- *     `replay` is a denial too (the broker consumed that request already),
- *     no answer or no standing is `unavailable`, and a lost answer or a
- *     receipt that does not match is `unknown`. Nothing is decided locally.
- *
- * What the request carries is the broker's vocabulary, not Maestro's: the
- * run identity, the source, the operation (`start`, `input`, `resume`), the
- * provider and model, the resource ids and the policy revision. The resolved
- * executable, arguments and environment stay in the local snapshot the lease
- * is bound to; the broker treats any argument on the wire as an unsafe
- * override and refuses it, since the installed provider is its own fact to
- * resolve, not the caller's to assert.
+ *   - `authority`: forwards the exact snapshot and authenticated context to
+ *     the optional PREPARED/1 local port. The producer's original lease owns
+ *     the protected process lifetime. A broker execution receipt is evidence
+ *     of an effect, never permission to duplicate it locally. The published
+ *     endpoint protocol has no prepared operation, so its client supplies no
+ *     port and local admission remains unavailable. No speculative wire call
+ *     or lossy execution request is sent as a substitute.
  *   - `policy()`: the sources admissions are decided on, which is the one
  *     endpoint the record names, at the revision it last reported.
  *   - the inputs the runtime mirrors into its own binding file under the
@@ -40,11 +30,6 @@
  * answers standalone: that is what "enrolled contexts cannot omit authority"
  * means at the sink.
  *
- * The endpoint in the sibling checkout advertises no `execution` capability
- * to an unprovisioned broker, so today every decision this adapter asks for
- * comes back `unsupported_capability` and is reported `unavailable` (CP-04,
- * owner mega-maestro). The adapter is the Maestro side of that pair; it does
- * not fill the other side in.
  */
 
 import { canonicalJson } from '../../canonicalJson';
@@ -61,9 +46,11 @@ import type { EnrollInput, ManagedBindingState } from './binding';
 import {
 	buildDispatchSnapshot,
 	createContextVerifier,
-	createLocalHostAuthority,
+	dispatchSnapshotDigest,
+	isVerifiedContext,
 	sha256Hex,
 	unavailableAuthority,
+	type AdmissionOutcome,
 	type AdmissionRequest,
 	type ContextVerification,
 	type DispatchAttribution,
@@ -71,17 +58,14 @@ import {
 	type DispatchSnapshot,
 	type DispatchSpecLike,
 	type HostAuthority,
-	type ManagedDecisionReceipt,
-	type PolicyDecision,
 	type PolicySourceSet,
 } from './authority';
 import {
-	isEndpointDigest,
 	isEndpointIdentifier,
 	type EndpointInvokeOutcome,
 	type EndpointPort,
 	type EndpointStatus,
-	type LocalEndpointDenialReason,
+	type PreparedExecutionPort,
 	type ManagedEnrollmentStatus,
 	type ManagedIdentityPort,
 	type ManagedIdentityRecord,
@@ -328,7 +312,9 @@ export interface ManagedHostAdapterDeps {
 	/** This process's standing, as the enrollment lifecycle sees it. */
 	status(): ManagedEnrollmentStatus;
 	now?: () => number;
+	/** @deprecated Prepared producers own lease IDs and expiry. */
 	newId?: () => string;
+	/** @deprecated Configure expiry on the prepared producer. */
 	leaseTtlMs?: number;
 	/** How long the last attachment answer counts as fresh. Default `POLICY_FRESHNESS_MS`. */
 	freshnessMs?: number;
@@ -660,31 +646,6 @@ function standingKeyOf(standing: ManagedEnrollmentStatus): string {
 	].join(':');
 }
 
-const EXECUTION_SOURCES: Record<ManagedOrigin, 'ux' | 'cli' | 'cue' | 'headless'> = {
-	desktop: 'ux',
-	cli: 'cli',
-	cue: 'cue',
-	headless: 'headless',
-	enterprise: 'headless',
-	embedded: 'headless',
-};
-
-/**
- * The endpoint's refusals that are a decision about this request, as opposed
- * to no decision at all, and the denial code each one maps to. A `replay` is
- * the broker saying it already consumed this request and attempt: a denial
- * the caller must not retry, not an outage.
- */
-const DECIDED_DENIALS: Readonly<Partial<Record<LocalEndpointDenialReason, ManagedDenialCode>>> = {
-	policy_denied: 'policy-denied',
-	budget_exhausted: 'policy-denied',
-	unknown_price: 'policy-denied',
-	untrusted_clock: 'policy-denied',
-	expired: 'policy-denied',
-	owner_unfenced: 'policy-denied',
-	replay: 'idempotency-conflict',
-};
-
 const MAX_RESOURCES = 64;
 const MAX_RESOURCE_LENGTH = 4096;
 
@@ -704,32 +665,6 @@ function executionRequestProblem(request: AdmissionRequest): string | null {
 	return null;
 }
 
-/** The broker's receipt for a dispatched request, read structurally; null when it is not one. */
-function readDispatchReceipt(payload: unknown): ManagedDecisionReceipt | null {
-	const receipt = payload as Partial<{
-		outcome: string;
-		decisionId: string;
-		requestDigest: string;
-		brokerId: string;
-		policyRevision: number;
-	}> | null;
-	if (
-		receipt?.outcome !== 'broker_dispatched' ||
-		!isEndpointIdentifier(receipt.decisionId) ||
-		!isEndpointDigest(receipt.requestDigest) ||
-		!isEndpointIdentifier(receipt.brokerId) ||
-		typeof receipt.policyRevision !== 'number'
-	) {
-		return null;
-	}
-	return {
-		decisionId: receipt.decisionId,
-		requestDigest: receipt.requestDigest,
-		brokerId: receipt.brokerId,
-		policyRevision: receipt.policyRevision,
-	};
-}
-
 export function createManagedHostAdapter(deps: ManagedHostAdapterDeps): ManagedHostAdapter {
 	const now = deps.now ?? (() => Date.now());
 	/** Follows the record: a desktop composed before it enrolls gets its authority id when the record lands. */
@@ -738,141 +673,195 @@ export function createManagedHostAdapter(deps: ManagedHostAdapterDeps): ManagedH
 		return view.status === 'ok' && view.record ? managedAuthorityId(view.record) : 'unavailable';
 	};
 
-	async function decide(request: AdmissionRequest): Promise<PolicyDecision> {
-		const identity = deps.identity.read();
-		if (identity.status !== 'ok' || !identity.record) {
-			return {
-				decision: 'unavailable',
-				reason: identity.message ?? 'This host holds no enrollment.',
-			};
-		}
+	// Unknown attempts stay held until the producer reconciles them. This local
+	// fence prevents blind retries; durable replay protection belongs to the port.
+	const attempts = new Map<string, AdmissionOutcome>();
+	const owners = new Map<
+		DispatchLease,
+		{ port: PreparedExecutionPort; generation: string; request: AdmissionRequest; input: string }
+	>();
+	let invalidation = 0;
+	function generation(): string {
 		const standing = deps.status();
-		if (standing.authority !== 'registered' || !deps.endpoint) {
-			return { decision: 'unavailable', reason: standing.reason ?? 'No endpoint is attached.' };
-		}
-		// A stale observation, a lapsed registration or a lapsed approval is not
-		// a standing to ask under: the installed policy stays, no new grant comes.
-		const policy = projectPolicyStatus({ standing, now: now(), freshnessMs: deps.freshnessMs });
-		if (!policy.admission.possible) {
-			return { decision: 'unavailable', reason: policy.admission.reasons.join(' ') };
-		}
-		const problem = executionRequestProblem(request);
-		if (problem)
-			return {
-				decision: 'unavailable',
-				reason: `The launch cannot be described to the endpoint: ${problem}.`,
-			};
-		const { context, snapshot } = request;
-		const policyRevision = request.policy.policyRevision as number;
-		// The endpoint's execution operation names a run, never a workflow owner:
-		// a launch that belongs to a workflow cannot be described to it with the
-		// workflow attached, and is not described with the workflow stripped off
-		// (the sibling bridge refuses a nonempty workflow context, CP-03). Until a
-		// producer binds workflow authority, the honest answer is no decision.
-		if (context.workflow) {
-			return {
-				decision: 'unavailable',
-				reason: `The endpoint carries no workflow authority, so workflow "${context.workflow.workflowId}" cannot be bound to this launch and is not dropped from it (CP-03).`,
-			};
-		}
-		// Nor does it name a delegation: a launch whose context carries a chain
-		// of principals (a dispatched turn, a Web Login's attribution) or a grant
-		// reference is not described with them stripped off either (the sibling
-		// bridge refuses a nonempty delegation, CP-03).
-		const { chain, grantRef } = context.delegation;
-		if (chain.length > 0 || grantRef !== null) {
-			const carried = [
-				...(chain.length > 0 ? [`a delegation chain of ${chain.length}`] : []),
-				...(grantRef !== null ? ['a grant reference'] : []),
-			].join(' and ');
-			return {
-				decision: 'unavailable',
-				reason: `The endpoint carries no delegation authority, so ${carried} cannot be bound to this launch and is not dropped from it (CP-03).`,
-			};
-		}
-		// The broker's request: identity, operation, provider, model, resources and
-		// the revision. No arguments: the resolved command line is bound in the
-		// local lease, and the broker refuses any argument as an unsafe override.
-		const execution = {
-			requestId: context.identity.requestId,
-			attemptId: context.identity.attemptId,
-			runId: context.identity.runId ?? context.identity.attemptId,
-			source: EXECUTION_SOURCES[context.origin],
-			operation: snapshot.operation,
-			arguments: [] as string[],
-			resources: [...snapshot.resourceIds],
-			provider: snapshot.provider,
-			model: snapshot.model ?? 'unspecified',
-			...(context.identity.parentRunId ? { parentRunId: context.identity.parentRunId } : {}),
-			policyRevision,
-		};
-		const outcome = await deps.endpoint.invoke('execution', execution);
-		switch (outcome.status) {
-			case 'denied': {
-				const code = DECIDED_DENIALS[outcome.reason];
-				if (code) {
-					return {
-						decision: 'deny',
-						reason: `The endpoint refused the launch: ${outcome.reason}.`,
-						policyRevision,
-						code,
-					};
-				}
-				return {
-					decision: 'unavailable',
-					reason: `The endpoint did not decide: ${outcome.reason}.`,
-				};
-			}
-			case 'unavailable':
-				return { decision: 'unavailable', reason: outcome.message };
-			case 'unknown':
-				return { decision: 'unknown', reason: outcome.message };
-			case 'ok':
-				break;
-		}
-		const answered = outcome.payload as Partial<{
-			requestId: string;
-			attemptId: string;
-			runId: string;
-		}> | null;
-		const receipt = readDispatchReceipt(outcome.payload);
-		if (
-			!receipt ||
-			answered?.requestId !== execution.requestId ||
-			answered.attemptId !== execution.attemptId ||
-			answered.runId !== execution.runId ||
-			receipt.policyRevision !== policyRevision
-		) {
-			return {
-				decision: 'unknown',
-				reason:
-					'The endpoint answered with a receipt that does not match the request; the decision is not known.',
-			};
-		}
-		return { decision: 'allow', policyRevision, receipt };
+		const identity = deps.identity.read();
+		const record = identity.record;
+		return canonicalJson({
+			invalidation,
+			standing: standingKeyOf(standing),
+			authority: standing.authority,
+			custody: identity.status,
+			installation: deps.installation,
+			identity: record && {
+				installationId: record.installationId,
+				tenantId: record.tenantId,
+				orgId: record.orgId,
+				enrollmentId: record.enrollmentId,
+				management: record.management,
+				endpoint: record.endpoint,
+				registration: record.registration,
+			},
+		});
 	}
 
-	// The lease authority reads the id at every mint, so a lease names the
-	// authority of the record that was current when it was admitted.
-	const leases = createLocalHostAuthority({
-		get authorityId() {
-			return authorityId();
-		},
-		decide,
-		now,
-		newId: deps.newId ?? (() => `lease-${sha256Hex(`${now()}-${Math.random()}`).slice(0, 16)}`),
-		...(deps.leaseTtlMs !== undefined ? { leaseTtlMs: deps.leaseTtlMs } : {}),
-	});
+	async function admit(request: AdmissionRequest): Promise<AdmissionOutcome> {
+		const unavailable = (message: string): AdmissionOutcome => ({
+			state: 'unavailable',
+			code: 'runtime-unavailable',
+			message,
+		});
+		const key = canonicalJson([
+			request.context.identity.requestId,
+			request.context.identity.attemptId,
+		]);
+		const previous = attempts.get(key);
+		if (previous?.state === 'unknown') return previous;
+		const identity = deps.identity.read();
+		if (identity.status !== 'ok' || !identity.record)
+			return unavailable(identity.message ?? 'This host holds no enrollment.');
+		const standing = deps.status();
+		if (
+			standing.authority !== 'registered' ||
+			!deps.endpoint ||
+			!standing.connection?.attached ||
+			identity.record.management !== 'enrolled'
+		)
+			return unavailable(standing.reason ?? 'No endpoint is attached.');
+		const policy = projectPolicyStatus({ standing, now: now(), freshnessMs: deps.freshnessMs });
+		if (!policy.admission.possible) return unavailable(policy.admission.reasons.join(' '));
+		const problem = executionRequestProblem(request);
+		if (problem) return unavailable(`The launch cannot be described to the endpoint: ${problem}.`);
+		const port = deps.endpoint.preparedExecution;
+		if (!port || port.version !== 1) {
+			return unavailable(
+				'No negotiated prepared execution authority (PREPARED/1); workflow and delegation authority cannot be dropped, and a broker dispatch receipt is not a local launch permit.'
+			);
+		}
+		const { context, snapshot } = request;
+		const { record } = identity;
+		const registration = record.registration;
+		if (
+			!isVerifiedContext(context) ||
+			canonicalJson(context.installation) !== canonicalJson(deps.installation) ||
+			record.installationId !== deps.installation.installationId ||
+			!registration?.actorId ||
+			!Number.isFinite(Date.parse(registration.expiresAt)) ||
+			Date.parse(registration.expiresAt) <= now() ||
+			context.actor.kind !== 'human' ||
+			context.actor.id !== registration.actorId ||
+			registration.runtimeId !== deps.installation.runtimeId ||
+			registration.processEpoch !== deps.installation.processEpoch
+		) {
+			return {
+				state: 'denied',
+				code: 'unauthenticated',
+				message: 'The prepared actor/installation does not match the current registration.',
+				policyRevision: policy.appliedRevision,
+			};
+		}
+		if (snapshot.contractVersion !== MANAGED_CONTRACT_VERSION)
+			return {
+				state: 'denied',
+				code: 'version-unsupported',
+				message: 'Unsupported dispatch snapshot version.',
+				policyRevision: policy.appliedRevision,
+			};
+		if (
+			context.policyRevision !== policy.appliedRevision ||
+			request.policy.policyRevision !== policy.appliedRevision ||
+			port.authorityId !== authorityId()
+		)
+			return unavailable('The prepared authority or policy generation is no longer current.');
+		if (previous)
+			return {
+				state: 'denied',
+				code: 'idempotency-conflict',
+				message: 'This prepared attempt was already consumed; do not retry it.',
+				policyRevision: policy.appliedRevision,
+			};
+		const unknown: AdmissionOutcome = {
+			state: 'unknown',
+			code: 'outcome-unknown',
+			message:
+				'Prepared admission may have been consumed; reconcile with its authority before retrying.',
+		};
+		attempts.set(key, unknown);
+		const before = generation();
+		const input = canonicalJson(request);
+		const digest = dispatchSnapshotDigest(snapshot);
+		let outcome: AdmissionOutcome;
+		try {
+			// Preserve every field, including delegation/workflow and exact resolved
+			// argv/cwd/env/stdin/resource digests. The producer pins native handles.
+			outcome = await port.admit(request, {
+				identity: structuredClone(record),
+				connection: standing.connection!.connection,
+			});
+		} catch {
+			return unknown; // A thrown/lost response is never safe to retry.
+		}
+		if (outcome.state === 'admitted') {
+			const { lease } = outcome;
+			if (
+				before !== generation() ||
+				input !== canonicalJson(request) ||
+				deps.endpoint.preparedExecution !== port ||
+				!projectPolicyStatus({ standing: deps.status(), now: now(), freshnessMs: deps.freshnessMs })
+					.admission.possible ||
+				lease.authorityId !== authorityId() ||
+				lease.snapshotDigest !== digest ||
+				canonicalJson(lease.actor) !== canonicalJson(context.actor) ||
+				lease.policyRevision !== policy.appliedRevision ||
+				outcome.policyRevision !== policy.appliedRevision ||
+				lease.attemptId !== context.identity.attemptId ||
+				lease.runId !== context.identity.runId ||
+				!port.check(lease, digest).ok
+			) {
+				port.revoke(
+					lease.leaseId,
+					'Prepared input or authority changed before admission completed.'
+				);
+				return unknown;
+			}
+			owners.set(lease, { port, generation: before, request, input });
+		}
+		if (outcome.state === 'unavailable') attempts.delete(key);
+		else attempts.set(key, outcome);
+		return outcome;
+	}
 
 	const authority: HostAuthority = {
 		get authorityId() {
 			return authorityId();
 		},
-		admit: (request) => leases.admit(request),
-		check: (lease, digest) => leases.check(lease, digest),
-		revoke: (leaseId, reason) => leases.revoke(leaseId, reason),
-		revokeAll: (reason) => leases.revokeAll(reason),
-		live: () => leases.live(),
+		admit,
+		check(lease, digest) {
+			const owner = owners.get(lease);
+			if (!owner) return { ok: false, reason: 'forged' };
+			if (
+				owner.generation !== generation() ||
+				owner.input !== canonicalJson(owner.request) ||
+				deps.endpoint?.preparedExecution !== owner.port ||
+				!projectPolicyStatus({ standing: deps.status(), now: now(), freshnessMs: deps.freshnessMs })
+					.admission.possible
+			) {
+				owner.port.revoke(lease.leaseId, 'Prepared authority generation changed.');
+				return { ok: false, reason: 'revoked' };
+			}
+			return owner.port.check(lease, digest);
+		},
+		revoke(leaseId, reason) {
+			for (const [lease, owner] of owners)
+				if (lease.leaseId === leaseId) return owner.port.revoke(leaseId, reason);
+			return false;
+		},
+		revokeAll(reason) {
+			invalidation++;
+			let count = 0;
+			for (const [lease, owner] of owners) if (owner.port.revoke(lease.leaseId, reason)) count++;
+			return count;
+		},
+		live: () =>
+			[...owners.keys()].filter((lease) => lease.state() === 'issued' || lease.state() === 'bound'),
 	};
 
 	return {
