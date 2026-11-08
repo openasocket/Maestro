@@ -9,6 +9,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -19,6 +20,11 @@ import {
 } from '../../../../__tests__/shared/maestro-lib/run/fakeGroupChatProvider';
 import { CROSS_AGENT_ASK_SESSION_ID, CROSS_AGENT_ASK_TAB_ID } from '../../../crossAgentTypes';
 import { DEFAULT_TAB_DEFAULTS } from '../../agents/rules';
+import {
+	FAKE_AGENT_PATH,
+	writeFakeTurn,
+} from '../../../../__tests__/shared/maestro-lib/run/fakeAgent';
+import { runAgentTurn } from '../../turns/run-agent-turn';
 import type { ClientResult, MaestroEvent } from '../../client/types';
 import {
 	createLocalHostAuthority,
@@ -29,6 +35,7 @@ import {
 import { createManagedBinding } from '../../managed/binding';
 import {
 	MANAGED_DELEGATION_ENV_VAR,
+	childDelegationContext,
 	delegationContextOf,
 	readDelegationContextEnv,
 	type ManagedDelegationContext,
@@ -97,6 +104,7 @@ describe('runtime consults', () => {
 	let onBackgroundAdmission: RuntimeDeps['background']['onAdmission'];
 	let initiator: RuntimeDeps['consults']['initiator'];
 	let probeBinary: RuntimeDeps['probeBinary'] | undefined;
+	let chatTurn: RuntimeDeps['turns']['runAgentTurn'];
 
 	function deps(): Partial<RuntimeDeps> {
 		let id = 0;
@@ -111,6 +119,7 @@ describe('runtime consults', () => {
 			checkCwd: () => null,
 			readTabDefaults: async () => DEFAULT_TAB_DEFAULTS,
 			watchDirectory: () => ({ close: () => undefined }),
+			...(chatTurn ? { turns: { runAgentTurn: chatTurn } } : {}),
 			probeBinary: async (binaryName, customPath) =>
 				probeBinary
 					? probeBinary(binaryName, customPath)
@@ -183,6 +192,7 @@ describe('runtime consults', () => {
 		onBackgroundAdmission = undefined;
 		initiator = undefined;
 		probeBinary = undefined;
+		chatTurn = undefined;
 	});
 	afterEach(async () => {
 		for (const runtime of open) await runtime.connection.close();
@@ -703,6 +713,222 @@ describe('runtime consults', () => {
 			expect(runtime.managedBinding.state().state).toBe('enrolled');
 			return runtime;
 		}
+
+		describe('live chat source composition', () => {
+			const callers = new AsyncLocalStorage<{ agentId: string; tabId: string }>();
+			let readable: boolean;
+			let sourceLookup: ReturnType<
+				typeof vi.fn<NonNullable<NonNullable<MaestroRuntimeOptions['managed']>['consultSource']>>
+			>;
+			let sourceAdmissions: AdmissionRequest[];
+			const input = {
+				targetAgentId: 'a2',
+				fromAgentId: 'a1',
+				fromTabId: 'a1-t1',
+				question: 'Check this',
+			};
+			const ask = (runtime: MaestroRuntime, request = input) =>
+				callers.run({ agentId: request.fromAgentId, tabId: request.fromTabId }, () =>
+					runtime.consults.ask(request)
+				);
+
+			async function liveChat(script: FakeScript = ANSWER, readOnly = true) {
+				readable = true;
+				sourceAdmissions = [];
+				const recording = writeFakeTurn(work, { chunks: [], close: { code: 0, signal: null } });
+				chatTurn = (turn, options) =>
+					runAgentTurn(
+						{
+							...turn,
+							launch: {
+								...turn.launch,
+								command: process.execPath,
+								args: [FAKE_AGENT_PATH],
+								sessionCustomEnvVars: {
+									...turn.launch.sessionCustomEnvVars,
+									FAKE_AGENT_RECORDING: recording,
+									FAKE_AGENT_HOLD: '1',
+								},
+							},
+						},
+						{ ...options, stopGraceMs: 200 }
+					);
+				sourceLookup = vi.fn(() => (readable ? (callers.getStore() ?? null) : null));
+				const runtime = await startEnrolled(() => 'allow', sourceAdmissions, script, {
+					consultSource: sourceLookup,
+				});
+				value(await runtime.tabs.update('a1', 'a1-t1', { readOnly }));
+				value(await runtime.turns.send('a1', 'a1-t1', { text: 'Source operation' }));
+				return runtime;
+			}
+
+			it('preserves standalone consults with a configured source lookup', async () => {
+				const lookup = vi.fn(() => null);
+				const runtime = await start(ANSWER, undefined, {}, { consultSource: lookup });
+				value(await runtime.consults.ask(input));
+				expect(lookup).not.toHaveBeenCalled();
+			});
+
+			it('requires source custody if enrollment arrives during preparation', async () => {
+				const runtime = await start(ANSWER, undefined, {}, { consultSource: () => null });
+				authority = createLocalHostAuthority({
+					authorityId: 'fleet-authority',
+					decide: () => ({ decision: 'allow', policyRevision: 1 }),
+					now: () => T0,
+					newId: () => 'enrollment-transition-lease',
+				});
+				const binding = createManagedBinding({
+					paths: { userDataDir: dir, productionDataDir: dir },
+					fence: () => ({ ok: true }),
+					authority,
+					now: () => T0,
+				});
+				probeBinary = async () => {
+					const enrolled = await binding.enroll({
+						installationId: runtime.installation.installationId,
+						authorityId: 'fleet-authority',
+						endpointRef: 'ep',
+						policySources: [],
+						policyRevision: 1,
+					});
+					expect(enrolled.ok).toBe(true);
+					runtime.managedBinding.reload();
+					return { exists: true, path: '/fake/bin/claude' };
+				};
+				expect(errorOf(await runtime.consults.ask(input)).message).toMatch(/custody/i);
+				expect(provider.calls).toEqual([]);
+			});
+
+			it.each([false, true])(
+				'binds a live source and retains readOnly=%s for handoffs',
+				async (readOnly) => {
+					const runtime = await liveChat(ANSWER, readOnly);
+					const source = sourceAdmissions[0].context;
+					const result = await callers.run({ agentId: 'a1', tabId: 'a1-t1' }, () =>
+						runtime.consults.ask({ ...input, handoffAnswer: 'Apply this answer' })
+					);
+					value(result);
+					const child = lineageOf(0);
+					expect(child.identity.parentRunId).toBe(
+						source.identity.runId ?? source.identity.requestId
+					);
+					expect(child).toEqual(
+						childDelegationContext(delegationContextOf(source), {
+							link: { kind: 'agent', id: 'a2' },
+							requestId: child.identity.requestId,
+							attemptId: child.identity.attemptId,
+						})
+					);
+					expect(child.delegation.chain).toEqual([
+						...source.delegation.chain,
+						{ kind: 'agent', id: 'a2' },
+					]);
+					expect(sourceAdmissions).toHaveLength(2);
+					expect(permissionMode(provider.calls[0].spec.args)).toBe(readOnly ? 'plan' : undefined);
+					expect(sourceLookup.mock.calls.length).toBeGreaterThan(3);
+					expect(authority.live()).toHaveLength(1);
+				}
+			);
+
+			it.each([
+				'no-caller',
+				'different-agent',
+				'different-tab',
+				'omitted-tab',
+				'unreadable',
+				'stopped',
+				'revoked',
+			] as const)('refuses %s source custody before writing the target', async (mode) => {
+				const runtime = await liveChat();
+				if (mode === 'unreadable')
+					sourceLookup.mockImplementation(() => {
+						throw new Error('No custody');
+					});
+				if (mode === 'stopped') value(await runtime.turns.interrupt('a1', 'a1-t1'));
+				if (mode === 'revoked') authority.revoke(authority.live()[0].leaseId, 'Source revoked');
+				const request = {
+					...input,
+					...(mode === 'different-agent' ? { fromAgentId: 'a3' } : {}),
+					...(mode === 'different-tab' ? { fromTabId: 'a1-other' } : {}),
+					...(mode === 'omitted-tab' ? { fromTabId: undefined } : {}),
+				};
+				const invoke = () => runtime.consults.ask(request);
+				const result = await (mode === 'no-caller'
+					? invoke()
+					: callers.run({ agentId: 'a1', tabId: 'a1-t1' }, invoke));
+				expect(errorOf(result).message).toMatch(/custody/i);
+				expect(provider.calls).toEqual([]);
+				expect(consultTab('a2')).toBeUndefined();
+				expect(sourceAdmissions).toHaveLength(1);
+			});
+
+			it.each(['preparation', 'admission', 'observer', 'sink'] as const)(
+				'rechecks a withdrawn caller at %s and admits a fresh request',
+				async (boundary) => {
+					let withdraw = true;
+					const runtime = await liveChat(() => {
+						if (withdraw && boundary === 'sink') readable = false;
+						return { text: 'Fresh answer' };
+					});
+					const issued: DispatchLease[] = [];
+					const admit = authority.admit.bind(authority);
+					vi.spyOn(authority, 'admit').mockImplementation(async (request) => {
+						const answer = await admit(request);
+						if (answer.state === 'admitted') issued.push(answer.lease);
+						if (withdraw && boundary === 'admission') readable = false;
+						return answer;
+					});
+					probeBinary = async () => {
+						if (withdraw && boundary === 'preparation') readable = false;
+						return { exists: true, path: '/fake/bin/claude' };
+					};
+					onBackgroundAdmission = (event) => {
+						if (withdraw && boundary === 'observer' && event.kind === 'admitted') readable = false;
+					};
+					expect(errorOf(await ask(runtime)).message).toMatch(/custody|lease.*released/i);
+					expect(authority.live()).toHaveLength(1);
+					for (const lease of issued) {
+						expect(lease.pid()).toBeUndefined();
+						expect(lease.ended()).toMatchObject({
+							state: 'released',
+							release: { outcome: 'spawn-failed' },
+						});
+					}
+					if (boundary !== 'sink') expect(provider.calls).toEqual([]);
+					withdraw = false;
+					readable = true;
+					value(await ask(runtime));
+					expect(lineageOf(provider.calls.length - 1).identity.parentRunId).toBe(
+						sourceAdmissions[0].context.identity.requestId
+					);
+					expect(authority.live()).toHaveLength(1);
+				}
+			);
+
+			it('keeps concurrent source tabs separate and rejects a queued request after its source stops', async () => {
+				const runtime = await liveChat((call) => ({ text: 'Answer', hold: call.nth === 1 }));
+				value(await runtime.tabs.update('a3', 'a3-t1', { readOnly: true }));
+				value(await runtime.turns.send('a3', 'a3-t1', { text: 'Other source' }));
+				const first = ask(runtime);
+				await vi.waitFor(() => expect(provider.calls).toHaveLength(1));
+				const queued = ask(runtime);
+				const other = { ...input, targetAgentId: 'a1', fromAgentId: 'a3', fromTabId: 'a3-t1' };
+				value(await ask(runtime, other));
+				expect(lineageOf(0).identity.parentRunId).toBe(
+					sourceAdmissions[0].context.identity.requestId
+				);
+				expect(lineageOf(1).identity.parentRunId).toBe(
+					sourceAdmissions[1].context.identity.requestId
+				);
+				value(await runtime.turns.interrupt('a1', 'a1-t1'));
+				await first;
+				expect(errorOf(await queued).message).toMatch(/custody/i);
+				expect(provider.calls).toHaveLength(2);
+				value(await ask(runtime, other));
+				expect(runtime.consultsInFlight()).toBe(0);
+				expect(authority.live()).toHaveLength(1);
+			});
+		});
 
 		describe('explicit consult delegates with authenticated parents', () => {
 			it.each([

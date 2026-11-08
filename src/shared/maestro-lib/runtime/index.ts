@@ -16,6 +16,7 @@
  */
 
 import * as fs from 'fs/promises';
+import { AsyncLocalStorage } from 'node:async_hooks';
 
 import { createSleepTracker } from '../../sleepTracking';
 import { createAgentRepository } from '../agents/repository';
@@ -57,6 +58,7 @@ import {
 	type EventJournal,
 } from '../managed/event-journal';
 import { createLifecycleProjector, type LifecycleProjector } from '../managed/events';
+import { delegationContextOf } from '../managed/delegation';
 import {
 	bindingEnrollment,
 	createHeadlessSpawnAuthority,
@@ -177,6 +179,14 @@ export interface MaestroRuntimeOptions {
 		 * environment authority. The host must associate every turn with its current source custody.
 		 */
 		backgroundParentContext?: BackgroundManagedOptions['parentContext'];
+		/**
+		 * Current caller's authenticated live chat source, supplied by the trusted host transport.
+		 * Re-read throughout consult dispatch; null or a mismatch with the requested agent/tab
+		 * refuses the child. Coordinates from a request or environment cannot implement this port.
+		 * The runtime supplies the original bound source lease/context, never accepts one here.
+		 * Transport authentication and non-chat source custody must be composed by the host.
+		 */
+		consultSource?(): { agentId: string; tabId: string } | null;
 		/**
 		 * The owner fence of an Auto Run's (or a hosted Cue run's) workflow, claimed on every
 		 * attempt for that attempt's run and attempt ids. Default: the runtime's own
@@ -701,6 +711,13 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 		options: { ...options.turns, lifecycle: options.turns?.lifecycle ?? lifecycle },
 		deps: { probeBinary: deps.probeBinary, ...deps.turns },
 	});
+	// Each ask carries its own live source reader through queueing and asynchronous preparation.
+	// The runner associates only that ask's process, so another request or room cannot borrow it.
+	const consultSource = new AsyncLocalStorage<{
+		read(): ReturnType<typeof turns.sourceCustody>;
+		required(): boolean;
+		processId?: string;
+	}>();
 
 	// Group chats and consults: the processes a round and a question are made of (GD20). The metrics are
 	// one instance because the spawn path starts a turn's clock and the engine finishes it.
@@ -717,9 +734,20 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 		// Every group chat turn and consult process is admitted on the host's standing (MRC-07-05).
 		managed: {
 			port: backgroundSpawnPort,
-			...(options.managed?.backgroundParentContext
-				? { parentContext: options.managed.backgroundParentContext }
-				: {}),
+			get parentContext() {
+				if (!consultSource.getStore()?.required()) return options.managed?.backgroundParentContext;
+				return (processId: string) => {
+					const source = consultSource.getStore();
+					const custody = source?.processId === processId ? source.read() : null;
+					return custody
+						? ({ ok: true, context: custody.context } as const)
+						: ({
+								ok: false,
+								code: 'unauthenticated',
+								problems: ['The consult source custody is unavailable.'],
+							} as const);
+				};
+			},
 			...(deps.background?.onAdmission ? { onAdmission: deps.background.onAdmission } : {}),
 		},
 	});
@@ -738,7 +766,23 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 		paths,
 		repository,
 		fence,
-		background,
+		background: {
+			...background,
+			consultRunner: (checkScope) => {
+				const runner = background.consultRunner(checkScope);
+				return {
+					...runner,
+					start: (spawn, observer) => {
+						const source = consultSource.getStore();
+						return source
+							? consultSource.run({ ...source, processId: spawn.processId }, () =>
+									runner.start(spawn, observer)
+								)
+							: runner.start(spawn, observer);
+					},
+				};
+			},
+		},
 		rules: deps.rules,
 		// Where the prompts and the CLI script are, as the chat turns are told.
 		...(options.turns ? { options: options.turns } : {}),
@@ -747,7 +791,15 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 			: {}),
 		managed: {
 			port: backgroundSpawnPort,
-			...(deps.consults?.initiator ? { initiator: deps.consults.initiator } : {}),
+			get initiator() {
+				if (!consultSource.getStore()?.required()) return deps.consults?.initiator;
+				return () => {
+					const custody = consultSource.getStore()?.read();
+					return custody
+						? { delegation: delegationContextOf(custody.context), writable: custody.writable }
+						: null;
+				};
+			},
 			...(deps.consults?.onAdmission ? { onAdmission: deps.consults.onAdmission } : {}),
 		},
 	});
@@ -853,7 +905,37 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 		turns: turns.api,
 		autoRun: autoRun.api,
 		groupChats: groupChats.api,
-		consults: { api: consults.api, cancelForSource: consults.cancelForSource },
+		consults: {
+			api: {
+				ask: (input) => {
+					const lookup = options.managed?.consultSource;
+					if (!lookup) return consults.api.ask(input);
+					const { fromAgentId, fromTabId } = input;
+					let active = true;
+					let required = false;
+					return consultSource.run(
+						{
+							// Enrollment during a wait requires custody; losing it cannot undo that.
+							required: () => (required ||= backgroundSpawnPort().standing() !== 'standalone'),
+							read: () => {
+								if (!active || !fromAgentId || !fromTabId) return null;
+								const source = lookup();
+								if (source?.agentId !== fromAgentId || source.tabId !== fromTabId) return null;
+								return turns.sourceCustody(fromAgentId, fromTabId);
+							},
+						},
+						async () => {
+							try {
+								return await consults.api.ask(input);
+							} finally {
+								active = false;
+							}
+						}
+					);
+				},
+			},
+			cancelForSource: consults.cancelForSource,
+		},
 		...(managed ? { managed } : {}),
 	});
 
