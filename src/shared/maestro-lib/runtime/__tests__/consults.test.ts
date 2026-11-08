@@ -20,7 +20,11 @@ import {
 import { CROSS_AGENT_ASK_SESSION_ID, CROSS_AGENT_ASK_TAB_ID } from '../../../crossAgentTypes';
 import { DEFAULT_TAB_DEFAULTS } from '../../agents/rules';
 import type { ClientResult, MaestroEvent } from '../../client/types';
-import { createLocalHostAuthority, type AdmissionRequest } from '../../managed/authority';
+import {
+	createLocalHostAuthority,
+	type AdmissionRequest,
+	type DispatchLease,
+} from '../../managed/authority';
 import { createManagedBinding } from '../../managed/binding';
 import {
 	MANAGED_DELEGATION_ENV_VAR,
@@ -87,6 +91,7 @@ describe('runtime consults', () => {
 	let admissions: ConsultAdmissionEvent[];
 	/** Every admission the background runner decided at the spawn (MRC-07-05). */
 	let backgroundAdmissions: BackgroundAdmissionEvent[];
+	let onBackgroundAdmission: RuntimeDeps['background']['onAdmission'];
 	let initiator: RuntimeDeps['consults']['initiator'];
 	let probeBinary: RuntimeDeps['probeBinary'] | undefined;
 
@@ -109,7 +114,10 @@ describe('runtime consults', () => {
 					: { exists: true, path: `/fake/bin/${binaryName}` },
 			background: {
 				runTurn: provider.runTurn,
-				onAdmission: (event) => backgroundAdmissions.push(event),
+				onAdmission: (event) => {
+					backgroundAdmissions.push(event);
+					onBackgroundAdmission?.(event);
+				},
 			},
 			consults: {
 				minTimeoutMs: 50,
@@ -169,6 +177,7 @@ describe('runtime consults', () => {
 		open = [];
 		admissions = [];
 		backgroundAdmissions = [];
+		onBackgroundAdmission = undefined;
 		initiator = undefined;
 		probeBinary = undefined;
 	});
@@ -507,6 +516,7 @@ describe('runtime consults', () => {
 	 * so an enrolled runtime refuses rather than run a consult unmanaged.
 	 */
 	describe('lineage and admission (MRC-07-04A)', () => {
+		let authority: ReturnType<typeof createLocalHostAuthority>;
 		/** An asking turn the host can name: admitted elsewhere under `policyRevision`. */
 		const namedInitiator = (
 			policyRevision: number | null,
@@ -656,7 +666,7 @@ describe('runtime consults', () => {
 			script: FakeScript = ANSWER
 		): Promise<MaestroRuntime> {
 			let leaseId = 0;
-			const authority = createLocalHostAuthority({
+			authority = createLocalHostAuthority({
 				authorityId: 'fleet-authority',
 				decide: (request) => {
 					asked.push(request);
@@ -842,6 +852,154 @@ describe('runtime consults', () => {
 				expect(provider.calls).toEqual([]);
 				expect(asked).toEqual([]);
 				expect(consultTab('a2')).toBeUndefined();
+			});
+
+			describe.each(['admission', 'observer', 'sink'] as const)('%s boundary', (boundary) => {
+				it.each(['missing', 'unreadable', 'grant', 'fence', 'policy', 'access', 'run'] as const)(
+					'refuses %s custody after runner handoff, releases the lease and recovers',
+					async (change) => {
+						const asked: AdmissionRequest[] = [];
+						const saved = structuredClone(current);
+						let recovered = false;
+						const withdraw = () => {
+							if (recovered) return;
+							if (change === 'missing') current = null;
+							if (change === 'unreadable') unreadable = true;
+							if (change === 'grant') current!.delegation.delegation.grantRef = 'grant-2';
+							if (change === 'fence') current!.delegation.workflow!.fencingToken = 'fence-2';
+							if (change === 'policy') current!.delegation.policyRevision = 2;
+							if (change === 'access') current!.writable = false;
+							if (change === 'run') current!.delegation.identity.runId = 'new-source-run';
+						};
+						const runtime = await startEnrolled(
+							() => 'allow',
+							asked,
+							() => {
+								if (boundary === 'sink') withdraw();
+								return { text: 'Fresh answer' };
+							}
+						);
+						const issued: DispatchLease[] = [];
+						const admit = authority.admit.bind(authority);
+						vi.spyOn(authority, 'admit').mockImplementation(async (request) => {
+							const result = await admit(request);
+							if (result.state === 'admitted') issued.push(result.lease);
+							if (boundary === 'admission') withdraw();
+							return result;
+						});
+						onBackgroundAdmission = (event) => {
+							if (boundary === 'observer' && event.kind === 'admitted') withdraw();
+						};
+						const input = {
+							targetAgentId: 'a2',
+							fromAgentId: 'a1',
+							fromTabId: 'a1-t1',
+							question: 'Act on this answer',
+							handoffAnswer: 'Use a queue',
+						};
+						expect(errorOf(await runtime.consults.ask(input)).code).toBe('failed');
+						expect(admissions).toContainEqual(
+							expect.objectContaining({
+								kind: 'refused',
+								state: 'unavailable',
+								message: expect.stringMatching(/custody/i),
+							})
+						);
+						expect(asked).toHaveLength(1);
+						expect(issued).toHaveLength(1);
+						expect(issued[0].pid()).toBeUndefined();
+						expect(issued[0].ended()).toMatchObject({
+							state: 'released',
+							release: { outcome: 'spawn-failed' },
+						});
+						expect(authority.live()).toEqual([]);
+						expect(runtime.consultsInFlight()).toBe(0);
+						if (boundary !== 'sink') expect(provider.calls).toEqual([]);
+						expect(consultTab('a2').agentSessionId).toBeNull();
+						expect(consultTab('a2').logs.map((log: { source: string }) => log.source)).toEqual([
+							'user',
+							'error',
+						]);
+						if (!current) current = saved;
+						unreadable = false;
+						recovered = true;
+						expect(value(await runtime.consults.ask(input)).answer).toBe('Fresh answer');
+						expect(asked).toHaveLength(2);
+						expect(issued[1].pid()).toBeGreaterThan(0);
+						expect(asked[1].context.identity.requestId).not.toBe(
+							asked[0].context.identity.requestId
+						);
+						expect(authority.live()).toEqual([]);
+						const last = provider.callsFor('consult').length - 1;
+						expect(lineageOf(last)).toMatchObject({
+							workflow: current!.delegation.workflow,
+							delegation: {
+								grantRef: current!.delegation.delegation.grantRef,
+								chain: [
+									{ kind: 'agent', id: 'a1' },
+									{ kind: 'agent', id: 'a2' },
+								],
+							},
+							identity: { parentRunId: current!.delegation.identity.runId, rootRunId: 'run-7' },
+						});
+						expect(permissionMode(provider.callsFor('consult')[last].spec.args)).toBe(
+							change === 'access' ? 'plan' : undefined
+						);
+					}
+				);
+			});
+
+			it('keeps concurrent consult source checks independent while one admission is pending', async () => {
+				const other = namedInitiator(1, false)({ agentId: 'a3' })!;
+				other.delegation.delegation.chain = [{ kind: 'agent', id: 'a3' }];
+				initiator = ({ agentId }) => (agentId === 'a3' ? other : current);
+				const asked: AdmissionRequest[] = [];
+				const runtime = await startEnrolled(() => 'allow', asked);
+				const entered = Promise.withResolvers<void>();
+				const proceed = Promise.withResolvers<void>();
+				const issued: DispatchLease[] = [];
+				const admit = authority.admit.bind(authority);
+				vi.spyOn(authority, 'admit').mockImplementation(async (request) => {
+					const result = await admit(request);
+					if (result.state === 'admitted') issued.push(result.lease);
+					if (request.context.delegation.chain[0].id === 'a1') {
+						entered.resolve();
+						await proceed.promise;
+					}
+					return result;
+				});
+				const first = runtime.consults.ask({
+					targetAgentId: 'a2',
+					fromAgentId: 'a1',
+					question: 'First',
+				});
+				try {
+					await entered.promise;
+					current = null;
+					value(
+						await runtime.consults.ask({
+							targetAgentId: 'a2',
+							fromAgentId: 'a3',
+							question: 'Other',
+						})
+					);
+					expect(provider.callsFor('consult')).toHaveLength(1);
+					expect(lineageOf(0).delegation.chain).toEqual([
+						{ kind: 'agent', id: 'a3' },
+						{ kind: 'agent', id: 'a2' },
+					]);
+				} finally {
+					proceed.resolve();
+				}
+				expect(errorOf(await first).message).toMatch(/custody/i);
+				expect(issued[0].pid()).toBeUndefined();
+				expect(issued[0].ended()).toMatchObject({
+					state: 'released',
+					release: { outcome: 'spawn-failed' },
+				});
+				expect(issued[1].pid()).toBeGreaterThan(0);
+				expect(authority.live()).toEqual([]);
+				expect(runtime.consultsInFlight()).toBe(0);
 			});
 		});
 

@@ -122,8 +122,9 @@ export interface RuntimeConsultsManagedOptions {
 	 * the initiator is the consult the asker is itself answering, else a lineage with the asker as
 	 * the chain (workflow null, no policy generation).
 	 * Once supplied, this trusted host lookup must return current custody. Null or unreadable
-	 * custody refuses the ask; it never falls back to inferred lineage. It is re-read at dequeue
-	 * and runner handoff. The background runner's parentContext still owns final sink verification.
+	 * custody refuses the ask; it never falls back to inferred lineage. It is re-read at dequeue,
+	 * runner handoff and through the background runner's final process gate. This request check
+	 * supplements the background runner's authenticated parentContext verification.
 	 */
 	initiator?(asker: { agentId: string; tabId?: string }): ConsultInitiator | null;
 	onAdmission?(event: ConsultAdmissionEvent): void;
@@ -575,7 +576,7 @@ export function createRuntimeConsults(options: RuntimeConsultsOptions): RuntimeC
 				};
 
 				running.set(requestId, { targetId: target.id, delegation, writable });
-				const runner = background.consultRunner();
+				const runner = background.consultRunner(recheckInitiator);
 				let chunk: CrossAgentResponseChunk;
 				try {
 					chunk = await new Promise<CrossAgentResponseChunk>((resolve) => {
