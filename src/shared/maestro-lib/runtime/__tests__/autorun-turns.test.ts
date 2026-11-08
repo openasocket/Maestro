@@ -253,7 +253,10 @@ describe('Auto Run turns: a refused effort, and the fence claimed per attempt', 
 		}
 
 		describe('trusted incoming Auto Run delegation', () => {
-			function parentOf(port: AutoRunSpawnAuthorityPort) {
+			function parentOf(
+				port: AutoRunSpawnAuthorityPort,
+				owns: 'workflow' | 'nothing' = 'workflow'
+			) {
 				const bound = port.context({
 					identity: {
 						requestId: 'cue-request',
@@ -265,12 +268,15 @@ describe('Auto Run turns: a refused effort, and the fence claimed per attempt', 
 					},
 					traceId: 'cue-trace',
 					policyRevision: 1,
-					workflow: {
-						workflowId: workflow.workflowId,
-						version: workflow.version,
-						triggerEventId: workflow.triggerEventId,
-						...FENCE,
-					},
+					workflow:
+						owns === 'nothing'
+							? null
+							: {
+									workflowId: workflow.workflowId,
+									version: workflow.version,
+									triggerEventId: workflow.triggerEventId,
+									...FENCE,
+								},
 					delegation: { chain: [{ kind: 'human', id: 'source-human' }], grantRef: 'source-grant' },
 				});
 				if (!bound.ok) throw new Error(bound.problems.join('; '));
@@ -801,6 +807,102 @@ describe('Auto Run turns: a refused effort, and the fence claimed per attempt', 
 				expect(result.managed).toBeDefined();
 				expect(decide).not.toHaveBeenCalled();
 				expect(startedProcesses()).toBe(0);
+			});
+
+			describe('a source that owns no workflow nests the run (MCOMP-17-03BU)', () => {
+				it('admits every attempt as a nested workflow carrying the source lineage under its own fence', async () => {
+					const requests: AdmissionRequest[] = [];
+					const { port } = await managedPort((request) => {
+						requests.push(request);
+						return ALLOW;
+					});
+					const parent = parentOf(port, 'nothing');
+					expect(parent.context.workflow).toBeNull();
+					const parentContext = vi.fn(() => parent);
+					const turns = runner(['refuse', 'answer'], {
+						workflow,
+						managed: { port, fence: () => FENCE, parentContext },
+					});
+					expect(
+						await turns.run({ purpose: 'task', prompt: 'work', effort: 'minimal' })
+					).toMatchObject({ success: true });
+					expect(startedProcesses()).toBe(2);
+					expect(requests).toHaveLength(2);
+					for (const [index, { context }] of requests.entries()) {
+						expect(context.workflow).toEqual({
+							workflowId: workflow.workflowId,
+							version: workflow.version,
+							triggerEventId: workflow.triggerEventId,
+							...FENCE,
+						});
+						expect(context.identity.rootRunId).toBe('pipeline-root');
+						expect(context.identity.parentRunId).toBe('cue-run');
+						expect(context.delegation).toEqual({
+							chain: [
+								{ kind: 'human', id: 'source-human' },
+								{ kind: 'agent', id: 'source-agent' },
+							],
+							grantRef: 'source-grant',
+						});
+						const env = JSON.parse(
+							fs.readFileSync(path.join(dir, `env-${index + 1}.json`), 'utf8')
+						);
+						expect(readDelegationContextEnv(env)).toEqual({
+							status: 'ok',
+							context: delegationContextOf(context),
+						});
+					}
+					expect(parentContext.mock.calls.length).toBeGreaterThan(2);
+				});
+
+				it('lends no fence: an unowned nested run is refused and starts nothing', async () => {
+					const decide = vi.fn(() => ALLOW);
+					const { port } = await managedPort(decide);
+					const parent = parentOf(port, 'nothing');
+					const result = await runner(['answer'], {
+						workflow,
+						managed: { port, fence: () => null, parentContext: () => parent },
+					}).run({ purpose: 'task', prompt: 'work' });
+					expect(result.success).toBe(false);
+					expect(result.managed).toMatchObject({ state: 'unavailable' });
+					expect(decide).not.toHaveBeenCalled();
+					expect(startedProcesses()).toBe(0);
+				});
+
+				it.each(['withdrawn', 'depth', 'grant drift'] as const)(
+					'still refuses a %s source that owns no workflow',
+					async (change) => {
+						const decide = vi.fn(() => ALLOW);
+						const { port } = await managedPort(decide);
+						const parent = parentOf(port, 'nothing');
+						if (change === 'depth')
+							parent.context.delegation.chain = Array.from(
+								{ length: MAX_DELEGATION_DEPTH },
+								(_, i) => ({ kind: 'agent', id: `prior-${i}` })
+							);
+						let reads = 0;
+						const result = await runner(['answer'], {
+							workflow,
+							managed: {
+								port,
+								fence: () => FENCE,
+								parentContext: (): ContextVerification => {
+									reads += 1;
+									if (change === 'withdrawn')
+										return { ok: false, code: 'unauthenticated', problems: ['parent revoked'] };
+									if (change === 'grant drift' && reads > 1) {
+										const next = parentOf(port, 'nothing');
+										next.context.delegation.grantRef = 'changed-grant';
+										return next;
+									}
+									return parent;
+								},
+							},
+						}).run({ purpose: 'task', prompt: 'work' });
+						expect(result.success).toBe(false);
+						expect(startedProcesses()).toBe(0);
+					}
+				);
 			});
 
 			describe.each(['fence', 'preparation', 'admission', 'spawn gate'] as const)(

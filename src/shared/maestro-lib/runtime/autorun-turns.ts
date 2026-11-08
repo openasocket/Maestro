@@ -153,7 +153,11 @@ export interface AutoRunManagedOptions {
 	/**
 	 * Trusted host verification of the initiating operation, read for every attempt and
 	 * again before dispatch. Never supply environment or renderer JSON as authentication.
-	 * A supplied source must remain verified and own this workflow under its current fence.
+	 * A supplied source must remain verified. A source that owns a workflow must own this one under
+	 * its current fence; a source that owns none (a room turn, a consult: `workflow: null`) may
+	 * start this run as a nested workflow (MCOMP-17-03BU). The nested run carries the source's
+	 * chain, grant and root run, is parented under the source's run, and is held to its own owner
+	 * fence alone: the source lends it lineage, never a workflow or a fence.
 	 */
 	parentContext?(): ContextVerification;
 	/**
@@ -451,7 +455,12 @@ export function createAutoRunTurnRunner(options: AutoRunTurnRunnerOptions): Auto
 		}
 		const policy = managed.port.policy();
 		const workflow = autoRunWorkflowRef(attribution.workflow, fence);
-		if (parent && canonicalJson(parent.workflow) !== canonicalJson(workflow)) {
+		// A parent with no workflow nests this run under it; one that owns a workflow must own this one.
+		if (
+			parent &&
+			parent.workflow !== null &&
+			canonicalJson(parent.workflow) !== canonicalJson(workflow)
+		) {
 			return refuse(
 				'denied',
 				'policy-denied',
