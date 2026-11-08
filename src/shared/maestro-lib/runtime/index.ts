@@ -185,6 +185,7 @@ export interface MaestroRuntimeOptions {
 
 export type RuntimeRefusal =
 	| DataDirRefusal
+	| { reason: 'managed-host-invalid'; message: string }
 	| { reason: 'data-dir-missing'; tried: string[]; message: string }
 	| { reason: 'synced-data-dir'; syncDir: string; message: string }
 	| RepositoryLoadFailure;
@@ -335,7 +336,29 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 		pid: lock.info.pid,
 		startedAt: lock.info.startedAt,
 	});
-	const managedHost = options.managed?.host?.(installation) ?? null;
+	let managedHost: ManagedHostAdapter | null;
+	try {
+		// Pass a copy: composition cannot rewrite the lock holder's identity.
+		managedHost = options.managed?.host?.({ ...installation }) ?? null;
+		if (
+			managedHost &&
+			(managedHost.installation.installationId !== installation.installationId ||
+				managedHost.installation.runtimeId !== installation.runtimeId ||
+				managedHost.installation.processEpoch !== installation.processEpoch)
+		) {
+			lock.release();
+			return {
+				ok: false,
+				refusal: {
+					reason: 'managed-host-invalid',
+					message: 'The managed host must belong to this installation, runtime and process epoch.',
+				},
+			};
+		}
+	} catch (error) {
+		lock.release();
+		throw error;
+	}
 	const managedAuthority = managedHost?.authority ?? options.managed?.authority;
 	const custodyStanding = options.managed?.standing;
 	const binding = createManagedBinding({

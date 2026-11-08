@@ -39,6 +39,7 @@ import type {
 	EndpointComponent,
 	EndpointPort,
 } from '../../shared/maestro-lib/managed/endpoint-port';
+import type { ManagedEffectProducer } from '../../shared/maestro-lib/managed/effects';
 import {
 	createLifecycleProjector,
 	type LifecycleProjector,
@@ -376,6 +377,12 @@ export interface EnterpriseServiceDeps {
 	now?: () => number;
 	/** Test seam: how a port is opened for a socket path. */
 	openPort?: Parameters<typeof createEnrollmentLifecycle>[0]['openPort'];
+	/**
+	 * Trusted host injection after authenticated EFFECT/1 negotiation on this port.
+	 * Return the same producer while its connection/generation remains current,
+	 * or null when unavailable. The default v1 client has no effect producer.
+	 */
+	effectProducer?(port: EndpointPort): ManagedEffectProducer | null;
 	/** Hears a dispatch ledger write that failed. Default: nothing; `dispatch.persistFailures()` counts them. */
 	onDispatchPersistError?(error: unknown): void;
 	/** Test seam: how an SSH remote is asked for its managed standing. Default: the real probe over ssh. */
@@ -488,7 +495,7 @@ export interface EnterpriseService {
 		workflow: WorkflowIdentityLike,
 		run: { runId: string; attemptId: string }
 	): Promise<WorkflowFenceAnswer>;
-	/** Re-attach a previously enrolled installation. Never throws; the outcome is in `status()`. */
+	/** Recover once before admitting work, then re-attach. Ledger failure rejects and holds admission. */
 	start(): Promise<void>;
 	close(): Promise<void>;
 }
@@ -516,6 +523,8 @@ export function createEnterpriseService(deps: EnterpriseServiceDeps): Enterprise
 	// The socket the lifecycle opened last, injected or the real client, so the
 	// host adapter and the workflow ownership speak over the same connection.
 	let port: EndpointPort | null = null;
+	let admissionReady = false;
+	let starting: Promise<void> | null = null;
 	// Close once: the quit handler's cleanup and a later will-quit can both reach it.
 	let closing: Promise<void> | null = null;
 	const openPort =
@@ -544,7 +553,20 @@ export function createEnterpriseService(deps: EnterpriseServiceDeps): Enterprise
 		get endpoint() {
 			return port;
 		},
-		status: () => lifecycle.status(),
+		status: () => {
+			const status = lifecycle.status();
+			return admissionReady && !closing
+				? status
+				: {
+						...status,
+						authority: 'none',
+						reason: closing
+							? 'The desktop authority is closing.'
+							: 'The desktop authority has not recovered its dispatch state.',
+					};
+		},
+		effectProducer: () =>
+			admissionReady && !closing && port ? (deps.effectProducer?.(port) ?? null) : null,
 		now,
 	});
 	const dispatch = createBrokerDispatch({
@@ -591,6 +613,7 @@ export function createEnterpriseService(deps: EnterpriseServiceDeps): Enterprise
 		identity,
 		host,
 		dispatch,
+		effects: host.effects,
 		workflowFence: claimWorkflowFence,
 		now,
 	});
@@ -717,43 +740,56 @@ export function createEnterpriseService(deps: EnterpriseServiceDeps): Enterprise
 		managed,
 		workflows,
 		claimWorkflowFence,
-		async start() {
-			// The ledger is read first: a lease still bound at the last exit is unknown from here on.
-			await dispatch.load();
-			// So are the held fences: a restarted host re-claims with what it held, never afresh.
-			await workflows.load();
-			// And the command and receipt ledgers, before any attach makes admission possible:
-			// a command accepted by the last process is unknown, a pending receipt uncertain.
-			await commands.load();
-			await inbox.load();
-			// The event journal reads its file before the projection raises anything this process
-			// observes; a file that will not load is reported and left alone, never overwritten.
-			const loadedEvents = await eventJournal.load();
-			if (loadedEvents.ok) {
-				eventJournal.attach(events);
-				eventJournalAttached = true;
-				// The client passes when an event lands and rarely otherwise; with no record its
-				// standing read finds no file and stops there, so an unenrolled desktop still never
-				// touches the keyring. Started with no standing yet: the first passes answer so.
-				events.subscribe(() => telemetry.wake());
-				telemetry.start();
-			} else {
-				deps.onEventJournalUnavailable?.(loadedEvents);
-			}
-			// No sealed file, no custody read: an unenrolled desktop never touches the keyring here.
-			if (identity.read().status === 'ok') await lifecycle.connect();
-			// What this boot is, once its standing is known: one event per distinct
-			// inventory, kept by the journal, withheld from the endpoint by name.
-			inventory.record();
+		start() {
+			if (closing) return closing;
+			starting ??= (async () => {
+				// The ledger is read first: a lease still bound at the last exit is unknown from here on.
+				const loadedDispatch = await dispatch.load();
+				if (!loadedDispatch.ok)
+					throw new Error(`Managed dispatch recovery failed: ${loadedDispatch.message}`);
+				// So are the held fences: a restarted host re-claims with what it held, never afresh.
+				await workflows.load();
+				// And the command and receipt ledgers, before any attach makes admission possible:
+				// a command accepted by the last process is unknown, a pending receipt uncertain.
+				await commands.load();
+				await inbox.load();
+				// The event journal reads its file before the projection raises anything this process
+				// observes; a file that will not load is reported and left alone, never overwritten.
+				const loadedEvents = await eventJournal.load();
+				if (closing) return;
+				if (loadedEvents.ok) {
+					eventJournal.attach(events);
+					eventJournalAttached = true;
+					// The client passes when an event lands and rarely otherwise; with no record its
+					// standing read finds no file and stops there, so an unenrolled desktop still never
+					// touches the keyring. Started with no standing yet: the first passes answer so.
+					events.subscribe(() => telemetry.wake());
+					telemetry.start();
+				} else {
+					deps.onEventJournalUnavailable?.(loadedEvents);
+				}
+				// No sealed file, no custody read: an unenrolled desktop never touches the keyring here.
+				admissionReady = true;
+				if (identity.read().status === 'ok') await lifecycle.connect();
+				// What this boot is, once its standing is known: one event per distinct
+				// inventory, kept by the journal, withheld from the endpoint by name.
+				inventory.record();
+			})();
+			return starting;
 		},
 		close() {
 			// Idempotent: the quit handler's cleanup and a later will-quit both land here, and
 			// the second caller waits on the first drain instead of starting another.
 			closing ??= (async () => {
+				admissionReady = false;
+				host.authority.revokeAll('The desktop authority is closing.');
+				// A failed start still needs cleanup; its caller receives the original rejection.
+				await starting?.catch(() => undefined);
 				// No new pass; the one in flight settles its batch before the socket and the file go.
 				telemetry.stop();
 				await telemetry.drain();
 				await lifecycle.close();
+				await dispatch.flush();
 				// What the journal recorded of the last spawns and exits, before the process goes.
 				if (eventJournalAttached) await eventJournal.flush();
 			})();

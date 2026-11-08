@@ -2212,6 +2212,20 @@
 					"id": "MCOMP-13-03"
 				},
 				{
+					"id": "MCOMP-13-03A",
+					"label": "Test authority composition and recovery ordering",
+					"kind": "TEST",
+					"targets": [
+						"src/__tests__/main/enterprise/service.test.ts",
+						"src/__tests__/main/enterprise/dispatch.test.ts",
+						"src/shared/maestro-lib/runtime/__tests__/runtime.test.ts"
+					],
+					"outcome": "Bounded continuation of MCOMP-13-03: test desktop prepared/effect composition through declared local producers, current actor/installation, startup recovery and shutdown, unavailable producers, corrupt dispatch ledgers and runtime host identity mismatch or composition failure. At most three authored files and fewer than 500 changed lines. Local fixture proof only; production negotiation and paired/provider/native qualification remain separate.",
+					"backlog": ["M-03"],
+					"requires": ["MAESTRO-CONTRACT-INPUTS-BUILD"],
+					"produces": []
+				},
+				{
 					"label": "Repair pair runtime and actual fixture observation",
 					"kind": "IMPLEMENT",
 					"targets": [
@@ -2257,7 +2271,7 @@
 			"produces": ["MAESTRO-EFFECT-CONSUMERS-BUILD"],
 			"id": "MCOMP-13",
 			"path": ".maestro/playbooks/2026-10-29-Maestro-Integration-Completion/MCOMP-13.md",
-			"taskCount": 12,
+			"taskCount": 13,
 			"stage": "S06"
 		},
 		{
@@ -5425,7 +5439,7 @@
 				"MEGA-RUNTIME-ADAPTER-BUILD"
 			],
 			"nativeInputs": false,
-			"taskCount": 13
+			"taskCount": 14
 		},
 		{
 			"id": "S07",
@@ -5703,10 +5717,10 @@
 			"taskCount": 1
 		}
 	],
-	"taskCount": 322,
+	"taskCount": 323,
 	"taskCounts": {
 		"IMPLEMENT": 215,
-		"TEST": 47,
+		"TEST": 48,
 		"VERIFY": 60
 	},
 	"artifacts": {
@@ -6406,7 +6420,8 @@
 			"MCOMP-13-02B",
 			"MCOMP-13-02C",
 			"MCOMP-13-02D",
-			"MCOMP-13-02E"
+			"MCOMP-13-02E",
+			"MCOMP-13-03A"
 		],
 		"PAIR-02": [
 			"GCOMP-08-01",

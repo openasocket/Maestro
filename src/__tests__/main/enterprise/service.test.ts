@@ -13,7 +13,20 @@ import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createLocalEndpointClient } from '../../../main/enterprise/endpoint-client';
-import { createEnterpriseService, type EnterpriseService } from '../../../main/enterprise/service';
+import {
+	createEnterpriseService,
+	type EnterpriseService,
+	type EnterpriseServiceDeps,
+} from '../../../main/enterprise/service';
+import {
+	buildDispatchSnapshot,
+	createLocalHostAuthority,
+} from '../../../shared/maestro-lib/managed/authority';
+import {
+	effectGranted,
+	type ManagedEffectProducer,
+} from '../../../shared/maestro-lib/managed/effects';
+import type { EndpointPort } from '../../../shared/maestro-lib/managed/endpoint-port';
 import type { LifecycleFact } from '../../../shared/maestro-lib/managed/events';
 import type { Anchor } from '../../../main/utils/keyring-anchor';
 import { fakeAnchor, fakeSeal } from './fakeCustody';
@@ -42,7 +55,10 @@ describe('enterprise service', () => {
 		fs.rmSync(dir, { recursive: true, force: true });
 	});
 
-	function compose(anchor = fakeAnchor(holder)) {
+	function compose(
+		anchor = fakeAnchor(holder),
+		extra: Pick<EnterpriseServiceDeps, 'openPort' | 'effectProducer'> = {}
+	) {
 		const seal = fakeSeal();
 		const service = createEnterpriseService({
 			userDataDir: dir,
@@ -61,10 +77,192 @@ describe('enterprise service', () => {
 			platform: 'darwin',
 			now: () => NOW,
 			openPort: (socketPath) => createLocalEndpointClient({ socketPath, timeoutMs: 1_000 }),
+			...extra,
 		});
 		services.push(service);
 		return service;
 	}
+
+	it.each([false, true])(
+		'holds prepared and effect inputs until desktop recovery: recovered=%s',
+		async (recovered) => {
+			let service: EnterpriseService;
+			let currentPort: EndpointPort;
+			let leaseNumber = 0;
+			// Declared local producer only. No wire negotiation or native confinement is claimed.
+			const producer: ManagedEffectProducer = {
+				version: 1,
+				get authorityId() {
+					return service.host.authority.authorityId;
+				},
+				authorize: vi.fn(async (request) => ({
+					decision: 'allow',
+					receipt: {
+						receiptId: 'local-effect',
+						effectDigest: request.effectDigest,
+						policyRevision: request.policyRevision,
+						expiresAt: new Date(NOW + 1000).toISOString(),
+					},
+				})),
+				consume: vi.fn(async (_request, receipt) => ({ decision: 'allow', receipt })),
+			};
+			const effectProducer = vi.fn((port: EndpointPort) =>
+				port === currentPort ? producer : null
+			);
+			service = compose(undefined, {
+				effectProducer,
+				openPort: (socketPath) => {
+					currentPort = createLocalEndpointClient({ socketPath, timeoutMs: 1_000 });
+					const prepared = createLocalHostAuthority({
+						authorityId: service.host.authority.authorityId,
+						now: () => NOW,
+						newId: () => `local-lease-${++leaseNumber}`,
+						decide: () => ({ decision: 'allow', policyRevision: 3 }),
+					});
+					Object.defineProperty(currentPort, 'preparedExecution', {
+						value: { ...prepared, version: 1 },
+					});
+					return currentPort;
+				},
+			});
+			await register(service, recovered);
+			// V1 registration has no actor binding. Supply one only in this declared
+			// local custody fixture; the production service must never manufacture it.
+			const enrolled = service.identity.read();
+			if (enrolled.status !== 'ok' || !enrolled.record.registration)
+				throw new Error('expected the local registration fixture');
+			await service.identity.write({
+				...enrolled.record,
+				registration: { ...enrolled.record.registration, actorId: 'fixture-actor' },
+			});
+			const spawn = service.spawnAuthority;
+			expect(spawn.effects).toBe(service.host.effects);
+			const verified = spawn.verify({
+				actor: { peer: 'in-process' },
+				identity: {
+					requestId: 'local-request',
+					idempotencyKey: 'local-key',
+					attemptId: 'local-attempt',
+					runId: null,
+					rootRunId: null,
+					parentRunId: null,
+				},
+				traceId: 'local-trace',
+				policyRevision: 3,
+				workflow: null,
+			});
+			if (!verified.ok) throw new Error(verified.problems.join('; '));
+			expect(verified.context.installation).toEqual(service.installation);
+			expect(verified.context.actor.id).toBe(
+				service.lifecycle.status().identity.record?.registration?.actorId
+			);
+			const request = {
+				context: verified.context,
+				policy: spawn.policy(),
+				snapshot: buildDispatchSnapshot(
+					{ command: '/local/fixture', args: [], cwd: dir, env: {} },
+					{ provider: 'claude-code', model: null }
+				),
+			};
+			const admitted = await spawn.authority.admit(request);
+			if (!recovered) {
+				expect(admitted).toMatchObject({ state: 'unavailable' });
+				expect(await service.host.authority.admit(request)).toMatchObject({ state: 'unavailable' });
+				expect(effectProducer).not.toHaveBeenCalled();
+				expect(leaseNumber).toBe(0);
+				return;
+			}
+			if (admitted.state !== 'admitted') throw new Error(admitted.message);
+			admitted.lease.bind(42);
+			const binding = {
+				leaseId: admitted.lease.leaseId,
+				actor: verified.context.actor,
+				provider: 'claude-code',
+				threadId: null,
+				turnId: 'tab-1',
+				requestId: 'effect-1',
+			};
+			const effect = {
+				kind: 'tool-call' as const,
+				tool: 'Write',
+				input: { file_path: '/work/file', content: 'exact contents' },
+				request: { method: 'Write', input: { file_path: '/work/file', content: 'exact contents' } },
+			};
+			const allowed = await spawn.effects!.decide(effect, binding, new AbortController().signal);
+			expect(effectGranted(allowed)).toBe(true);
+			expect(producer.consume).toHaveBeenCalledWith(
+				expect.objectContaining({ effect, binding, policyRevision: 3 }),
+				expect.objectContaining({ receiptId: 'local-effect' }),
+				expect.any(AbortSignal)
+			);
+			expect(effectProducer).toHaveBeenCalledWith(currentPort!);
+			vi.mocked(producer.authorize).mockImplementation(() => new Promise(() => {}));
+			const pending = spawn.effects!.decide(
+				effect,
+				{ ...binding, requestId: 'effect-2' },
+				new AbortController().signal
+			);
+			const closing = service.close();
+			expect(admitted.lease.state()).toBe('revoked');
+			expect(effectGranted(allowed)).toBe(false);
+			expect(await pending).toMatchObject({ decision: 'deny' });
+			await closing;
+			await service.start(); // Terminal close cannot re-open authority.
+			expect(service.host.policyStatus().admission.possible).toBe(false);
+			expect(service.dispatch.receipt(admitted.lease.leaseId)?.effect.state).toBe('revoked');
+			expect(
+				fake.calls.filter((call) => (call.body as { operation: string }).operation === 'execution')
+			).toHaveLength(0);
+		}
+	);
+
+	it('holds admission during recovery and recovers once across concurrent starts', async () => {
+		const service = compose();
+		let finish!: () => void;
+		const waiting = new Promise<void>((resolve) => (finish = resolve));
+		const load = service.dispatch.load;
+		const recovery = vi.spyOn(service.dispatch, 'load').mockImplementation(async () => {
+			await waiting;
+			return load();
+		});
+		const first = service.start();
+		expect(service.start()).toBe(first);
+		expect(service.host.status().reason).toContain('has not recovered');
+		expect(service.host.policyStatus().admission.possible).toBe(false);
+		finish();
+		await first;
+		await service.start();
+		expect(recovery).toHaveBeenCalledTimes(1);
+	});
+
+	it('stays closed when shutdown races with startup recovery', async () => {
+		const service = compose();
+		let finish!: () => void;
+		vi.spyOn(service.dispatch, 'load').mockImplementation(
+			() =>
+				new Promise(
+					(resolve) => (finish = () => resolve({ ok: true, receipts: 0, recoveredUnknown: 0 }))
+				)
+		);
+		const starting = service.start();
+		const closing = service.close();
+		finish();
+		await Promise.all([starting, closing]);
+		await service.start();
+		expect(service.host.status().reason).toContain('closing');
+		expect(service.telemetry.status().running).toBe(false);
+		expect(fake.calls).toHaveLength(0);
+	});
+
+	it('preserves a corrupt dispatch ledger and keeps authority unavailable', async () => {
+		const file = path.join(dir, 'maestro-managed-dispatch-receipts.json');
+		fs.writeFileSync(file, '{broken');
+		const service = compose();
+		await expect(service.start()).rejects.toThrow('Managed dispatch recovery failed');
+		expect(service.host.policyStatus().admission.possible).toBe(false);
+		expect(fs.readFileSync(file, 'utf8')).toBe('{broken');
+		expect(fake.calls).toHaveLength(0);
+	});
 
 	it('derives the installation identity and composes every part without touching the keyring when unenrolled', async () => {
 		const anchor = fakeAnchor(holder);
@@ -80,6 +278,21 @@ describe('enterprise service', () => {
 		});
 		expect(service.policy.status()).toMatchObject({ source: 'none' });
 		expect(service.host.authority.authorityId).toBe('unavailable');
+		expect(service.spawnAuthority.effects).toBe(service.host.effects);
+		expect(
+			await service.spawnAuthority.effects!.decide(
+				{ kind: 'command', command: 'fixture', cwd: null, argv: null },
+				{
+					leaseId: 'absent',
+					actor: { kind: 'human', id: 'fixture' },
+					provider: 'claude-code',
+					threadId: null,
+					turnId: null,
+					requestId: 'absent',
+				},
+				new AbortController().signal
+			)
+		).toMatchObject({ decision: 'unavailable' });
 		// The Cue port is the same enrollment seen from the Cue run router (MRC-07-02A).
 		expect(service.cueSpawnAuthority.standing()).toBe('standalone');
 		expect(service.cueSpawnAuthority.authority).toBe(service.spawnAuthority.authority);
@@ -251,7 +464,7 @@ describe('enterprise service', () => {
 	});
 
 	/** Enroll, attach and register the service against the running fake (the approval flow of the test above). */
-	async function register(service: EnterpriseService): Promise<void> {
+	async function register(service: EnterpriseService, recover = true): Promise<void> {
 		await service.identity.write({
 			installationId: service.installation.installationId,
 			tenantId: 'tenant-1',
@@ -267,7 +480,8 @@ describe('enterprise service', () => {
 			policy: { desiredRevision: null, appliedRevision: null, observedAt: null },
 			enrolledAt: new Date(NOW).toISOString(),
 		});
-		await service.start();
+		if (recover) await service.start();
+		else await service.lifecycle.connect();
 		expect((await service.policy.recover()).status).toBe('approval-required');
 		expect((await service.lifecycle.completeRegistration()).status).toBe('ok');
 		expect(service.lifecycle.status().authority).toBe('registered');

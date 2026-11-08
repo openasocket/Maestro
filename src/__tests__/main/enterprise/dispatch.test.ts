@@ -13,7 +13,7 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
 	createBrokerDispatch,
@@ -273,6 +273,34 @@ describe('broker dispatch bridge', () => {
 			leaseId: 'lease-1',
 			effect: { state: 'released' },
 		});
+	});
+
+	it('holds admission until recovery and never reloads a live lease as an unknown restart', async () => {
+		const { dispatch, host, file } = bridge();
+		const admit = vi.spyOn(host.authority, 'admit');
+		expect(await dispatch.authority.admit(admission())).toMatchObject({ state: 'unavailable' });
+		expect(admit).not.toHaveBeenCalled();
+		expect(fs.existsSync(file)).toBe(false);
+		const loading = dispatch.load();
+		expect(dispatch.load()).toBe(loading);
+		await loading;
+		const admitted = await dispatch.authority.admit(admission());
+		if (admitted.state !== 'admitted') throw new Error(admitted.message);
+		admitted.lease.bind(42);
+		await dispatch.flush();
+		await dispatch.load();
+		expect(dispatch.receipt(admitted.lease.leaseId)?.effect.state).toBe('bound');
+		expect(admit).toHaveBeenCalledTimes(1);
+	});
+
+	it('does not call authority or overwrite a ledger that recovery cannot read', async () => {
+		const { dispatch, host, file } = bridge();
+		fs.writeFileSync(file, '{broken');
+		const admit = vi.spyOn(host.authority, 'admit');
+		expect(await dispatch.load()).toMatchObject({ ok: false, reason: 'corrupt' });
+		expect(await dispatch.authority.admit(admission())).toMatchObject({ state: 'unavailable' });
+		expect(admit).not.toHaveBeenCalled();
+		expect(fs.readFileSync(file, 'utf8')).toBe('{broken');
 	});
 
 	it('leaves no record for a refusal and writes a revocation as the authority’s stop', async () => {

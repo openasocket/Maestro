@@ -188,6 +188,8 @@ export function createBrokerDispatch(deps: BrokerDispatchDeps): BrokerDispatch {
 	let doc: DispatchReceiptsDocument = emptyDocument();
 	let failures = 0;
 	let pending: Promise<void> = Promise.resolve();
+	let loaded = !deps.file;
+	let loading: Promise<DispatchLedgerLoad> | null = null;
 	const byLease = new Map<string, DispatchReceiptRecord>();
 
 	function index(): void {
@@ -266,6 +268,12 @@ export function createBrokerDispatch(deps: BrokerDispatchDeps): BrokerDispatch {
 			return deps.host.authority.authorityId;
 		},
 		async admit(request: AdmissionRequest) {
+			if (!loaded)
+				return {
+					state: 'unavailable',
+					code: 'runtime-unavailable',
+					message: 'The dispatch ledger has not recovered; managed admission is unavailable.',
+				};
 			const outcome = await deps.host.authority.admit(request);
 			if (outcome.state !== 'admitted') return outcome;
 			const { lease } = outcome;
@@ -307,31 +315,35 @@ export function createBrokerDispatch(deps: BrokerDispatchDeps): BrokerDispatch {
 	return {
 		authority,
 
-		async load() {
-			if (!deps.file) return { ok: true, receipts: 0, recoveredUnknown: 0 };
-			const read = await readStoreDocument<DispatchReceiptsDocument>(deps.file, (value) =>
-				Array.isArray(value.receipts) ? null : 'receipts is not an array'
-			);
-			if (read.status === 'corrupt' || read.status === 'unreadable') {
-				return { ok: false, reason: read.status, file: deps.file, message: read.reason };
-			}
-			doc = read.status === 'ok' ? read.data : emptyDocument();
-			index();
-			let recoveredUnknown = 0;
-			const at = iso();
-			for (const record of doc.receipts) {
-				if (record.effect.state === 'bound' || record.effect.state === 'admitted') {
-					record.effect = {
-						...record.effect,
-						state: 'unknown',
-						endedAt: at,
-						reason: 'The host restarted while this lease was live.',
-					};
-					recoveredUnknown += 1;
+		load() {
+			loading ??= (async (): Promise<DispatchLedgerLoad> => {
+				if (!deps.file) return { ok: true, receipts: 0, recoveredUnknown: 0 };
+				const read = await readStoreDocument<DispatchReceiptsDocument>(deps.file, (value) =>
+					Array.isArray(value.receipts) ? null : 'receipts is not an array'
+				);
+				if (read.status === 'corrupt' || read.status === 'unreadable') {
+					return { ok: false, reason: read.status, file: deps.file, message: read.reason };
 				}
-			}
-			if (recoveredUnknown > 0 || read.status === 'missing') await persist();
-			return { ok: true, receipts: doc.receipts.length, recoveredUnknown };
+				doc = read.status === 'ok' ? read.data : emptyDocument();
+				index();
+				let recoveredUnknown = 0;
+				const at = iso();
+				for (const record of doc.receipts) {
+					if (record.effect.state === 'bound' || record.effect.state === 'admitted') {
+						record.effect = {
+							...record.effect,
+							state: 'unknown',
+							endedAt: at,
+							reason: 'The host restarted while this lease was live.',
+						};
+						recoveredUnknown += 1;
+					}
+				}
+				if (recoveredUnknown > 0 || read.status === 'missing') await persist();
+				loaded = true;
+				return { ok: true, receipts: doc.receipts.length, recoveredUnknown };
+			})();
+			return loading;
 		},
 
 		receipts: () => doc.receipts,

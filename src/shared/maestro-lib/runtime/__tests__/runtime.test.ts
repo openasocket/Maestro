@@ -25,6 +25,7 @@ import {
 	type RuntimeRefusal,
 } from '../index';
 import type { WatchDirectory } from '../settings-watch';
+import { createManagedHostAdapter } from '../../managed/host-adapter';
 
 const T0 = Date.parse('2026-10-04T12:00:00Z');
 const BOOT = T0 - 3_600_000;
@@ -153,6 +154,55 @@ describe('createMaestroRuntime', () => {
 	// -----------------------------------------------------------------------
 
 	describe('the start rule', () => {
+		it.each(['installationId', 'runtimeId', 'processEpoch'] as const)(
+			'refuses a host with a different %s before reading managed state or exposing actions',
+			async (field) => {
+				const read = vi.fn(() => ({
+					status: 'none' as const,
+					record: null,
+					reason: null,
+					message: null,
+				}));
+				const refused = await refusal(100, {
+					managed: {
+						host: (installation) => {
+							// A miscomposed host cannot rewrite the runtime's lock identity either.
+							installation[field] = 'foreign';
+							return createManagedHostAdapter({
+								installation,
+								identity: { read },
+								endpoint: null,
+								status: () => {
+									throw new Error('must not read foreign standing');
+								},
+							});
+						},
+					},
+				});
+				expect(refused).toMatchObject({ reason: 'managed-host-invalid' });
+				expect(read).not.toHaveBeenCalled();
+				expect(fs.existsSync(lockFile())).toBe(false);
+				expect(fs.existsSync(sessionsFile())).toBe(false);
+				await start(); // The refused composition released the data directory.
+			}
+		);
+
+		it('releases the lock and preserves the error when authority composition throws', async () => {
+			const failure = new Error('custody could not be composed');
+			await expect(
+				start(100, {
+					managed: {
+						host: () => {
+							throw failure;
+						},
+					},
+				})
+			).rejects.toBe(failure);
+			expect(fs.existsSync(lockFile())).toBe(false);
+			expect(fs.existsSync(sessionsFile())).toBe(false);
+			await start();
+		});
+
 		it('uses the directory it was given and never reads MAESTRO_USER_DATA', async () => {
 			const other = fs.mkdtempSync(path.join(os.tmpdir(), 'maestro-runtime-other-'));
 			const saved = process.env.MAESTRO_USER_DATA;
