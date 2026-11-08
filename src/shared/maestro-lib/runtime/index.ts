@@ -262,11 +262,12 @@ export interface MaestroRuntime extends MaestroClient {
 	/** Consults waiting on another agent's answer (GD24). */
 	consultsInFlight(): number;
 	/**
-	 * Host only: ask on behalf of the chat turn whose process presented `credential` (its
-	 * `MAESTRO_MANAGED_CALLER_CREDENTIAL`). The credential is resolved again at every custody read
-	 * of the consult, so stopping, revoking or finishing that turn withdraws the ask's source. It
-	 * selects that tab's chat custody only and stands in for `managed.consultSource` for this ask;
-	 * the stated `fromAgentId`/`fromTabId` must match it. An unknown, stale or withdrawn credential
+	 * Host only: ask on behalf of the chat turn or live Auto Run process that presented
+	 * `credential` (its `MAESTRO_MANAGED_CALLER_CREDENTIAL`). The credential is resolved again at
+	 * every custody read of the consult, so stopping, revoking or finishing that turn or run
+	 * withdraws the ask's source. It selects that tab's chat custody, or that run's Auto Run custody
+	 * (pinned to its process), and stands in for `managed.consultSource` for this ask; the stated
+	 * `fromAgentId` (and a chat turn's `fromTabId`) must match it. An unknown, stale or withdrawn credential
 	 * authenticates nobody, so a managed ask is refused. Never expose this on a client transport
 	 * without the host first reading the credential from that caller.
 	 */
@@ -1068,8 +1069,18 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 			turnsInFlight: () => registry.size() - background.registeredCount(),
 			roundsInFlight: groupChats.roundsInFlight,
 			consultsInFlight: consults.inFlight,
-			// A credential resolves only to a chat turn's own tab: never a process or Auto Run source.
-			askAsCaller: (credential, input) => askFrom(input, () => turns.callerSource(credential)),
+			// A credential resolves to a chat turn's own tab, or else to the live Auto Run process it
+			// was minted for (MCOMP-17-03AZ). A tab is no Auto Run custody coordinate, so the run
+			// answers the stated tab and `askFrom` pins its process and kind; never a background process.
+			askAsCaller: (credential, input) =>
+				askFrom(input, () => {
+					const chat = turns.callerSource(credential);
+					if (chat) return chat;
+					const run = autoRun.callerSource(credential);
+					return run && input.fromTabId
+						? { ...run, tabId: input.fromTabId, kind: 'auto-run' as const }
+						: null;
+				}),
 		},
 	};
 }

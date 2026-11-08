@@ -1019,6 +1019,9 @@ describe('runtime consults', () => {
 			});
 
 			describe('live Auto Run source composition', () => {
+				/** Where the Auto Run process `processId` writes its real environment. */
+				const autoRunEnvFile = (processId: string) =>
+					path.join(work, `autorun-env-${processId}.json`);
 				async function liveAutoRun(kind: 'playbook' | 'goal' = 'playbook', script = ANSWER) {
 					readable = true;
 					sourceAdmissions = [];
@@ -1036,6 +1039,7 @@ describe('runtime consults', () => {
 										...turn.launch.sessionCustomEnvVars,
 										FAKE_AGENT_RECORDING: recording,
 										FAKE_AGENT_HOLD: '1',
+										FAKE_AGENT_ENV_OUT: autoRunEnvFile(options.sessionId),
 									},
 								},
 							},
@@ -1204,6 +1208,131 @@ describe('runtime consults', () => {
 						value(await nested());
 					}
 				);
+
+				describe('forwarded Auto Run caller credentials (MCOMP-17-03AZ)', () => {
+					const request = { ...input, handoffAnswer: 'Save the answer.' };
+					/** The caller credential Auto Run process `processId` was stamped with. */
+					async function credentialFor(processId: string): Promise<string> {
+						const file = autoRunEnvFile(processId);
+						let credential: unknown;
+						await vi.waitFor(() => {
+							credential = fs.existsSync(file)
+								? JSON.parse(fs.readFileSync(file, 'utf-8'))[CALLER_CREDENTIAL_ENV_VAR]
+								: undefined;
+							expect(typeof credential).toBe('string');
+						});
+						return credential as string;
+					}
+
+					it.each(['playbook', 'goal'] as const)(
+						'binds the presenting %s process without asking the host lookup or reclaiming',
+						async (kind) => {
+							const { runtime, claim, lifetime, processes } = await liveAutoRun(kind);
+							const credential = await credentialFor(processes[0]);
+							const lease = authority.live()[0];
+							sourceLookup.mockClear();
+							expect(value(await runtime.askAsCaller(credential, request)).answer).toBe(
+								'Answer 1: use a queue.'
+							);
+							const child = lineageOf(0);
+							expect(child).toEqual(
+								childDelegationContext(delegationContextOf(sourceAdmissions[0].context), {
+									link: { kind: 'agent', id: 'a2' },
+									requestId: child.identity.requestId,
+									attemptId: child.identity.attemptId,
+								})
+							);
+							expect(child.workflow).toMatchObject({
+								ownerEpoch: 'epoch-1',
+								fencingToken: 'fence-1',
+							});
+							expect(sourceLookup).not.toHaveBeenCalled();
+							expect(sourceAdmissions).toHaveLength(2);
+							expect(claim).toHaveBeenCalledTimes(1);
+							expect(lifetime.finish).not.toHaveBeenCalled();
+							expect(authority.live()).toEqual([lease]);
+						}
+					);
+
+					it.each([
+						'forged',
+						'near-miss',
+						'blank',
+						'different-agent',
+						'stopped',
+						'ended',
+						'revoked',
+						'owner',
+					] as const)('refuses a %s Auto Run caller before writing the target', async (mode) => {
+						const { runtime, processes, owner, lifetime } = await liveAutoRun();
+						const own = await credentialFor(processes[0]);
+						const credential =
+							mode === 'forged'
+								? 'A'.repeat(own.length)
+								: mode === 'near-miss'
+									? own.slice(0, -1) + (own.endsWith('A') ? 'B' : 'A')
+									: mode === 'blank'
+										? ''
+										: own;
+						if (mode === 'stopped') value(await runtime.autoRun.stop('a1'));
+						if (mode === 'ended') {
+							owner.abort();
+							await vi.waitFor(() => expect(runtime.runs.activeRuns()).toHaveLength(0));
+						}
+						if (mode === 'revoked') authority.revoke(authority.live()[0].leaseId, 'Source revoked');
+						if (mode === 'owner') lifetime.current.mockReturnValue(false);
+						const stated = mode === 'different-agent' ? { ...request, fromAgentId: 'a3' } : request;
+						expect(errorOf(await runtime.askAsCaller(credential, stated)).message).toMatch(
+							/custody/i
+						);
+						expect(provider.calls).toEqual([]);
+						expect(consultTab('a2')).toBeUndefined();
+						expect(sourceAdmissions).toHaveLength(1);
+					});
+
+					it('rereads the credential at preparation and honors it again once custody returns', async () => {
+						const { runtime, processes, lifetime } = await liveAutoRun();
+						const credential = await credentialFor(processes[0]);
+						probeBinary = async () => {
+							lifetime.current.mockReturnValue(false);
+							return { exists: true, path: '/fake/bin/claude' };
+						};
+						expect(errorOf(await runtime.askAsCaller(credential, request)).message).toMatch(
+							/custody|lease.*released/i
+						);
+						expect(provider.calls).toEqual([]);
+						probeBinary = undefined;
+						lifetime.current.mockReturnValue(true);
+						value(await runtime.askAsCaller(credential, request));
+						expect(provider.calls).toHaveLength(1);
+					});
+
+					it('keeps concurrent Auto Run credentials apart and withdraws a finished run', async () => {
+						const { runtime, file, processes } = await liveAutoRun();
+						value(await runtime.agents.update('a3', { autoRunFolderPath: work }));
+						value(await runtime.autoRun.launch('a3', { documents: [{ file }] }));
+						await vi.waitFor(() => expect(processes).toHaveLength(2));
+						const first = await credentialFor(processes[0]);
+						const other = await credentialFor(processes[1]);
+						expect(other).not.toBe(first);
+						const fromA3 = { ...request, fromAgentId: 'a3', fromTabId: 'a3-t1' };
+						expect(errorOf(await runtime.askAsCaller(other, request)).message).toMatch(/custody/i);
+						expect(errorOf(await runtime.askAsCaller(first, fromA3)).message).toMatch(/custody/i);
+						expect(provider.calls).toEqual([]);
+						value(await runtime.askAsCaller(other, fromA3));
+						value(await runtime.askAsCaller(first, request));
+						const sources = sourceAdmissions
+							.slice(0, 2)
+							.map((admission) => admission.context.identity.runId);
+						const [a3Parent, a1Parent] = [0, 1].map((n) => lineageOf(n).identity.parentRunId);
+						expect([a3Parent, a1Parent].sort()).toEqual([...sources].sort());
+						value(await runtime.autoRun.stop('a1'));
+						expect(errorOf(await runtime.askAsCaller(first, request)).message).toMatch(/custody/i);
+						value(await runtime.askAsCaller(other, fromA3));
+						expect(lineageOf(2).identity.parentRunId).toBe(a3Parent);
+						expect(provider.calls).toHaveLength(3);
+					});
+				});
 
 				it('isolates concurrent Auto Run sources and checks the exact owning agent', async () => {
 					const { runtime, caller, file, processes } = await liveAutoRun();
