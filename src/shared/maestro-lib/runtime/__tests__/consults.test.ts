@@ -23,14 +23,17 @@ import type { ClientResult, MaestroEvent } from '../../client/types';
 import {
 	createLocalHostAuthority,
 	type AdmissionRequest,
+	type ContextVerification,
 	type DispatchLease,
 } from '../../managed/authority';
 import { createManagedBinding } from '../../managed/binding';
 import {
 	MANAGED_DELEGATION_ENV_VAR,
+	delegationContextOf,
 	readDelegationContextEnv,
 	type ManagedDelegationContext,
 } from '../../managed/delegation';
+import { createHeadlessSpawnAuthority } from '../../managed/host-adapter';
 import { MANAGED_CONTRACT_VERSION } from '../../managed/types';
 import { readHistory } from '../../store/read-history';
 import type { BackgroundAdmissionEvent } from '../background-turns';
@@ -663,7 +666,8 @@ describe('runtime consults', () => {
 		async function startEnrolled(
 			decide: (request: AdmissionRequest) => 'allow' | 'deny',
 			asked: AdmissionRequest[],
-			script: FakeScript = ANSWER
+			script: FakeScript = ANSWER,
+			managed?: MaestroRuntimeOptions['managed']
 		): Promise<MaestroRuntime> {
 			let leaseId = 0;
 			authority = createLocalHostAuthority({
@@ -695,10 +699,152 @@ describe('runtime consults', () => {
 			if (!enrolled.ok) throw new Error(enrolled.message);
 			await enroller.connection.close();
 			open.splice(open.indexOf(enroller), 1);
-			const runtime = await start(script, undefined, {}, { authority });
+			const runtime = await start(script, undefined, {}, { ...managed, authority });
 			expect(runtime.managedBinding.state().state).toBe('enrolled');
 			return runtime;
 		}
+
+		describe('explicit consult delegates with authenticated parents', () => {
+			it.each([
+				'ask',
+				'handoff',
+				'workflow',
+				'grant',
+				'root',
+				'parent',
+				'chain',
+				'policy',
+				'copied',
+				'withdrawn',
+				'admission',
+				'observer',
+				'sink',
+				'host-denial',
+			] as const)('preserves the delegate and enforces %s custody', async (mode) => {
+				const asked: AdmissionRequest[] = [];
+				let source: ContextVerification = {
+					ok: false,
+					code: 'unauthenticated',
+					problems: ['Source withdrawn.'],
+				};
+				const withdrawn = source;
+				let record = namedInitiator(7, false)({ agentId: 'a1' })!;
+				record.delegation.workflow = {
+					workflowId: 'nightly',
+					version: 'v1',
+					triggerEventId: 'cue:1',
+					ownerEpoch: 'epoch-1',
+					fencingToken: 'fence-1',
+				};
+				record.delegation.delegation.grantRef = 'grant-1';
+				const saved = structuredClone(record);
+				initiator = () => record;
+				const parentContext = vi.fn(() => source);
+				let firstAttempt = true;
+				const issued: DispatchLease[] = [];
+				onBackgroundAdmission = (event) => {
+					if (event.kind === 'admitted') {
+						if (firstAttempt && mode === 'observer') source = withdrawn;
+					}
+				};
+				const runtime = await startEnrolled(
+					() => {
+						if (firstAttempt && mode === 'admission') source = withdrawn;
+						return firstAttempt && mode === 'host-denial' ? 'deny' : 'allow';
+					},
+					asked,
+					() => {
+						if (firstAttempt && mode === 'sink') source = withdrawn;
+						return { text: 'Verified child answer.' };
+					},
+					{ backgroundParentContext: parentContext }
+				);
+				const admit = authority.admit.bind(authority);
+				vi.spyOn(authority, 'admit').mockImplementation(async (request) => {
+					const result = await admit(request);
+					if (result.state === 'admitted') issued.push(result.lease);
+					return result;
+				});
+				const verified = createHeadlessSpawnAuthority({
+					installation: runtime.installation,
+					binding: runtime.managedBinding.state(),
+					host: { authority, policy: () => ({ sources: [], policyRevision: 7 }) },
+					origin: 'cue',
+					actor: { kind: 'human', id: 'source-operator' },
+				}).context(record.delegation);
+				if (!verified.ok) throw new Error(verified.problems.join('; '));
+				source = verified;
+				if (mode === 'workflow') record.delegation.workflow!.fencingToken = 'forged';
+				if (mode === 'grant') record.delegation.delegation.grantRef = 'forged';
+				if (mode === 'root') record.delegation.identity.rootRunId = 'forged';
+				if (mode === 'parent') record.delegation.identity.runId = 'forged';
+				if (mode === 'chain') record.delegation.delegation.chain[0].id = 'forged';
+				if (mode === 'policy') record.delegation.policyRevision = 8;
+				if (mode === 'copied') source = structuredClone(verified);
+				if (mode === 'withdrawn') source = withdrawn;
+				const input = {
+					targetAgentId: mode === 'handoff' ? 'a3' : 'a2',
+					fromAgentId: 'a1',
+					fromTabId: 'a1-t1',
+					question: 'Check the delegated task.',
+					...(mode === 'handoff' ? { handoffAnswer: 'Save this answer.' } : {}),
+				};
+				const first = await runtime.consults.ask(input);
+				if (mode !== 'ask' && mode !== 'handoff') {
+					const reason =
+						mode === 'copied'
+							? /parent is unavailable/
+							: mode === 'sink'
+								? /The lease for this launch is released/
+								: ['withdrawn', 'admission', 'observer'].includes(mode)
+									? /Source withdrawn/
+									: mode === 'host-denial'
+										? /policy says no/
+										: /does not match its authenticated parent/;
+					expect(errorOf(first).message).toMatch(reason);
+					expect(asked).toHaveLength(
+						['admission', 'observer', 'sink', 'host-denial'].includes(mode) ? 1 : 0
+					);
+					if (mode !== 'sink') expect(provider.calls).toEqual([]);
+					else expect(provider.calls).toHaveLength(1);
+					expect(authority.live()).toEqual([]);
+					expect(issued).toHaveLength(['admission', 'observer', 'sink'].includes(mode) ? 1 : 0);
+					for (const lease of issued) {
+						expect(lease.pid()).toBeUndefined();
+						expect(lease.ended()).toMatchObject({
+							state: 'released',
+							release: {
+								outcome: 'spawn-failed',
+								message: expect.stringContaining('Source withdrawn'),
+							},
+						});
+					}
+					firstAttempt = false;
+					record = saved;
+					source = verified;
+					expect(value(await runtime.consults.ask(input)).answer).toBe('Verified child answer.');
+				} else expect(value(first).answer).toBe('Verified child answer.');
+				const lineage = lineageOf(provider.callsFor('consult').length - 1);
+				expect(lineage).toMatchObject({
+					workflow: saved.delegation.workflow,
+					policyRevision: 1,
+					identity: { rootRunId: 'run-7', parentRunId: 'run-7' },
+					delegation: {
+						chain: [
+							...saved.delegation.delegation.chain,
+							{ kind: 'agent', id: input.targetAgentId },
+						],
+						grantRef: 'grant-1',
+					},
+				});
+				expect(asked.at(-1)!.context.actor).not.toEqual(verified.context.actor);
+				expect(delegationContextOf(asked.at(-1)!.context)).toEqual(lineage);
+				expect(permissionMode(provider.calls.at(-1)!.spec.args)).toBe('plan');
+				expect(parentContext).toHaveBeenCalledWith(provider.calls.at(-1)!.processId);
+				expect(parentContext.mock.calls.length).toBeGreaterThanOrEqual(4);
+				expect(authority.live()).toEqual([]);
+			});
+		});
 
 		describe('trusted consult source custody', () => {
 			let current: ReturnType<NonNullable<typeof initiator>>;

@@ -4030,6 +4030,20 @@
 					"produces": []
 				},
 				{
+					"id": "MCOMP-17-03X",
+					"label": "Preserve explicit delegate identity when verifying background parents",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/shared/maestro-lib/runtime/background-turns.ts",
+						"src/shared/maestro-lib/runtime/__tests__/consults.test.ts",
+						"Plans/integration-completion/program.json"
+					],
+					"outcome": "Consume MAESTRO-EFFECT-CONSUMERS-BUILD and its pinned MAESTRO-CONTRACT-INPUTS-BUILD dependency. Bounded prerequisite continuation of MCOMP-17-03: verify an explicit child against its authenticated parent while preserving the selected delegate, rather than replacing that delegate with the parent actor. Reconstruct and compare the complete inherited lineage, workflow, grant, policy and run ancestry; the target host must still admit the selected child independently. Exercise positive full-runtime consults and handoffs, inherited-scope conflicts, copied or withdrawn parent custody, final-gate changes, lease cleanup and fresh recovery with the existing real fixture-process harness. Preserve inferred group-chat behavior and standalone behavior. Production consult source association, desktop/headless Auto Run composition, incoming transport authentication, desktop composition and managed room custody remain pending. Reuse WORKFLOW-CONTEXT/1; no new wire capability, producer mapping or paired/provider/native qualification. Keep to three authored files and fewer than 500 changed lines.",
+					"backlog": ["M-04"],
+					"requires": ["MAESTRO-EFFECT-CONSUMERS-BUILD"],
+					"produces": []
+				},
+				{
 					"label": "Bind Auto Run Cue and nested work at dispatch",
 					"kind": "IMPLEMENT",
 					"targets": [
@@ -4072,7 +4086,7 @@
 			"produces": ["MAESTRO-WORKFLOW-CONSUMERS-BUILD"],
 			"id": "MCOMP-17",
 			"path": ".maestro/playbooks/2026-10-29-Maestro-Integration-Completion/MCOMP-17.md",
-			"taskCount": 28,
+			"taskCount": 29,
 			"stage": "S10"
 		},
 		{
@@ -5862,7 +5876,7 @@
 				"PAIR-DIRECT-EVIDENCE"
 			],
 			"nativeInputs": false,
-			"taskCount": 35
+			"taskCount": 36
 		},
 		{
 			"id": "S11",
@@ -6066,9 +6080,9 @@
 			"taskCount": 1
 		}
 	],
-	"taskCount": 348,
+	"taskCount": 349,
 	"taskCounts": {
-		"IMPLEMENT": 239,
+		"IMPLEMENT": 240,
 		"TEST": 49,
 		"VERIFY": 60
 	},
@@ -6835,6 +6849,7 @@
 			"MCOMP-17-03U",
 			"MCOMP-17-03V",
 			"MCOMP-17-03W",
+			"MCOMP-17-03X",
 			"MCOMP-17-03",
 			"MCOMP-17-04",
 			"MCOMP-17-05",

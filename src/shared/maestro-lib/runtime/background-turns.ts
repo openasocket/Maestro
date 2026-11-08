@@ -341,8 +341,14 @@ export function createBackgroundTurns(options: BackgroundTurnsOptions): Backgrou
 					...parent,
 					verification: { ...parent.verification, verifiedAt: undefined },
 				});
+				// An explicit child names its delegate (the consulted agent), which can differ
+				// from the source actor. This is a requested identity, not authority: rebuild
+				// every inherited field from the verified parent and admit the full child below.
+				const link = explicit ? delegation.delegation.chain.at(-1) : parent.actor;
+				if (!link)
+					return refuse('denied', 'policy-denied', 'The background child names no delegate.');
 				const child = childDelegationContext(delegationContextOf(parent), {
-					link: parent.actor,
+					link,
 					requestId: delegation.identity.requestId,
 					attemptId: delegation.identity.attemptId,
 					idempotencyKey: delegation.identity.idempotencyKey,
