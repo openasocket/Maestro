@@ -500,6 +500,29 @@ function callerSourceResolverOf(ctx: MessageHandlerContext): CallerSourceResolve
 }
 
 /**
+ * How often a credentialed ask re-reads its caller's custody while the consult runs
+ * (MCOMP-17-03AS). The credential is also re-read once more when the consult settles.
+ */
+export const CALLER_CUSTODY_RECHECK_MS = 1_000;
+
+/**
+ * The host-only hook that stops the consult a withdrawn ask's dispatch ticket started
+ * (MCOMP-17-03AS). Optional: absent, the ask is still withdrawn here (the caller is told and the
+ * answer withheld) while the consult itself runs to its own end.
+ */
+export type CallerConsultWithdrawer = (dispatchTicket: string) => void;
+
+/** The withdraw hook the desktop composed for the ask handler, when it composed one. */
+function callerConsultWithdrawerOf(
+	ctx: MessageHandlerContext
+): CallerConsultWithdrawer | undefined {
+	const { withdrawCallerConsult } = ctx.callbacks as MessageHandlerContext['callbacks'] & {
+		withdrawCallerConsult?: CallerConsultWithdrawer;
+	};
+	return typeof withdrawCallerConsult === 'function' ? withdrawCallerConsult : undefined;
+}
+
+/**
  * Authenticate a forwarded caller credential (MCOMP-17-03AP): the exact agent and tab it names,
  * or the refusal that leaves nothing asked. The stated ids must both be present and be exactly
  * that source, so a credential never lends one turn's standing to another agent or tab.
@@ -586,6 +609,7 @@ export function handleCrossAgentAsk(
 	// issued or the target is touched, with the shared host's wording. Never echoed or logged.
 	let fromSessionId = statedFromSessionId;
 	let fromTabId = statedFromTabId;
+	let custodyCredential: string | undefined;
 	if ('callerCredential' in message) {
 		const caller = resolveForwardedCaller(ctx, message.callerCredential, {
 			fromSessionId: statedFromSessionId,
@@ -597,6 +621,7 @@ export function handleCrossAgentAsk(
 		}
 		fromSessionId = caller.agentId;
 		fromTabId = caller.tabId;
+		custodyCredential = message.callerCredential as string;
 	}
 	if (!ctx.callbacks.getSessionDetail?.(targetSessionId)) {
 		reply({ success: false, error: 'Agent not found' });
@@ -624,6 +649,44 @@ export function handleCrossAgentAsk(
 	// admitted for the CLI or device that asked (MRC-08-01C).
 	const dispatchTicket = issueDispatchTicket(admission, { agentId: targetSessionId });
 
+	// Source custody (MCOMP-17-03AS): a credentialed ask stands only while the chat turn that
+	// asked still holds its admission. The credential is re-read on an interval while the consult
+	// runs and once more when it settles; once it names nobody (the turn was stopped, killed,
+	// replaced, finished or revoked) the ask is withdrawn: the caller is told, the answer is
+	// withheld, and the host's withdraw hook (when composed) stops the consult. Only the first
+	// outcome is ever replied.
+	let settled = false;
+	let custodyWatch: ReturnType<typeof setInterval> | undefined;
+	const settle = (payload: Record<string, unknown>): boolean => {
+		if (settled) return false;
+		settled = true;
+		if (custodyWatch) clearInterval(custodyWatch);
+		reply(payload);
+		return true;
+	};
+	const custodyHeld = (): boolean =>
+		custodyCredential === undefined ||
+		resolveForwardedCaller(ctx, custodyCredential, { fromSessionId, fromTabId }).ok;
+	const withdrawForCustody = (): void => {
+		const replied = settle({
+			success: false,
+			error:
+				'The asking chat turn no longer holds its admission (stopped, ended or revoked); the ask was withdrawn and no answer is returned.',
+		});
+		if (!replied) return;
+		logger.info(
+			`[Web Ask] Withdrawn: the asking turn lost custody | Target: ${targetSessionId} | From: ${fromSessionId ?? 'unattributed'}`,
+			LOG_CONTEXT
+		);
+		callerConsultWithdrawerOf(ctx)?.(dispatchTicket);
+	};
+	if (custodyCredential !== undefined) {
+		custodyWatch = setInterval(() => {
+			if (!custodyHeld()) withdrawForCustody();
+		}, CALLER_CUSTODY_RECHECK_MS);
+		custodyWatch.unref?.();
+	}
+
 	ctx.callbacks
 		.consultAgent({
 			targetSessionId,
@@ -638,10 +701,18 @@ export function handleCrossAgentAsk(
 			// A consult that never reached the sink (no window, the renderer refused
 			// it) leaves its ticket unclaimed; one that ran has already spent it.
 			if (!result.success) withdrawDispatchTicket(dispatchTicket);
-			reply({ ...result });
+			if (settled) return;
+			if (!custodyHeld()) {
+				withdrawForCustody();
+				return;
+			}
+			settle({ ...result });
 		})
 		.catch((error) => {
 			withdrawDispatchTicket(dispatchTicket);
+			if (custodyWatch) clearInterval(custodyWatch);
+			if (settled) return;
+			settled = true;
 			ctx.reportHandlerError(
 				client,
 				error,

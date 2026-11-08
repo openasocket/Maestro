@@ -4324,6 +4324,20 @@
 					"produces": []
 				},
 				{
+					"id": "MCOMP-17-03AS",
+					"label": "Hold asking-turn custody while a desktop credentialed consult runs",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/main/web-server/handlers/messageHandlers/commands.ts",
+						"src/__tests__/main/web-server/handlers/messageHandlers.test.ts",
+						"Plans/integration-completion/program.json"
+					],
+					"outcome": "Consume MAESTRO-EFFECT-CONSUMERS-BUILD and its pinned MAESTRO-CONTRACT-INPUTS-BUILD dependency. Bounded prerequisite continuation of MCOMP-17-03 after MCOMP-17-03AR: the desktop cross_agent_ask handler re-reads a resolved caller credential on an interval while the consult runs and once more when it settles; once the credential names nobody or another source, the ask is withdrawn (one refusal reply, the answer withheld, a later failure raises no second reply) and an optional host withdraw hook keyed by the dispatch ticket is called. Exercise mid-flight withdrawal, a moved source, delivery while custody holds with the watch stopped after settle, the settle-time re-read, failure after withdrawal, an absent hook, no watch without a credential, and a mutation check. Composing the withdraw hook so the running consult process is stopped, background/consult and Auto Run child credentials and room owner lifetime remain pending. Reuse WORKFLOW-CONTEXT/1; no new wire capability, producer mapping or paired/provider/native qualification. Keep to three authored files and fewer than 500 changed lines.",
+					"backlog": ["M-04"],
+					"requires": ["MAESTRO-EFFECT-CONSUMERS-BUILD"],
+					"produces": []
+				},
+				{
 					"label": "Bind Auto Run Cue and nested work at dispatch",
 					"kind": "IMPLEMENT",
 					"targets": [
@@ -4366,7 +4380,7 @@
 			"produces": ["MAESTRO-WORKFLOW-CONSUMERS-BUILD"],
 			"id": "MCOMP-17",
 			"path": ".maestro/playbooks/2026-10-29-Maestro-Integration-Completion/MCOMP-17.md",
-			"taskCount": 49,
+			"taskCount": 50,
 			"stage": "S10"
 		},
 		{
@@ -6156,7 +6170,7 @@
 				"PAIR-DIRECT-EVIDENCE"
 			],
 			"nativeInputs": false,
-			"taskCount": 56
+			"taskCount": 57
 		},
 		{
 			"id": "S11",
@@ -6360,8 +6374,8 @@
 			"taskCount": 1
 		}
 	],
-	"taskCount": 369,
-	"taskCounts": { "IMPLEMENT": 260, "TEST": 49, "VERIFY": 60 },
+	"taskCount": 370,
+	"taskCounts": { "IMPLEMENT": 261, "TEST": 49, "VERIFY": 60 },
 	"artifacts": {
 		"MEGA-CONTRACTS-FOUNDATION-BUILD": {
 			"producerDocument": "GCOMP-01",
@@ -7146,6 +7160,7 @@
 			"MCOMP-17-03AP",
 			"MCOMP-17-03AQ",
 			"MCOMP-17-03AR",
+			"MCOMP-17-03AS",
 			"MCOMP-17-03",
 			"MCOMP-17-04",
 			"MCOMP-17-05",

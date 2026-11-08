@@ -38,6 +38,7 @@ import {
 	type WebClientMessage,
 	type MessageHandlerCallbacks,
 } from '../../../../main/web-server/handlers/messageHandlers';
+import { CALLER_CUSTODY_RECHECK_MS } from '../../../../main/web-server/handlers/messageHandlers/commands';
 import {
 	getActivePluginManager,
 	isPluginsFeatureEnabled,
@@ -785,6 +786,136 @@ describe('WebSocketMessageHandler', () => {
 					ask({ fromSessionId: 'caller-1', fromTabId: 'caller-tab', callerCredential: 42 });
 					expect(callerSourceOf).not.toHaveBeenCalled();
 					expect(lastReply().error).toContain('must be a string');
+				});
+
+				describe('source custody while the consult runs (MCOMP-17-03AS)', () => {
+					let finish: (result: Record<string, unknown>) => void;
+					let fail: (error: Error) => void;
+					let withdrawCallerConsult: ReturnType<typeof vi.fn>;
+					const replies = () =>
+						vi
+							.mocked(client.socket.send)
+							.mock.calls.map((call) => JSON.parse(String(call[0])))
+							.filter((r) => r.type === 'cross_agent_ask_result');
+					const credentialedAsk = () =>
+						ask({ fromSessionId: 'caller-1', fromTabId: 'caller-tab', callerCredential: LIVE });
+
+					beforeEach(() => {
+						vi.useFakeTimers();
+						vi.mocked(callbacks.consultAgent).mockImplementation(
+							() =>
+								new Promise((resolve, reject) => {
+									finish = resolve as typeof finish;
+									fail = reject;
+								})
+						);
+						withdrawCallerConsult = vi.fn();
+						handler.setCallbacks({
+							callerSourceOf,
+							withdrawCallerConsult,
+						} as Partial<MessageHandlerCallbacks>);
+					});
+					afterEach(() => {
+						vi.useRealTimers();
+					});
+
+					it('withdraws the ask when the asking turn loses custody mid-flight', async () => {
+						credentialedAsk();
+						expect(callbacks.consultAgent).toHaveBeenCalledTimes(1);
+						const ticket = ticketSent();
+						vi.advanceTimersByTime(CALLER_CUSTODY_RECHECK_MS);
+						expect(replies()).toHaveLength(0);
+
+						// The turn was stopped or revoked: the host's lookup now names nobody.
+						callerSourceOf.mockReturnValue(null);
+						vi.advanceTimersByTime(CALLER_CUSTODY_RECHECK_MS);
+						expect(replies()).toHaveLength(1);
+						expect(replies()[0]).toMatchObject({ success: false, requestId: 'r-cred' });
+						expect(replies()[0].error).toContain('the ask was withdrawn');
+						expect(JSON.stringify(replies()[0])).not.toContain(LIVE);
+						expect(withdrawCallerConsult).toHaveBeenCalledTimes(1);
+						expect(withdrawCallerConsult).toHaveBeenCalledWith(ticket);
+
+						// The consult's late answer is withheld, and the watch has stopped.
+						finish({ success: true, answer: 'secret answer' });
+						await vi.runAllTimersAsync();
+						expect(replies()).toHaveLength(1);
+						expect(JSON.stringify(replies())).not.toContain('secret answer');
+						const reads = callerSourceOf.mock.calls.length;
+						vi.advanceTimersByTime(CALLER_CUSTODY_RECHECK_MS * 5);
+						expect(callerSourceOf.mock.calls.length).toBe(reads);
+						expect(withdrawCallerConsult).toHaveBeenCalledTimes(1);
+					});
+
+					it('a turn that moves to another source is custody lost too', () => {
+						credentialedAsk();
+						callerSourceOf.mockReturnValue({ agentId: 'caller-1', tabId: 'other-tab' });
+						vi.advanceTimersByTime(CALLER_CUSTODY_RECHECK_MS);
+						expect(replies()).toHaveLength(1);
+						expect(replies()[0].error).toContain('the ask was withdrawn');
+					});
+
+					it('delivers the answer once while custody holds, then stops re-reading', async () => {
+						credentialedAsk();
+						vi.advanceTimersByTime(CALLER_CUSTODY_RECHECK_MS * 3);
+						expect(callerSourceOf.mock.calls.length).toBeGreaterThanOrEqual(4);
+						finish({ success: true, answer: 'the answer' });
+						await vi.advanceTimersByTimeAsync(0);
+						expect(replies()).toHaveLength(1);
+						expect(replies()[0]).toMatchObject({ success: true, answer: 'the answer' });
+						const reads = callerSourceOf.mock.calls.length;
+						vi.advanceTimersByTime(CALLER_CUSTODY_RECHECK_MS * 5);
+						expect(callerSourceOf.mock.calls.length).toBe(reads);
+						expect(withdrawCallerConsult).not.toHaveBeenCalled();
+					});
+
+					it('re-reads custody when the consult settles, so an answer between checks is withheld', async () => {
+						credentialedAsk();
+						callerSourceOf.mockReturnValue(null);
+						finish({ success: true, answer: 'late answer' });
+						await vi.advanceTimersByTimeAsync(0);
+						expect(replies()).toHaveLength(1);
+						expect(replies()[0]).toMatchObject({ success: false });
+						expect(replies()[0].error).toContain('the ask was withdrawn');
+						expect(JSON.stringify(replies())).not.toContain('late answer');
+						expect(withdrawCallerConsult).toHaveBeenCalledTimes(1);
+					});
+
+					it('a consult that fails after the withdrawal raises no second reply', async () => {
+						credentialedAsk();
+						callerSourceOf.mockReturnValue(null);
+						vi.advanceTimersByTime(CALLER_CUSTODY_RECHECK_MS);
+						fail(new Error('renderer gone'));
+						await vi.advanceTimersByTimeAsync(0);
+						const asks = vi
+							.mocked(client.socket.send)
+							.mock.calls.map((call) => JSON.parse(String(call[0])))
+							.filter((r) => r.requestId === 'r-cred');
+						expect(asks).toHaveLength(1);
+						expect(asks[0].error).toContain('the ask was withdrawn');
+					});
+
+					it('withdraws without a composed withdraw hook', () => {
+						handler.setCallbacks({
+							withdrawCallerConsult: undefined,
+						} as Partial<MessageHandlerCallbacks>);
+						credentialedAsk();
+						callerSourceOf.mockReturnValue(null);
+						expect(() => vi.advanceTimersByTime(CALLER_CUSTODY_RECHECK_MS)).not.toThrow();
+						expect(replies()).toHaveLength(1);
+						expect(replies()[0].error).toContain('the ask was withdrawn');
+					});
+
+					it('an ask without a credential holds no custody watch', async () => {
+						ask({ fromSessionId: 'caller-1', fromTabId: 'caller-tab' });
+						callerSourceOf.mockReturnValue(null);
+						vi.advanceTimersByTime(CALLER_CUSTODY_RECHECK_MS * 3);
+						expect(callerSourceOf).not.toHaveBeenCalled();
+						finish({ success: true, answer: 'plain' });
+						await vi.advanceTimersByTimeAsync(0);
+						expect(replies()).toHaveLength(1);
+						expect(replies()[0]).toMatchObject({ success: true, answer: 'plain' });
+					});
 				});
 			});
 
