@@ -29,6 +29,7 @@ import {
 	clearRememberedClaudeSessionCosts,
 } from '../../../claudeCostTracker';
 import { embedSystemPromptInPrompt } from '../../../embeddedSystemPrompt';
+import { stopProcess } from '../../control/termination';
 import { getAgentCapabilities } from '../../providers/capabilities';
 import { getAgentDefinition, type AgentConfig } from '../../providers/definitions';
 import { resolveMaestroPaths } from '../../paths/resolve';
@@ -572,6 +573,126 @@ describe('background turns', () => {
 		});
 
 		describe('live background source custody', () => {
+			it.each(['managed', 'standalone'] as const)(
+				'keeps %s process ownership when caller coordinates change during preparation',
+				async (standing) => {
+					const authority = authorityOf(() => 'allow');
+					const { background, provider } = managedTurns(
+						() => ({ text: 'working', hold: true }),
+						standing === 'managed' ? authority : null
+					);
+					const runner = background.groupChatRunner(handlers);
+					const spawn = spawnOf({ readOnlyMode: true });
+					const pending = runner.start(spawn);
+					spawn.processId = MODERATOR;
+					spawn.readOnlyMode = false;
+					const started = await pending;
+					try {
+						expect(started.success).toBe(true);
+						expect(provider.calls[0].processId).toBe(PARTICIPANT);
+						expect(registry.isBusy(groupChatOwner(CHAT_ID), PARTICIPANT)).toBe(true);
+						expect(registry.isBusy(groupChatOwner(CHAT_ID), MODERATOR)).toBe(false);
+						expect(background.sourceCustody(MODERATOR)).toBeNull();
+						if (standing === 'managed')
+							expect(background.sourceCustody(PARTICIPANT)?.writable).toBe(false);
+						else expect(background.sourceCustody(PARTICIPANT)).toBeNull();
+						runner.stop(PARTICIPANT);
+						await background.whenSettled(() => true);
+						expect(background.activeCount()).toBe(0);
+						expect(registry.size()).toBe(0);
+					} finally {
+						// Clean up the fixture even if an ownership regression disconnects Stop.
+						if (background.activeCount() && started.pid)
+							stopProcess({ pid: started.pid }, { from: 'kill', graceMs: 0, immediate: true });
+						await registry.stopAll();
+					}
+				}
+			);
+
+			it.each([
+				['group-chat', 'preparation'],
+				['consult', 'preparation'],
+				['group-chat', 'admission'],
+				['consult', 'admission'],
+			])('pins the submitted %s identity and lineage through %s', async (kind, phase) => {
+				const authority = authorityOf(() => 'allow');
+				const waiting = Promise.withResolvers<void>();
+				const resume = Promise.withResolvers<void>();
+				const admit = authority.admit.bind(authority);
+				vi.spyOn(authority, 'admit').mockImplementation(async (request) => {
+					waiting.resolve();
+					await resume.promise;
+					return admit(request);
+				});
+				const { background, provider } = managedTurns(
+					() => ({ text: 'original source', hold: true }),
+					authority
+				);
+				const observer = { onActivity: vi.fn(), onSessionId: vi.fn(), onEnd: vi.fn() };
+				const runner =
+					kind === 'consult' ? background.consultRunner() : background.groupChatRunner(handlers);
+				const processId = kind === 'consult' ? 'cross-agent-original' : PARTICIPANT;
+				const delegation = carried(3);
+				delegation.workflow = {
+					workflowId: 'nightly',
+					version: 'v1',
+					triggerEventId: 'cue:1',
+					ownerEpoch: 'epoch-1',
+					fencingToken: 'fence-1',
+				};
+				delegation.delegation.grantRef = 'grant-1';
+				const original = structuredClone(delegation);
+				const spawn = spawnOf({
+					processId,
+					delegation,
+					readOnlyMode: true,
+					prompt: 'original prompt',
+				});
+				const pending = runner.start(spawn, observer);
+				try {
+					if (phase === 'admission') await waiting.promise;
+					spawn.processId = MODERATOR;
+					spawn.prompt = 'replacement prompt';
+					spawn.readOnlyMode = false;
+					delegation.identity.runId = 'replacement-run';
+					delegation.delegation.chain[0].id = 'replacement-source';
+					delegation.delegation.chain[1].id = 'replacement-target';
+					delegation.delegation.grantRef = 'replacement-grant';
+					delegation.workflow.fencingToken = 'replacement-fence';
+					resume.resolve();
+					expect((await pending).success).toBe(true);
+					expect(provider.calls).toHaveLength(1);
+					expect(provider.calls[0].processId).toBe(processId);
+					expect(promptOf(provider.calls[0].spec)).toContain('original prompt');
+					expect(promptOf(provider.calls[0].spec)).not.toContain('replacement prompt');
+					const custody = background.sourceCustody(processId)!;
+					expect(custody.writable).toBe(false);
+					expect(custody.context.workflow).toEqual(original.workflow);
+					expect(custody.context.delegation).toEqual(original.delegation);
+					expect(custody.context.identity).toEqual(original.identity);
+					expect(background.sourceCustody(MODERATOR)).toBeNull();
+					expect(stampedOn(provider.calls[0].spec.env!)).toEqual(original);
+					// Stop must reach the process registered under the submitted id.
+					runner.stop(processId);
+					expect(background.sourceCustody(processId)).toBeNull();
+					await background.whenSettled(() => true);
+					expect(authority.live()).toEqual([]);
+					expect(registry.size()).toBe(0);
+					// A fresh request may use the caller's edits; it is admitted independently.
+					spawn.processId = processId;
+					expect((await runner.start(spawn, observer)).success).toBe(true);
+					expect(background.sourceCustody(processId)?.writable).toBe(true);
+					expect(background.sourceCustody(processId)?.context.identity.runId).toBe(
+						'replacement-run'
+					);
+					expect(asked).toHaveLength(2);
+				} finally {
+					resume.resolve();
+					await pending;
+					await registry.stopAll();
+				}
+			});
+
 			it.each([true, false])(
 				'retains original context and prepared readOnlyMode=%s',
 				async (readOnlyMode) => {

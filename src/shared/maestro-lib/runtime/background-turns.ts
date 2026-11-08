@@ -434,6 +434,13 @@ export function createBackgroundTurns(options: BackgroundTurnsOptions): Backgrou
 		owner: string,
 		hooks: TurnHooks
 	): Promise<GroupChatTurnStart> {
+		// The caller may reuse its request while preparation awaits. Keep its coordinates and
+		// access mode with the registered owner, and retain the submitted delegation by value.
+		// Live host/parent authority is still rechecked independently through the final gate.
+		spawn = {
+			...spawn,
+			...(spawn.delegation ? { delegation: structuredClone(spawn.delegation) } : {}),
+		};
 		const processId = spawn.processId;
 		if (registered.has(processId)) {
 			return { success: false, error: 'A background turn with this process id is still settling.' };

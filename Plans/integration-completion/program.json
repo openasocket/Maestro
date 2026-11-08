@@ -4142,6 +4142,20 @@
 					"produces": []
 				},
 				{
+					"id": "MCOMP-17-03AF",
+					"label": "Pin background dispatch identity and delegation before asynchronous preparation",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/shared/maestro-lib/runtime/background-turns.ts",
+						"src/shared/maestro-lib/runtime/__tests__/background-turns.test.ts",
+						"Plans/integration-completion/program.json"
+					],
+					"outcome": "Consume MAESTRO-EFFECT-CONSUMERS-BUILD and its pinned MAESTRO-CONTRACT-INPUTS-BUILD dependency. Bounded prerequisite continuation of MCOMP-17-03: snapshot the background request coordinates, access mode and carried delegation before any asynchronous preparation. Keep the registered owner, prepared process, admission, live source custody and stop/report lifecycle on the same submitted identity despite caller mutation. Preserve workflow/fence and source/target lineage while continuing to recheck live host and parent authority. Exercise real group-chat and consult fixture processes, mutation before preparation and during admission, standalone behavior, cancellation and fresh recovery. Transport authentication and lookup installation, desktop composition and managed room custody remain pending. Reuse WORKFLOW-CONTEXT/1; no new wire capability, producer mapping or paired/provider/native qualification. Keep to three authored files and fewer than 500 changed lines.",
+					"backlog": ["M-04"],
+					"requires": ["MAESTRO-EFFECT-CONSUMERS-BUILD"],
+					"produces": []
+				},
+				{
 					"label": "Bind Auto Run Cue and nested work at dispatch",
 					"kind": "IMPLEMENT",
 					"targets": [
@@ -4184,7 +4198,7 @@
 			"produces": ["MAESTRO-WORKFLOW-CONSUMERS-BUILD"],
 			"id": "MCOMP-17",
 			"path": ".maestro/playbooks/2026-10-29-Maestro-Integration-Completion/MCOMP-17.md",
-			"taskCount": 36,
+			"taskCount": 37,
 			"stage": "S10"
 		},
 		{
@@ -5974,7 +5988,7 @@
 				"PAIR-DIRECT-EVIDENCE"
 			],
 			"nativeInputs": false,
-			"taskCount": 43
+			"taskCount": 44
 		},
 		{
 			"id": "S11",
@@ -6178,12 +6192,8 @@
 			"taskCount": 1
 		}
 	],
-	"taskCount": 356,
-	"taskCounts": {
-		"IMPLEMENT": 247,
-		"TEST": 49,
-		"VERIFY": 60
-	},
+	"taskCount": 357,
+	"taskCounts": { "IMPLEMENT": 248, "TEST": 49, "VERIFY": 60 },
 	"artifacts": {
 		"MEGA-CONTRACTS-FOUNDATION-BUILD": {
 			"producerDocument": "GCOMP-01",
@@ -6955,6 +6965,7 @@
 			"MCOMP-17-03AC",
 			"MCOMP-17-03AD",
 			"MCOMP-17-03AE",
+			"MCOMP-17-03AF",
 			"MCOMP-17-03",
 			"MCOMP-17-04",
 			"MCOMP-17-05",
