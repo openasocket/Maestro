@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import { readPin } from '../../../../../scripts/import-mega-maestro.mjs';
@@ -14,6 +14,12 @@ import {
 	isSettingLockable,
 	type ManagedSettingLocksView,
 } from '../../../../shared/managedSettingsLock';
+import {
+	createPolicyStatusService,
+	type NativePolicyProjection,
+	type NativePolicyProjectionPort,
+} from '../../../../main/enterprise/policy-status';
+import { registeredStatus } from '../../../main/enterprise/fakeManaged';
 
 const now = Date.parse('2026-11-08T12:00:00Z');
 const uuid = '11111111-1111-4111-8111-111111111111';
@@ -76,6 +82,253 @@ describe('desktop authoring mapping against pinned public schema 1', () => {
 		).toBe(pin.dependencies.zod);
 		({ desktopPolicyResult: schema } =
 			await import('../../../../../vendor/mega-maestro/contracts/dist/desktop-policy.js'));
+	});
+
+	// Local authenticated-producer double only; the real endpoint has no delivery mapping.
+	function nativeHarness() {
+		const standing = registeredStatus({ actorId: uuid, applied: 7 });
+		const record = standing.identity.record!;
+		Object.assign(record, {
+			tenantId: uuid,
+			orgId: uuid,
+			enrollmentId: uuid,
+			installationId: binding.installationId,
+		});
+		Object.assign(record.registration!, {
+			runtimeId: binding.runtimeId,
+			processEpoch: binding.processEpoch,
+			expiresAt: new Date(now + 3_600_000).toISOString(),
+		});
+		record.endpoint.trustRootDigest = 'b'.repeat(64);
+		record.policy.observedAt = new Date(now).toISOString();
+		const source: NativePolicyProjection = {
+			desktop: projection(),
+			settings: { policyRevision: 7, locks: [{ key: 'agentConfig.model' }] },
+			routes: [
+				{
+					providerId: 'claude-code',
+					model: 'sonnet',
+					baseUrl: null,
+					accountDir: null,
+					login: 'approved-credential',
+					permissionMode: 'standard',
+				},
+			],
+			ceilings: {
+				browser: { policyRevision: 7, actors: [] },
+				shell: { policyRevision: 7, surfaces: [] },
+				plugins: { policyRevision: 7, plugins: [] },
+				install: { policyRevision: 7, pins: [], mcpServers: [] },
+				egress: { policyRevision: 7, classes: [] },
+				listeners: { policyRevision: 7, listeners: [] },
+				localEffects: { policyRevision: 7, classes: [] },
+				repository: { policyRevision: 7, actors: [] },
+				updates: { policyRevision: 7, hold: true, channel: 'stable', pin: null },
+			},
+		};
+		const read = vi.fn(async (): Promise<unknown> => structuredClone(source));
+		let port: NativePolicyProjectionPort | null = { version: 1, schema, readVerified: read };
+		const clock = { now };
+		const service = createPolicyStatusService({
+			lifecycle: {
+				status: () => standing,
+				connect: async () => ({ status: 'ok', value: standing.endpoint! }),
+				beginRegistration: async () => ({
+					status: 'refused',
+					reason: 'not-enrolled',
+					message: 'test',
+				}),
+			},
+			projections: () => port,
+			now: () => clock.now,
+		});
+		return {
+			service,
+			source,
+			standing,
+			record,
+			read,
+			clock,
+			disconnect: () => {
+				port = null;
+			},
+		};
+	}
+
+	it('atomically receives all native restrictions and returns detached copies, including offline', async () => {
+		const h = nativeHarness();
+		expect(await h.service.refreshProjection()).toEqual({ installed: true, policyRevision: 7 });
+		expect(h.service.installedProjection()).toEqual(h.source);
+		expect(h.read.mock.calls[0]).toEqual([{ identity: h.record, connection: 1 }]);
+		h.source.settings.locks.length = 0;
+		h.service.installedProjection()!.settings.locks.length = 0;
+		h.disconnect();
+		h.standing.connection!.attached = false;
+		h.clock.now += 3_600_001;
+		expect(await h.service.refreshProjection()).toEqual({
+			installed: false,
+			reason: 'unavailable',
+		});
+		expect(h.service.installedProjection()!.settings.locks).toHaveLength(1);
+		expect(h.service.status().admission.possible).toBe(false);
+	});
+
+	it.each([
+		[
+			'tenant',
+			(h: ReturnType<typeof nativeHarness>) => {
+				h.source.desktop.binding.tenantId = '22222222-2222-4222-8222-222222222222';
+			},
+		],
+		[
+			'revision',
+			(h: ReturnType<typeof nativeHarness>) => {
+				h.source.desktop.binding.policyRevision = 6;
+			},
+		],
+		[
+			'actor',
+			(h: ReturnType<typeof nativeHarness>) => {
+				h.source.desktop.binding.principal.id = '22222222-2222-4222-8222-222222222222';
+			},
+		],
+		[
+			'epoch',
+			(h: ReturnType<typeof nativeHarness>) => {
+				h.source.desktop.binding.processEpoch = 'other';
+			},
+		],
+		[
+			'expiry',
+			(h: ReturnType<typeof nativeHarness>) => {
+				h.clock.now += 60_000;
+			},
+		],
+		[
+			'future issue',
+			(h: ReturnType<typeof nativeHarness>) => {
+				h.source.desktop.issuedAt = new Date(now + 1_000).toISOString();
+			},
+		],
+		[
+			'settings',
+			(h: ReturnType<typeof nativeHarness>) => {
+				h.source.settings.policyRevision = 6;
+			},
+		],
+		[
+			'ceiling',
+			(h: ReturnType<typeof nativeHarness>) => {
+				h.source.ceilings.browser.policyRevision = 6;
+			},
+		],
+		[
+			'malformed ceiling',
+			(h: ReturnType<typeof nativeHarness>) => {
+				Object.assign(h.source.ceilings.egress, { extra: true });
+			},
+		],
+		[
+			'missing ceiling',
+			(h: ReturnType<typeof nativeHarness>) => {
+				Reflect.deleteProperty(h.source.ceilings, 'shell');
+			},
+		],
+		[
+			'route',
+			(h: ReturnType<typeof nativeHarness>) => {
+				h.source.routes[0].baseUrl = 'https://user:secret@example.test';
+			},
+		],
+		[
+			'duplicate route',
+			(h: ReturnType<typeof nativeHarness>) => {
+				h.source.routes.push(h.source.routes[0]);
+			},
+		],
+	])('rejects %s without replacing the previous batch', async (_name, corrupt) => {
+		const h = nativeHarness();
+		expect((await h.service.refreshProjection()).installed).toBe(true);
+		const before = h.service.installedProjection();
+		corrupt(h);
+		expect((await h.service.refreshProjection()).installed).toBe(false);
+		expect(h.service.installedProjection()).toEqual(before);
+	});
+
+	it('keeps prior restrictions after signature failure and refuses absent authenticated authority', async () => {
+		const h = nativeHarness();
+		await h.service.refreshProjection();
+		h.read.mockRejectedValueOnce(new Error('signature rejected: secret-canary'));
+		expect(await h.service.refreshProjection()).toEqual({
+			installed: false,
+			reason: 'unavailable',
+		});
+		expect(h.service.installedProjection()).toEqual(h.source);
+		h.record.registration!.actorId = null;
+		expect((await h.service.refreshProjection()).installed).toBe(false);
+		expect(h.service.installedProjection()).toBeNull();
+		expect(h.read).toHaveBeenCalledTimes(2);
+	});
+
+	it('rejects same-revision replacement and rollback but accepts renewed and newer applied policy', async () => {
+		const h = nativeHarness();
+		await h.service.refreshProjection();
+		h.source.desktop.issuedAt = new Date(now).toISOString();
+		expect((await h.service.refreshProjection()).installed).toBe(true);
+		h.source.settings.locks = [];
+		expect((await h.service.refreshProjection()).installed).toBe(false);
+		h.source.desktop.binding.policyRevision = h.source.settings.policyRevision = 8;
+		Object.values(h.source.ceilings).forEach((ceiling) => {
+			ceiling.policyRevision = 8;
+		});
+		h.record.policy.appliedRevision = h.standing.endpoint!.appliedPolicyRevision = 8;
+		expect((await h.service.refreshProjection()).installed).toBe(true);
+		h.source.desktop.binding.policyRevision = h.source.settings.policyRevision = 7;
+		Object.values(h.source.ceilings).forEach((ceiling) => {
+			ceiling.policyRevision = 7;
+		});
+		h.record.policy.appliedRevision = h.standing.endpoint!.appliedPolicyRevision = 7;
+		expect((await h.service.refreshProjection()).installed).toBe(false);
+		expect(h.service.installedProjection()!.desktop.binding.policyRevision).toBe(8);
+	});
+
+	it.each(['connection', 'trust', 'tenant', 'registration', 'producer'] as const)(
+		'rejects a pending delivery across a %s change',
+		async (change) => {
+			const h = nativeHarness();
+			let deliver!: (value: unknown) => void;
+			h.read.mockImplementationOnce(
+				() =>
+					new Promise((resolve) => {
+						deliver = resolve;
+					})
+			);
+			const pending = h.service.refreshProjection();
+			if (change === 'connection') h.standing.connection!.connection++;
+			if (change === 'trust') h.record.endpoint.trustRootDigest = 'c'.repeat(64);
+			if (change === 'tenant') h.record.tenantId = 'other';
+			if (change === 'registration') h.record.registration!.challengeId = 'other';
+			if (change === 'producer') h.disconnect();
+			deliver(h.source);
+			expect(await pending).toEqual({ installed: false, reason: 'changed' });
+			expect(h.service.installedProjection()).toBeNull();
+		}
+	);
+
+	it('fences superseded reads and refreshes projections through the existing refresh path', async () => {
+		const h = nativeHarness();
+		let deliver!: (value: unknown) => void;
+		h.read.mockImplementationOnce(
+			() =>
+				new Promise((resolve) => {
+					deliver = resolve;
+				})
+		);
+		const first = h.service.refreshProjection();
+		await h.service.refresh();
+		deliver(h.source);
+		expect(await first).toEqual({ installed: false, reason: 'changed' });
+		expect(h.service.installedProjection()).toEqual(h.source);
 	});
 
 	it('preserves field states, reference relationships and operation choices without granting authority', () => {
