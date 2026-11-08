@@ -315,10 +315,13 @@ type CueManagedBinding =
  */
 async function bindCueManagedRun(
 	deps: CueManagedDeps | undefined,
-	lineage: CueRunLineage
-): Promise<CueManagedBinding> {
+	lineage: CueRunLineage,
+	signal?: AbortSignal
+): Promise<CueManagedBinding | null> {
+	if (isLaunchCancelled(signal)) return null;
 	const port = deps?.port();
 	if (!deps || !port || port.standing() === 'standalone') return { managed: false };
+	const authority = port.authority;
 	const refuse = (state: CueManagedState, code: ManagedDenialCode, message: string) => {
 		deps.onAdmission?.({ kind: 'refused', lineage, state, code, message });
 		return { managed: true, refusal: { state, code, message } } as const;
@@ -331,6 +334,9 @@ async function bindCueManagedRun(
 			runId: lineage.identity.requestId,
 			attemptId: lineage.identity.attemptId,
 		})) ?? null;
+	// Stop also owns an outstanding owner claim. Its late answer is not permission
+	// to prepare a process; the existing workflow owner service retains the fence.
+	if (isLaunchCancelled(signal)) return null;
 	if (isWorkflowFenceRefusal(fence)) return refuse(fence.state, fence.code, fence.message);
 	if (!fence) {
 		return refuse(
@@ -339,8 +345,19 @@ async function bindCueManagedRun(
 			`Cue workflow "${lineage.workflow.workflowId}" has no workflow owner fence; a managed host does not run an unowned workflow, and the Cue engine does not mint one (CP-03, the workflow owner producer).`
 		);
 	}
-	const policy = port.policy();
-	const verified = port.context({
+	// A claim can await the endpoint while enrollment or the authority changes.
+	// Re-read the port (headless hosts rebuild it) and compare the authority object,
+	// not its name. Never use the old port or downgrade this firing to standalone.
+	const current = deps.port();
+	if (!current || current.standing() !== 'managed' || current.authority !== authority) {
+		return refuse(
+			'unavailable',
+			'runtime-unavailable',
+			'The Cue host standing or authority changed while claiming workflow ownership; no executor was started.'
+		);
+	}
+	const policy = current.policy();
+	const verified = current.context({
 		identity: lineage.identity,
 		traceId: lineage.traceId,
 		policyRevision: policy.policyRevision,
@@ -357,7 +374,7 @@ async function bindCueManagedRun(
 	return {
 		managed: true,
 		admission: {
-			authority: port.authority,
+			authority,
 			context: verified.context,
 			policy,
 			account: deps.account ?? null,
@@ -401,6 +418,7 @@ export async function executeCueRunAction(
 			sessionId,
 			sessionName: storedSession.name,
 			subscriptionName,
+			pipelineName: pipelineName ?? undefined,
 			event,
 		});
 	if (isLaunchCancelled(signal)) return stoppedResult();
@@ -426,6 +444,7 @@ export async function executeCueRunAction(
 			pipelineName: pipelineName ?? undefined,
 			event,
 			status: 'failed',
+			executionStarted: false,
 			stdout: '',
 			stderr: `[managed-${state}] ${message}`,
 			exitCode: null,
@@ -601,8 +620,10 @@ export async function executeCueRunAction(
 					event,
 					ownerAgentId: storedSession.id,
 					attemptId: deps.managed?.newId?.() ?? generateUUID(),
-				})
+				}),
+				signal
 			);
+			if (!binding || isLaunchCancelled(signal)) return stoppedResult();
 			if (binding.managed && 'refusal' in binding) return managedRefusalResult(binding.refusal);
 			return deps.executeCueShell({
 				runId,
@@ -640,7 +661,8 @@ export async function executeCueRunAction(
 			ownerAgentId: storedSession.id,
 			attemptId: deps.managed?.newId?.() ?? generateUUID(),
 		});
-		const cliBinding = await bindCueManagedRun(deps.managed, cliLineage);
+		const cliBinding = await bindCueManagedRun(deps.managed, cliLineage, signal);
+		if (!cliBinding || isLaunchCancelled(signal)) return stoppedResult();
 		if (cliBinding.managed && 'refusal' in cliBinding) {
 			return managedRefusalResult(cliBinding.refusal);
 		}
@@ -737,7 +759,8 @@ export async function executeCueRunAction(
 		ownerAgentId: storedSession.id,
 		attemptId: deps.managed?.newId?.() ?? generateUUID(),
 	});
-	const binding = await bindCueManagedRun(deps.managed, lineage);
+	const binding = await bindCueManagedRun(deps.managed, lineage, signal);
+	if (!binding || isLaunchCancelled(signal)) return stoppedResult();
 	if (binding.managed && 'refusal' in binding) return managedRefusalResult(binding.refusal);
 
 	const result = await deps.executeCuePrompt({

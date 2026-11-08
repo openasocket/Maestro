@@ -3750,6 +3750,20 @@
 					"id": "MCOMP-17-03C"
 				},
 				{
+					"label": "Recheck Cue authority after asynchronous workflow claims",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/main/cue/cue-run-router.ts",
+						"src/__tests__/main/cue/cue-run-router.managed.test.ts",
+						"Plans/integration-completion/program.json"
+					],
+					"outcome": "Consume MAESTRO-EFFECT-CONSUMERS-BUILD and its pinned MAESTRO-CONTRACT-INPUTS-BUILD dependency. Bounded continuation of MCOMP-17-03: re-read managed standing and authority after each awaited Cue workflow-owner claim, bind the current port context and policy, refuse withdrawal or replacement without downgrading, and stop before prompt, shell or CLI executor preparation when cancellation arrives during the claim. Retain opaque owner fences, per-firing attempts, trigger and root/parent lineage. Exercise late claims, replaced authority instances, refreshed policy, retries and cancellation through the existing managed router harness. This closes the router owner-claim boundary only; retain MCOMP-17-03 unchecked for authoritative prompt child environments, post-preparation/admission Cue rechecks, Cue Auto Run actions, incoming authenticated delegation, desktop composition and managed room custody across turns. No external capability, producer mapping or paired/provider/native qualification is supplied. Keep to three authored files and fewer than 500 changed lines.",
+					"backlog": ["M-04"],
+					"requires": ["MAESTRO-EFFECT-CONSUMERS-BUILD"],
+					"produces": [],
+					"id": "MCOMP-17-03D"
+				},
+				{
 					"label": "Bind Auto Run Cue and nested work at dispatch",
 					"kind": "IMPLEMENT",
 					"targets": [
@@ -3792,7 +3806,7 @@
 			"produces": ["MAESTRO-WORKFLOW-CONSUMERS-BUILD"],
 			"id": "MCOMP-17",
 			"path": ".maestro/playbooks/2026-10-29-Maestro-Integration-Completion/MCOMP-17.md",
-			"taskCount": 8,
+			"taskCount": 9,
 			"stage": "S10"
 		},
 		{
@@ -5582,7 +5596,7 @@
 				"PAIR-DIRECT-EVIDENCE"
 			],
 			"nativeInputs": false,
-			"taskCount": 15
+			"taskCount": 16
 		},
 		{
 			"id": "S11",
@@ -5786,9 +5800,9 @@
 			"taskCount": 1
 		}
 	],
-	"taskCount": 328,
+	"taskCount": 329,
 	"taskCounts": {
-		"IMPLEMENT": 219,
+		"IMPLEMENT": 220,
 		"TEST": 49,
 		"VERIFY": 60
 	},
@@ -6537,6 +6551,7 @@
 			"MCOMP-17-03A",
 			"MCOMP-17-03B",
 			"MCOMP-17-03C",
+			"MCOMP-17-03D",
 			"MCOMP-17-03",
 			"MCOMP-17-04",
 			"MCOMP-17-05",

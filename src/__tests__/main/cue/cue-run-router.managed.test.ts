@@ -491,6 +491,199 @@ describe('a maestro-cli action under management (MRC-07-04)', () => {
 });
 
 describe('the owner fence claimed per firing (MRC-07-06)', () => {
+	describe.each([
+		{ name: 'prompt', overrides: {} },
+		{
+			name: 'shell',
+			overrides: { action: 'command', command: { mode: 'shell', shell: 'echo hi' } },
+		},
+		{
+			name: 'cli',
+			overrides: {
+				action: 'command',
+				command: { mode: 'cli', cli: { command: 'send', target: 'agent-2', message: 'hi' } },
+			},
+		},
+	] satisfies { name: string; overrides: Partial<OnCueRunParams> }[])(
+		'$name owner claim',
+		({ overrides }) => {
+			it.each(['withdrawn', 'standalone', 'replacement', 'mutated'] as const)(
+				'refuses %s authority while the owner claim is pending',
+				async (change) => {
+					const initial = cuePort();
+					let current: CueSpawnAuthorityPort | null = initial;
+					const entered = Promise.withResolvers<void>();
+					const claim = Promise.withResolvers<typeof FENCE>();
+					const onAdmission = vi.fn();
+					const deps = makeDeps({
+						port: () => current,
+						workflowFence: () => {
+							entered.resolve();
+							return claim.promise;
+						},
+						onAdmission,
+					});
+					const pending = executeCueRunAction(deps, params(overrides));
+					await entered.promise;
+					if (change === 'withdrawn') current = null;
+					else if (change === 'standalone') current = cuePort('standalone');
+					else if (change === 'replacement') current = cuePort();
+					else Object.defineProperty(initial, 'authority', { value: cuePort().authority });
+					claim.resolve(FENCE);
+					const result = await pending;
+					expect(result).toMatchObject({
+						status: 'failed',
+						executionStarted: false,
+						pipelineName: 'Nightly QA',
+						managed: { state: 'unavailable', code: 'runtime-unavailable' },
+					});
+					expect(result.stderr).toContain('standing or authority changed');
+					expect(onAdmission).toHaveBeenCalledExactlyOnceWith(
+						expect.objectContaining({ kind: 'refused' })
+					);
+					expect(deps.executeCuePrompt).not.toHaveBeenCalled();
+					expect(deps.executeCueShell).not.toHaveBeenCalled();
+					expect(deps.executeCueCli).not.toHaveBeenCalled();
+				}
+			);
+
+			it.each(['fenced', 'refused'] as const)(
+				'stays stopped after a late %s claim',
+				async (answer) => {
+					const port = cuePort();
+					const entered = Promise.withResolvers<void>();
+					const claim =
+						Promise.withResolvers<
+							Awaited<ReturnType<NonNullable<CueManagedDeps['workflowFence']>>>
+						>();
+					const controller = new AbortController();
+					const onAdmission = vi.fn();
+					const context = vi.spyOn(port, 'context');
+					const deps = makeDeps({
+						port: () => port,
+						workflowFence: () => {
+							entered.resolve();
+							return claim.promise;
+						},
+						onAdmission,
+					});
+					const pending = executeCueRunAction(
+						deps,
+						params({ ...overrides, signal: controller.signal })
+					);
+					await entered.promise;
+					controller.abort();
+					claim.resolve(
+						answer === 'fenced'
+							? FENCE
+							: {
+									fence: null,
+									state: 'denied',
+									code: 'policy-denied',
+									message: 'Owner revoked',
+								}
+					);
+					expect(await pending).toMatchObject({
+						status: 'stopped',
+						executionStarted: false,
+						pipelineName: 'Nightly QA',
+						exitCode: null,
+					});
+					expect(context).not.toHaveBeenCalled();
+					expect(onAdmission).not.toHaveBeenCalled();
+					expect(deps.executeCuePrompt).not.toHaveBeenCalled();
+					expect(deps.executeCueShell).not.toHaveBeenCalled();
+					expect(deps.executeCueCli).not.toHaveBeenCalled();
+				}
+			);
+		}
+	);
+
+	it('binds the fresh port policy and verified lineage after each successful claim', async () => {
+		const initial = cuePort();
+		const current: CueSpawnAuthorityPort = {
+			...initial,
+			policy: () => ({
+				sources: [{ id: 'endpoint-test', kind: 'endpoint', revision: 8 }],
+				policyRevision: 8,
+			}),
+			context: vi.fn(initial.context),
+		};
+		let offered = initial;
+		let attempt = 0;
+		const workflowFence = vi.fn(async () => {
+			offered = current;
+			return { ownerEpoch: `epoch-${attempt}`, fencingToken: `fence-${attempt}` };
+		});
+		const deps = makeDeps({
+			port: () => offered,
+			workflowFence,
+			newId: () => `attempt-${++attempt}`,
+		});
+		for (const runId of ['run-9', 'retry-9']) {
+			await executeCueRunAction(deps, params({ runId }));
+			const context = deps.executeCuePrompt.mock.calls.at(-1)![0].admission!.context;
+			expect(context).toMatchObject({
+				actor: { kind: 'human', id: 'actor-registered' },
+				origin: 'cue',
+				policyRevision: 8,
+				identity: {
+					requestId: runId,
+					attemptId: `attempt-${attempt}`,
+					rootRunId: 'root-1',
+					parentRunId: 'run-8',
+				},
+				workflow: {
+					...FENCE,
+					ownerEpoch: `epoch-${attempt}`,
+					fencingToken: `fence-${attempt}`,
+					triggerEventId: 'time.scheduled:evt-1',
+				},
+			});
+			expect(workflowFence).toHaveBeenLastCalledWith(expect.anything(), {
+				runId,
+				attemptId: `attempt-${attempt}`,
+			});
+		}
+		expect(current.context).toHaveBeenCalledTimes(2);
+		expect(deps.executeCuePrompt).toHaveBeenCalledTimes(2);
+	});
+
+	it('does not execute when the fresh context is revoked after the owner claim', async () => {
+		const port = cuePort();
+		const deps = makeDeps({
+			port: () => port,
+			workflowFence: async () => {
+				vi.spyOn(port, 'context').mockReturnValue({
+					ok: false,
+					code: 'context-mismatch',
+					problems: ['actor revoked'],
+				});
+				return FENCE;
+			},
+		});
+		const result = await executeCueRunAction(deps, params());
+		expect(result.managed).toEqual({ state: 'denied', code: 'context-mismatch' });
+		expect(result.stderr).toContain('actor revoked');
+		expect(deps.executeCuePrompt).not.toHaveBeenCalled();
+	});
+
+	it('propagates an unreadable host after the claim without starting an executor', async () => {
+		const port = cuePort();
+		const readPort = vi.fn(() => port);
+		const deps = makeDeps({
+			port: readPort,
+			workflowFence: async () => {
+				readPort.mockImplementation(() => {
+					throw new Error('host read failed');
+				});
+				return FENCE;
+			},
+		});
+		await expect(executeCueRunAction(deps, params())).rejects.toThrow('host read failed');
+		expect(deps.executeCuePrompt).not.toHaveBeenCalled();
+	});
+
 	it('asks the fence producer for this run and attempt, awaits it, and binds what it answers', async () => {
 		const asked: unknown[] = [];
 		const port = cuePort();
