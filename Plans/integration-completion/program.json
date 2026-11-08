@@ -3876,6 +3876,20 @@
 					"produces": []
 				},
 				{
+					"id": "MCOMP-17-03M",
+					"label": "Propagate Cue workflow settlement failures",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/main/cue/cue-run-router.ts",
+						"src/__tests__/main/cue/cue-run-router.managed.test.ts",
+						"Plans/integration-completion/program.json"
+					],
+					"outcome": "Consume MAESTRO-EFFECT-CONSUMERS-BUILD and its pinned MAESTRO-CONTRACT-INPUTS-BUILD dependency. Bounded continuation of MCOMP-17-03 at the shared Cue router: propagate workflow settlement exceptions instead of returning an executor success or ordinary terminal result. Retain both execution/preparation and settlement failures when they coincide, wait for settlement before publishing a result, and detach the owner listener before settlement. Exercise prompt, shell and CLI routes, unused claims, non-Error rejections and fresh retries through the existing managed router harness. Retain MCOMP-17-03 unchecked for Cue Auto Run actions, incoming authenticated delegation, desktop composition and managed room custody across turns. No new wire definition, external capability, producer mapping or paired/provider/native qualification is supplied. Keep to three authored files and fewer than 500 changed lines.",
+					"backlog": ["M-04"],
+					"requires": ["MAESTRO-EFFECT-CONSUMERS-BUILD"],
+					"produces": []
+				},
+				{
 					"label": "Bind Auto Run Cue and nested work at dispatch",
 					"kind": "IMPLEMENT",
 					"targets": [
@@ -3918,7 +3932,7 @@
 			"produces": ["MAESTRO-WORKFLOW-CONSUMERS-BUILD"],
 			"id": "MCOMP-17",
 			"path": ".maestro/playbooks/2026-10-29-Maestro-Integration-Completion/MCOMP-17.md",
-			"taskCount": 17,
+			"taskCount": 18,
 			"stage": "S10"
 		},
 		{
@@ -5708,7 +5722,7 @@
 				"PAIR-DIRECT-EVIDENCE"
 			],
 			"nativeInputs": false,
-			"taskCount": 24
+			"taskCount": 25
 		},
 		{
 			"id": "S11",
@@ -5912,8 +5926,8 @@
 			"taskCount": 1
 		}
 	],
-	"taskCount": 337,
-	"taskCounts": { "IMPLEMENT": 228, "TEST": 49, "VERIFY": 60 },
+	"taskCount": 338,
+	"taskCounts": { "IMPLEMENT": 229, "TEST": 49, "VERIFY": 60 },
 	"artifacts": {
 		"MEGA-CONTRACTS-FOUNDATION-BUILD": {
 			"producerDocument": "GCOMP-01",

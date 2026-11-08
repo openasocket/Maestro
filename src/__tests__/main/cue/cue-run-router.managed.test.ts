@@ -1055,6 +1055,59 @@ describe('Cue workflow fence lifetime', () => {
 		executor: 'executeCuePrompt' | 'executeCueShell' | 'executeCueCli';
 		overrides: Partial<OnCueRunParams>;
 	}[])('$name', ({ executor, overrides }) => {
+		it.each([
+			{ status: 'completed', executionStarted: true, effect: 'applied' },
+			{ status: 'failed', executionStarted: false, effect: 'no_effect' },
+			{ status: 'stopped', executionStarted: true, effect: 'uncertain' },
+		] as const)(
+			'propagates a failed $effect settlement instead of returning $status',
+			async ({ effect, ...outcome }) => {
+				const { deps, lifetime, controller } = fixture();
+				const failure = new Error('settlement offline');
+				deps[executor].mockResolvedValueOnce({ ...fakeResult('run-9'), ...outcome });
+				lifetime.finish.mockImplementationOnce(async () => {
+					controller.abort();
+					throw failure;
+				});
+				await expect(executeCueRunAction(deps, params(overrides))).rejects.toBe(failure);
+				expect(lifetime.finish).toHaveBeenCalledExactlyOnceWith(effect);
+				expect(deps.stopCueRun).not.toHaveBeenCalled();
+			}
+		);
+
+		it('waits for settlement before publishing a successful result', async () => {
+			const { deps, lifetime } = fixture();
+			const entered = Promise.withResolvers<void>();
+			const settlement = Promise.withResolvers<void>();
+			const outcome = { ...fakeResult('run-9'), executionStarted: true };
+			deps[executor].mockResolvedValueOnce(outcome);
+			lifetime.finish.mockImplementationOnce(() => {
+				entered.resolve();
+				return settlement.promise;
+			});
+			const published = vi.fn();
+			const pending = executeCueRunAction(deps, params(overrides)).then(published);
+			await entered.promise;
+			expect(published).not.toHaveBeenCalled();
+			settlement.resolve();
+			await pending;
+			expect(published).toHaveBeenCalledExactlyOnceWith(outcome);
+		});
+
+		it('retains both executor and settlement failures', async () => {
+			const { deps, lifetime } = fixture();
+			const executionFailure = new Error('executor failed');
+			const settlementFailure = new Error('settlement offline');
+			deps[executor].mockRejectedValueOnce(executionFailure);
+			lifetime.finish.mockRejectedValueOnce(settlementFailure);
+			await expect(executeCueRunAction(deps, params(overrides))).rejects.toMatchObject({
+				name: 'Error',
+				cause: executionFailure,
+				errors: [executionFailure, settlementFailure],
+			});
+			expect(lifetime.finish).toHaveBeenCalledExactlyOnceWith('uncertain');
+		});
+
 		it.each(['cancelled', 'revoked', 'stale'] as const)(
 			'settles an unused late %s claim',
 			async (change) => {
@@ -1187,12 +1240,39 @@ describe('Cue workflow fence lifetime', () => {
 		}
 	);
 
-	it('retains the executor result when settlement fails and reports the uncertainty', async () => {
+	it.each([undefined, 'settlement offline'])(
+		'propagates a non-Error settlement rejection (%s)',
+		async (failure) => {
+			const { deps, lifetime } = fixture();
+			lifetime.finish.mockRejectedValueOnce(failure);
+			await expect(executeCueRunAction(deps, params())).rejects.toBe(failure);
+		}
+	);
+
+	it('retains a preparation failure alongside a failed unused-claim settlement', async () => {
+		const { deps, lifetime, port } = fixture();
+		const executionFailure = new Error('context failed');
+		const settlementFailure = new Error('settlement offline');
+		vi.spyOn(port, 'context').mockImplementationOnce(() => {
+			throw executionFailure;
+		});
+		lifetime.finish.mockRejectedValueOnce(settlementFailure);
+		await expect(executeCueRunAction(deps, params())).rejects.toMatchObject({
+			errors: [executionFailure, settlementFailure],
+		});
+		expect(deps.executeCuePrompt).not.toHaveBeenCalled();
+		expect(lifetime.finish).toHaveBeenCalledExactlyOnceWith('no_effect');
+	});
+
+	it('retains an undefined executor rejection alongside a settlement failure', async () => {
 		const { deps, lifetime } = fixture();
-		lifetime.finish.mockRejectedValueOnce(new Error('settlement offline'));
-		const result = await executeCueRunAction(deps, params());
-		expect(result.status).toBe('completed');
-		expect(deps.onLog).toHaveBeenCalledWith('warn', expect.stringContaining('settlement offline'));
+		const settlementFailure = new Error('settlement offline');
+		deps.executeCuePrompt.mockRejectedValueOnce(undefined);
+		lifetime.finish.mockRejectedValueOnce(settlementFailure);
+		await expect(executeCueRunAction(deps, params())).rejects.toMatchObject({
+			errors: [undefined, settlementFailure],
+		});
+		expect(lifetime.finish).toHaveBeenCalledExactlyOnceWith('uncertain');
 	});
 
 	it('reclaims on retry and removes the previous attempt listener', async () => {
@@ -1213,6 +1293,31 @@ describe('Cue workflow fence lifetime', () => {
 		expect(first.lifetime.finish).toHaveBeenCalledExactlyOnceWith('applied');
 		expect(next.lifetime.finish).toHaveBeenCalledExactlyOnceWith('applied');
 		expect(first.deps.stopCueRun).not.toHaveBeenCalled();
+	});
+
+	it('claims fresh custody after a failed settlement without retaining the old listener', async () => {
+		const first = fixture();
+		const next = fixture();
+		first.lifetime.finish.mockRejectedValueOnce(new Error('settlement offline'));
+		first.workflowFence
+			.mockResolvedValueOnce({ ...FENCE, lifetime: first.lifetime })
+			.mockResolvedValueOnce({ ...FENCE, lifetime: next.lifetime });
+		first.deps.executeCuePrompt.mockResolvedValue({
+			...fakeResult('run-9'),
+			executionStarted: true,
+		});
+		await expect(executeCueRunAction(first.deps, params())).rejects.toThrow('settlement offline');
+		await expect(
+			executeCueRunAction(first.deps, params({ runId: 'retry-9' }))
+		).resolves.toMatchObject({ status: 'completed' });
+		first.controller.abort();
+		expect(first.deps.stopCueRun).not.toHaveBeenCalled();
+		expect(first.workflowFence.mock.calls.map(([, run]) => run.runId)).toEqual([
+			'run-9',
+			'retry-9',
+		]);
+		expect(first.lifetime.finish).toHaveBeenCalledExactlyOnceWith('applied');
+		expect(next.lifetime.finish).toHaveBeenCalledExactlyOnceWith('applied');
 	});
 
 	it('fences an actual fixture process through the existing Cue Stop registry', async () => {

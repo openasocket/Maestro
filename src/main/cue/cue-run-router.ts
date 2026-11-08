@@ -906,7 +906,7 @@ export async function executeCueRunAction(
 	if (!managed?.workflowFence) return executeBoundCueRunAction(deps, params);
 	let lifetime: WorkflowFenceLifetime | undefined;
 	let dispatched = false;
-	let result: CueRunResult | undefined;
+	let outcome: { result: CueRunResult } | { error: unknown };
 	const stopped = new AbortController();
 	const stop = () => {
 		if (stopped.signal.aborted) return;
@@ -916,7 +916,7 @@ export async function executeCueRunAction(
 		deps.stopCueRun(params.runId);
 	};
 	try {
-		result = await executeBoundCueRunAction(
+		const result = await executeBoundCueRunAction(
 			{
 				...deps,
 				managed: {
@@ -940,28 +940,38 @@ export async function executeCueRunAction(
 				dispatched = true;
 			}
 		);
-		return result;
+		outcome = { result };
+	} catch (error) {
+		outcome = { error };
 	} finally {
 		// Settlement can itself revoke the lifetime. Detach first so it cannot
 		// stop a later run that reused this run id.
 		lifetime?.signal.removeEventListener('abort', stop);
-		if (lifetime) {
-			const effect =
-				result?.managed?.state === 'unknown'
-					? 'uncertain'
-					: !dispatched || result?.executionStarted === false
-						? 'no_effect'
-						: result?.executionStarted === true && result.status === 'completed'
-							? 'applied'
-							: 'uncertain';
-			try {
-				await lifetime.finish(effect);
-			} catch (error) {
-				deps.onLog(
-					'warn',
-					`[CUE] Workflow settlement remains uncertain: ${error instanceof Error ? error.message : String(error)}`
-				);
+	}
+	if (lifetime) {
+		const result = 'result' in outcome ? outcome.result : undefined;
+		const effect =
+			result?.managed?.state === 'unknown'
+				? 'uncertain'
+				: !dispatched || result?.executionStarted === false
+					? 'no_effect'
+					: result?.executionStarted === true && result.status === 'completed'
+						? 'applied'
+						: 'uncertain';
+		try {
+			await lifetime.finish(effect);
+		} catch (error) {
+			// A completed executor is not a settled workflow. Let the run manager
+			// record the failure; a warning plus success could advance the chain.
+			if ('error' in outcome) {
+				throw Object.assign(new Error('Cue execution and workflow settlement failed'), {
+					cause: outcome.error,
+					errors: [outcome.error, error],
+				});
 			}
+			throw error;
 		}
 	}
+	if ('error' in outcome) throw outcome.error;
+	return outcome.result;
 }
