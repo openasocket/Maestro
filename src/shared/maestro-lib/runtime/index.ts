@@ -261,6 +261,19 @@ export interface MaestroRuntime extends MaestroClient {
 	roundsInFlight(): number;
 	/** Consults waiting on another agent's answer (GD24). */
 	consultsInFlight(): number;
+	/**
+	 * Host only: ask on behalf of the chat turn whose process presented `credential` (its
+	 * `MAESTRO_MANAGED_CALLER_CREDENTIAL`). The credential is resolved again at every custody read
+	 * of the consult, so stopping, revoking or finishing that turn withdraws the ask's source. It
+	 * selects that tab's chat custody only and stands in for `managed.consultSource` for this ask;
+	 * the stated `fromAgentId`/`fromTabId` must match it. An unknown, stale or withdrawn credential
+	 * authenticates nobody, so a managed ask is refused. Never expose this on a client transport
+	 * without the host first reading the credential from that caller.
+	 */
+	askAsCaller(
+		credential: string,
+		input: Parameters<MaestroClient['consults']['ask']>[0]
+	): ReturnType<MaestroClient['consults']['ask']>;
 }
 
 /** What the status bar prints after `host: `. */
@@ -989,51 +1002,53 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 		},
 		consults: {
 			api: {
-				ask: (input) => {
-					const lookup = options.managed?.consultSource;
-					if (!lookup) return consults.api.ask(input);
-					const { fromAgentId, fromTabId } = input;
-					let active = true;
-					let required = false;
-					let selected: { processId: string | undefined; kind?: 'auto-run' } | undefined;
-					return consultSource.run(
-						{
-							// Enrollment during a wait requires custody; losing it cannot undo that.
-							required: () => (required ||= backgroundSpawnPort().standing() !== 'standalone'),
-							read: () => {
-								if (!active || !fromAgentId || !fromTabId) return null;
-								const source = lookup();
-								if (source?.agentId !== fromAgentId || source.tabId !== fromTabId) return null;
-								// Pin the selected process and source kind. A
-								// queued ask cannot transfer to another live source on the same agent/tab.
-								selected ??= { processId: source.processId, kind: source.kind };
-								if (selected.processId !== source.processId || selected.kind !== source.kind)
-									return null;
-								if (source.kind === 'auto-run') {
-									return source.processId
-										? autoRun.sourceCustody(fromAgentId, source.processId)
-										: null;
-								}
-								if (source.kind !== undefined) return null;
-								return source.processId === undefined
-									? turns.sourceCustody(fromAgentId, fromTabId)
-									: background.sourceCustody(source.processId);
-							},
-						},
-						async () => {
-							try {
-								return await consults.api.ask(input);
-							} finally {
-								active = false;
-							}
-						}
-					);
-				},
+				ask: (input) => askFrom(input, options.managed?.consultSource),
 			},
 			cancelForSource: consults.cancelForSource,
 		},
 		...(managed ? { managed } : {}),
 	});
+
+	// Composes a live source lookup into one ask's custody reads (MCOMP-17-03Z/AB/AE).
+	function askFrom(
+		input: Parameters<MaestroClient['consults']['ask']>[0],
+		lookup: NonNullable<MaestroRuntimeOptions['managed']>['consultSource']
+	): ReturnType<MaestroClient['consults']['ask']> {
+		if (!lookup) return consults.api.ask(input);
+		const { fromAgentId, fromTabId } = input;
+		let active = true;
+		let required = false;
+		let selected: { processId: string | undefined; kind?: 'auto-run' } | undefined;
+		return consultSource.run(
+			{
+				// Enrollment during a wait requires custody; losing it cannot undo that.
+				required: () => (required ||= backgroundSpawnPort().standing() !== 'standalone'),
+				read: () => {
+					if (!active || !fromAgentId || !fromTabId) return null;
+					const source = lookup();
+					if (source?.agentId !== fromAgentId || source.tabId !== fromTabId) return null;
+					// Pin the selected process and source kind. A
+					// queued ask cannot transfer to another live source on the same agent/tab.
+					selected ??= { processId: source.processId, kind: source.kind };
+					if (selected.processId !== source.processId || selected.kind !== source.kind) return null;
+					if (source.kind === 'auto-run') {
+						return source.processId ? autoRun.sourceCustody(fromAgentId, source.processId) : null;
+					}
+					if (source.kind !== undefined) return null;
+					return source.processId === undefined
+						? turns.sourceCustody(fromAgentId, fromTabId)
+						: background.sourceCustody(source.processId);
+				},
+			},
+			async () => {
+				try {
+					return await consults.api.ask(input);
+				} finally {
+					active = false;
+				}
+			}
+		);
+	}
 
 	return {
 		ok: true,
@@ -1053,6 +1068,8 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 			turnsInFlight: () => registry.size() - background.registeredCount(),
 			roundsInFlight: groupChats.roundsInFlight,
 			consultsInFlight: consults.inFlight,
+			// A credential resolves only to a chat turn's own tab: never a process or Auto Run source.
+			askAsCaller: (credential, input) => askFrom(input, () => turns.callerSource(credential)),
 		},
 	};
 }

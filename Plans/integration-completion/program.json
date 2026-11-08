@@ -4198,6 +4198,20 @@
 					"produces": []
 				},
 				{
+					"id": "MCOMP-17-03AJ",
+					"label": "Resolve forwarded caller credentials into consult source custody",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/shared/maestro-lib/runtime/index.ts",
+						"src/shared/maestro-lib/runtime/__tests__/consults.test.ts",
+						"Plans/integration-completion/program.json"
+					],
+					"outcome": "Consume MAESTRO-EFFECT-CONSUMERS-BUILD and its pinned MAESTRO-CONTRACT-INPUTS-BUILD dependency. Bounded prerequisite continuation of MCOMP-17-03 after MCOMP-17-03AI: give the shared runtime a host-only askAsCaller(credential, input) that composes the per-process chat-turn caller credential into the existing consult source wrapper, re-resolving the credential through RuntimeTurns.callerSource at every custody read so stop, revocation, completion or withheld custody withdraws the ask source. The credential selects only that chat tab (never a process or Auto Run source), stands in for managed.consultSource for that ask, and must match the stated fromAgentId/fromTabId. Forged, near-miss, blank, other-tab, stopped and revoked credentials refuse before the target is written; a fresh turn credential is honored and the old one stays refused. Exercise real fixture processes and a mutation check. The CLI forwarding the credential on the wire, server-side request resolution, background/consult and Auto Run child credentials, desktop composition and room owner lifetime remain pending. Reuse WORKFLOW-CONTEXT/1; no new wire capability, producer mapping or paired/provider/native qualification. Keep to three authored files and fewer than 500 changed lines.",
+					"backlog": ["M-04"],
+					"requires": ["MAESTRO-EFFECT-CONSUMERS-BUILD"],
+					"produces": []
+				},
+				{
 					"label": "Bind Auto Run Cue and nested work at dispatch",
 					"kind": "IMPLEMENT",
 					"targets": [
@@ -4240,7 +4254,7 @@
 			"produces": ["MAESTRO-WORKFLOW-CONSUMERS-BUILD"],
 			"id": "MCOMP-17",
 			"path": ".maestro/playbooks/2026-10-29-Maestro-Integration-Completion/MCOMP-17.md",
-			"taskCount": 40,
+			"taskCount": 41,
 			"stage": "S10"
 		},
 		{
@@ -6030,7 +6044,7 @@
 				"PAIR-DIRECT-EVIDENCE"
 			],
 			"nativeInputs": false,
-			"taskCount": 47
+			"taskCount": 48
 		},
 		{
 			"id": "S11",
@@ -6234,8 +6248,8 @@
 			"taskCount": 1
 		}
 	],
-	"taskCount": 360,
-	"taskCounts": { "IMPLEMENT": 251, "TEST": 49, "VERIFY": 60 },
+	"taskCount": 361,
+	"taskCounts": { "IMPLEMENT": 252, "TEST": 49, "VERIFY": 60 },
 	"artifacts": {
 		"MEGA-CONTRACTS-FOUNDATION-BUILD": {
 			"producerDocument": "GCOMP-01",
@@ -7011,6 +7025,7 @@
 			"MCOMP-17-03AG",
 			"MCOMP-17-03AH",
 			"MCOMP-17-03AI",
+			"MCOMP-17-03AJ",
 			"MCOMP-17-03",
 			"MCOMP-17-04",
 			"MCOMP-17-05",

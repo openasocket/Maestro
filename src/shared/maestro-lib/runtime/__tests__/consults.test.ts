@@ -51,6 +51,7 @@ import {
 	type MaestroRuntimeOptions,
 	type RuntimeDeps,
 } from '../index';
+import { CALLER_CREDENTIAL_ENV_VAR } from '../turns';
 
 const T0 = Date.parse('2026-10-04T12:00:00Z');
 const BUNDLED_PROMPTS = path.resolve(__dirname, '../../../../prompts');
@@ -753,6 +754,7 @@ describe('runtime consults', () => {
 									...turn.launch.sessionCustomEnvVars,
 									FAKE_AGENT_RECORDING: recording,
 									FAKE_AGENT_HOLD: '1',
+									FAKE_AGENT_ENV_OUT: chatEnvFile(options.sessionId),
 								},
 							},
 						},
@@ -766,6 +768,117 @@ describe('runtime consults', () => {
 				value(await runtime.turns.send('a1', 'a1-t1', { text: 'Source operation' }));
 				return runtime;
 			}
+
+			/** Where the chat turn of process session `sessionId` (`<agent>-ai-<tab>`) writes its real environment. */
+			const chatEnvFile = (sessionId: string) => path.join(work, `chat-env-${sessionId}.json`);
+			/** The caller credential the chat turn on `tabId` was last stamped with. */
+			async function credentialOf(tabId = 'a1-t1'): Promise<string> {
+				const file = chatEnvFile(`${tabId.split('-')[0]}-ai-${tabId}`);
+				let credential: unknown;
+				await vi.waitFor(() => {
+					credential = fs.existsSync(file)
+						? JSON.parse(fs.readFileSync(file, 'utf-8'))[CALLER_CREDENTIAL_ENV_VAR]
+						: undefined;
+					expect(typeof credential).toBe('string');
+				});
+				return credential as string;
+			}
+
+			describe('forwarded caller credentials (MCOMP-17-03AJ)', () => {
+				beforeEach(() => {
+					for (const id of ['a1-ai-a1-t1', 'a3-ai-a3-t1'])
+						fs.rmSync(chatEnvFile(id), { force: true });
+				});
+
+				it('binds the presenting chat turn without asking the host lookup', async () => {
+					const runtime = await liveChat();
+					const credential = await credentialOf();
+					sourceLookup.mockClear();
+					value(await runtime.askAsCaller(credential, input));
+					const source = sourceAdmissions[0].context;
+					const child = lineageOf(0);
+					expect(child).toEqual(
+						childDelegationContext(delegationContextOf(source), {
+							link: { kind: 'agent', id: 'a2' },
+							requestId: child.identity.requestId,
+							attemptId: child.identity.attemptId,
+						})
+					);
+					expect(permissionMode(provider.calls[0].spec.args)).toBe('plan');
+					expect(sourceLookup).not.toHaveBeenCalled();
+					expect(authority.live()).toHaveLength(1);
+				});
+
+				it.each([
+					'forged',
+					'near-miss',
+					'blank',
+					'different-tab',
+					'different-agent',
+					'other-tab-credential',
+					'stopped',
+					'revoked',
+				] as const)('refuses a %s caller before writing the target', async (mode) => {
+					const runtime = await liveChat();
+					if (mode === 'other-tab-credential') {
+						value(await runtime.tabs.update('a3', 'a3-t1', { readOnly: true }));
+						value(await runtime.turns.send('a3', 'a3-t1', { text: 'Other source' }));
+					}
+					const own = await credentialOf();
+					const credential =
+						mode === 'forged'
+							? 'A'.repeat(own.length)
+							: mode === 'near-miss'
+								? own.slice(0, -1) + (own.endsWith('A') ? 'B' : 'A')
+								: mode === 'blank'
+									? ''
+									: mode === 'other-tab-credential'
+										? await credentialOf('a3-t1')
+										: own;
+					if (mode === 'stopped') value(await runtime.turns.interrupt('a1', 'a1-t1'));
+					if (mode === 'revoked') authority.revoke(authority.live()[0].leaseId, 'Source revoked');
+					const admitted = sourceAdmissions.length;
+					const request = {
+						...input,
+						...(mode === 'different-tab' ? { fromTabId: 'a1-other' } : {}),
+						...(mode === 'different-agent' ? { fromAgentId: 'a3', fromTabId: 'a1-t1' } : {}),
+					};
+					expect(errorOf(await runtime.askAsCaller(credential, request)).message).toMatch(
+						/custody/i
+					);
+					expect(provider.calls).toEqual([]);
+					expect(consultTab('a2')).toBeUndefined();
+					expect(sourceAdmissions).toHaveLength(admitted);
+				});
+
+				it('withdraws the credential when its turn stops during preparation, and honors the fresh one', async () => {
+					const runtime = await liveChat();
+					const first = await credentialOf();
+					let stopDuringPreparation = true;
+					probeBinary = async () => {
+						if (stopDuringPreparation) {
+							stopDuringPreparation = false;
+							value(await runtime.turns.interrupt('a1', 'a1-t1'));
+						}
+						return { exists: true, path: '/fake/bin/claude' };
+					};
+					expect(errorOf(await runtime.askAsCaller(first, input)).message).toMatch(
+						// Stopping the asking turn also stops its consults (cancelForSource).
+						/custody|lease.*released|was stopped/i
+					);
+					expect(provider.calls).toEqual([]);
+					await vi.waitFor(() => expect(runtime.turnsInFlight()).toBe(0));
+					fs.rmSync(chatEnvFile('a1-ai-a1-t1'), { force: true });
+					value(await runtime.turns.send('a1', 'a1-t1', { text: 'Second source' }));
+					const second = await credentialOf();
+					expect(second).not.toBe(first);
+					expect(errorOf(await runtime.askAsCaller(first, input)).message).toMatch(/custody/i);
+					value(await runtime.askAsCaller(second, input));
+					expect(lineageOf(0).identity.parentRunId).toBe(
+						sourceAdmissions.at(-2)?.context.identity.requestId
+					);
+				});
+			});
 
 			it('refuses unknown source kinds without borrowing live chat custody', async () => {
 				const runtime = await liveChat();
