@@ -594,3 +594,163 @@ describe('caller consult withdrawer composition (MCOMP-17-03AV)', () => {
 		expect(String(results()[0].error)).toContain('no longer holds its admission');
 	});
 });
+
+describe('Auto Run caller credential resolver composition (MCOMP-17-03BC)', () => {
+	const ATTEMPT = 'mcc_auto-run-attempt-credential';
+	const CHAT = 'mcc_live-turn-credential';
+	const RECHECK_MS = 1_000;
+
+	type ChatResolver = (credential: string) => { agentId: string; tabId: string } | null;
+	type AutoRunResolver = (credential: string) => { agentId: string; processId: string } | null;
+
+	function compose(
+		opts: {
+			chat?: ChatResolver;
+			autoRun?: AutoRunResolver;
+			withdrawer?: (ticket: string) => void;
+			autoRunFirst?: boolean;
+			pending?: boolean;
+		} = {}
+	) {
+		const server = new WebServer(0);
+		const consultAgent = opts.pending
+			? vi.fn(() => new Promise(() => {}))
+			: vi.fn().mockResolvedValue({ success: true, response: 'answer' });
+		server.setConsultAgentCallback(consultAgent as never);
+		server.setGetSessionDetailCallback(vi.fn().mockReturnValue({ state: 'idle' }) as never);
+		// Composed before start() wires the remaining callbacks, as the factory does, in either
+		// order: no setter may drop another's hook.
+		if (opts.autoRunFirst && opts.autoRun) server.setAutoRunCallerSourceResolver(opts.autoRun);
+		if (opts.chat) server.setCallerSourceResolver(opts.chat);
+		if (opts.withdrawer) server.setCallerConsultWithdrawer(opts.withdrawer);
+		if (!opts.autoRunFirst && opts.autoRun) server.setAutoRunCallerSourceResolver(opts.autoRun);
+		(server as any).setupMessageHandlerCallbacks();
+		const sent: Array<Record<string, unknown>> = [];
+		const client = {
+			id: 'cli-socket',
+			connectedAt: Date.now(),
+			cli: true,
+			socket: {
+				readyState: WebSocket.OPEN,
+				send: vi.fn((frame: string) => sent.push(JSON.parse(frame))),
+				once: vi.fn(),
+				off: vi.fn(),
+			},
+		};
+		const ask = (fields: Record<string, unknown>) =>
+			(server as any).messageHandler.handleMessage(client, {
+				type: 'cross_agent_ask',
+				sessionId: 'target-agent',
+				question: 'q',
+				requestId: 'r-1',
+				...fields,
+			});
+		const results = () => sent.filter((r) => r.type === 'cross_agent_ask_result');
+		return { consultAgent, ask, results };
+	}
+
+	const attemptAsk = {
+		fromSessionId: 'runner-agent',
+		fromTabId: 'shown-tab',
+		callerCredential: ATTEMPT,
+	};
+
+	it('authenticates an Auto Run attempt credential through the composed resolver', async () => {
+		const autoRun = vi.fn((credential: string) =>
+			credential === ATTEMPT ? { agentId: 'runner-agent', processId: 'runner-agent-batch-1' } : null
+		);
+		const chat = vi.fn(() => null);
+		const { consultAgent, ask, results } = compose({ chat, autoRun });
+		ask(attemptAsk);
+		await vi.waitFor(() => expect(consultAgent).toHaveBeenCalledTimes(1));
+		expect(chat).toHaveBeenCalledWith(ATTEMPT);
+		expect(autoRun).toHaveBeenCalledWith(ATTEMPT);
+		const params = consultAgent.mock.calls[0][0];
+		expect(params).toMatchObject({
+			targetSessionId: 'target-agent',
+			fromSessionId: 'runner-agent',
+			fromTabId: 'shown-tab',
+		});
+		expect(JSON.stringify(params)).not.toContain(ATTEMPT);
+		await vi.waitFor(() => expect(results()[0]).toMatchObject({ success: true }));
+		expect(JSON.stringify(results())).not.toContain(ATTEMPT);
+	});
+
+	it('keeps both resolvers whichever is composed first', async () => {
+		const chat = vi.fn((c: string) =>
+			c === CHAT ? { agentId: 'caller-1', tabId: 'tab-1' } : null
+		);
+		const autoRun = vi.fn((c: string) =>
+			c === ATTEMPT ? { agentId: 'runner-agent', processId: 'runner-agent-batch-1' } : null
+		);
+		const { consultAgent, ask } = compose({ chat, autoRun, autoRunFirst: true });
+		ask(attemptAsk);
+		ask({
+			fromSessionId: 'caller-1',
+			fromTabId: 'tab-1',
+			callerCredential: CHAT,
+			requestId: 'r-2',
+		});
+		await vi.waitFor(() => expect(consultAgent).toHaveBeenCalledTimes(2));
+		expect(consultAgent.mock.calls[0][0]).toMatchObject({ fromSessionId: 'runner-agent' });
+		expect(consultAgent.mock.calls[1][0]).toMatchObject({ fromSessionId: 'caller-1' });
+	});
+
+	it('authenticates an attempt credential with no chat resolver composed', async () => {
+		const { consultAgent, ask } = compose({
+			autoRun: () => ({ agentId: 'runner-agent', processId: 'runner-agent-batch-1' }),
+		});
+		ask(attemptAsk);
+		await vi.waitFor(() => expect(consultAgent).toHaveBeenCalledTimes(1));
+	});
+
+	it('refuses an attempt credential when only the chat resolver was composed', () => {
+		const { consultAgent, ask, results } = compose({ chat: () => null });
+		ask(attemptAsk);
+		expect(consultAgent).not.toHaveBeenCalled();
+		expect(results()[0]).toMatchObject({ success: false, requestId: 'r-1' });
+		expect(String(results()[0].error)).toContain(
+			'authenticates no live chat turn or Auto Run attempt'
+		);
+	});
+
+	it('refuses an attempt credential stated for another agent', () => {
+		const { consultAgent, ask, results } = compose({
+			autoRun: () => ({ agentId: 'runner-agent', processId: 'runner-agent-batch-1' }),
+		});
+		ask({ ...attemptAsk, fromSessionId: 'someone-else' });
+		expect(consultAgent).not.toHaveBeenCalled();
+		expect(String(results()[0].error)).toContain('not the Auto Run attempt');
+	});
+
+	describe('custody', () => {
+		beforeEach(() => {
+			vi.useFakeTimers();
+		});
+		afterEach(() => {
+			vi.useRealTimers();
+		});
+
+		it('withdraws the ask through the composed withdrawer when the attempt moves process', () => {
+			let processId = 'runner-agent-batch-1';
+			const withdrawer = vi.fn();
+			const { consultAgent, ask, results } = compose({
+				autoRun: () => ({ agentId: 'runner-agent', processId }),
+				withdrawer,
+				pending: true,
+			});
+			ask(attemptAsk);
+			expect(consultAgent).toHaveBeenCalledTimes(1);
+			const { dispatchTicket } = (consultAgent.mock.calls[0] as unknown[])[0] as {
+				dispatchTicket: string;
+			};
+			vi.advanceTimersByTime(RECHECK_MS);
+			expect(withdrawer).not.toHaveBeenCalled();
+			processId = 'runner-agent-batch-2';
+			vi.advanceTimersByTime(RECHECK_MS);
+			expect(withdrawer).toHaveBeenCalledWith(dispatchTicket);
+			expect(results()).toHaveLength(1);
+			expect(results()[0]).toMatchObject({ success: false, requestId: 'r-1' });
+		});
+	});
+});

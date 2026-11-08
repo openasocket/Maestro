@@ -58,6 +58,7 @@ import { captureException } from '../utils/sentry';
 import { WebSocketMessageHandler } from './handlers';
 import type { MessageHandlerCallbacks } from './handlers';
 import type {
+	AutoRunCallerSourceResolver,
 	CallerConsultWithdrawer,
 	CallerSourceResolver,
 } from './handlers/messageHandlers/commands';
@@ -728,6 +729,23 @@ export class WebServer {
 	setCallerSourceResolver(resolver: CallerSourceResolver): void {
 		const callbacks: Partial<MessageHandlerCallbacks> & { callerSourceOf: CallerSourceResolver } = {
 			callerSourceOf: resolver,
+		};
+		this.messageHandler.setCallbacks(callbacks);
+	}
+
+	/**
+	 * The host-only lookup the `cross_agent_ask` handler authenticates a forwarded Auto Run
+	 * attempt credential with (MCOMP-17-03BC): the desktop composes
+	 * `ProcessManager.autoRunCallerSourceOf`. Tried after the chat resolver, so the two kinds of
+	 * credential never resolve as each other. Merged into the message handler like
+	 * `setCallerSourceResolver`, so it survives `start()` and never crosses the renderer. Until
+	 * one is composed, an attempt's credential refuses as authenticating no live caller.
+	 */
+	setAutoRunCallerSourceResolver(resolver: AutoRunCallerSourceResolver): void {
+		const callbacks: Partial<MessageHandlerCallbacks> & {
+			autoRunCallerSourceOf: AutoRunCallerSourceResolver;
+		} = {
+			autoRunCallerSourceOf: resolver,
 		};
 		this.messageHandler.setCallbacks(callbacks);
 	}
