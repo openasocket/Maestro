@@ -4212,6 +4212,20 @@
 					"produces": []
 				},
 				{
+					"id": "MCOMP-17-03AK",
+					"label": "Resolve forwarded caller credentials in the shared host request handler",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/shared/maestro-lib/runtime/server-requests.ts",
+						"src/shared/maestro-lib/runtime/__tests__/consults.test.ts",
+						"Plans/integration-completion/program.json"
+					],
+					"outcome": "Consume MAESTRO-EFFECT-CONSUMERS-BUILD and its pinned MAESTRO-CONTRACT-INPUTS-BUILD dependency. Bounded prerequisite continuation of MCOMP-17-03 after MCOMP-17-03AJ: the shared host request handler resolves a cross_agent_ask callerCredential through the runtime's host-only askAsCaller, so a detached host attributes an agent-shell consult by the credential its process was stamped with, not by the stated fromSessionId/fromTabId. A request with no credential keeps the host lookup path. A credential is never dropped: a non-string value, or a client that cannot resolve it (a client transport, not the runtime), refuses before asking. Forged, blank, other-tab, stopped and mismatched credentials refuse before the target is written even where the host lookup would bind the stated caller, and no reply echoes the credential. Exercise real fixture processes and a mutation check. The CLI reading MAESTRO_MANAGED_CALLER_CREDENTIAL and forwarding it, background/consult and Auto Run child credentials, desktop composition and room owner lifetime remain pending. Reuse WORKFLOW-CONTEXT/1; no new wire capability, producer mapping or paired/provider/native qualification. Keep to three authored files and fewer than 500 changed lines.",
+					"backlog": ["M-04"],
+					"requires": ["MAESTRO-EFFECT-CONSUMERS-BUILD"],
+					"produces": []
+				},
+				{
 					"label": "Bind Auto Run Cue and nested work at dispatch",
 					"kind": "IMPLEMENT",
 					"targets": [
@@ -4254,7 +4268,7 @@
 			"produces": ["MAESTRO-WORKFLOW-CONSUMERS-BUILD"],
 			"id": "MCOMP-17",
 			"path": ".maestro/playbooks/2026-10-29-Maestro-Integration-Completion/MCOMP-17.md",
-			"taskCount": 41,
+			"taskCount": 42,
 			"stage": "S10"
 		},
 		{
@@ -6044,7 +6058,7 @@
 				"PAIR-DIRECT-EVIDENCE"
 			],
 			"nativeInputs": false,
-			"taskCount": 48
+			"taskCount": 49
 		},
 		{
 			"id": "S11",
@@ -6248,8 +6262,8 @@
 			"taskCount": 1
 		}
 	],
-	"taskCount": 361,
-	"taskCounts": { "IMPLEMENT": 252, "TEST": 49, "VERIFY": 60 },
+	"taskCount": 362,
+	"taskCounts": { "IMPLEMENT": 253, "TEST": 49, "VERIFY": 60 },
 	"artifacts": {
 		"MEGA-CONTRACTS-FOUNDATION-BUILD": {
 			"producerDocument": "GCOMP-01",
@@ -7026,6 +7040,7 @@
 			"MCOMP-17-03AH",
 			"MCOMP-17-03AI",
 			"MCOMP-17-03AJ",
+			"MCOMP-17-03AK",
 			"MCOMP-17-03",
 			"MCOMP-17-04",
 			"MCOMP-17-05",

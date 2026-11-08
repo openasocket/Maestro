@@ -51,6 +51,7 @@ import {
 	type MaestroRuntimeOptions,
 	type RuntimeDeps,
 } from '../index';
+import { createRequestHandler, runtimeManagedScope } from '../server-requests';
 import { CALLER_CREDENTIAL_ENV_VAR } from '../turns';
 
 const T0 = Date.parse('2026-10-04T12:00:00Z');
@@ -877,6 +878,128 @@ describe('runtime consults', () => {
 					expect(lineageOf(0).identity.parentRunId).toBe(
 						sourceAdmissions.at(-2)?.context.identity.requestId
 					);
+				});
+			});
+
+			describe('server-resolved caller credentials (MCOMP-17-03AK)', () => {
+				beforeEach(() => {
+					for (const id of ['a1-ai-a1-t1', 'a3-ai-a3-t1'])
+						fs.rmSync(chatEnvFile(id), { force: true });
+				});
+				const request = (extra: Record<string, unknown> = {}) => ({
+					type: 'cross_agent_ask',
+					sessionId: input.targetAgentId,
+					question: input.question,
+					fromSessionId: input.fromAgentId,
+					fromTabId: input.fromTabId,
+					...extra,
+				});
+				const handlerFor = (runtime: MaestroRuntime) =>
+					createRequestHandler(runtime, { managedScope: runtimeManagedScope(runtime) });
+
+				it('binds the presenting chat turn from the wire credential, never the host lookup', async () => {
+					const runtime = await liveChat();
+					const credential = await credentialOf();
+					sourceLookup.mockClear();
+					const reply = await handlerFor(runtime)(request({ callerCredential: credential }));
+					expect(reply).toMatchObject({ type: 'cross_agent_ask_result', success: true });
+					expect(JSON.stringify(reply)).not.toContain(credential);
+					expect(lineageOf(0)).toEqual(
+						childDelegationContext(delegationContextOf(sourceAdmissions[0].context), {
+							link: { kind: 'agent', id: 'a2' },
+							requestId: lineageOf(0).identity.requestId,
+							attemptId: lineageOf(0).identity.attemptId,
+						})
+					);
+					expect(permissionMode(provider.calls[0].spec.args)).toBe('plan');
+					expect(sourceLookup).not.toHaveBeenCalled();
+				});
+
+				it.each(['forged', 'blank', 'other-tab-credential', 'stopped', 'mismatched-from'] as const)(
+					'refuses a %s wire credential before writing the target',
+					async (mode) => {
+						const runtime = await liveChat();
+						if (mode === 'other-tab-credential') {
+							value(await runtime.tabs.update('a3', 'a3-t1', { readOnly: true }));
+							value(await runtime.turns.send('a3', 'a3-t1', { text: 'Other source' }));
+						}
+						const own = await credentialOf();
+						const credential =
+							mode === 'forged'
+								? 'A'.repeat(own.length)
+								: mode === 'blank'
+									? ''
+									: mode === 'other-tab-credential'
+										? await credentialOf('a3-t1')
+										: own;
+						if (mode === 'stopped') value(await runtime.turns.interrupt('a1', 'a1-t1'));
+						const admitted = sourceAdmissions.length;
+						// The host lookup would bind the stated caller: only the credential can refuse.
+						const reply = await callers.run({ agentId: 'a1', tabId: 'a1-t1' }, () =>
+							handlerFor(runtime)(
+								request({
+									callerCredential: credential,
+									...(mode === 'mismatched-from' ? { fromTabId: 'a1-other' } : {}),
+								})
+							)
+						);
+						expect(reply).toMatchObject({ type: 'cross_agent_ask_result', success: false });
+						expect(String(reply?.error)).toMatch(/custody/i);
+						if (credential) expect(JSON.stringify(reply)).not.toContain(credential);
+						expect(provider.calls).toEqual([]);
+						expect(consultTab('a2')).toBeUndefined();
+						expect(sourceAdmissions).toHaveLength(admitted);
+					}
+				);
+
+				it.each([
+					['a non-string credential', { callerCredential: 42 }, /must be a string/],
+					['a null credential', { callerCredential: null }, /must be a string/],
+				] as const)('refuses %s without asking', async (_name, extra, error) => {
+					const runtime = await liveChat();
+					await credentialOf();
+					const admitted = sourceAdmissions.length;
+					const reply = await handlerFor(runtime)(request(extra));
+					expect(reply).toEqual({
+						type: 'cross_agent_ask_result',
+						success: false,
+						error: expect.stringMatching(error),
+					});
+					expect(provider.calls).toEqual([]);
+					expect(consultTab('a2')).toBeUndefined();
+					expect(sourceAdmissions).toHaveLength(admitted);
+				});
+
+				it('refuses a credential on a client that cannot resolve it, never dropping it', async () => {
+					const runtime = await liveChat();
+					const credential = await credentialOf();
+					const { askAsCaller: _host, ...clientOnly } = runtime;
+					const admitted = sourceAdmissions.length;
+					// The caller's own coordinates would bind through the host lookup: dropping the
+					// credential and asking anyway would succeed, so a refusal here is the handler's choice.
+					const reply = await callers.run({ agentId: 'a1', tabId: 'a1-t1' }, () =>
+						createRequestHandler(clientOnly)(request({ callerCredential: credential }))
+					);
+					expect(reply).toMatchObject({
+						type: 'cross_agent_ask_result',
+						success: false,
+						error: expect.stringMatching(/cannot authenticate a caller credential/),
+					});
+					expect(provider.calls).toEqual([]);
+					expect(sourceAdmissions).toHaveLength(admitted);
+				});
+
+				it('keeps an ask with no credential on the host lookup', async () => {
+					const runtime = await liveChat();
+					await credentialOf();
+					sourceLookup.mockClear();
+					expect(await handlerFor(runtime)(request())).toMatchObject({ success: false });
+					expect(sourceLookup).toHaveBeenCalled();
+					expect(provider.calls).toEqual([]);
+					const reply = await callers.run({ agentId: 'a1', tabId: 'a1-t1' }, () =>
+						handlerFor(runtime)(request())
+					);
+					expect(reply).toMatchObject({ type: 'cross_agent_ask_result', success: true });
 				});
 			});
 

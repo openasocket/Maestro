@@ -9,7 +9,9 @@
  *
  * It takes any `MaestroClient`, never the runtime: the transport adds the request id, the pushes,
  * and the host's own control messages. A message it does not know returns `undefined`, which the
- * transport answers with the bridge's `echo`, the signal a client reads as "unsupported".
+ * transport answers with the bridge's `echo`, the signal a client reads as "unsupported". The one
+ * host-only method it reaches for is `askAsCaller`, present only when the client is the runtime
+ * itself, so a forwarded caller credential is resolved by the host that minted it.
  */
 
 import type { AgentRecord } from '../store/records';
@@ -740,6 +742,18 @@ async function projectSessions(client: MaestroClient): Promise<Frame[]> {
 	);
 }
 
+/**
+ * The runtime behind `client` when it resolves forwarded caller credentials (MCOMP-17-03AK).
+ * Only a host's own runtime has `askAsCaller`; a client transport (`createWsMaestroClient`)
+ * never does, so a credential sent to a handler over one is refused, not forwarded or ignored.
+ */
+function callerCredentialHost(
+	client: MaestroClient
+): Pick<MaestroRuntime, 'askAsCaller'> | undefined {
+	const { askAsCaller } = client as MaestroClient & Partial<Pick<MaestroRuntime, 'askAsCaller'>>;
+	return typeof askAsCaller === 'function' ? { askAsCaller } : undefined;
+}
+
 export type RequestHandler = (message: Request) => Promise<Frame | undefined>;
 
 export interface RequestHandlerOptions {
@@ -1176,7 +1190,7 @@ export function createRequestHandler(
 			// -- consults ----------------------------------------------------
 			// Waits as long as the answer takes: the caller's own timeout bounds it, not a delivery receipt.
 			case 'cross_agent_ask': {
-				const result = await client.consults.ask({
+				const input: Parameters<MaestroClient['consults']['ask']>[0] = {
 					targetAgentId: sessionId(message),
 					question: typeof message.question === 'string' ? message.question : '',
 					...(str(message.fromSessionId) ? { fromAgentId: str(message.fromSessionId) } : {}),
@@ -1186,7 +1200,30 @@ export function createRequestHandler(
 					...(typeof message.handoffAnswer === 'string'
 						? { handoffAnswer: message.handoffAnswer }
 						: {}),
-				});
+				};
+				// A forwarded caller credential (MCOMP-17-03AK) is the host's only proof of which live
+				// chat turn is asking; the stated from ids are claims. It is resolved by the host itself,
+				// never dropped: a credential this host cannot resolve refuses rather than asking unbound.
+				let result: Awaited<ReturnType<MaestroClient['consults']['ask']>>;
+				if (!('callerCredential' in message)) {
+					result = await client.consults.ask(input);
+				} else {
+					const credential = message.callerCredential;
+					if (typeof credential !== 'string') {
+						return refusal(
+							'cross_agent_ask_result',
+							'callerCredential must be a string; nothing was asked.'
+						);
+					}
+					const host = callerCredentialHost(client);
+					if (!host) {
+						return refusal(
+							'cross_agent_ask_result',
+							'This host cannot authenticate a caller credential; nothing was asked.'
+						);
+					}
+					result = await host.askAsCaller(credential, input);
+				}
 				if (result.ok) {
 					return {
 						type: 'cross_agent_ask_result',
