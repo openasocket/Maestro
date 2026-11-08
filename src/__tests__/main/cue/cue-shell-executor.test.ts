@@ -829,13 +829,20 @@ describe('cue-shell-executor', () => {
 		it('stopped while the authority decides releases the lease unused and spawns nothing', async () => {
 			let answer!: (decision: PolicyDecision) => void;
 			const leases: DispatchLease[] = [];
+			const onLease = vi.fn();
 			const admission = managedAdmission(
 				() =>
 					new Promise<PolicyDecision>((resolve) => {
 						answer = resolve;
 					}),
-				(lease) => leases.push(lease)
+				onLease
 			);
+			const admit = admission.authority.admit.bind(admission.authority);
+			vi.spyOn(admission.authority, 'admit').mockImplementation(async (request) => {
+				const outcome = await admit(request);
+				if (outcome.state === 'admitted') leases.push(outcome.lease);
+				return outcome;
+			});
 			const controller = new AbortController();
 			const promise = executeCueShell(
 				createConfig({ admission, routeSupport: qualified, signal: controller.signal }) as any
@@ -850,6 +857,167 @@ describe('cue-shell-executor', () => {
 			expect(leases).toHaveLength(1);
 			expect(leases[0].state()).toBe('released');
 			expect(leases[0].ended().release).toEqual({ outcome: 'stopped', by: 'caller' });
+			expect(onLease).not.toHaveBeenCalled();
 		});
+
+		it.each(['deny', 'unavailable', 'unknown'] as const)(
+			'keeps Stop and the late %s diagnostics while admission settles',
+			async (decision) => {
+				let answer!: (value: PolicyDecision) => void;
+				const admission = managedAdmission(
+					() => new Promise<PolicyDecision>((resolve) => (answer = resolve))
+				);
+				const controller = new AbortController();
+				const promise = executeCueShell(
+					createConfig({ admission, routeSupport: qualified, signal: controller.signal })
+				);
+				await vi.advanceTimersByTimeAsync(0);
+				controller.abort();
+				answer(
+					decision === 'deny'
+						? { decision, reason: 'late answer', policyRevision: 3, code: 'policy-denied' }
+						: { decision, reason: 'late answer' }
+				);
+				const result = await promise;
+				const state = decision === 'deny' ? 'denied' : decision;
+				expect(result).toMatchObject({ status: 'stopped', exitCode: null, managed: { state } });
+				expect(result.stderr).toBe(`[managed-${state}] late answer`);
+				expect(mockSpawn).not.toHaveBeenCalled();
+				expect(admission.authority.live()).toEqual([]);
+			}
+		);
+
+		it.each([false, true])(
+			'releases custody when the observer throws (stopped: %s)',
+			async (stop) => {
+				const controller = new AbortController();
+				const leases: DispatchLease[] = [];
+				const admission = managedAdmission(
+					() => ({ decision: 'allow', policyRevision: 3 }),
+					(lease) => {
+						leases.push(lease);
+						if (stop) controller.abort();
+						throw new Error('observer failed');
+					}
+				);
+				const result = await executeCueShell(
+					createConfig({ admission, routeSupport: qualified, signal: controller.signal })
+				);
+				expect(result.status).toBe(stop ? 'stopped' : 'failed');
+				expect(mockCaptureException).toHaveBeenCalledWith(
+					expect.objectContaining({ message: 'observer failed' }),
+					expect.objectContaining({ operation: 'cue:shell:admission', runId: 'run-1' })
+				);
+				expect(mockSpawn).not.toHaveBeenCalled();
+				expect(leases[0].pid()).toBeUndefined();
+				expect(leases[0].ended().release).toEqual(
+					stop
+						? { outcome: 'stopped', by: 'caller' }
+						: { outcome: 'spawn-failed', message: 'observer failed' }
+				);
+				expect(admission.authority.live()).toEqual([]);
+			}
+		);
+
+		it('an observer can stop a launch, and a retry gets a fresh lease', async () => {
+			const controller = new AbortController();
+			const leases: DispatchLease[] = [];
+			const admission = managedAdmission(
+				() => ({ decision: 'allow', policyRevision: 3 }),
+				(lease) => {
+					leases.push(lease);
+					controller.abort();
+				}
+			);
+			const result = await executeCueShell(
+				createConfig({ admission, routeSupport: qualified, signal: controller.signal })
+			);
+			expect(result.status).toBe('stopped');
+			expect(mockSpawn).not.toHaveBeenCalled();
+			expect(leases[0].ended().release).toEqual({ outcome: 'stopped', by: 'caller' });
+			const retry = executeCueShell(createConfig({ admission, routeSupport: qualified }));
+			await vi.advanceTimersByTimeAsync(0);
+			expect(mockSpawn).toHaveBeenCalledTimes(1);
+			expect(leases[1]).not.toBe(leases[0]);
+			expect(leases[1].state()).toBe('bound');
+			mockChild.emit('close', 0, null);
+			expect((await retry).status).toBe('completed');
+			expect(admission.authority.live()).toEqual([]);
+		});
+
+		it.each(['local', 'ssh'] as const)(
+			'honors Stop from the admission log on %s',
+			async (route) => {
+				const controller = new AbortController();
+				const leases: DispatchLease[] = [];
+				const admission = managedAdmission(
+					() => ({ decision: 'allow', policyRevision: 3 }),
+					(lease) => leases.push(lease)
+				);
+				mockWrapSpawnWithSsh.mockResolvedValue({
+					command: 'ssh',
+					args: ['test-host', 'bash -c true'],
+					cwd: '/fixture',
+					sshRemoteUsed: { id: 'remote-1', name: 'Fixture', host: 'test-host' },
+				});
+				const result = await executeCueShell(
+					createConfig({
+						admission,
+						routeSupport: qualified,
+						signal: controller.signal,
+						...(route === 'ssh'
+							? {
+									sshRemoteConfig: { enabled: true, remoteId: 'remote-1' },
+									sshStore: { getSshRemotes: () => [] },
+								}
+							: {}),
+						onLog: (_level: string, message: string) => {
+							if (message.includes('admitted under lease')) controller.abort();
+						},
+					})
+				);
+				expect(result.status).toBe('stopped');
+				expect(mockSpawn).not.toHaveBeenCalled();
+				expect(leases[0].ended().release).toEqual({ outcome: 'stopped', by: 'caller' });
+				expect(getProcessList()).toEqual([]);
+			}
+		);
+
+		it.each(['log', 'gate', 'expired'] as const)(
+			'cleans unused custody after %s failure',
+			async (failure) => {
+				const leases: DispatchLease[] = [];
+				const admission = managedAdmission(
+					() => ({ decision: 'allow', policyRevision: 3 }),
+					(lease) => {
+						leases.push(lease);
+						if (failure === 'expired') vi.setSystemTime(Date.parse(lease.expiresAt) + 1);
+					}
+				);
+				if (failure === 'gate') {
+					vi.spyOn(admission.authority, 'check').mockImplementationOnce(() => {
+						throw new Error('gate failed');
+					});
+				}
+				const result = await executeCueShell(
+					createConfig({
+						admission,
+						routeSupport: qualified,
+						onLog: (_level: string, message: string) => {
+							if (failure === 'log' && message.includes('admitted under lease'))
+								throw new Error('log failed');
+						},
+					})
+				);
+				expect(result.status).toBe('failed');
+				expect(mockSpawn).not.toHaveBeenCalled();
+				expect(leases[0].pid()).toBeUndefined();
+				expect(leases[0].ended().release).toMatchObject({ outcome: 'spawn-failed' });
+				expect(admission.authority.live()).toEqual([]);
+				if (failure === 'expired')
+					expect(result.managed).toEqual({ state: 'denied', code: 'lease-invalid' });
+				else expect(mockCaptureException).toHaveBeenCalled();
+			}
+		);
 	});
 });

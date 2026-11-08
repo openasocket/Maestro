@@ -3806,6 +3806,20 @@
 					"id": "MCOMP-17-03G"
 				},
 				{
+					"label": "Close Cue shell cancellation and unused lease cleanup",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/main/cue/cue-shell-executor.ts",
+						"src/__tests__/main/cue/cue-shell-executor.test.ts",
+						"Plans/integration-completion/program.json"
+					],
+					"outcome": "Consume MAESTRO-EFFECT-CONSUMERS-BUILD and its pinned MAESTRO-CONTRACT-INPUTS-BUILD dependency. Bounded continuation of MCOMP-17-03 at the shell sink delegated by cue-run-router.ts: keep Stop and late producer diagnostics together, notify the lease observer only after custody is held by the executor, and release unused leases on observer/log failures, cancellation and final-gate refusal. Preserve the canonical admission gate, original producer lease, normal exit/revocation and fresh retry admission. Exercise local and SSH cancellation with declared route/process fixtures; production managed shell routes remain unavailable. Retain MCOMP-17-03 unchecked for Cue Auto Run actions, incoming authenticated delegation, desktop composition and managed room custody across turns. No new wire definition, external capability, producer mapping or paired/provider/native qualification is supplied. Keep to three authored files and fewer than 500 changed lines.",
+					"backlog": ["M-04"],
+					"requires": ["MAESTRO-EFFECT-CONSUMERS-BUILD"],
+					"produces": [],
+					"id": "MCOMP-17-03H"
+				},
+				{
 					"label": "Bind Auto Run Cue and nested work at dispatch",
 					"kind": "IMPLEMENT",
 					"targets": [
@@ -3848,7 +3862,7 @@
 			"produces": ["MAESTRO-WORKFLOW-CONSUMERS-BUILD"],
 			"id": "MCOMP-17",
 			"path": ".maestro/playbooks/2026-10-29-Maestro-Integration-Completion/MCOMP-17.md",
-			"taskCount": 12,
+			"taskCount": 13,
 			"stage": "S10"
 		},
 		{
@@ -5638,7 +5652,7 @@
 				"PAIR-DIRECT-EVIDENCE"
 			],
 			"nativeInputs": false,
-			"taskCount": 19
+			"taskCount": 20
 		},
 		{
 			"id": "S11",
@@ -5842,9 +5856,9 @@
 			"taskCount": 1
 		}
 	],
-	"taskCount": 332,
+	"taskCount": 333,
 	"taskCounts": {
-		"IMPLEMENT": 223,
+		"IMPLEMENT": 224,
 		"TEST": 49,
 		"VERIFY": 60
 	},
@@ -6597,6 +6611,7 @@
 			"MCOMP-17-03E",
 			"MCOMP-17-03F",
 			"MCOMP-17-03G",
+			"MCOMP-17-03H",
 			"MCOMP-17-03",
 			"MCOMP-17-04",
 			"MCOMP-17-05",

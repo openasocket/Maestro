@@ -260,7 +260,9 @@ export async function executeCueShell(config: CueShellExecutionConfig): Promise<
 	let attribution: DispatchAttribution | undefined;
 	if (admission) {
 		const outcome = await admitCueShell(
-			admission,
+			// The sink must hold the lease before an observer can throw or stop
+			// the run. Keep the helper's original producer lease and canonical gate.
+			{ ...admission, onLease: undefined },
 			plan,
 			routeSupport ? { routeSupport } : undefined
 		);
@@ -271,6 +273,9 @@ export async function executeCueShell(config: CueShellExecutionConfig): Promise<
 			);
 			return {
 				...failedResult(`[managed-${outcome.state}] ${outcome.message}`),
+				// Cancellation owns the pending launch; the producer's diagnostics
+				// (including an uncertain outcome) still need to reach reconciliation.
+				...(isLaunchCancelled(signal) ? { status: 'stopped' as const } : {}),
 				managed: { state: outcome.state, code: outcome.code },
 			};
 		}
@@ -282,10 +287,19 @@ export async function executeCueShell(config: CueShellExecutionConfig): Promise<
 		lease = outcome.lease;
 		gate = outcome.gate;
 		attribution = outcome.attribution;
-		onLog('cue', `[CUE] Shell run ${runId} admitted under lease ${lease.leaseId}`);
 	}
 
-	return new Promise<CueRunResult>((resolve) => {
+	try {
+		if (lease) {
+			admission?.onLease?.(lease);
+			onLog('cue', `[CUE] Shell run ${runId} admitted under lease ${lease.leaseId}`);
+		}
+		// Observers can synchronously request Stop. No observer or await follows
+		// this check before the canonical gate and spawn.
+		if (isLaunchCancelled(signal)) {
+			lease?.release({ outcome: 'stopped', by: 'caller' });
+			return stoppedResult();
+		}
 		// The gate sees exactly what spawn sees: the snapshot is rebuilt from the
 		// arguments handed to `spawn()` below, under the attribution the lease
 		// was admitted on, and nothing runs in between.
@@ -303,15 +317,29 @@ export async function executeCueShell(config: CueShellExecutionConfig): Promise<
 				)
 			);
 			if (!verdict.ok) {
-				lease.release({ outcome: 'unknown', message: verdict.message });
-				resolve({
+				lease.release({ outcome: 'spawn-failed', message: verdict.message });
+				return {
 					...failedResult(`[managed-${verdict.state}] ${verdict.message}`),
 					managed: { state: verdict.state, code: verdict.code },
-				});
-				return;
+				};
 			}
 		}
+	} catch (err) {
+		// No spawn was attempted. An observer or gate failure must not strand
+		// unused custody; exceptions after spawn retain their existing lifetime.
+		const message = err instanceof Error ? err.message : String(err);
+		lease?.release(
+			isLaunchCancelled(signal)
+				? { outcome: 'stopped', by: 'caller' }
+				: { outcome: 'spawn-failed', message }
+		);
+		captureException(err, { operation: 'cue:shell:admission', runId });
+		return isLaunchCancelled(signal)
+			? stoppedResult()
+			: failedResult(`Admission error: ${message}`);
+	}
 
+	return new Promise<CueRunResult>((resolve) => {
 		let child: ChildProcess;
 		try {
 			child = spawn(spawnCommand, spawnArgs, {
