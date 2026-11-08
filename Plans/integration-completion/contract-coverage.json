@@ -296,6 +296,16 @@
 	},
 	"extensionProposals": [
 		{
+			"id": "REGISTRATION-HTTP/2",
+			"status": "proposed-not-negotiated",
+			"owner": "mega-maestro",
+			"version": "purpose-bound runtime approval HTTP mapping for registration schema 2",
+			"operations": "Existing approve_runtime_registration HTTP body remains v1. Propose a negotiated v2 mapping; no new route is sent.",
+			"missing": "Public runtimeApprovalInputV2 exists, but http-operations accepts only challengeId/nonce/challengeDigest. No public session identifier is exposed for consumer-side session correlation; session binding remains server-owned. Never drop purpose/version to fit v1.",
+			"implementationTasks": ["MCOMP-07-01", "MCOMP-13-01"],
+			"pairedVerification": ["MCOMP-14-01"]
+		},
+		{
 			"id": "PREPARED/1",
 			"status": "proposed-not-negotiated",
 			"owner": "mega-maestro",

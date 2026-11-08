@@ -55,13 +55,14 @@
  * A run over a dirty endpoint source or a stale library needs the matching
  * `--allow-*` flag and is recorded with `certifiable: false` and the reason.
  * The registration approval belongs to the Mega-Maestro API: when
- * `--approve-command` is given it is run on the host with the challenge on
- * stdin while the driver waits; without it the handshake stops at the
- * challenge and the dependency is named.
+ * `runPair({ approvalBridge })` composes createActorApprovalBridge's owned
+ * browser port; legacy `--approve-command` receives the challenge on stdin.
+ * Without either, the handshake stops at the challenge. Build inputs and
+ * configured ports do not prove live API availability or paired enrollment.
  */
 
 import { createHash } from 'node:crypto';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFile, execFileSync, spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { parseArgs } from 'node:util';
@@ -93,6 +94,150 @@ const git = (dir, args) => {
 };
 const docker = (args, options = {}) =>
 	spawnSync('docker', args, { encoding: 'utf8', timeout: options.timeout ?? 20_000 });
+
+/**
+ * Owned browser-session port: origin(), csrf() and fetch() stay in the caller's
+ * authenticated browser context. Never pass cookies, actor JSON or a device
+ * bearer here. The public client supplies credentials/include and CSRF; the
+ * service authenticates the actor. This one-shot bridge grants no runtime use:
+ * the driver must redeem on the original endpoint connection afterwards.
+ */
+export async function createActorApprovalBridge({ browser, origin, timeoutMs = 30_000 }) {
+	// Snapshot-only consumers do not load contracts or importer dependencies.
+	const { inspectContractsDir } = await import('./check-mega-contract-vectors.mjs');
+	const { readPin } = await import('./import-mega-maestro.mjs');
+	const base = new URL(origin);
+	if (
+		base.origin !== origin ||
+		base.protocol !== 'https:' ||
+		!Number.isInteger(timeoutMs) ||
+		timeoutMs < 1 ||
+		timeoutMs > DEFAULT_RUN_TIMEOUT_MS
+	)
+		throw new Error('Invalid approval bridge options');
+	const contractsDir = path.join(REPO_ROOT, 'vendor/mega-maestro/contracts');
+	const pin = readPin(path.join(REPO_ROOT, DEFAULT_PIN_FILE));
+	const checked = inspectContractsDir({ contractsDir, expectedSha256: pin?.payloadDigest });
+	const pkg = readJson(path.join(contractsDir, 'package.json'));
+	const zod = readJson(path.join(contractsDir, 'node_modules/zod/package.json'));
+	if (
+		checked.sourceRevision !== pin.sourceRevision ||
+		pkg.name !== pin.name ||
+		pkg.version !== pin.version ||
+		zod.version !== pin.dependencies.zod ||
+		!pin.acceptedEndpointProtocols.includes(1)
+	)
+		throw new Error('Approval contracts differ from the pin');
+	const [wire, http] = await Promise.all([
+		import(pathToFileURL(path.join(contractsDir, 'dist/local-endpoint.js')).href),
+		import(pathToFileURL(path.join(contractsDir, 'dist/http-operations.js')).href),
+	]);
+	const challengeSchema = wire.runtimeApprovalInput.extend({
+		expiresAt: wire.runtimeChallengeView.shape.expiresAt,
+	});
+	let used = false;
+	return {
+		input: Object.freeze({
+			schemaVersion: 1,
+			contractSha256: pin.sha256,
+			protocol: 1,
+			proofClass: 'consumer-input',
+			authority: 'none',
+			paired: false,
+		}),
+		async approve(value, { signal: parentSignal } = {}) {
+			if (used) return { outcome: 'denied' };
+			used = true;
+			const parsed = challengeSchema.safeParse(value);
+			if (!parsed.success || Date.parse(parsed.data.expiresAt) <= Date.now())
+				return { outcome: 'denied' };
+			const challenge = parsed.data;
+			const controller = new AbortController();
+			const signal = parentSignal
+				? AbortSignal.any([parentSignal, controller.signal])
+				: controller.signal;
+			let sent = false;
+			const timer = setTimeout(
+				() => controller.abort(),
+				Math.min(timeoutMs, Date.parse(challenge.expiresAt) - Date.now())
+			);
+			let onAbort;
+			try {
+				const client = http.createEnterpriseClient({
+					baseUrl: origin,
+					csrf: () => browser.csrf(),
+					fetch: async (url, init) => {
+						signal.throwIfAborted();
+						if (Date.parse(challenge.expiresAt) <= Date.now()) throw new Error('Expired challenge');
+						if (browser.origin() !== origin) throw new Error('Browser origin changed');
+						if (init.method === 'POST') {
+							if (!init.headers.get('x-csrf-token')) throw new Error('Missing CSRF');
+							sent = true;
+						}
+						const response = await browser.fetch(url, init);
+						signal.throwIfAborted();
+						return {
+							ok: response.ok,
+							status: response.status,
+							json: async () => {
+								const reader = response.body.getReader();
+								let bytes = 0;
+								const chunks = [];
+								try {
+									for (;;) {
+										const chunk = await reader.read();
+										signal.throwIfAborted();
+										if (chunk.done) break;
+										bytes += chunk.value.byteLength;
+										if (bytes > 8192) throw new Error('Approval response too large');
+										chunks.push(Buffer.from(chunk.value));
+									}
+									return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+								} finally {
+									void reader.cancel().catch(() => {});
+								}
+							},
+						};
+					},
+				});
+				const work = async () => {
+					const session = await client.request('getSession', { signal });
+					signal.throwIfAborted();
+					if (
+						session?.principal?.kind !== 'user' ||
+						!Number.isFinite(session.expiresAt) ||
+						session.expiresAt <= Date.now()
+					)
+						return { outcome: 'denied' };
+					const body = wire.runtimeApprovalInput.parse({
+						challengeId: challenge.challengeId,
+						nonce: challenge.nonce,
+						challengeDigest: challenge.challengeDigest,
+					});
+					const approved = await client.request('approve_runtime_registration', { body, signal });
+					signal.throwIfAborted();
+					return {
+						outcome: approved?.challengeId === challenge.challengeId ? 'approved' : 'unknown',
+					};
+				};
+				const aborted = new Promise((_, reject) => {
+					onAbort = () => reject(new Error('Approval aborted'));
+					signal.addEventListener('abort', onAbort, { once: true });
+					if (signal.aborted) onAbort();
+				});
+				return await Promise.race([work(), aborted]);
+			} catch (error) {
+				return {
+					outcome: [401, 403].includes(error?.status) ? 'denied' : sent ? 'unknown' : 'unavailable',
+				};
+			} finally {
+				clearTimeout(timer);
+				if (onAbort) signal.removeEventListener('abort', onAbort);
+				controller.abort();
+			}
+		},
+	};
+}
 
 // ---------------------------------------------------------------------------
 // check: every input of the pair, inspected and named
@@ -293,8 +438,8 @@ export function inspectProducers({ pin, pinDir, source, runtime, approvalProduce
 		'registration-approval': {
 			fresh: Boolean(approvalProducer),
 			detail: approvalProducer
-				? 'an approval producer is configured (--approve-command)'
-				: 'no API/console producer to approve the actor registration (--approve-command)',
+				? 'approval bridge configured; authenticated API availability is not yet observed'
+				: 'approval bridge not configured; this does not probe API availability',
 		},
 	};
 }
@@ -533,7 +678,8 @@ export async function buildCheckReport(options) {
 		pin: inspectPin(pinFile),
 		endpointSources,
 		linuxHost: inspectLinuxHost(options.image ?? DEFAULT_IMAGE),
-		approvalProducer: Boolean(options.approveCommand),
+		approvalProducer: Boolean(options.approvalBridge || options.approveCommand),
+		approvalConsumerInput: options.approvalBridge?.input ?? null,
 	};
 	report.producers = inspectProducers({
 		pin: report.pin,
@@ -569,7 +715,7 @@ const approval = approvalMs > 0 ? async (challenge) => {
 	const deadline = Date.now() + approvalMs;
 	while (Date.now() < deadline && !fs.existsSync(OUT + '/approval.json')) await wait(250);
 	fs.rmSync(OUT + '/challenge.json', { force: true });
-	return fs.existsSync(OUT + '/approval.json');
+	return fs.existsSync(OUT + '/approval.json') && JSON.parse(fs.readFileSync(OUT + '/approval.json', 'utf8')).challengeId === challenge.challengeId;
 } : undefined;
 async function main() {
 	const port = bundle.createLocalEndpointClient({ socketPath: process.env.PAIR_SOCKET });
@@ -703,26 +849,42 @@ function stageLibraryFromRuntime(runtime, into) {
 }
 
 /** Run the approval producer on the host once the driver has handed the challenge over. */
-function watchForChallenge(outDir, command, timeoutMs) {
+export function watchForChallenge(outDir, approve, timeoutMs) {
 	const deadline = Date.now() + timeoutMs;
-	const timer = setInterval(() => {
+	const controller = new AbortController();
+	const timer = setInterval(async () => {
 		const file = path.join(outDir, 'challenge.json');
-		if (Date.now() > deadline) clearInterval(timer);
+		if (Date.now() > deadline) {
+			clearInterval(timer);
+			return;
+		}
 		if (!exists(file)) return;
 		clearInterval(timer);
-		const result = spawnSync(command, {
-			shell: true,
-			input: fs.readFileSync(file),
-			encoding: 'utf8',
-			timeout: timeoutMs,
-		});
-		if (result.status === 0)
-			fs.writeFileSync(
-				path.join(outDir, 'approval.json'),
-				JSON.stringify({ approvedAt: new Date().toISOString() })
-			);
+		try {
+			const stat = fs.lstatSync(file);
+			if (!stat.isFile() || stat.size > 4096) return;
+			const challenge = JSON.parse(fs.readFileSync(file, 'utf8'));
+			const result = await approve(challenge, { signal: controller.signal });
+			if (result.outcome === 'approved' && !controller.signal.aborted && Date.now() < deadline)
+				fs.writeFileSync(
+					path.join(outDir, 'approval.json'),
+					JSON.stringify({ challengeId: challenge.challengeId }),
+					{ mode: 0o600, flag: 'wx' }
+				);
+		} catch {
+			/* No transport exception or challenge content belongs in evidence. */
+		} finally {
+			fs.rmSync(file, { force: true });
+		}
 	}, 250);
-	return () => clearInterval(timer);
+	const stop = () => {
+		clearInterval(timer);
+		clearTimeout(expiry);
+		controller.abort();
+		fs.rmSync(path.join(outDir, 'challenge.json'), { force: true });
+	};
+	const expiry = setTimeout(stop, timeoutMs);
+	return stop;
 }
 
 const readOut = (dir, name) => {
@@ -783,9 +945,20 @@ export async function runPair(options) {
 	const bundle = await bundleDriver(driverDir);
 	const surfaces = options.surfaces ?? [];
 	const timeoutMs = options.timeoutMs ?? DEFAULT_RUN_TIMEOUT_MS;
-	const stopWatching = options.approveCommand
-		? watchForChallenge(outDir, options.approveCommand, timeoutMs)
-		: () => undefined;
+	const approve =
+		options.approvalBridge?.approve ??
+		(options.approveCommand
+			? async (challenge) => {
+					const result = spawnSync(options.approveCommand, {
+						shell: true,
+						input: JSON.stringify(challenge),
+						encoding: 'utf8',
+						timeout: timeoutMs,
+					});
+					return { outcome: result.status === 0 ? 'approved' : 'unknown' };
+				}
+			: null);
+	const stopWatching = approve ? watchForChallenge(outDir, approve, timeoutMs) : () => undefined;
 	const args = [
 		'run',
 		'--rm',
@@ -805,7 +978,7 @@ export async function runPair(options) {
 		'-e',
 		'NODE_ENV=development',
 		'-e',
-		`PAIR_APPROVAL_TIMEOUT_MS=${options.approveCommand ? timeoutMs : 0}`,
+		`PAIR_APPROVAL_TIMEOUT_MS=${approve ? timeoutMs : 0}`,
 		'-e',
 		`PAIR_SURFACES=${surfaces.join(',')}`,
 		'-w',
@@ -816,8 +989,15 @@ export async function runPair(options) {
 		CONTAINER_SCRIPT,
 	];
 	const startedAt = new Date().toISOString();
-	const container = docker(args, { timeout: timeoutMs + 30_000 });
-	stopWatching();
+	const container = await new Promise((resolve) => {
+		execFile(
+			'docker',
+			args,
+			{ encoding: 'utf8', timeout: timeoutMs + 30_000 },
+			(error, stdout, stderr) =>
+				resolve({ status: error ? (error.code ?? 1) : 0, error, stdout, stderr })
+		);
+	}).finally(stopWatching);
 	const driverResult = readOut(outDir, 'driver.json');
 	const { assessJourney } = createRequire(import.meta.url)(bundle.file);
 	const journeys = (driverResult?.journeys?.journeys ?? []).map((result) =>
@@ -893,9 +1073,7 @@ export async function runPair(options) {
 				exit: readOut(outDir, 'driver.exit'),
 				log: readOut(outDir, 'driver.log'),
 				result: driverResult,
-				approval: options.approveCommand
-					? exists(path.join(outDir, 'approval.json'))
-					: 'no-producer',
+				approval: approve ? exists(path.join(outDir, 'approval.json')) : 'no-producer',
 			},
 			status: { exit: readOut(outDir, 'status.exit'), answer: readOut(outDir, 'status.json') },
 			stop: { exit: readOut(outDir, 'stop.exit'), answer: readOut(outDir, 'stop.json') },
