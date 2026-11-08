@@ -335,8 +335,13 @@ describe('agentConfigWriteVerdict and holdAgentConfigWrite (MRC2-06-03)', () => 
 			policyRevision: 3,
 		});
 		expect(holdAgentConfigWrite('codex', 'reasoningEffort', 'high')).toEqual({ allowed: true });
-		expect(holdAgentConfigWrite('codex', 'customArgs', '--sandbox read-only -m o3')).toEqual({
+		expect(holdAgentConfigWrite('codex', 'customArgs', '--sandbox read-only')).toEqual({
 			allowed: true,
+		});
+		expect(holdAgentConfigWrite('codex', 'customArgs', '--sandbox read-only -m o3')).toMatchObject({
+			allowed: false,
+			code: 'ceiling',
+			policyRevision: 3,
 		});
 		expect(holdAgentConfigWrite('codex', 'customArgs', '--api-key sk -c model_provider=x')).toEqual(
 			{

@@ -419,6 +419,80 @@ describe('a managed launch on an SSH remote is unsupported, never local (MRC-08-
 		expect(JSON.stringify(local.plan.envVars ?? {})).not.toContain(SENTINEL);
 	});
 
+	it.each([
+		['policy revision changes', 'managed-credential-refused'],
+		['credential expires', 'managed-credential-refused'],
+		['credential binding is copied', 'managed-credentials-unbound'],
+		['model selection widens', 'managed-route-refused'],
+		['permission selection widens', 'managed-route-refused'],
+	] as const)('rechecks a usable local launch when %s', (change, reason) => {
+		let secretReads = 0;
+		const managed = {
+			route: {
+				...route(),
+				model: 'gpt-approved',
+				login: 'approved-credential' as const,
+				permissionMode: 'standard' as const,
+			},
+			credentials: approved(),
+			now: NOW,
+			credentialConsumer: { tenantId: 't', actorId: 'a', agentId: 'agent-1', policyRevision: 1 },
+		};
+		const request = input({
+			managed,
+			permissionMode: 'standard',
+			sessionCustomEnvVars: {
+				OPENAI_API_KEY: 'personal-key',
+				OPENAI_BASE_URL: 'https://personal.example',
+				CODEX_HOME: '/personal/account',
+			},
+			secretLookup: {
+				runSecretsDir: null,
+				env: {
+					get OPENAI_KEY() {
+						secretReads++;
+						return SENTINEL;
+					},
+				},
+			},
+		});
+		const before = buildAgentLaunchPlan(request);
+		if (!before.ok) throw new Error(before.error);
+		expect(before.plan.cwd).toBe(request.cwd);
+		expect(before.plan.args).toEqual(['exec', '--json', '-m', 'gpt-approved', '--', 'fix the bug']);
+		expect(before.plan.permission).toEqual({ requested: 'standard', ceiling: 'standard' });
+		expect(before.plan.env?.OPENAI_API_KEY).toBe(SENTINEL);
+		expect(before.plan.env?.OPENAI_BASE_URL).toBeUndefined();
+		expect(before.plan.env?.CODEX_HOME).toBeUndefined();
+		expect(before.plan.managedCredentials?.delivered).toEqual([
+			{ refId: 'cred-codex', envVar: 'OPENAI_API_KEY', source: 'env' },
+		]);
+		const readsBeforeRetry = secretReads;
+		expect(readsBeforeRetry).toBeGreaterThan(0);
+		const changes: Record<typeof change, Partial<AgentLaunchInput>> = {
+			'policy revision changes': {
+				managed: {
+					...managed,
+					credentialConsumer: { ...managed.credentialConsumer, policyRevision: 2 },
+				},
+			},
+			'credential expires': { managed: { ...managed, now: Date.parse('2026-10-23T00:00:00Z') } },
+			'credential binding is copied': {
+				managed: { ...managed, credentials: { ...managed.credentials } },
+			},
+			'model selection widens': { args: ['exec', '--json', '--model', 'gpt-unapproved'] },
+			'permission selection widens': { permissionMode: 'full' },
+		};
+		const after = buildAgentLaunchPlan({ ...request, ...changes[change] });
+		expect(after).toMatchObject({ ok: false, reason });
+		expect(after).not.toHaveProperty('plan');
+		expect(secretReads).toBe(readsBeforeRetry);
+		expect(JSON.stringify(after)).not.toContain(SENTINEL);
+		const { env: _env, ...report } = before.plan;
+		expect(JSON.stringify(report)).not.toContain(SENTINEL);
+		expect(JSON.stringify(report)).not.toContain('personal-key');
+	});
+
 	it("a qualified remote is identity for the sink's lease, not support for the plan; an unqualified one runs nowhere", () => {
 		const target = resolveSshLaunchTarget(storeWith(remote()), {
 			enabled: true,

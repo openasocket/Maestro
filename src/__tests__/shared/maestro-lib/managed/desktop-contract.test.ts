@@ -291,6 +291,124 @@ describe('desktop authoring mapping against pinned public schema 1', () => {
 		expect(h.service.installedProjection()).toEqual(before);
 	});
 
+	it('replaces displayed choices only after the new applied revision is verified', async () => {
+		const h = nativeHarness();
+		h.source.executionChoices = [
+			{ providerRef: 'provider-1', permissions: ['standard'], transports: ['transport-1'] },
+		];
+		expect((await h.service.refreshProjection()).installed).toBe(true);
+		const displayed = h.service.agentOptions(settings);
+		if (displayed.outcome !== 'available') throw new Error('expected choices');
+		expect(displayed.fields.model.choices.map(({ ref }) => ref)).toEqual(['model-1']);
+		expect(displayed.fields.workspace.choices.map(({ ref }) => ref)).toEqual(['workspace-1']);
+		expect(displayed.fields.credential.choices.map(({ ref }) => ref)).toEqual(['credential-1']);
+
+		h.record.policy.appliedRevision = h.standing.endpoint!.appliedPolicyRevision = 8;
+		const currentSettings = { ...settings, policyRevision: 8 };
+		expect(h.service.agentOptions(currentSettings)).toMatchObject({ outcome: 'unavailable' });
+		// A caller retaining the old settings/choice view cannot restore its freshness.
+		expect(h.service.agentOptions(settings)).not.toHaveProperty('fields');
+		expect((await h.service.refreshProjection()).installed).toBe(false);
+
+		h.source.desktop.binding.policyRevision = h.source.settings.policyRevision = 8;
+		h.source.desktop.binding.policyDigest = 'd'.repeat(64);
+		Object.values(h.source.ceilings).forEach((ceiling) => {
+			ceiling.policyRevision = 8;
+		});
+		h.source.desktop.choices = [
+			...h.source.desktop.choices,
+			{ kind: 'workspace', ref: 'workspace-2' },
+			{ kind: 'credential', ref: 'credential-2', accountRef: 'account-1' },
+		];
+		for (const kind of ['model', 'workspace', 'credential'] as const) {
+			h.source.desktop.fields[kind] = {
+				state: 'constrained',
+				allowed: [`${kind}-2`],
+				minimum: 1,
+				maximum: 1,
+			};
+		}
+		h.source.executionChoices = [
+			{ providerRef: 'provider-1', permissions: ['readonly'], transports: ['transport-2'] },
+		];
+		expect(await h.service.refreshProjection()).toEqual({ installed: true, policyRevision: 8 });
+		const refreshed = h.service.agentOptions(currentSettings);
+		if (refreshed.outcome !== 'available') throw new Error('expected refreshed choices');
+		expect(refreshed).toMatchObject({ authority: 'none', policyRevision: 8, freshness: 'fresh' });
+		for (const kind of ['model', 'workspace', 'credential'] as const) {
+			expect(refreshed.fields[kind]).toMatchObject({ editable: true, minimum: 1, maximum: 1 });
+			expect(refreshed.fields[kind].choices.map(({ ref }) => ref)).toEqual([`${kind}-2`]);
+			expect(displayed.fields[kind].choices.map(({ ref }) => ref)).toEqual([`${kind}-1`]);
+		}
+		expect(refreshed.fields.permission.choices.map(({ ref }) => ref)).toEqual(['readonly']);
+		expect(refreshed.fields.transport.choices.map(({ ref }) => ref)).toEqual(['transport-2']);
+		expect(h.service.agentOptions(settings)).not.toHaveProperty('fields');
+		// An editable display choice does not override the independently installed write lock.
+		expect(h.settings.authorizeAgentConfig('claude-code', 'model', 'model-2')).toMatchObject({
+			code: 'locked',
+			policyRevision: 8,
+		});
+	});
+
+	it.each(['revision', 'expiry'] as const)(
+		'rechecks %s after a pending choice refresh without releasing installed restrictions',
+		async (change) => {
+			const h = nativeHarness();
+			await h.service.refreshProjection();
+			const before = h.service.installedProjection();
+			let deliver!: (value: unknown) => void;
+			h.read.mockImplementationOnce(() => new Promise((resolve) => (deliver = resolve)));
+			const pending = h.service.refreshProjection();
+			if (change === 'revision')
+				h.record.policy.appliedRevision = h.standing.endpoint!.appliedPolicyRevision = 8;
+			else h.clock.now += 60_000;
+			deliver(h.source);
+			expect(await pending).toEqual({
+				installed: false,
+				reason: change === 'revision' ? 'changed' : 'invalid',
+			});
+			expect(h.service.agentOptions(settings)).not.toHaveProperty('fields');
+			expect(h.service.installedProjection()).toEqual(before);
+			expect(h.settings.authorizeAgentConfig('claude-code', 'model', 'model-1').allowed).toBe(
+				false
+			);
+		}
+	);
+
+	it('withholds credentials for a disallowed account while retaining approved model and workspace choices', async () => {
+		const h = nativeHarness();
+		h.source.desktop.fields.account = { state: 'user_editable', allowed: [] };
+		await h.service.refreshProjection();
+		const view = h.service.agentOptions(settings);
+		if (view.outcome !== 'available') throw new Error('expected choices');
+		expect(view.fields.account.choices).toEqual([]);
+		expect(view.fields.credential).toMatchObject({ choices: [], editable: false });
+		expect(view.fields.credential.lockedReason).toBeTruthy();
+		expect(view.fields.model.choices.map(({ ref }) => ref)).toEqual(['model-1']);
+		expect(view.fields.workspace.choices.map(({ ref }) => ref)).toEqual(['workspace-1']);
+	});
+
+	it('restores choices after reconnect and renewal while keeping offline restrictions', async () => {
+		const h = nativeHarness();
+		await h.service.refreshProjection();
+		h.standing.connection!.closed = true;
+		h.clock.now += 60_000;
+		expect(h.service.agentOptions(settings)).not.toHaveProperty('fields');
+		expect(h.settings.authorize('agentConfig.model')).toMatchObject({ code: 'locked' });
+		h.standing.connection!.closed = false;
+		expect(h.service.agentOptions(settings)).not.toHaveProperty('fields');
+		h.source.desktop.issuedAt = new Date(h.clock.now).toISOString();
+		h.source.desktop.expiresAt = new Date(h.clock.now + 60_000).toISOString();
+		expect((await h.service.refreshProjection()).installed).toBe(true);
+		expect(h.service.agentOptions(settings)).toMatchObject({
+			outcome: 'available',
+			authority: 'none',
+			policyRevision: 7,
+			expiresAt: h.source.desktop.expiresAt,
+		});
+		expect(h.settings.authorize('agentConfig.model')).toMatchObject({ code: 'locked' });
+	});
+
 	it('installs verified settings and restores pins before refresh returns, allowing unheld edits', async () => {
 		const h = nativeHarness();
 		h.source.settings.locks.push(

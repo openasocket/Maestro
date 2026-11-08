@@ -283,6 +283,68 @@ describe('the launch plan under management', () => {
 		if (!late.ok) expect(late.reason).toBe('managed-credential-refused');
 	});
 
+	it('delivers until the expiry boundary, then refuses before looking up any secret', () => {
+		const candidate = ref();
+		const credentials = bindApprovedCredentials([candidate], binding());
+		const expiresAt = Date.parse(candidate.expiresAt);
+		const live = buildAgentLaunchPlan(
+			input({ managed: { route: ROUTE, credentials, now: expiresAt - 1 } })
+		);
+		if (!live.ok) throw new Error(live.error);
+		expect(live.plan.env?.ANTHROPIC_API_KEY).toBe(CANARY);
+		const lookup = vi.fn(() => {
+			throw new Error('expired credentials must not reach secret lookup');
+		});
+		const expired = buildAgentLaunchPlan(
+			input({
+				secretLookup: { env: new Proxy({}, { get: lookup }), runSecretsDir: null },
+				managed: { route: ROUTE, credentials, now: expiresAt },
+			})
+		);
+		expect(expired).toMatchObject({ ok: false, reason: 'managed-credential-refused' });
+		expect(lookup).not.toHaveBeenCalled();
+	});
+
+	it('recovers on the current policy only after the host binds a newly issued reference', () => {
+		const oldCredentials = bindApprovedCredentials([ref()], binding());
+		const credentialConsumer = { ...binding(), policyRevision: 8 };
+		const managed = { route: ROUTE, now: NOW, credentialConsumer };
+		expect(
+			buildAgentLaunchPlan(input({ managed: { ...managed, credentials: oldCredentials } }))
+		).toMatchObject({ ok: false, reason: 'managed-credential-refused' });
+		const currentCredentials = bindApprovedCredentials(
+			[ref({ policyRevision: 8 })],
+			binding({ policyRevision: 8 })
+		);
+		const recovered = buildAgentLaunchPlan(
+			input({ managed: { ...managed, credentials: currentCredentials } })
+		);
+		if (!recovered.ok) throw new Error(recovered.error);
+		expect(recovered.plan.env?.ANTHROPIC_API_KEY).toBe(CANARY);
+		expect(recovered.plan.managedCredentials?.bindingDigest).toBe(currentCredentials.digest);
+		expect(currentCredentials.digest).not.toBe(oldCredentials.digest);
+		expect(
+			buildAgentLaunchPlan(input({ managed: { ...managed, credentials: oldCredentials } }))
+		).toMatchObject({ ok: false, reason: 'managed-credential-refused' });
+	});
+
+	it('keeps bound delivery isolated from later mutations of the source reference and binding', () => {
+		const candidate = ref();
+		const consumer = binding();
+		const credentials = bindApprovedCredentials([candidate], consumer);
+		candidate.source.secretName = 'ABSENT_SECRET';
+		candidate.source.envVar = 'OTHER_API_KEY';
+		candidate.expiresAt = '2026-10-21T01:00:00Z';
+		consumer.policyRevision = 8;
+		const result = buildAgentLaunchPlan(
+			input({ managed: { route: ROUTE, credentials, now: NOW } })
+		);
+		if (!result.ok) throw new Error(result.error);
+		expect(result.plan.env?.ANTHROPIC_API_KEY).toBe(CANARY);
+		expect(result.plan.env?.OTHER_API_KEY).toBeUndefined();
+		expect(credentials.binding.policyRevision).toBe(7);
+	});
+
 	it('denies when the approved value is missing or unusable, where an ordinary launch would warn and start', () => {
 		const set = bindApprovedCredentials(
 			[
