@@ -4044,6 +4044,20 @@
 					"produces": []
 				},
 				{
+					"id": "MCOMP-17-03Y",
+					"label": "Expose authenticated live chat-turn source custody",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/shared/maestro-lib/runtime/turns.ts",
+						"src/shared/maestro-lib/runtime/__tests__/turns.test.ts",
+						"Plans/integration-completion/program.json"
+					],
+					"outcome": "Consume MAESTRO-EFFECT-CONSUMERS-BUILD and its pinned MAESTRO-CONTRACT-INPUTS-BUILD dependency. Bounded prerequisite continuation of MCOMP-17-03: expose a host-only exact agent/tab source custody lookup backed by the actual authenticated chat dispatch and original bound lease. Preserve effective read-only access and refuse missing, pending, stopped, completed, revoked, mutated or unavailable custody, current policy drift, lost data-directory ownership and authority replacement. Remove custody at process completion and host disposal; authorize fresh sends independently. Exercise the existing real fixture-process harness. Caller authentication and production consult association remain pending, alongside desktop/headless Auto Run composition, desktop composition and managed room custody. Reuse existing typed ports and WORKFLOW-CONTEXT/1; no new wire capability, producer mapping or paired/provider/native qualification. Keep to three authored files and fewer than 500 changed lines.",
+					"backlog": ["M-04"],
+					"requires": ["MAESTRO-EFFECT-CONSUMERS-BUILD"],
+					"produces": []
+				},
+				{
 					"label": "Bind Auto Run Cue and nested work at dispatch",
 					"kind": "IMPLEMENT",
 					"targets": [
@@ -4086,7 +4100,7 @@
 			"produces": ["MAESTRO-WORKFLOW-CONSUMERS-BUILD"],
 			"id": "MCOMP-17",
 			"path": ".maestro/playbooks/2026-10-29-Maestro-Integration-Completion/MCOMP-17.md",
-			"taskCount": 29,
+			"taskCount": 30,
 			"stage": "S10"
 		},
 		{
@@ -5876,7 +5890,7 @@
 				"PAIR-DIRECT-EVIDENCE"
 			],
 			"nativeInputs": false,
-			"taskCount": 36
+			"taskCount": 37
 		},
 		{
 			"id": "S11",
@@ -6080,9 +6094,9 @@
 			"taskCount": 1
 		}
 	],
-	"taskCount": 349,
+	"taskCount": 350,
 	"taskCounts": {
-		"IMPLEMENT": 240,
+		"IMPLEMENT": 241,
 		"TEST": 49,
 		"VERIFY": 60
 	},
@@ -6850,6 +6864,7 @@
 			"MCOMP-17-03V",
 			"MCOMP-17-03W",
 			"MCOMP-17-03X",
+			"MCOMP-17-03Y",
 			"MCOMP-17-03",
 			"MCOMP-17-04",
 			"MCOMP-17-05",

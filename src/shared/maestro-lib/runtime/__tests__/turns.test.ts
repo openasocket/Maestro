@@ -55,6 +55,8 @@ import { runAgentTurn, type RunAgentTurnOptions } from '../../turns/run-agent-tu
 import { RUNTIME_LOCK_FILE_NAME } from '../data-dir-lock';
 import { createMaestroRuntime, type MaestroRuntime, type RuntimeDeps } from '../index';
 import type { WatchDirectory } from '../settings-watch';
+import * as runtimeTurns from '../turns';
+import { isVerifiedContext } from '../../managed/authority';
 
 const T0 = Date.parse('2026-10-04T12:00:00Z');
 const BUNDLED_PROMPTS = path.resolve(__dirname, '../../../../prompts');
@@ -1134,6 +1136,239 @@ describe('runtime turns', () => {
 			});
 			if (!enrolled.ok) throw new Error(`enroll failed: ${enrolled.message}`);
 		}
+
+		describe('live source custody', () => {
+			let capture: ReturnType<typeof vi.fn<typeof runtimeTurns.createRuntimeTurns>>;
+			beforeEach(() => {
+				hold = true;
+				capture = vi.spyOn(runtimeTurns, 'createRuntimeTurns');
+			});
+			afterEach(() => vi.restoreAllMocks());
+
+			it.each([false, true])(
+				'returns the authenticated live source with readOnly=%s',
+				async (readOnly) => {
+					const authority = managedAuthority();
+					const runtime = await startManaged(authority);
+					await enrollDir(runtime.installation.installationId, authority);
+					runtime.managedBinding.reload();
+					const service = capture.mock.results[0].value as runtimeTurns.RuntimeTurns;
+					expect(service.sourceCustody('a1', 't1')).toBeNull();
+					const events = watch(runtime);
+					value(await runtime.tabs.update('a1', 't1', { readOnly }));
+					value(await runtime.turns.send('a1', 't1', { text: 'source' }));
+					await vi.waitFor(() => expect(ran()).toHaveLength(1));
+					const custody = service.sourceCustody('a1', 't1');
+					expect(custody).toEqual({
+						context: turnOptions[0].managed!.context,
+						writable: !readOnly,
+					});
+					expect(isVerifiedContext(custody!.context)).toBe(true);
+					expect(service.sourceCustody('a1', 't2')).toBeNull();
+					expect(service.sourceCustody('other', 't1')).toBeNull();
+					value(await runtime.tabs.update('a1', 't1', { readOnly: !readOnly }));
+					value(await runtime.turns.send('a1', 't1', { text: 'queued' }));
+					expect(service.sourceCustody('a1', 't1')).toEqual(custody);
+					for (const item of value(await runtime.turns.queue.list('a1'))) {
+						value(await runtime.turns.queue.remove('a1', item.itemId));
+					}
+					const stopped = runtime.turns.interrupt('a1', 't1');
+					expect(service.sourceCustody('a1', 't1')).toBeNull();
+					await stopped;
+					await events.outcome();
+					value(await runtime.turns.send('a1', 't1', { text: 'fresh' }));
+					expect(service.sourceCustody('a1', 't1')!.context.identity.attemptId).not.toBe(
+						custody!.context.identity.attemptId
+					);
+				}
+			);
+
+			it.each([
+				'revoked',
+				'released',
+				'missing-lease',
+				'wrong-pid',
+				'authority',
+				'policy',
+				'policy-source',
+				'unavailable',
+				'standalone',
+				'unreadable',
+				'context',
+				'fence',
+				'disposed',
+			])('withholds source custody after %s', async (change) => {
+				const authority = managedAuthority();
+				const runtime = await startManaged(authority);
+				await enrollDir(runtime.installation.installationId, authority);
+				runtime.managedBinding.reload();
+				const service = capture.mock.results[0].value as runtimeTurns.RuntimeTurns;
+				const options = capture.mock.calls[0][0];
+				value(await runtime.turns.send('a1', 't1', { text: 'source' }));
+				const custody = service.sourceCustody('a1', 't1');
+				expect(custody).not.toBeNull();
+				const lease = authority.live()[0];
+				const port = options.standing.port();
+				switch (change) {
+					case 'revoked':
+						authority.revoke(lease.leaseId, 'withdrawn');
+						break;
+					case 'released':
+						lease.release({ outcome: 'stopped', by: 'authority' });
+						break;
+					case 'missing-lease':
+						vi.spyOn(authority, 'live').mockReturnValue([]);
+						break;
+					case 'wrong-pid':
+						vi.spyOn(lease, 'pid').mockReturnValue(-1);
+						break;
+					case 'authority':
+						vi.spyOn(options.standing, 'port').mockReturnValue({
+							...port,
+							authority: { ...authority },
+						});
+						break;
+					case 'policy':
+						vi.spyOn(options.standing, 'port').mockReturnValue({
+							...port,
+							policy: () => ({ ...port.policy(), policyRevision: 2 }),
+						});
+						break;
+					case 'policy-source':
+						vi.spyOn(options.standing, 'port').mockReturnValue({
+							...port,
+							policy: () => ({
+								...port.policy(),
+								sources: [{ id: 'replacement', kind: 'local', revision: 1 }],
+							}),
+						});
+						break;
+					case 'unavailable':
+						vi.spyOn(options.standing, 'port').mockReturnValue({
+							...port,
+							unavailableReason: 'offline',
+						});
+						break;
+					case 'standalone':
+						vi.spyOn(options.standing, 'port').mockReturnValue({
+							...port,
+							standing: () => 'standalone',
+						});
+						break;
+					case 'unreadable':
+						vi.spyOn(options.standing, 'port').mockImplementation(() => {
+							throw new Error('custody unreadable');
+						});
+						break;
+					case 'context':
+						custody!.context.identity.rootRunId = 'changed';
+						break;
+					case 'fence':
+						vi.spyOn(options, 'fence').mockReturnValue({
+							ok: false,
+							reason: 'lock-lost',
+						});
+						break;
+					case 'disposed':
+						service.dispose();
+						break;
+				}
+				expect(service.sourceCustody('a1', 't1')).toBeNull();
+			});
+
+			it('retains the verified peer actor and complete workflow lineage', async () => {
+				const authority = managedAuthority();
+				const runtime = await startManaged(authority);
+				await enrollDir(runtime.installation.installationId, authority);
+				runtime.managedBinding.reload();
+				const service = capture.mock.results[0].value as runtimeTurns.RuntimeTurns;
+				const request = envelope(runtime, submission('delegated source'), {
+					workflow: {
+						workflowId: 'nightly',
+						version: 'v1',
+						triggerEventId: 'cue:1',
+						ownerEpoch: 'epoch-1',
+						fencingToken: 'fence-1',
+					},
+					delegation: { chain: [{ kind: 'agent', id: 'parent' }], grantRef: 'grant-1' },
+					identity: { runId: 'run-source', rootRunId: 'root', parentRunId: 'parent' },
+				});
+				expect(value(await managedOf(runtime).submit(request))).toMatchObject({
+					status: 'ok',
+					value: { disposition: 'accepted', run: { agentId: 'a1', attemptId: 'attempt-1' } },
+				});
+				const custody = service.sourceCustody('a1', 't1');
+				expect(custody!.context).toBe(turnOptions[0].managed!.context);
+				expect(custody!.context).toMatchObject(request.context);
+				expect(isVerifiedContext(custody!.context)).toBe(true);
+			});
+
+			it('keeps concurrent read-only source tabs isolated', async () => {
+				const authority = managedAuthority();
+				const runtime = await startManaged(authority);
+				await enrollDir(runtime.installation.installationId, authority);
+				runtime.managedBinding.reload();
+				const service = capture.mock.results[0].value as runtimeTurns.RuntimeTurns;
+				for (const tab of ['t1', 't2']) {
+					value(await runtime.tabs.update('a1', tab, { readOnly: true }));
+					expect(value(await runtime.turns.send('a1', tab, { text: tab })).status).toBe('started');
+				}
+				const first = service.sourceCustody('a1', 't1');
+				const second = service.sourceCustody('a1', 't2');
+				expect(first!.context.identity.attemptId).not.toBe(second!.context.identity.attemptId);
+				value(await runtime.turns.interrupt('a1', 't1'));
+				expect(service.sourceCustody('a1', 't1')).toBeNull();
+				expect(service.sourceCustody('a1', 't2')).toEqual(second);
+			});
+
+			it('records no source for a refused admission', async () => {
+				const authority = managedAuthority({ decision: 'deny', reason: 'held', policyRevision: 1 });
+				const runtime = await startManaged(authority);
+				await enrollDir(runtime.installation.installationId, authority);
+				runtime.managedBinding.reload();
+				const service = capture.mock.results[0].value as runtimeTurns.RuntimeTurns;
+				expect(errorOf(await runtime.turns.send('a1', 't1', { text: 'held' })).code).toBe('failed');
+				expect(service.sourceCustody('a1', 't1')).toBeNull();
+				expect(ran()).toHaveLength(0);
+			});
+
+			it('exposes no pending admission, then removes custody when the real process exits', async () => {
+				hold = false;
+				const authority = managedAuthority();
+				const admit = authority.admit.bind(authority);
+				let release!: () => void;
+				const gate = new Promise<void>((resolve) => {
+					release = resolve;
+				});
+				vi.spyOn(authority, 'admit').mockImplementation(async (request) => {
+					await gate;
+					return admit(request);
+				});
+				const runtime = await startManaged(authority);
+				await enrollDir(runtime.installation.installationId, authority);
+				runtime.managedBinding.reload();
+				const service = capture.mock.results[0].value as runtimeTurns.RuntimeTurns;
+				const events = watch(runtime);
+				const sent = runtime.turns.send('a1', 't1', { text: 'source' });
+				await vi.waitFor(() => expect(authority.admit).toHaveBeenCalled());
+				try {
+					expect(service.sourceCustody('a1', 't1')).toBeNull();
+				} finally {
+					release();
+				}
+				value(await sent);
+				await events.outcome();
+				expect(service.sourceCustody('a1', 't1')).toBeNull();
+			});
+
+			it('never derives source custody from a standalone process', async () => {
+				const runtime = await start();
+				const service = capture.mock.results[0].value as runtimeTurns.RuntimeTurns;
+				value(await runtime.turns.send('a1', 't1', { text: 'plain' }));
+				await vi.waitFor(() => expect(ran()).toHaveLength(1));
+				expect(service.sourceCustody('a1', 't1')).toBeNull();
+			});
+		});
 
 		let bare = 0;
 		function bareTurn() {

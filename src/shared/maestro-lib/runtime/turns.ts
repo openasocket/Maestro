@@ -73,6 +73,9 @@ import type {
 	Unsubscribe,
 } from '../client/types';
 import { logger } from '../host';
+import { canonicalJson } from '../../canonicalJson';
+import { isVerifiedContext, type DispatchLease } from '../managed/authority';
+import type { ManagedAuthenticatedContext } from '../managed/types';
 import { isAgentOwnWorkingDirectory } from '../launch/interactive-mode';
 import type { BinaryDetectionResult } from '../launch/path-prober';
 import { createOutputParser } from '../parsers/parser-factory';
@@ -191,6 +194,15 @@ export interface RuntimeTurns {
 	readonly api: TurnsApi;
 	/** The managed facade's side: a managed send, and cancel by run id. */
 	readonly managed: ManagedTurnPort;
+	/**
+	 * Host-only custody of an exact live source tab. The host must authenticate the caller before
+	 * using these coordinates; they are selectors, not credentials. Never exposed on the client API.
+	 * Returns the original verified context and the assembled access ceiling, not a spawn permit.
+	 */
+	sourceCustody(
+		agentId: string,
+		tabId: string
+	): { context: ManagedAuthenticatedContext; writable: boolean } | null;
 	/** Look at an agent's queue again, for a hold that cleared (an Auto Run ended). */
 	drain(agentId: string): void;
 	/** Stop looking at queues: nothing more starts. Running turns are left to `registry.stopAll`. */
@@ -292,6 +304,8 @@ export function createRuntimeTurns(options: RuntimeTurnsOptions): RuntimeTurns {
 	const sshStore = createSshRemoteStore(paths);
 
 	const queues = new Map<string, ExecutionQueue<TurnItem>>();
+	const sources = new Map<string, () => ReturnType<RuntimeTurns['sourceCustody']>>();
+	let disposed = false;
 	/** Resolved by the first dispatch attempt of an item that ran straight away. */
 	const verdicts = new Map<string, (verdict: Verdict) => void>();
 
@@ -432,8 +446,15 @@ export function createRuntimeTurns(options: RuntimeTurnsOptions): RuntimeTurns {
 			}
 			throw new Error(message);
 		}
-		const admitted: { leaseId: string | null; admission: LifecycleAdmissionRef | null } = {
+		const contextKey = managed ? canonicalJson(managed.context) : null;
+		const policyKey = managed ? canonicalJson(managed.policy) : null;
+		const admitted: {
+			leaseId: string | null;
+			lease: DispatchLease | null;
+			admission: LifecycleAdmissionRef | null;
+		} = {
 			leaseId: null,
+			lease: null,
 			admission: null,
 		};
 		const started = await deps.runAgentTurn(turn, {
@@ -452,6 +473,7 @@ export function createRuntimeTurns(options: RuntimeTurnsOptions): RuntimeTurns {
 							resourceIds: managed.resources.map((resource) => resource.id),
 							onLease: (lease) => {
 								admitted.leaseId = lease.leaseId;
+								admitted.lease = lease;
 								admitted.admission = lifecycleAdmissionOfLease(lease);
 							},
 						},
@@ -507,6 +529,50 @@ export function createRuntimeTurns(options: RuntimeTurnsOptions): RuntimeTurns {
 			},
 			managed ? { runId: managed.runId } : {}
 		);
+		// Keep source custody only while this exact admitted process is live. Recording can outlast
+		// the process, so remove on the process result as well as on the stream's settlement.
+		const sourceKey = canonicalJson([agentId, item.tabId]);
+		let forgetSource = (): void => undefined;
+		if (managed && admitted.lease && !disposed) {
+			const { context, authority } = managed;
+			const lease = admitted.lease;
+			const writable = !turn.readOnly;
+			const readSource = (): ReturnType<RuntimeTurns['sourceCustody']> => {
+				try {
+					const current = options.standing.port();
+					if (
+						disposed ||
+						!options.fence().ok ||
+						run.stopRequested() ||
+						current.standing() !== 'managed' ||
+						current.unavailableReason !== null ||
+						current.authority !== authority ||
+						canonicalJson(current.policy()) !== policyKey ||
+						!isVerifiedContext(context) ||
+						canonicalJson(context) !== contextKey ||
+						lease.state() !== 'bound' ||
+						!authority.live().includes(lease) ||
+						lease.pid() !== run.pid ||
+						lease.runId !== context.identity.runId ||
+						lease.attemptId !== context.identity.attemptId ||
+						lease.policyRevision !== context.policyRevision ||
+						lease.policyRevision !== managed.policy.policyRevision ||
+						canonicalJson(lease.actor) !== canonicalJson(context.actor)
+					)
+						return null;
+					return { context, writable };
+				} catch {
+					// Unreadable custody supplies no authority to a child.
+					return null;
+				}
+			};
+			sources.set(sourceKey, readSource);
+			forgetSource = () => {
+				if (sources.get(sourceKey) === readSource) sources.delete(sourceKey);
+			};
+			run.result.then(forgetSource, forgetSource);
+			settled.then(forgetSource, forgetSource);
+		}
 		// The process exists: the attempt is dispatched. A receipt the journal
 		// cannot write is an unknown attempt, not a started one.
 		if (managed) {
@@ -546,6 +612,7 @@ export function createRuntimeTurns(options: RuntimeTurnsOptions): RuntimeTurns {
 				admission: admitted.admission,
 			});
 		} catch (error) {
+			forgetSource();
 			run.terminate();
 			await run.result.catch(() => undefined);
 			settle();
@@ -1122,8 +1189,11 @@ export function createRuntimeTurns(options: RuntimeTurnsOptions): RuntimeTurns {
 	return {
 		api,
 		managed: managedPort,
+		sourceCustody: (agentId, tabId) => sources.get(canonicalJson([agentId, tabId]))?.() ?? null,
 		drain: (agentId) => queues.get(agentId)?.drain(),
 		dispose() {
+			disposed = true;
+			sources.clear();
 			unsubscribeLifecycle();
 			for (const queue of queues.values()) queue.dispose();
 			queues.clear();
