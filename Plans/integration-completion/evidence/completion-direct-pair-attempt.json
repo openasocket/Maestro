@@ -1,0 +1,243 @@
+{
+	"schemaVersion": 1,
+	"artifactId": "MCOMP-14-01-VERIFY-ATTEMPT",
+	"owner": "maestro",
+	"proofClass": "readiness-only",
+	"status": "blocked",
+	"task": "MCOMP-14-01",
+	"stage": "S08",
+	"recordedAt": "2026-11-08T10:14:48.999Z",
+	"observedRevision": "b83837af70a6ae503d1c91a6b185ed954dadfcc3",
+	"inputs": [
+		{
+			"path": "Plans/integration-completion/program.json",
+			"sha256": "068e3aad530e8fb4de7d3616e3641e46df8088ab484de0a390f4c2d5fe6a6a38"
+		},
+		{
+			"path": "Plans/integration-completion/contract-coverage.json",
+			"sha256": "9746166fc0b9a0be35a0a3fed762a1f4d9541d5fe70c252a354ddfd78467a039"
+		}
+	],
+	"requirements": [
+		{
+			"artifactId": "MAESTRO-EFFECT-CONSUMERS-BUILD",
+			"owner": "maestro",
+			"producerDocument": "MCOMP-13",
+			"producerStage": "S06",
+			"producerTask": "MCOMP-13-06",
+			"expected": ["Plans/integration-completion/evidence/effect-build.json"],
+			"present": true,
+			"receipt": {
+				"path": "Plans/integration-completion/evidence/effect-build.json",
+				"sha256": "f5f81b81e3255ec225eb51d9e80c12f9c1a8ee921cc24aa7a13482cb29ae031e",
+				"status": "complete-local-consumer-build",
+				"proofClass": "implementation-input"
+			}
+		},
+		{
+			"artifactId": "MEGA-ACTOR-POLICY-BUILD",
+			"owner": "mega-maestro",
+			"producerDocument": "GCOMP-03",
+			"producerStage": "S03",
+			"producerTask": "GCOMP-03-09",
+			"expected": ["../mega-maestro/docs/evidence/integration-completion/g02-build.json"],
+			"present": false,
+			"receipt": null
+		},
+		{
+			"artifactId": "MEGA-PREPARED-EXECUTION-BUILD",
+			"owner": "mega-maestro",
+			"producerDocument": "GCOMP-08",
+			"producerStage": "S03",
+			"producerTask": "GCOMP-08-09",
+			"expected": ["../mega-maestro/docs/evidence/integration-completion/g06-build.json"],
+			"present": false,
+			"receipt": null
+		},
+		{
+			"artifactId": "MEGA-RUNTIME-ADAPTER-BUILD",
+			"owner": "mega-maestro",
+			"producerDocument": "GCOMP-04",
+			"producerStage": "S03",
+			"producerTask": "GCOMP-04-08",
+			"expected": ["../mega-maestro/docs/evidence/integration-completion/g03-build.json"],
+			"present": false,
+			"receipt": null
+		}
+	],
+	"pendingExtensions": [
+		{
+			"id": "REGISTRATION-HTTP/2",
+			"status": "proposed-not-negotiated"
+		},
+		{
+			"id": "PREPARED/1",
+			"status": "proposed-not-negotiated"
+		},
+		{
+			"id": "EFFECT/1",
+			"status": "proposed-not-negotiated"
+		},
+		{
+			"id": "HEADLESS-CUSTODY/1",
+			"status": "proposed-not-negotiated"
+		}
+	],
+	"localRuntime": {
+		"path": "dist/mega-maestro-runtime/0.36.0/81b298be7b61ce6b0bc17dd92539d20134c7472b87a767ae445bca3b45100245/runtime.tgz",
+		"sha256": "81b298be7b61ce6b0bc17dd92539d20134c7472b87a767ae445bca3b45100245",
+		"implementationRevision": "4094931879e55287eec1a1306d857111293b7460",
+		"obligation": "Verify the current archive and rebind the real counterpart adapter to this archive digest before pairing; historical M0 is not this cohort.",
+		"verification": {
+			"status": "ready",
+			"sourceDrift": 0,
+			"libraryInputDrift": [],
+			"committedPin": false,
+			"qualification": "Archive integrity/source check only; not a paired outcome"
+		}
+	},
+	"siblingEvidence": {
+		"directory": "../mega-maestro/docs/evidence/integration-completion",
+		"files": [
+			"01.json",
+			"g01-build-attempt.json",
+			"g01-build.json",
+			"g01-closure-delivery.json",
+			"g03-schema-closure.json",
+			"g16-build-attempt.json",
+			"g17-build-attempt.json",
+			"g18-build-attempt.json",
+			"g19-build-attempt.json",
+			"g20-build-attempt.json",
+			"g21-build-attempt.json",
+			"g22-verify-attempt.json",
+			"g23-verify-attempt.json",
+			"g24-verify-attempt.json",
+			"g25-verify-attempt.json",
+			"g26-verify-attempt.json",
+			"g27-verify-attempt.json",
+			"g28-verify-attempt.json",
+			"g29-build-attempt.json",
+			"g30-verify-attempt.json",
+			"implementation-inputs.json"
+		]
+	},
+	"qualification": {
+		"paired": false,
+		"provider": false,
+		"native": false,
+		"desktopGui": false
+	},
+	"commands": [
+		{
+			"command": "st node .maestro/playbooks/Working/mcomp-14-01/readiness.mjs --out .maestro/playbooks/Working/mcomp-14-01/readiness-current.json",
+			"exitCode": 2
+		},
+		{
+			"command": "st node .maestro/playbooks/Working/MCOMP-00-01/verify-inputs.mjs > .maestro/playbooks/Working/mcomp-14-01/contracts-current.log",
+			"exitCode": 0
+		},
+		{
+			"command": "st node scripts/mega-maestro-pair.mjs check --runtime dist/mega-maestro-runtime/0.36.0/81b298be7b61ce6b0bc17dd92539d20134c7472b87a767ae445bca3b45100245 --runtime-pin .maestro/playbooks/Working/MCOMP-13-06/runtime-input.json --out .maestro/playbooks/Working/mcomp-14-01/pair-check-current.json > .maestro/playbooks/Working/mcomp-14-01/pair-check-current.log",
+			"exitCode": 2
+		}
+	],
+	"observations": "Input inventory only. No endpoint/API request, actor enrollment, bounded effect, central receipt or recovery scenario was executed.",
+	"nextAction": "Obtain the named cross-owner BUILD receipts and public wire/custody definitions; verify immutable inputs, resolve mappings, then run all mandatory real Linux positive, negative and recovery cases.",
+	"imagesAnalyzed": 0,
+	"pairCheck": {
+		"ready": false,
+		"dependencies": [
+			{
+				"id": "maestro-lib",
+				"owner": "maestro",
+				"status": "open",
+				"detail": "built library is dirty"
+			},
+			{
+				"id": "CP-01",
+				"owner": "mega-maestro",
+				"status": "open",
+				"detail": "no clean Linux application artifact (4 dirty-source packaged artifact(s); development checkout is never certifiable)"
+			},
+			{
+				"id": "CP-01",
+				"owner": "mega-maestro",
+				"status": "open",
+				"detail": "contracts pin pinned; needs the clean contracts artifact of endpoint source 7027ba62c2ffb0748a1a00291e91f42823cc875d (dirty or absent)"
+			},
+			{
+				"id": "CP-02",
+				"owner": "mega-maestro",
+				"status": "open",
+				"detail": "runtime adapter pin absent, declared unsupported; needs a supported createMaestroAdapter from endpoint source 7027ba62c2ffb0748a1a00291e91f42823cc875d (dirty or absent) qualified against runtime 81b298be7b61ce6b0bc17dd92539d20134c7472b87a767ae445bca3b45100245"
+			},
+			{
+				"id": "CP-03",
+				"owner": "mega-maestro",
+				"status": "open",
+				"detail": "workflow authority pin absent; needs the delegation/workflow owner producer from endpoint source 7027ba62c2ffb0748a1a00291e91f42823cc875d (dirty or absent)"
+			},
+			{
+				"id": "maestro-runtime",
+				"owner": "maestro",
+				"status": "open",
+				"detail": "the runtime pin .maestro/playbooks/Working/MCOMP-13-06/runtime-input.json is not committed"
+			},
+			{
+				"id": "linux-runtime",
+				"owner": "maestro",
+				"status": "open",
+				"detail": "the selected image has not passed the Node permission feature probe"
+			},
+			{
+				"id": "registration-approval",
+				"owner": "mega-maestro",
+				"status": "open",
+				"detail": "approval bridge not configured; this does not probe API availability"
+			}
+		],
+		"libraryObservation": "The checker also inspected stale dirty dist/maestro-lib despite --runtime. The selected archive is clean with zero implementation drift; do not conflate this extra library observation with the current BUILD archive.",
+		"linuxProbe": {
+			"node": "v22.16.0",
+			"status": "unsupported",
+			"reason": "this Node does not honor --allow-net"
+		},
+		"approval": "No approval bridge was configured; API availability and authenticated actor registration were not tested."
+	},
+	"contractCheck": {
+		"result": "passed",
+		"archiveSha256": "c34e6cd0590fdce90cd2ace60f8f43ee278f6d24d62d4b6caab2bb4f720ab177",
+		"payloadFiles": 46,
+		"pendingExtensions": "Registration HTTP v2, prepared/effect wire authority and independent headless custody remain proposed, not negotiated; adapter was not enabled."
+	},
+	"evidence": [
+		{
+			"path": ".maestro/playbooks/Working/mcomp-14-01/readiness.mjs",
+			"sha256": "33ad6cb32e4b082d009ad05df318266e1f19a7e4472e2090caf69b39d242cc6c"
+		},
+		{
+			"path": ".maestro/playbooks/Working/mcomp-14-01/readiness-current.json",
+			"sha256": "3cecdb9be40d35bb093fef7cb44e898a65b0587aacb9bf3ae5b2d5cd76e4dcfd"
+		},
+		{
+			"path": ".maestro/playbooks/Working/mcomp-14-01/pair-check-current.json",
+			"sha256": "d89cd8fe5275f05ecfa340746a3c8fa4824f336d92bf7ec9781c2c5100e0bcf7"
+		},
+		{
+			"path": ".maestro/playbooks/Working/mcomp-14-01/contracts-current.log",
+			"sha256": "36eef50e024c7307bd9a3e4832a63c265dcb6df7b15878eb105b99f0b2f989a9"
+		},
+		{
+			"path": ".maestro/playbooks/Working/mcomp-14-01/preserved-planning.patch",
+			"sha256": "dfb93dd9e59467b797f11121a02146cac115adb2ba6d16ba0b5209b7398915b7"
+		}
+	],
+	"validation": "Readiness/source/hash assertions passed; no application code changed and no real-pair case passed or was waived.",
+	"probeCorrection": "Initial temporary probe invocation exited 1 because st git lacks rev-parse; reran with st proxy git and obtained the expected blocked exit 2. The legacy probe falsely treated the existing local BUILD as absent and read the historical M0 cohort.",
+	"publication": {
+		"qualificationReceiptCreated": false,
+		"blockedAttemptOnly": true,
+		"git": "Commit/push result is recorded in the local playbook; no remote publication claimed here."
+	}
+}
