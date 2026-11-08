@@ -448,7 +448,14 @@ export function inspectProducers({ pin, pinDir, source, runtime, approvalProduce
 export function inspectArtifactDir(dir) {
 	const manifestFile = path.join(dir, 'artifact.json');
 	if (!exists(manifestFile)) return { kind: 'packaged', dir, status: 'no-manifest' };
-	const manifest = readJson(manifestFile);
+	let manifest;
+	try {
+		manifest = readJson(manifestFile);
+		if (!manifest || manifest.formatVersion !== 1 || typeof manifest.sourceDirty !== 'boolean')
+			throw new Error('invalid application manifest');
+	} catch {
+		return { kind: 'packaged', dir, status: 'malformed', certifiable: false };
+	}
 	const archive = path.join(dir, 'application.tgz');
 	const sidecar = `${archive}.sha256`;
 	const archiveDigest = exists(archive) ? sha256(fs.readFileSync(archive)) : null;
@@ -463,7 +470,7 @@ export function inspectArtifactDir(dir) {
 		status:
 			archiveDigest === null
 				? 'no-archive'
-				: sidecarDigest !== archiveDigest
+				: sidecarDigest !== archiveDigest || manifest.sha256 !== archiveDigest
 					? 'digest-mismatch'
 					: sourceDirty
 						? 'dirty'
@@ -480,7 +487,12 @@ export function inspectArtifactDir(dir) {
 		contractsSha256: manifest.contracts?.sha256 ?? null,
 		/** CP-02 as the artifact itself declares it (`maestro.status`), never guessed. */
 		maestroAdapter: manifest.maestro ?? null,
-		certifiable: archiveDigest !== null && sidecarDigest === archiveDigest && !sourceDirty && linux,
+		certifiable:
+			archiveDigest !== null &&
+			sidecarDigest === archiveDigest &&
+			manifest.sha256 === archiveDigest &&
+			!sourceDirty &&
+			linux,
 	};
 }
 
@@ -534,8 +546,59 @@ export function inspectSibling(dir) {
 	};
 }
 
-export function inspectLinuxHost(image) {
-	const info = docker(['info', '--format', '{{json .}}']);
+/** Probe the selected image, using the route's canonical feature requirements. No provider runs. */
+export async function probeLinuxRuntime(image, run = docker) {
+	const { build } = await import('esbuild');
+	const bundled = await build({
+		stdin: {
+			contents: `import { syntheticHarnessRouteSupport } from './src/shared/maestro-lib/managed/provider-route.ts';
+				console.log(JSON.stringify({ node: process.version, platform: process.platform,
+					permission: typeof process.permission?.has === 'function', support: syntheticHarnessRouteSupport() }));`,
+			resolveDir: REPO_ROOT,
+			loader: 'ts',
+		},
+		bundle: true,
+		platform: 'node',
+		format: 'cjs',
+		write: false,
+		logLevel: 'silent',
+	});
+	const result = run([
+		'run',
+		'--rm',
+		'--pull=never',
+		'--network=none',
+		'--pids-limit=32',
+		'--memory=128m',
+		image,
+		'node',
+		'--permission',
+		'--disallow-code-generation-from-strings',
+		'-e',
+		bundled.outputFiles[0].text,
+	]);
+	try {
+		const observed = JSON.parse(result.stdout);
+		if (
+			result.status === 0 &&
+			observed.platform === 'linux' &&
+			observed.permission === true &&
+			observed.support?.managed === 'implemented'
+		)
+			return { ...observed, status: 'supported', image };
+		return { status: 'unsupported', image, exit: result.status, observed };
+	} catch {
+		return {
+			status: 'unavailable',
+			image,
+			exit: result.status,
+			reason: 'runtime probe failed or returned invalid JSON',
+		};
+	}
+}
+
+export async function inspectLinuxHost(image, run = docker) {
+	const info = run(['info', '--format', '{{json .}}']);
 	if (info.status !== 0)
 		return {
 			docker: false,
@@ -545,6 +608,8 @@ export function inspectLinuxHost(image) {
 	let parsed;
 	try {
 		parsed = JSON.parse(info.stdout);
+		if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.SecurityOptions ?? []))
+			throw new Error('invalid docker info');
 	} catch {
 		return {
 			docker: false,
@@ -552,7 +617,7 @@ export function inspectLinuxHost(image) {
 			image: { ref: image, present: false },
 		};
 	}
-	const inspect = docker([
+	const inspect = run([
 		'image',
 		'inspect',
 		image,
@@ -563,12 +628,17 @@ export function inspectLinuxHost(image) {
 	const seccompBuiltin = (parsed.SecurityOptions ?? []).some(
 		(s) => typeof s === 'string' && s.startsWith('name=seccomp,') && s.includes('profile=builtin')
 	);
+	const runtime =
+		parsed.OSType === 'linux' && seccompBuiltin && os === 'linux' && id
+			? await probeLinuxRuntime(id, run)
+			: { status: 'unavailable', reason: 'no Linux image on a seccomp-enabled engine' };
 	return {
 		docker: true,
 		osType: parsed.OSType,
 		serverVersion: parsed.ServerVersion,
 		seccompBuiltin,
 		linux: parsed.OSType === 'linux' && seccompBuiltin,
+		runtime,
 		image: {
 			ref: image,
 			present: inspect.status === 0,
@@ -592,8 +662,8 @@ export function assessPair(report) {
 			'mega-maestro',
 			'no clean contracts artifact is pinned (vendor/mega-maestro/contracts.pin.json)'
 		);
-	const certifiable = report.endpointSources.find((s) => s.certifiable);
-	if (!certifiable) {
+	const selected = chooseEndpointSource(report, { artifact: report.requestedArtifact });
+	if (!selected?.certifiable || !endpointMatchesPair(selected, report)) {
 		const dirty = report.endpointSources.filter(
 			(s) => s.kind === 'packaged' && s.sourceDirty
 		).length;
@@ -603,7 +673,7 @@ export function assessPair(report) {
 			`no clean Linux application artifact (${dirty} dirty-source packaged artifact(s); development checkout is never certifiable)`
 		);
 	}
-	for (const id of ['CP-02', 'CP-03'])
+	for (const id of ['CP-01', 'CP-02', 'CP-03'])
 		if (!report.producers[id].fresh) open(id, 'mega-maestro', report.producers[id].detail);
 	if (report.runtime && report.runtime.status !== 'ready')
 		open(
@@ -625,16 +695,36 @@ export function assessPair(report) {
 			'maestro',
 			`image ${report.linuxHost.image.ref} is not present (pull it explicitly)`
 		);
+	else if (report.linuxHost.runtime?.status !== 'supported')
+		open(
+			'linux-runtime',
+			'maestro',
+			'the selected image has not passed the Node permission feature probe'
+		);
 	if (!report.approvalProducer)
 		open('registration-approval', 'mega-maestro', report.producers['registration-approval'].detail);
 	return { ready: dependencies.length === 0, dependencies };
 }
 
-/** The endpoint source a run drives: the named artifact, else the first certifiable one, else the built checkout. */
+/** An application must match both the imported contracts and the Linux image architecture. */
+export function endpointMatchesPair(source, report) {
+	const arch = { amd64: 'x64', arm64: 'arm64' }[report.linuxHost.image.arch];
+	return (
+		source.kind === 'packaged' &&
+		report.pin.status === 'pinned' &&
+		source.contractsSha256 === report.pin.digest &&
+		arch &&
+		source.arch === arch
+	);
+}
+
+/** Honor an explicit artifact even when invalid; never silently substitute a different one. */
 export function chooseEndpointSource(report, options) {
 	return options.artifact
 		? report.endpointSources[0]
-		: (report.endpointSources.find((s) => s.certifiable) ??
+		: (report.endpointSources
+				.filter((s) => s.certifiable && endpointMatchesPair(s, report))
+				.sort((a, b) => a.dir.localeCompare(b.dir))[0] ??
 				report.endpointSources.find(
 					(s) => s.kind === 'development-checkout' && s.status === 'built'
 				) ??
@@ -676,8 +766,9 @@ export async function buildCheckReport(options) {
 		library: inspectLibrary(path.resolve(options.library ?? DEFAULT_LIBRARY_DIR), headRevision),
 		runtime: options.runtime ? await verifyRuntime(options) : null,
 		pin: inspectPin(pinFile),
+		requestedArtifact: options.artifact ?? null,
 		endpointSources,
-		linuxHost: inspectLinuxHost(options.image ?? DEFAULT_IMAGE),
+		linuxHost: await inspectLinuxHost(options.image ?? DEFAULT_IMAGE),
 		approvalProducer: Boolean(options.approvalBridge || options.approveCommand),
 		approvalConsumerInput: options.approvalBridge?.input ?? null,
 	};
@@ -898,6 +989,32 @@ const readOut = (dir, name) => {
 	}
 };
 
+/** A successful shell exit alone cannot certify a failed or unobserved journey. */
+export function pairRunStatus(run) {
+	if (run.containerExit !== 0) return 'container-failed';
+	const { nativeBuild, start, driver, status, stop } = run.observed;
+	if (
+		[nativeBuild.exit, start.exit, start.socket, driver.exit, status.exit, stop.exit].some(
+			(exit) => exit !== 0
+		) ||
+		!driver.result ||
+		driver.result.driverError
+	)
+		return 'failed';
+	const selected = run.journeys.filter(
+		(j) => run.surfaces === 'all' || run.surfaces.includes(j.surface)
+	);
+	if (selected.some((j) => j.verdict === 'failed')) return 'failed';
+	if (
+		!run.expectedJourneys?.length ||
+		run.expectedJourneys.some((id) => selected.filter((j) => j.id === id).length !== 1) ||
+		!selected.length ||
+		selected.some((j) => j.verdict !== 'passed')
+	)
+		return 'blocked';
+	return 'completed';
+}
+
 export async function runPair(options) {
 	const report = await buildCheckReport(options);
 	const source = chooseEndpointSource(report, options);
@@ -925,12 +1042,21 @@ export async function runPair(options) {
 		refusals.push(
 			`endpoint source is not certifiable (${source.status}); pass --allow-dirty for a labeled development run`
 		);
+	if (
+		source?.kind === 'packaged' &&
+		(!['certifiable', 'dirty'].includes(source.status) || !endpointMatchesPair(source, report))
+	)
+		refusals.push(
+			'the selected application archive is invalid or does not match the contracts and Linux architecture'
+		);
 	if (report.library.status === 'stale' && !options.allowStale)
 		refusals.push('the built library is not from this HEAD; rebuild it or pass --allow-stale');
 	if (report.library.status !== 'ready' && report.library.status !== 'stale')
 		refusals.push(`the built library is ${report.library.status}`);
 	if (!report.linuxHost.linux || !report.linuxHost.image.present)
 		refusals.push('no Linux engine or the pinned image is absent');
+	if (report.linuxHost.runtime?.status !== 'supported')
+		refusals.push('the selected Linux runtime lacks the required Node permission features');
 	if (refusals.length) {
 		fs.rmSync(workspace, { recursive: true, force: true });
 		return { ...report, run: { status: 'refused', refusals } };
@@ -962,6 +1088,7 @@ export async function runPair(options) {
 	const args = [
 		'run',
 		'--rm',
+		'--pull=never',
 		'--network=none',
 		'--pids-limit=256',
 		'--memory=1g',
@@ -983,7 +1110,7 @@ export async function runPair(options) {
 		`PAIR_SURFACES=${surfaces.join(',')}`,
 		'-w',
 		'/work',
-		options.image ?? DEFAULT_IMAGE,
+		report.linuxHost.image.id,
 		'sh',
 		'-c',
 		CONTAINER_SCRIPT,
@@ -999,12 +1126,15 @@ export async function runPair(options) {
 		);
 	}).finally(stopWatching);
 	const driverResult = readOut(outDir, 'driver.json');
-	const { assessJourney } = createRequire(import.meta.url)(bundle.file);
+	const { assessJourney, PAIR_JOURNEYS } = createRequire(import.meta.url)(bundle.file);
 	const journeys = (driverResult?.journeys?.journeys ?? []).map((result) =>
 		assessJourney(result, report.producers)
 	);
 	const run = {
 		surfaces: surfaces.length ? surfaces : 'all',
+		expectedJourneys: PAIR_JOURNEYS.filter(
+			(j) => !surfaces.length || surfaces.includes(j.surface)
+		).map((j) => j.id),
 		journeys,
 		verdicts: Object.fromEntries(
 			['passed', 'failed', 'blocked', 'not-run'].map((v) => [
@@ -1012,12 +1142,7 @@ export async function runPair(options) {
 				journeys.filter((j) => j.verdict === v).length,
 			])
 		),
-		status:
-			container.status === 0
-				? 'completed'
-				: container.error
-					? 'container-failed'
-					: 'container-nonzero',
+		status: 'pending',
 		certifiable:
 			source.certifiable &&
 			report.library.status === 'ready' &&
@@ -1079,6 +1204,11 @@ export async function runPair(options) {
 			stop: { exit: readOut(outDir, 'stop.exit'), answer: readOut(outDir, 'stop.json') },
 		},
 	};
+	run.status = pairRunStatus(run);
+	if (run.status !== 'completed') {
+		run.certifiable = false;
+		run.notCertifiableBecause.push(`observed run is ${run.status}`);
+	}
 	fs.rmSync(path.join(outDir, 'challenge.json'), { force: true });
 	if (!options.keep) {
 		fs.rmSync(endpointDir, { recursive: true, force: true });

@@ -33,6 +33,7 @@ import * as path from 'node:path';
 import { createBrokerDispatch, type BrokerDispatch } from '../../../main/enterprise/dispatch';
 import { createLocalEndpointClient } from '../../../main/enterprise/endpoint-client';
 import {
+	buildDispatchSnapshot,
 	createContextVerifier,
 	type ContextVerifier,
 } from '../../../shared/maestro-lib/managed/authority';
@@ -41,7 +42,20 @@ import type {
 	ManagedEnrollmentStatus,
 	ManagedIdentityRecord,
 	ManagedIdentityView,
+	PreparedExecutionPort,
 } from '../../../shared/maestro-lib/managed/endpoint-port';
+import {
+	buildHarnessLaunchSpec,
+	harnessRouteProblems,
+	SYNTHETIC_HARNESS_PROVIDER,
+	SYNTHETIC_HARNESS_MODEL,
+	type HarnessRouteRequest,
+} from '../../../shared/maestro-lib/managed/provider-route';
+import {
+	DispatchRefusedError,
+	leaseAdmission,
+	startTurn,
+} from '../../../shared/maestro-lib/run/start-turn';
 import {
 	createManagedHostAdapter,
 	type ManagedHostAdapter,
@@ -142,6 +156,10 @@ export interface SyntheticProviderInput {
 	declaredFile?: string;
 	/** A file the route did not declare: reading it must be refused. */
 	undeclaredFile?: string;
+	/** Written only by the descendant, observed by the parent test independently. */
+	childMarker?: string;
+	/** Wait for lease cancellation after the effects, bounded by the scenario runner. */
+	holdOpen?: boolean;
 }
 
 export interface SyntheticProviderEffects {
@@ -210,6 +228,126 @@ export function startEgressObserver(): Promise<EgressObserver> {
 			});
 		});
 	});
+}
+
+/** Independent witnesses for this harmless fixture, not general OS process auditing. */
+export async function startPairEffectObservers(dir: string) {
+	const network = await startEgressObserver();
+	const childMarker = path.join(dir, 'child.marker');
+	const effectFile = path.join(dir, SYNTHETIC_EFFECTS_FILE);
+	if (fs.existsSync(childMarker) || fs.existsSync(effectFile)) {
+		await network.close();
+		throw new Error('Pair observers require a fresh effects directory');
+	}
+	return {
+		probePort: network.port,
+		childMarker,
+		snapshot: () => ({
+			connections: network.connections(),
+			childMarker: fs.existsSync(childMarker) ? fs.readFileSync(childMarker, 'utf8') : null,
+			// The file's presence and bytes come from the filesystem, never stdout or a receipt.
+			fileBytes: fs.existsSync(effectFile) ? fs.statSync(effectFile).size : 0,
+			files: fs.readdirSync(dir).sort(),
+		}),
+		close: () => network.close(),
+	};
+}
+
+export const DIRECT_PAIR_SCENARIOS = [
+	'allow',
+	'wrong-actor',
+	'changed-input',
+	'cancel',
+	'unknown',
+] as const;
+
+/**
+ * Direct lifecycle over existing typed ports: admit prepares, startTurn executes,
+ * receipt inspects and revoke cancels. No new wire operation or authority is minted.
+ * The caller supplies authenticated context/authority; tests may supply labeled doubles.
+ */
+export async function runDirectPairScenario(options: {
+	bridge: BrokerDispatch;
+	context: ManagedAuthenticatedContext;
+	request: HarnessRouteRequest;
+	scenario: (typeof DIRECT_PAIR_SCENARIOS)[number];
+	observers: Awaited<ReturnType<typeof startPairEffectObservers>>;
+}) {
+	const { bridge, context, request, scenario, observers } = options;
+	const problems = harnessRouteProblems(request);
+	if (problems.length) throw new Error(problems.join('; '));
+	const spec = buildHarnessLaunchSpec(request);
+	const attribution = {
+		provider: SYNTHETIC_HARNESS_PROVIDER,
+		model: SYNTHETIC_HARNESS_MODEL,
+		operation: 'start' as const,
+		target: { kind: 'local' as const },
+		resourceIds: [...request.inputs],
+	};
+	const turn = bridge.turnAuthority({ context, resourceIds: request.inputs });
+	const admission = {
+		context,
+		snapshot: buildDispatchSnapshot(spec, attribution),
+		policy: turn.policy,
+	};
+	const prepared = await bridge.authority.admit(admission);
+	if (prepared.state !== 'admitted') {
+		// Unknown is inspected by repeating the same attempt, never by creating a fresh retry.
+		const replay = scenario === 'unknown' ? await bridge.authority.admit(admission) : null;
+		await bridge.flush();
+		return {
+			prepare: prepared.state,
+			replay: replay?.state,
+			execute: null,
+			inspect: null,
+			cancelled: false,
+			observed: observers.snapshot(),
+		};
+	}
+	const { lease } = prepared;
+	let cancelled = false;
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	try {
+		const executeSpec =
+			scenario === 'changed-input' ? { ...spec, stdin: `${spec.stdin ?? ''} ` } : spec;
+		const handle = startTurn(
+			executeSpec,
+			{
+				onStdout: () => {
+					// Cancel only after the independent file observer sees that the process ran.
+					if (scenario === 'cancel' && !cancelled && observers.snapshot().fileBytes > 0)
+						cancelled = bridge.authority.revoke(lease.leaseId, 'direct pair cancellation');
+				},
+			},
+			{ admission: { gate: leaseAdmission(bridge.authority, lease), attribution }, stopGraceMs: 50 }
+		);
+		timer = setTimeout(() => handle.terminate(), request.timeoutMs);
+		const exit = await handle.done;
+		await bridge.flush();
+		return {
+			prepare: prepared.state,
+			replay: null,
+			execute: exit,
+			inspect: bridge.receipt(lease.leaseId),
+			cancelled,
+			observed: observers.snapshot(),
+		};
+	} catch (error) {
+		lease.release({ outcome: 'unknown', message: 'Direct pair execution did not complete' });
+		if (!(error instanceof DispatchRefusedError)) throw error;
+		await bridge.flush();
+		return {
+			prepare: prepared.state,
+			replay: null,
+			execute: { refused: error.code },
+			inspect: bridge.receipt(lease.leaseId),
+			cancelled,
+			observed: observers.snapshot(),
+		};
+	} finally {
+		clearTimeout(timer);
+		bridge.authority.revoke(lease.leaseId, 'direct pair scenario cleanup');
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -308,6 +446,8 @@ export interface PairCompositionOptions {
 	dir: string;
 	now?: () => number;
 	fake?: FakeEndpointOptions;
+	/** Explicit local prepared producer. Never installed by the real pair runner. */
+	prepared?: { actorId: string; create(identity: ManagedIdentityRecord): PreparedExecutionPort };
 }
 
 /**
@@ -335,6 +475,12 @@ export async function composePair(options: PairCompositionOptions): Promise<Pair
 		message: null,
 		record: pairIdentityRecord(fake.socketPath, now()),
 	};
+	if (options.prepared) {
+		view.record!.registration!.actorId = options.prepared.actorId;
+		Object.defineProperty(port, 'preparedExecution', {
+			value: options.prepared.create(view.record!),
+		});
+	}
 	const host = createManagedHostAdapter({
 		installation: PAIR_INSTALLATION,
 		identity: { read: () => view },
@@ -386,6 +532,8 @@ export async function composePair(options: PairCompositionOptions): Promise<Pair
 		ledgerFile,
 		attach,
 		close: async () => {
+			host.authority.revokeAll('pair fixture closed');
+			await bridge.flush();
 			await port.close();
 			await fake.close();
 		},

@@ -58,7 +58,10 @@ process.stdin.on('end', () => {
 	try { input = JSON.parse(raw.toString('utf8')); } catch {}
 	try {
 		const { spawnSync } = require('node:child_process');
-		const child = spawnSync(process.execPath, ['-e', '0']);
+		// Only the descendant writes this marker; the parent never reports it as evidence.
+		const childScript = input.childMarker
+			? 'require("node:fs").writeFileSync(process.argv[1], String(process.pid))' : '0';
+		const child = spawnSync(process.execPath, ['-e', childScript, ...(input.childMarker ? [input.childMarker] : [])], { timeout: 1000 });
 		effects.spawnedChild = child.error ? code(child.error) : true;
 	} catch (error) { effects.spawnedChild = code(error); }
 	effects.readDeclared = tryRead(input.declaredFile);
@@ -69,7 +72,8 @@ process.stdin.on('end', () => {
 		try { fs.writeFileSync(file, JSON.stringify(effects)); }
 		catch (error) { effects.wroteFile = 'refused:' + code(error); }
 		process.stdout.write(JSON.stringify({ type: 'synthetic-provider', effects }) + '\n');
-		process.exit(0);
+		if (input.holdOpen) setInterval(() => {}, 1000);
+		else process.exit(0);
 	};
 	const port = Number(input.probePort || 0);
 	if (!port) return finish();

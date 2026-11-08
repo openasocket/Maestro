@@ -2243,6 +2243,33 @@
 					"id": "MCOMP-13-04"
 				},
 				{
+					"id": "MCOMP-13-04A",
+					"label": "Add direct lifecycle scenarios and independent effect observers",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/__tests__/integration/mega-maestro/fixtures.ts",
+						"src/__tests__/integration/mega-maestro/journeys.ts"
+					],
+					"outcome": "Bounded continuation of MCOMP-13-04: extend the existing pair fixtures with prepare/execute/inspect/cancel scenarios and independent child marker, file and loopback observers. Include changed input, wrong actor and unknown settlement without supplying production authority. Use existing typed authority/dispatch ports. At most three authored files and fewer than 500 changed lines. Real endpoint-issued authority and Linux qualification remain MCOMP-14.",
+					"backlog": ["PAIR-02"],
+					"requires": ["MAESTRO-CONTRACT-INPUTS-BUILD"],
+					"produces": []
+				},
+				{
+					"id": "MCOMP-13-04B",
+					"label": "Test pair probes, artifact selection and direct observers",
+					"kind": "TEST",
+					"targets": [
+						"src/__tests__/scripts/mega-maestro-pair.test.ts",
+						"src/__tests__/integration/mega-maestro/direct-pair.test.ts",
+						"docs/agent-guides/CANONICAL-UTILITIES.md"
+					],
+					"outcome": "Bounded continuation of MCOMP-13-04: test Linux runtime probe failures, exact artifact selection, direct prepare/execute/inspect/cancel and positive controls for independent file/child/network observers with declared local authority fixtures. Verify wrong actor, changed input, cancellation and unknown settlement leave no denied effects. At most three authored files and fewer than 500 changed lines. No fixture qualifies a real pair. Document the local observer and authority boundaries in the canonical pair-runner entry.",
+					"backlog": ["PAIR-02"],
+					"requires": ["MAESTRO-CONTRACT-INPUTS-BUILD"],
+					"produces": []
+				},
+				{
 					"label": "Test prepared execution consumer lifecycle",
 					"kind": "TEST",
 					"targets": [
@@ -2271,7 +2298,7 @@
 			"produces": ["MAESTRO-EFFECT-CONSUMERS-BUILD"],
 			"id": "MCOMP-13",
 			"path": ".maestro/playbooks/2026-10-29-Maestro-Integration-Completion/MCOMP-13.md",
-			"taskCount": 13,
+			"taskCount": 15,
 			"stage": "S06"
 		},
 		{
@@ -5439,7 +5466,7 @@
 				"MEGA-RUNTIME-ADAPTER-BUILD"
 			],
 			"nativeInputs": false,
-			"taskCount": 14
+			"taskCount": 16
 		},
 		{
 			"id": "S07",
@@ -5717,10 +5744,10 @@
 			"taskCount": 1
 		}
 	],
-	"taskCount": 323,
+	"taskCount": 325,
 	"taskCounts": {
-		"IMPLEMENT": 215,
-		"TEST": 48,
+		"IMPLEMENT": 216,
+		"TEST": 49,
 		"VERIFY": 60
 	},
 	"artifacts": {
@@ -6446,7 +6473,9 @@
 			"GCOMP-29-06",
 			"GCOMP-29-07",
 			"GCOMP-29-08",
-			"GCOMP-30-01"
+			"GCOMP-30-01",
+			"MCOMP-13-04A",
+			"MCOMP-13-04B"
 		],
 		"G-06": [
 			"GCOMP-15-01",
