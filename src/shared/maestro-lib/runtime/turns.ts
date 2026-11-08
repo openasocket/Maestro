@@ -73,6 +73,7 @@ import type {
 	Unsubscribe,
 } from '../client/types';
 import { randomBytes } from 'node:crypto';
+import { CALLER_CREDENTIAL_ENV_VAR } from '../launch/env';
 import { logger } from '../host';
 import { canonicalJson } from '../../canonicalJson';
 import { isVerifiedContext, type DispatchLease } from '../managed/authority';
@@ -127,14 +128,8 @@ import { createSshRemoteStore } from './ssh-store';
 
 const LOG_CONTEXT = '[RuntimeTurns]';
 
-/**
- * The caller credential a managed chat turn's process is spawned with (MCOMP-17-03AI): a fresh
- * random secret per admitted process, so a host can tell which live source a request from that
- * process's shell comes from without trusting the agent and tab ids the caller states. A
- * `MAESTRO_MANAGED_` name, which the environment ceiling strips from every user layer and
- * inherited copy before Maestro restates its own. A standalone turn is stamped with none.
- */
-export const CALLER_CREDENTIAL_ENV_VAR = 'MAESTRO_MANAGED_CALLER_CREDENTIAL';
+/** The caller credential name (MCOMP-17-03AI), declared beside the env ceiling that strips it. */
+export { CALLER_CREDENTIAL_ENV_VAR };
 
 /** What the host passes the runtime so it can run turns. Every field is optional. */
 export interface RuntimeTurnOptions {

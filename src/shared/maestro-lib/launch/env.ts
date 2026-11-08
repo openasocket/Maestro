@@ -736,6 +736,17 @@ export const MANAGED_AUTHORITY_ENV_NAMES: readonly string[] = [
 export const MANAGED_AUTHORITY_ENV_PREFIX = 'MAESTRO_MANAGED_';
 
 /**
+ * The caller credential a managed chat turn's process is spawned with (MCOMP-17-03AI): a fresh
+ * random secret per admitted process, so a host can tell which live source a request from that
+ * process's shell comes from without trusting the agent and tab ids the caller states. Its
+ * `MAESTRO_MANAGED_` name is stripped by the ceiling from every user layer and inherited copy
+ * before Maestro restates its own. A standalone turn is stamped with none. Declared here, beside
+ * the ceiling that strips it, so a host sink can stamp it without loading the runtime
+ * (MCOMP-17-03AN); `runtime/turns.ts` re-exports it.
+ */
+export const CALLER_CREDENTIAL_ENV_VAR = 'MAESTRO_MANAGED_CALLER_CREDENTIAL';
+
+/**
  * The permission modes a launch can ask for, as the argument builder names
  * them (`BuildAgentArgsOptions.permissionMode`): `readonly` is the provider's
  * plan or read-only mode, `standard` its own prompting, `full` its bypass of
