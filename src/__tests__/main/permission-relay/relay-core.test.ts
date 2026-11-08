@@ -444,6 +444,33 @@ describe('permission-relay server AskUserQuestion round-trip', () => {
 		}
 	});
 
+	it('preserves the bridge request identity across replay for managed decisions', async () => {
+		const { token, cleanup } = registerSpawn({ sessionId: 'effect-replay' });
+		const ids: string[] = [];
+		server.setOnRequest(() => {
+			throw new Error('An unknown effect cannot ask for consent');
+		});
+		server.setManagedGate({
+			decide: async (_binding, request) => {
+				ids.push(request.requestId);
+				return {
+					managed: true,
+					decision: { decision: 'unknown', reason: 'Reconcile this request' },
+				};
+			},
+			recheck: () => ({ ok: true }),
+		});
+		try {
+			for (let attempt = 0; attempt < 2; attempt++) {
+				const response = await relayRequest(token, 'same-bridge-id', 'Write', { content: 'one' });
+				expect(response.decision).toMatchObject({ behavior: 'deny' });
+			}
+			expect(ids).toEqual(['same-bridge-id', 'same-bridge-id']);
+		} finally {
+			server.setManagedGate(null);
+			cleanup();
+		}
+	});
 	it('refuses an effect that expires while user consent is pending', async () => {
 		const { token, cleanup } = registerSpawn({ sessionId: 'effect-expiry' });
 		let current = true;

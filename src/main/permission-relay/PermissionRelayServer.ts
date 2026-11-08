@@ -276,7 +276,9 @@ export class PermissionRelayServer {
 		// The managed host decides first, on the exact tool and input, bound to
 		// the spawn the token names. Anything but allow ends here: the user is
 		// not asked, so no local consent can override it.
-		const verdict = await this.managedVerdict(binding, request);
+		// Authorization uses the bridge's stable id, so replay cannot acquire a
+		// fresh decision by receiving another renderer/pending UUID.
+		const verdict = await this.managedVerdict(binding, { ...request, requestId: bridgeRequestId });
 		if (verdict.managed && !effectGranted(verdict.decision)) {
 			const reason = verdict.decision.decision === 'allow' ? 'refused' : verdict.decision.reason;
 			logger.info('Managed host refused relayed tool request', LOG_CONTEXT, {
