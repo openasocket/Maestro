@@ -27,10 +27,14 @@ import { createEventBus } from '../client/event-bus';
 import type { HostInfo, MaestroClient, ManagedApi } from '../client/types';
 import { logger } from '../host';
 import { createGroupChatTurnMetrics } from '../groupchat/turn-metrics';
+import { findSessionForParticipantName } from '../groupchat/router';
+import { toGroupChatSessionInfo } from '../groupchat/session-info';
+import { parseParticipantSessionId } from '../groupchat/session-ids';
+import { filterLiveAgents } from '../../agentVisibility';
 import type { BinaryDetectionResult } from '../launch/path-prober';
 import { assertUserDataDirExists, type UserDataDirOptions } from '../paths/userDataDir';
 import { resolveMaestroPaths, type MaestroPaths } from '../paths/resolve';
-import { readAgentConfigsStore } from '../store/read-stores';
+import { readAgentConfigsStore, readSettingsStore } from '../store/read-stores';
 import { createRuntimeClient, type RuntimePhase } from './client';
 import {
 	acquireDataDirLock,
@@ -90,8 +94,10 @@ import { installTurnSinkStanding } from '../run/start-turn';
 import type { AgentRecord } from '../store/records';
 import {
 	createBackgroundTurns,
+	groupChatOwner,
 	type BackgroundManagedOptions,
 	type BackgroundTurnDeps,
+	type BackgroundTurns,
 } from './background-turns';
 import { createRuntimeConsults, type RuntimeConsultsManagedOptions } from './consults';
 import { createRuntimeGroupChats } from './group-chats';
@@ -269,7 +275,9 @@ export interface MaestroRuntime extends MaestroClient {
 	 * withdraws the ask's source. It selects that tab's chat custody, or that run's Auto Run custody,
 	 * or that background process's custody (both pinned to their process), and stands in for
 	 * `managed.consultSource` for this ask; the stated `fromAgentId` must match it (a background
-	 * turn's is the agent link its admitted delegation ends at), and so must a chat turn's
+	 * turn's is the agent link its admitted delegation ends at, and a room participant's is the
+	 * agent its name resolved to when its process started, held only while its room is neither
+	 * stopped nor removed), and so must a chat turn's
 	 * `fromTabId`. An unknown, stale or withdrawn credential
 	 * authenticates nobody, so a managed ask is refused. Never expose this on a client transport
 	 * without the host first reading the credential from that caller.
@@ -818,13 +826,65 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 			...(deps.background?.onAdmission ? { onAdmission: deps.background.onAdmission } : {}),
 		},
 	});
+	// The agent each live participant turn of a room stands for (MCOMP-17-03BL). A room turn's
+	// delegation link names its process, not an agent, so the identity a participant asks as is
+	// pinned when its process starts: the live agent the participant's name resolves to, by the
+	// rule the engine itself spawned it under. It lasts no longer than the room holds that turn:
+	// it is forgotten when the turn ends or is refused, and as soon as its room is stopped or
+	// removed, before the room's processes are. A moderator or synthesis turn stands for no agent.
+	const roomCallers = new Map<string, { chatId: string; agentId: string }>();
+	const forgetRoomCallers = (chatId: string): void => {
+		for (const [processId, caller] of roomCallers) {
+			if (caller.chatId === chatId) roomCallers.delete(processId);
+		}
+	};
+	const participantAgentId = (participantName: string): string | null => {
+		const settings = readSettingsStore(paths.settingsFile);
+		const encoreFeatures = settings.status === 'ok' ? settings.data.encoreFeatures : undefined;
+		const agents = filterLiveAgents(repository.listAgents(), encoreFeatures).map((agent) =>
+			toGroupChatSessionInfo(agent as unknown as Parameters<typeof toGroupChatSessionInfo>[0], {
+				sshRemoteName: () => undefined,
+				isBusy: false,
+			})
+		);
+		return findSessionForParticipantName(participantName, agents)?.id ?? null;
+	};
+	const roomBackground: BackgroundTurns = {
+		...background,
+		groupChatRunner: (handlers) => {
+			const runner = background.groupChatRunner({
+				...handlers,
+				onEnd: (processId, completed) => {
+					roomCallers.delete(processId);
+					return handlers.onEnd(processId, completed);
+				},
+			});
+			return {
+				...runner,
+				start: async (spawn) => {
+					const owner = parseParticipantSessionId(spawn.processId);
+					const agentId = owner ? participantAgentId(owner.participantName) : null;
+					if (owner && agentId)
+						roomCallers.set(spawn.processId, { chatId: owner.groupChatId, agentId });
+					try {
+						const started = await runner.start(spawn);
+						if (!started.success) roomCallers.delete(spawn.processId);
+						return started;
+					} catch (error) {
+						roomCallers.delete(spawn.processId);
+						throw error;
+					}
+				},
+			};
+		},
+	};
 	const groupChats = createRuntimeGroupChats({
 		paths,
 		repository,
 		bus,
 		registry,
 		fence,
-		background,
+		background: roomBackground,
 		metrics: groupChatMetrics,
 		// A room's `!autorun` would mint a new workflow under the host's own authority. Where the
 		// host verifies an authenticated parent for every room child, that run cannot yet carry the
@@ -1003,6 +1063,15 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 				groupChatSource.run({ lookup: options.managed?.backgroundParentContext }, () =>
 					groupChats.api.send(chatId, text)
 				),
+			// A stopped or removed room authenticates none of its turns from here on (MCOMP-17-03BL).
+			stop: (chatId) => {
+				forgetRoomCallers(chatId);
+				return groupChats.api.stop(chatId);
+			},
+			remove: (chatId) => {
+				forgetRoomCallers(chatId);
+				return groupChats.api.remove(chatId);
+			},
 		},
 		consults: {
 			api: {
@@ -1077,6 +1146,8 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 			// answers the stated tab and `askFrom` pins its process and kind. A background (consult or
 			// group chat) credential selects that exact process's custody (MCOMP-17-03BK): the stated
 			// agent must be the agent link its admitted delegation ends at, and the tab is display only.
+			// A room's participant turn instead asks as the agent pinned for it while its room holds
+			// it (MCOMP-17-03BL); a moderator or synthesis turn asks as nobody.
 			askAsCaller: (credential, input) =>
 				askFrom(input, () => {
 					const chat = turns.callerSource(credential);
@@ -1089,6 +1160,17 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 					}
 					const turn = background.callerSource(credential);
 					if (!turn || !input.fromTabId) return null;
+					// A room turn asks as the agent its participant stands for, while the room holds
+					// it (MCOMP-17-03BL); its own link names a process, so it is never matched. `askFrom`
+					// requires the stated agent to be that agent.
+					if (turn.owner.startsWith(groupChatOwner(''))) {
+						const room = roomCallers.get(turn.processId);
+						return room &&
+							turn.owner === groupChatOwner(room.chatId) &&
+							repository.getAgent(room.agentId)
+							? { agentId: room.agentId, tabId: input.fromTabId, processId: turn.processId }
+							: null;
+					}
 					const link = background.sourceCustody(turn.processId)?.context.delegation.chain.at(-1);
 					return link?.kind === 'agent' && link.id === input.fromAgentId
 						? { agentId: link.id, tabId: input.fromTabId, processId: turn.processId }

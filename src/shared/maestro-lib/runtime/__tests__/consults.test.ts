@@ -1603,6 +1603,115 @@ describe('runtime consults', () => {
 				);
 			});
 
+			describe('room participant caller credentials (MCOMP-17-03BL)', () => {
+				/** The moderator addresses both participants, both keep working, and a consult answers. */
+				const ROOM: FakeScript = (call) => {
+					if (call.role === 'moderator') return { text: '@Alpha @Beta please check this.' };
+					if (call.role === 'participant') return { text: 'Working on it', hold: true };
+					if (call.role === 'consult') return { text: 'Room answer' };
+					return { text: 'Done.' };
+				};
+				const roomAsk = {
+					targetAgentId: 'a3',
+					fromAgentId: 'a1',
+					fromTabId: 'room-tab',
+					question: 'Check this for the room',
+				};
+				const credentialIn = (env: Record<string, string | undefined>): string => {
+					const credential = env[CALLER_CREDENTIAL_ENV_VAR];
+					expect(typeof credential).toBe('string');
+					return credential as string;
+				};
+
+				async function liveRoom() {
+					const runtime = await startEnrolled(() => 'allow', [], ROOM);
+					const chatId = value(
+						await runtime.groupChats.create({
+							name: 'Release room',
+							participantIds: ['a1', 'a2'],
+							message: 'Please review the release.',
+						})
+					).chatId;
+					await vi.waitFor(() => expect(provider.callsFor('participant')).toHaveLength(2), {
+						timeout: 10_000,
+					});
+					// A participant's credential is honored once its process holds its lease.
+					await vi.waitFor(() =>
+						expect(authority.live().filter((lease) => lease.state() === 'bound')).toHaveLength(2)
+					);
+					const participant = provider
+						.callsFor('participant')
+						.find((call) => call.participant === 'Alpha');
+					if (!participant) throw new Error('Alpha never started');
+					return { runtime, chatId, participant, credential: credentialIn(participant.spec.env) };
+				}
+
+				it('asks as the agent the participant stands for, as a child of its room turn', async () => {
+					const { runtime, chatId, participant, credential } = await liveRoom();
+					expect(value(await runtime.askAsCaller(credential, roomAsk)).answer).toBe('Room answer');
+					const room = readDelegationContextEnv(participant.spec.env);
+					if (room.status !== 'ok') throw new Error('the participant carried no lineage');
+					expect(lineageOf(0).identity.parentRunId).toBe(room.context.identity.requestId);
+					expect(lineageOf(0).identity.rootRunId).toBe(room.context.identity.rootRunId);
+					expect(lineageOf(0).delegation.chain).toEqual([
+						...room.context.delegation.chain,
+						{ kind: 'agent', id: 'a3' },
+					]);
+					expect(consultTab('a3')).toBeDefined();
+					value(await runtime.groupChats.stop(chatId));
+				});
+
+				it.each(['other-agent', 'process-id', 'no-tab', 'moderator', 'unknown'] as const)(
+					'refuses a %s ask without a child effect',
+					async (mode) => {
+						const { runtime, chatId, participant, credential } = await liveRoom();
+						let presented = credential;
+						let stated: typeof roomAsk | Omit<typeof roomAsk, 'fromTabId'> = roomAsk;
+						if (mode === 'other-agent') stated = { ...roomAsk, fromAgentId: 'a2' };
+						// The room turn's own delegation link names its process: never an identity.
+						if (mode === 'process-id') stated = { ...roomAsk, fromAgentId: participant.processId };
+						if (mode === 'no-tab') {
+							const { fromTabId: _tab, ...rest } = roomAsk;
+							stated = rest;
+						}
+						if (mode === 'moderator')
+							presented = credentialIn(provider.callsFor('moderator')[0].spec.env);
+						if (mode === 'unknown') presented = `${credential}x`;
+						expect(errorOf(await runtime.askAsCaller(presented, stated)).message).toMatch(
+							/custody/i
+						);
+						expect(provider.callsFor('consult')).toHaveLength(0);
+						expect(consultTab('a3')).toBeUndefined();
+						value(await runtime.groupChats.stop(chatId));
+					}
+				);
+
+				it('withdraws the identity as the room stop begins, before its turns have ended', async () => {
+					const { runtime, chatId, credential } = await liveRoom();
+					const stopping = runtime.groupChats.stop(chatId);
+					expect(errorOf(await runtime.askAsCaller(credential, roomAsk)).message).toMatch(
+						/custody/i
+					);
+					value(await stopping);
+					expect(provider.callsFor('consult')).toHaveLength(0);
+					expect(consultTab('a3')).toBeUndefined();
+				});
+
+				it.each(['stopped', 'removed'] as const)(
+					'stops authenticating the participant once its room is %s',
+					async (mode) => {
+						const { runtime, chatId, credential } = await liveRoom();
+						if (mode === 'stopped') value(await runtime.groupChats.stop(chatId));
+						if (mode === 'removed') value(await runtime.groupChats.remove(chatId));
+						expect(errorOf(await runtime.askAsCaller(credential, roomAsk)).message).toMatch(
+							/custody/i
+						);
+						expect(provider.callsFor('consult')).toHaveLength(0);
+						expect(consultTab('a3')).toBeUndefined();
+					}
+				);
+			});
+
 			it.each(['preparation', 'admission', 'observer', 'sink'] as const)(
 				'rechecks nested custody at %s, releases unused leases and recovers',
 				async (boundary) => {

@@ -4590,6 +4590,20 @@
 					"produces": []
 				},
 				{
+					"id": "MCOMP-17-03BL",
+					"label": "Bind room participant caller credentials to the room's lifetime in the runtime ask",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/shared/maestro-lib/runtime/index.ts",
+						"src/shared/maestro-lib/runtime/__tests__/consults.test.ts",
+						"Plans/integration-completion/program.json"
+					],
+					"outcome": "Consume MAESTRO-EFFECT-CONSUMERS-BUILD and its pinned MAESTRO-CONTRACT-INPUTS-BUILD dependency. Bounded prerequisite continuation of MCOMP-17-03 after MCOMP-17-03BK: runtime/index.ts pins, when a room participant turn's process starts, the live agent its participant name resolves to under the engine's own rule, forgets it when the turn ends or is refused and as soon as its room is stopped or removed, and askAsCaller resolves a group chat background credential only to that pinned agent (never to the process link; a moderator or synthesis turn asks as nobody), selecting that participant process's live source custody through askFrom. Exercise binding and lineage, stated-agent mismatch, the process link as an identity, missing tab, moderator and unknown credentials, room stop and removal, a stop still in flight, and a mutation check. Group-chat Auto Run propagation and the desktop room path remain pending. Reuse WORKFLOW-CONTEXT/1; no new wire capability, producer mapping or paired/provider/native qualification. Keep to three authored files and fewer than 500 changed lines.",
+					"backlog": ["M-04"],
+					"requires": ["MAESTRO-EFFECT-CONSUMERS-BUILD"],
+					"produces": []
+				},
+				{
 					"label": "Bind Auto Run Cue and nested work at dispatch",
 					"kind": "IMPLEMENT",
 					"targets": [
@@ -4632,7 +4646,7 @@
 			"produces": ["MAESTRO-WORKFLOW-CONSUMERS-BUILD"],
 			"id": "MCOMP-17",
 			"path": ".maestro/playbooks/2026-10-29-Maestro-Integration-Completion/MCOMP-17.md",
-			"taskCount": 68,
+			"taskCount": 69,
 			"stage": "S10"
 		},
 		{
@@ -6422,7 +6436,7 @@
 				"PAIR-DIRECT-EVIDENCE"
 			],
 			"nativeInputs": false,
-			"taskCount": 75
+			"taskCount": 76
 		},
 		{
 			"id": "S11",
@@ -6626,8 +6640,8 @@
 			"taskCount": 1
 		}
 	],
-	"taskCount": 388,
-	"taskCounts": { "IMPLEMENT": 279, "TEST": 49, "VERIFY": 60 },
+	"taskCount": 389,
+	"taskCounts": { "IMPLEMENT": 280, "TEST": 49, "VERIFY": 60 },
 	"artifacts": {
 		"MEGA-CONTRACTS-FOUNDATION-BUILD": {
 			"producerDocument": "GCOMP-01",
@@ -7431,6 +7445,7 @@
 			"MCOMP-17-03BI",
 			"MCOMP-17-03BJ",
 			"MCOMP-17-03BK",
+			"MCOMP-17-03BL",
 			"MCOMP-17-03",
 			"MCOMP-17-04",
 			"MCOMP-17-05",
