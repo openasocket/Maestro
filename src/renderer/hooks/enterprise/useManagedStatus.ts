@@ -35,6 +35,8 @@ import type { ManagedStanding, ManagedStateView } from '../../../main/enterprise
 import type { UpdateStatus } from '../../../shared/types';
 import { formatManagedHold } from '../../../shared/formatters';
 import type { PolicyRecovery } from '../../../main/enterprise/policy-status';
+import type { ManagedRunView } from '../../../main/enterprise/dispatch';
+import type { LeaseRelease } from '../../../shared/maestro-lib/managed/authority';
 import { ipcErrorMessage } from '../../utils/ipcErrorMessage';
 import { useCachedResource } from '../utils/useCachedResource';
 
@@ -276,4 +278,258 @@ export function useManagedStatus(options: { pollMs?: number } = {}): UseManagedS
 		run,
 		update: managedUpdateState(resource.data, updater.data),
 	};
+}
+
+// ---------------------------------------------------------------------------
+// The managed run a composer turn started (MCOMP-25-02)
+// ---------------------------------------------------------------------------
+
+/** The seven words a managed run is shown as. */
+export type ManagedRunWord =
+	| 'admitted'
+	| 'running'
+	| 'completed'
+	| 'denied'
+	| 'unknown'
+	| 'offline'
+	| 'revoked';
+
+/**
+ * What a person may do about a run from where it is shown. Each one asks the
+ * host again rather than trusting the view: `stop` goes to the process the
+ * lease is bound to, `retry` is a new send admitted under the policy current
+ * then, `refresh` re-reads the run from the dispatch ledger, `refreshPolicy`
+ * asks the endpoint for the current policy.
+ */
+export type ManagedRunAction = 'stop' | 'retry' | 'refresh' | 'refreshPolicy';
+
+/** The one place the run words are spelled out. */
+export const MANAGED_RUN_COPY: Record<ManagedRunWord, { label: string; detail: string }> = {
+	admitted: {
+		label: 'Admitted',
+		detail: 'The host admitted this turn; the process has not been bound to its lease yet.',
+	},
+	running: {
+		label: 'Running',
+		detail: 'Running under its lease; the host can stop it if the lease is revoked.',
+	},
+	completed: {
+		label: 'Completed',
+		detail: 'The turn ended and its lease was released.',
+	},
+	denied: {
+		label: 'Denied',
+		detail: 'The host refused this turn; nothing ran.',
+	},
+	unknown: {
+		label: 'Unknown',
+		detail: 'The host cannot say how this turn ended; nothing is resent on its own.',
+	},
+	offline: {
+		label: 'Offline',
+		detail: 'The managed runtime is not reachable from here.',
+	},
+	revoked: {
+		label: 'Revoked',
+		detail: 'The host withdrew this turn’s lease; its process was stopped.',
+	},
+};
+
+/** A spawn the host refused, as the process manager reports it (`SpawnResult.managed`). */
+export interface ManagedRunRefusal {
+	state: 'denied' | 'unavailable' | 'unknown';
+	code: string;
+	message: string;
+}
+
+export interface ManagedRunStateInput {
+	/** The run the tab's last send started (the ledger's read when one is newer). */
+	run: ManagedRunView | null | undefined;
+	/** Whether the tab's turn is live right now. */
+	busy: boolean;
+	/** The host's standing (`useManagedStatus().state`): undefined reading, null no service. */
+	standing: ManagedStateView | null | undefined;
+	/** The last send's refusal, when the host refused it and so no run exists. */
+	refusal?: ManagedRunRefusal | null;
+}
+
+export interface ManagedRunStateView {
+	word: ManagedRunWord;
+	label: string;
+	detail: string;
+	/** The host's own sentence for this run (release, revocation, refusal); null when it said none. */
+	reason: string | null;
+	/** The policy revision the run was admitted under; null when none is recorded. */
+	revision: number | null;
+	/** The revision the host applies now, when it differs from the run's. */
+	currentRevision: number | null;
+	tint: 'success' | 'warning' | 'error' | 'textDim' | 'accent';
+	actions: ManagedRunAction[];
+	leaseId: string | null;
+}
+
+/** Standings under which the host refuses managed execution: no retry is offered. */
+const EXECUTION_REFUSED: ReadonlySet<ManagedStanding> = new Set([
+	'denied',
+	'suspended',
+	'revoked',
+	'retired',
+	'custody-refused',
+]);
+
+function releaseReason(release: LeaseRelease | null): string | null {
+	if (!release) return null;
+	switch (release.outcome) {
+		case 'exited':
+			return release.signal
+				? `The process ended on ${release.signal}.`
+				: `The process exited with code ${release.exitCode ?? 'unknown'}.`;
+		case 'stopped':
+			return release.by === 'caller' ? 'Stopped from Maestro.' : 'Stopped by the host.';
+		case 'spawn-failed':
+			return `The process failed to start: ${release.message}`;
+		case 'unknown':
+			return release.message;
+	}
+}
+
+/**
+ * The word, sentence and safe actions for one managed run. Pure, so the pane
+ * and a test read the same answer. Returns null when there is nothing managed
+ * to show (a standalone host binds no lease and refuses nothing), so an
+ * unmanaged Maestro draws nothing. Never a success tint unless the ledger or
+ * the live process says so: with no service or an unread standing the run
+ * reads `offline`, and a bound lease whose turn ended reads `unknown` until
+ * the ledger is read back.
+ */
+export function describeManagedRun(input: ManagedRunStateInput): ManagedRunStateView | null {
+	const { run, busy, standing, refusal } = input;
+	const refused = !!standing && EXECUTION_REFUSED.has(standing.standing);
+	const currentOf = (revision: number | null) => {
+		const now = standing?.policy?.appliedRevision ?? null;
+		return now !== null && now !== revision ? now : null;
+	};
+	const build = (
+		word: ManagedRunWord,
+		reason: string | null,
+		tint: ManagedRunStateView['tint'],
+		actions: ManagedRunAction[],
+		revision: number | null,
+		leaseId: string | null
+	): ManagedRunStateView => ({
+		word,
+		label: MANAGED_RUN_COPY[word].label,
+		detail: MANAGED_RUN_COPY[word].detail,
+		reason,
+		revision,
+		currentRevision: currentOf(revision),
+		tint,
+		// A host that refuses managed execution is never offered a resend.
+		actions: refused ? actions.filter((a) => a !== 'retry') : actions,
+		leaseId,
+	});
+
+	if (!run) {
+		if (!refusal) return null;
+		const reason = formatManagedHold(refusal);
+		if (refusal.state === 'unavailable') {
+			return build('offline', reason, 'warning', ['refreshPolicy', 'retry'], null, null);
+		}
+		if (refusal.state === 'unknown') {
+			return build('unknown', reason, 'warning', ['refreshPolicy'], null, null);
+		}
+		return build('denied', reason, 'error', ['refreshPolicy', 'retry'], null, null);
+	}
+
+	const revision = run.decision?.policyRevision ?? run.policyRevision;
+	const lease = run.leaseId;
+	const effect = run.effect;
+	const live = effect.state === 'admitted' || effect.state === 'bound';
+
+	if (live && busy) {
+		// Policy loss mid-run: the host's standing now refuses managed execution.
+		if (refused) {
+			return build('revoked', standing?.reason ?? null, 'error', ['stop'], revision, lease);
+		}
+		// No service, an unread or unreachable standing: never a success word.
+		if (!standing || standing.standing === 'offline') {
+			return build('offline', standing?.reason ?? null, 'warning', ['stop'], revision, lease);
+		}
+		if (effect.state === 'admitted') {
+			return build('admitted', null, 'accent', ['stop'], revision, lease);
+		}
+		return build('running', null, 'accent', ['stop'], revision, lease);
+	}
+	if (live) {
+		// The turn ended, but this is still the spawn-time view: read the ledger back.
+		return build('unknown', effect.reason, 'warning', ['refresh'], revision, lease);
+	}
+	switch (effect.state) {
+		case 'released': {
+			const release = effect.release;
+			const clean =
+				release?.outcome === 'stopped' ||
+				(release?.outcome === 'exited' && release.exitCode === 0 && !release.signal);
+			if (release?.outcome === 'unknown') {
+				return build(
+					'unknown',
+					releaseReason(release),
+					'warning',
+					['refresh', 'retry'],
+					revision,
+					lease
+				);
+			}
+			return build(
+				'completed',
+				effect.reason ?? releaseReason(release),
+				clean ? 'success' : 'warning',
+				['retry'],
+				revision,
+				lease
+			);
+		}
+		case 'revoked':
+			return build(
+				'revoked',
+				effect.reason ?? 'The host revoked the lease while the turn ran.',
+				'error',
+				['refreshPolicy', 'retry'],
+				revision,
+				lease
+			);
+		case 'expired':
+			return build(
+				'revoked',
+				effect.reason ?? 'The lease expired before the turn ended.',
+				'error',
+				['refreshPolicy', 'retry'],
+				revision,
+				lease
+			);
+		default:
+			return build('unknown', effect.reason, 'warning', ['refresh', 'retry'], revision, lease);
+	}
+}
+
+export const MANAGED_RUN_RESOURCE_PREFIX = 'enterprise:managedRun:';
+
+/**
+ * Read one run back from the dispatch ledger by its lease id, once its turn is
+ * no longer live (`enabled: false` while it runs: the live view is newer).
+ * `run` is undefined before the read, null for a lease the ledger never
+ * admitted or a host with no ledger.
+ */
+export function useManagedRun(
+	leaseId: string | null | undefined,
+	options: { enabled?: boolean } = {}
+): { run: ManagedRunView | null | undefined; refresh: () => Promise<void> } {
+	const api = window.maestro?.enterprise;
+	const supported = typeof api?.managedRun === 'function';
+	const enabled = options.enabled ?? true;
+	const key = supported && leaseId && enabled ? `${MANAGED_RUN_RESOURCE_PREFIX}${leaseId}` : null;
+	const resource = useCachedResource<ManagedRunView | null>(key, () =>
+		api.managedRun(leaseId as string)
+	);
+	return { run: key ? resource.data : undefined, refresh: resource.refresh };
 }
