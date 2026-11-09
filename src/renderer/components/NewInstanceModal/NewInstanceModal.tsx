@@ -62,6 +62,7 @@ const POLICY_SOURCE_LABELS: Record<'endpoint' | 'cached' | 'none', string> = {
  * why a field is fixed, plus the host's per-field reasons for the last refused
  * create. Advisory only: the host revalidates the record at commit. Renders
  * nothing on a standalone (unenrolled) desktop, whose form stays as it was.
+ * `action` names what the form does (`save` for Edit Agent, MCOMP-23-04).
  */
 export function ManagedChoicesNotice({
 	theme,
@@ -71,6 +72,7 @@ export function ManagedChoicesNotice({
 	refreshing,
 	onRefresh,
 	refusal,
+	action = 'create',
 }: {
 	theme: Theme;
 	managed: boolean;
@@ -79,6 +81,7 @@ export function ManagedChoicesNotice({
 	refreshing: boolean;
 	onRefresh: () => void;
 	refusal: AgentCommitRefusal | null;
+	action?: 'create' | 'save';
 }) {
 	if (!managed && !refusal) return null;
 	const refusedFields = new Map((refusal?.fields ?? []).map((f) => [f.field, f.reason]));
@@ -141,8 +144,8 @@ export function ManagedChoicesNotice({
 				<div style={{ color: theme.colors.error }} role="alert" data-testid="managed-refusal">
 					<p>
 						{refusal.code === 'stale'
-							? 'The policy changed while this form was open. Approved choices were refreshed; review them and create again.'
-							: `Not created: ${refusal.reason}`}
+							? `The policy changed while this form was open. Approved choices were refreshed; review them and ${action} again.`
+							: `Not ${action === 'save' ? 'saved' : 'created'}: ${refusal.reason}`}
 					</p>
 					{refusedFields.size > 0 && (
 						<ul className="list-disc ml-4">

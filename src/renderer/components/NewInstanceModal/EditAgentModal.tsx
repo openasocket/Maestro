@@ -44,6 +44,9 @@ import { isAbsolutePath } from '../../../shared/formatters';
 import { isSameDirectory, workingDirectoryChangeBlocker } from '../../utils/agentWorkingDirectory';
 import { withBlankEnvVarRow } from '../../../shared/envVarCatalog';
 import type { CodexTransport } from '../../../shared/codexTransport';
+import { ManagedChoicesNotice } from './NewInstanceModal';
+import { useManagedAgentOptions } from '../../hooks/enterprise/useManagedAgentOptions';
+import { AgentCommitRefusedError, type AgentCommitRefusal } from '../../services/agentCommit';
 
 /**
  * EditAgentModal - Modal for editing an existing agent's settings
@@ -156,6 +159,12 @@ export function EditAgentModal({
 	// a plain switch: tabs and transcripts stay, and each tab starts a fresh
 	// conversation on the new provider.
 	const [convertProviderHistory, setConvertProviderHistory] = useState(false);
+	// Managed installations: the host's approved choices, and the last refused save
+	// (MCOMP-23-04). The host checks the edited record at commit; a refusal saved
+	// nothing, so the draft stays and the reasons are shown by field.
+	const managedChoices = useManagedAgentOptions();
+	const refreshManagedChoices = managedChoices.refresh;
+	const [saveRefusal, setSaveRefusal] = useState<AgentCommitRefusal | null>(null);
 	const canConvertProvider =
 		providerChanged && !!getDeclaredTranslationDirection(session?.toolType ?? '', selectedToolType);
 	const convertingProvider = canConvertProvider && convertProviderHistory;
@@ -647,6 +656,7 @@ export function EditAgentModal({
 		// Save with per-session config fields including model, contextWindow, and SSH config
 		setMigrationSaving(true);
 		setMigrationError('');
+		setSaveRefusal(null);
 		try {
 			const saveArguments: Parameters<typeof onSave> = [
 				session.id,
@@ -686,7 +696,12 @@ export function EditAgentModal({
 			if (saved) await saved;
 			onClose();
 		} catch (error) {
-			setMigrationError(error instanceof Error ? error.message : String(error));
+			if (error instanceof AgentCommitRefusedError) {
+				setSaveRefusal(error.refusal);
+				if (error.refusal.code === 'stale') void refreshManagedChoices();
+			} else {
+				setMigrationError(error instanceof Error ? error.message : String(error));
+			}
 		} finally {
 			setMigrationSaving(false);
 		}
@@ -727,6 +742,7 @@ export function EditAgentModal({
 		onSave,
 		onClose,
 		existingSessions,
+		refreshManagedChoices,
 	]);
 
 	// Refresh available models
@@ -787,6 +803,19 @@ export function EditAgentModal({
 	if (!isOpen || !session) return null;
 
 	const agentName = getAgentDisplayName(selectedToolType);
+	// Messages already queued run with what this save stores: on the new provider
+	// (a per-message model or effort chosen for the old one is cleared) or in the
+	// new directory. Said before saving so the change is not a surprise.
+	const queuedCount = liveSession?.executionQueue?.length ?? 0;
+	const queuedMessages = `${queuedCount} queued message${queuedCount === 1 ? '' : 's'}`;
+	const queuedImpact =
+		queuedCount === 0
+			? null
+			: providerChanged
+				? `${queuedMessages} will run on ${agentName} after you save; a model or effort chosen for one on ${getAgentDisplayName(session.toolType)} is cleared.`
+				: workingDirChanged
+					? `${queuedMessages} will run in the new working directory after you save.`
+					: null;
 	// Whether a turn of this agent can run through the claude TUI, as the form
 	// stands now. Dynamic counts: it starts on the TUI and leaves it only near a
 	// limit. Read through the one resolver every spawn uses, so an SSH agent
@@ -863,6 +892,26 @@ export function EditAgentModal({
 					error={validation.errorField === 'name' ? validation.error : undefined}
 					heightClass="p-2"
 				/>
+
+				<ManagedChoicesNotice
+					theme={theme}
+					managed={managedChoices.managed}
+					options={managedChoices.options}
+					policySource={managedChoices.policySource}
+					refreshing={managedChoices.refreshing}
+					onRefresh={() => void managedChoices.refresh()}
+					refusal={saveRefusal}
+					action="save"
+				/>
+				{queuedImpact && (
+					<p
+						className="text-xs"
+						style={{ color: theme.colors.warning }}
+						data-testid="edit-agent-queued-impact"
+					>
+						{queuedImpact}
+					</p>
+				)}
 
 				{/* Agent Provider */}
 				<div>
@@ -1036,7 +1085,10 @@ export function EditAgentModal({
 								? `Enter remote path${sshRemoteHost ? ` on ${sshRemoteHost}` : ''} (e.g., /home/user/project)`
 								: 'Select directory...'
 						}
-						error={workingDirError}
+						error={
+							workingDirError ??
+							saveRefusal?.fields.find((field) => field.field === 'workspace')?.reason
+						}
 						helperText={
 							workingDirBlocker ??
 							(workingDirChanged

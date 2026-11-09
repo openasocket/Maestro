@@ -6,12 +6,14 @@
  */
 
 import { useState, useCallback } from 'react';
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { AgentConfigPanel } from '../../../../renderer/components/shared/AgentConfigPanel';
 import type { AgentConfig, AgentCapabilities } from '../../../../renderer/types';
 
 import { createMockTheme } from '../../../helpers/mockTheme';
+import { useSettingsStore } from '../../../../renderer/stores/settingsStore';
+import { NO_MANAGED_SETTING_LOCKS } from '../../../../shared/managedSettingsLock';
 
 // Mock lucide-react icons
 vi.mock('lucide-react', () => ({
@@ -991,5 +993,103 @@ describe('AgentConfigPanel blur callbacks', () => {
 		for (const call of onEnvVarsBlur.mock.calls) {
 			expect(call).toEqual([]);
 		}
+	});
+});
+
+describe('AgentConfigPanel - fields held by managed policy (MCOMP-23-04)', () => {
+	const lockMessage = (field: string) =>
+		`the "agentConfig.${field}" setting is locked by managed policy revision 4`;
+	const hold = (...fields: string[]) =>
+		useSettingsStore.setState({
+			managedLocks: {
+				policyRevision: 4,
+				locks: Object.fromEntries(
+					fields.map((field) => [
+						`agentConfig.${field}`,
+						{ code: 'locked' as const, message: lockMessage(field), pinned: false },
+					])
+				),
+			},
+		});
+	const modelAgent = createMockAgent({
+		configOptions: [
+			{ key: 'model', label: 'Model', type: 'text', description: 'Model to use', default: '' },
+			{
+				key: 'contextWindow',
+				label: 'Context Window',
+				type: 'number',
+				description: 'Window',
+				default: 0,
+			},
+		],
+	});
+
+	afterEach(() => useSettingsStore.setState({ managedLocks: NO_MANAGED_SETTING_LOCKS }));
+
+	it('leaves every editor editable on a standalone desktop', () => {
+		render(
+			<AgentConfigPanel
+				{...createDefaultProps({ customArgs: '--x', customEnvVars: { API_KEY: 'v1' } })}
+			/>
+		);
+		expect(screen.getByDisplayValue('/usr/local/bin/claude')).not.toBeDisabled();
+		expect(screen.getByDisplayValue('--x')).not.toBeDisabled();
+		expect(screen.getByDisplayValue('v1')).not.toBeDisabled();
+		expect(screen.getByText('Add Variable').closest('button')).not.toBeDisabled();
+		expect(screen.queryByTestId(/held-by-policy-/)).not.toBeInTheDocument();
+	});
+
+	it('disables held path, arguments and environment editors and says why', () => {
+		hold('customPath', 'customArgs', 'customEnvVars');
+		render(
+			<AgentConfigPanel
+				{...createDefaultProps({ customArgs: '--x', customEnvVars: { API_KEY: 'v1' } })}
+			/>
+		);
+		expect(screen.getByDisplayValue('/usr/local/bin/claude')).toBeDisabled();
+		expect(screen.getByDisplayValue('--x')).toBeDisabled();
+		expect(screen.getByDisplayValue('v1')).toBeDisabled();
+		expect(screen.getByText('Add Variable').closest('button')).toBeDisabled();
+		expect(screen.getByTitle('Remove variable')).toBeDisabled();
+		for (const field of ['customPath', 'customArgs', 'customEnvVars'])
+			expect(screen.getByTestId(`held-by-policy-${field}`)).toHaveTextContent(
+				`Held by policy: ${lockMessage(field)}`
+			);
+	});
+
+	it('holds only the fields the policy names', () => {
+		hold('customArgs');
+		render(<AgentConfigPanel {...createDefaultProps({ customArgs: '--x' })} />);
+		expect(screen.getByDisplayValue('--x')).toBeDisabled();
+		expect(screen.getByDisplayValue('/usr/local/bin/claude')).not.toBeDisabled();
+		expect(screen.getByText('Add Variable').closest('button')).not.toBeDisabled();
+		expect(screen.queryByTestId('held-by-policy-customPath')).not.toBeInTheDocument();
+	});
+
+	it('holds the OpenCode agent field with the arguments it is stored in', () => {
+		hold('customArgs');
+		render(
+			<AgentConfigPanel
+				{...createDefaultProps({
+					agent: createMockAgent({ id: 'opencode', name: 'OpenCode', binaryName: 'opencode' }),
+				})}
+			/>
+		);
+		expect(screen.getByLabelText('OpenCode Agent (optional)')).toBeDisabled();
+	});
+
+	it('holds a model option under the model lock and leaves other options editable', () => {
+		hold('model');
+		render(
+			<AgentConfigPanel
+				{...createDefaultProps({
+					agent: modelAgent,
+					agentConfig: { model: 'claude-sonnet', contextWindow: 1000 },
+				})}
+			/>
+		);
+		expect(screen.getByDisplayValue('claude-sonnet')).toBeDisabled();
+		expect(screen.getByDisplayValue('1000')).not.toBeDisabled();
+		expect(screen.getByTestId('held-by-policy-model')).toHaveTextContent(lockMessage('model'));
 	});
 });

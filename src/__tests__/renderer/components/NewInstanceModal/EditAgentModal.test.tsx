@@ -12,6 +12,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act, render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { EditAgentModal } from '../../../../renderer/components/NewInstanceModal/EditAgentModal';
 import { useSessionStore } from '../../../../renderer/stores/sessionStore';
+import { clearCachedResources } from '../../../../renderer/hooks/utils/useCachedResource';
+import { AgentCommitRefusedError } from '../../../../renderer/services/agentCommit';
 import type { Theme, Session, AgentConfig } from '../../../../renderer/types';
 
 // lucide-react icons are mocked globally in src/__tests__/setup.ts using a Proxy
@@ -2123,6 +2125,162 @@ describe('EditAgentModal', () => {
 			await sectionReady();
 
 			expect(screen.queryByText(INTERACTIVE_NOTE)).not.toBeInTheDocument();
+		});
+	});
+
+	describe('Managed approved choices and host refusals (MCOMP-23-04)', () => {
+		const original = window.maestro.enterprise;
+		const managedState = vi.fn();
+		const managed = (revision: number) => ({
+			standing: 'managed',
+			policy: { source: 'endpoint' },
+			agentOptions: {
+				outcome: 'available',
+				authority: 'none',
+				policyRevision: revision,
+				freshness: 'fresh',
+				expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+				operations: ['create', 'edit'],
+				fields: {
+					workspace: {
+						choices: [{ kind: 'workspace', ref: 'ws-project' }],
+						editable: true,
+						minimum: 1,
+						maximum: 1,
+						lockedReason: null,
+					},
+				},
+			},
+		});
+		const refused = (code: 'field' | 'stale', revision: number) =>
+			new AgentCommitRefusedError({
+				ok: false,
+				code,
+				reason:
+					code === 'stale'
+						? 'The policy changed. Refresh to load the current approved choices.'
+						: 'This working directory is not an approved choice.',
+				policyRevision: revision,
+				fields:
+					code === 'field'
+						? [{ field: 'workspace', reason: 'This working directory is not an approved choice.' }]
+						: [],
+			});
+		const renderEdit = (session: Session = createSession()) =>
+			render(
+				<EditAgentModal
+					isOpen={true}
+					onClose={onClose}
+					onSave={onSave}
+					theme={theme}
+					session={session}
+					existingSessions={[]}
+				/>
+			);
+		const save = async () => {
+			await waitFor(() =>
+				expect(screen.getByText('Save Changes').closest('button')).not.toBeDisabled()
+			);
+			await act(async () => {
+				fireEvent.click(screen.getByText('Save Changes'));
+			});
+		};
+		let previousSessions: Session[];
+
+		beforeEach(() => {
+			clearCachedResources();
+			managedState.mockReset();
+			(window.maestro as { enterprise: unknown }).enterprise = { ...original, managedState };
+			previousSessions = useSessionStore.getState().sessions;
+		});
+		afterEach(() => {
+			clearCachedResources();
+			(window.maestro as { enterprise: unknown }).enterprise = original;
+			act(() => useSessionStore.setState({ sessions: previousSessions }));
+		});
+
+		it('keeps the standalone dialog unchanged on an unenrolled desktop', async () => {
+			managedState.mockResolvedValue({ standing: 'unenrolled', policy: { source: 'none' } });
+			renderEdit();
+			await save();
+			expect(onSave).toHaveBeenCalledTimes(1);
+			expect(onClose).toHaveBeenCalled();
+			expect(screen.queryByTestId('managed-choices-notice')).not.toBeInTheDocument();
+		});
+
+		it('shows the policy revision and keeps the draft with field reasons when the host refuses', async () => {
+			managedState.mockResolvedValue(managed(6));
+			onSave.mockRejectedValue(refused('field', 6));
+			renderEdit();
+			expect(await screen.findByTestId('managed-policy-revision')).toHaveTextContent(
+				'revision 6, from the endpoint, fresh'
+			);
+			fireEvent.change(screen.getByDisplayValue('My Agent'), { target: { value: 'Renamed' } });
+			await save();
+
+			expect(onSave).toHaveBeenCalledTimes(1);
+			expect(onClose).not.toHaveBeenCalled();
+			expect(screen.getByDisplayValue('Renamed')).toBeInTheDocument();
+			expect(screen.getByTestId('managed-refusal')).toHaveTextContent(
+				'Not saved: This working directory is not an approved choice.'
+			);
+			expect(screen.getByTestId('managed-refusal-workspace')).toHaveTextContent(
+				'Working directory: This working directory is not an approved choice.'
+			);
+			// The working directory input carries its own reason too, and no raw error duplicates it.
+			expect(screen.getAllByText('This working directory is not an approved choice.')).toHaveLength(
+				1
+			);
+		});
+
+		it('refreshes the approved choices after a stale refusal', async () => {
+			managedState.mockResolvedValueOnce(managed(6)).mockResolvedValue(managed(7));
+			onSave.mockRejectedValue(refused('stale', 7));
+			renderEdit();
+			expect(await screen.findByTestId('managed-policy-revision')).toHaveTextContent('revision 6');
+			await save();
+
+			expect(onClose).not.toHaveBeenCalled();
+			expect(screen.getByTestId('managed-refusal')).toHaveTextContent(
+				'The policy changed while this form was open. Approved choices were refreshed; review them and save again.'
+			);
+			await waitFor(() =>
+				expect(screen.getByTestId('managed-policy-revision')).toHaveTextContent('revision 7')
+			);
+		});
+
+		it('still reports an ordinary save failure as before', async () => {
+			managedState.mockResolvedValue({ standing: 'unenrolled', policy: { source: 'none' } });
+			onSave.mockRejectedValue(new Error('disk full'));
+			renderEdit();
+			await save();
+			expect(onClose).not.toHaveBeenCalled();
+			expect(screen.getByRole('alert')).toHaveTextContent('disk full');
+			expect(screen.queryByTestId('managed-refusal')).not.toBeInTheDocument();
+		});
+
+		it('says what a provider or directory change does to queued messages', async () => {
+			managedState.mockResolvedValue({ standing: 'unenrolled', policy: { source: 'none' } });
+			const session = createSession({
+				executionQueue: [{ id: 'q1' }, { id: 'q2' }] as Session['executionQueue'],
+			});
+			act(() => useSessionStore.setState({ sessions: [session] }));
+			renderEdit(session);
+			await screen.findByDisplayValue('/home/user/project');
+			expect(screen.queryByTestId('edit-agent-queued-impact')).not.toBeInTheDocument();
+
+			fireEvent.change(screen.getByDisplayValue('/home/user/project'), {
+				target: { value: '/home/user/elsewhere' },
+			});
+			expect(screen.getByTestId('edit-agent-queued-impact')).toHaveTextContent(
+				'2 queued messages will run in the new working directory after you save.'
+			);
+
+			fireEvent.click(screen.getByRole('button', { name: 'Agent Provider' }));
+			fireEvent.click(screen.getByRole('option', { name: 'OpenCode' }));
+			expect(screen.getByTestId('edit-agent-queued-impact')).toHaveTextContent(
+				'2 queued messages will run on OpenCode after you save; a model or effort chosen for one on Claude Code is cleared.'
+			);
 		});
 	});
 });

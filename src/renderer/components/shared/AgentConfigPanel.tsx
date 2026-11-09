@@ -34,6 +34,12 @@ import { EnvVarKeyInput } from './EnvVarKeyInput';
 import { BLANK_ENV_VAR_KEY } from '../../../shared/envVarCatalog';
 import { useKnownEnvVarKeys } from '../../hooks/agent/useKnownEnvVarKeys';
 import { elevatedSurfaceStyle } from '../../utils/elevatedSurface';
+import { useSettingsStore } from '../../stores/settingsStore';
+import {
+	agentConfigLockKey,
+	type AgentConfigLockField,
+	type ManagedSettingLockView,
+} from '../../../shared/managedSettingsLock';
 
 const MAESTRO_P_INSTALL_URL = 'https://runmaestro.ai/maestro-p/';
 
@@ -307,6 +313,35 @@ function ModelTextInput({
 	);
 }
 
+/**
+ * The policy's reason under a per-provider configuration field the managed
+ * policy holds (`agentConfig.customPath`, `customArgs`, `customEnvVars`,
+ * `model`, `reasoningEffort`; MCOMP-23-04). The field's section is a
+ * `<fieldset>` disabled by the same lock, so no create or edit surface offers a
+ * raw path, argument, environment, model or effort override the host would
+ * refuse (`holdAgentRecordWrite`). A standalone desktop holds nothing.
+ */
+function HeldByPolicyNote({
+	theme,
+	field,
+	lock,
+}: {
+	theme: Theme;
+	field: AgentConfigLockField | null;
+	lock: ManagedSettingLockView | null;
+}) {
+	if (!lock || !field) return null;
+	return (
+		<p
+			className="text-xs mt-2"
+			style={{ color: theme.colors.warning }}
+			data-testid={`held-by-policy-${field}`}
+		>
+			Held by policy: {lock.message}
+		</p>
+	);
+}
+
 export interface AgentConfigPanelProps {
 	theme: Theme;
 	agent: AgentConfig;
@@ -519,6 +554,16 @@ export function AgentConfigPanel({
 	const showMaestroPDetails = displayClaudeTokenMode !== 'api';
 	// Track which built-in env var tooltip is showing
 	const knownEnvVarKeys = useKnownEnvVarKeys();
+	// Fields the managed policy holds; empty on a standalone desktop.
+	const managedLocks = useSettingsStore((s) => s.managedLocks.locks);
+	const heldLock = (field: AgentConfigLockField | null): ManagedSettingLockView | null =>
+		field ? (managedLocks[agentConfigLockKey(field) ?? ''] ?? null) : null;
+	const configOptionLockField = (key: string): AgentConfigLockField | null =>
+		key === 'model'
+			? 'model'
+			: key === 'reasoningEffort' || key === 'effort'
+				? 'reasoningEffort'
+				: null;
 	// Set when the user presses "Add Variable", cleared once the new unnamed row
 	// has taken the caret. Not derived from "is this row blank": a blank row can
 	// also arrive from disk, and that one must not steal focus on modal open.
@@ -619,8 +664,9 @@ export function AgentConfigPanel({
 		<div className={spacing}>
 			{/* Path input - pre-filled with detected path, editable to override */}
 			{/* When SSH is enabled and no custom path is set, show the remote binary name instead of local path */}
-			<div
-				className={`${padding} rounded border`}
+			<fieldset
+				disabled={!!heldLock('customPath')}
+				className={`${padding} rounded border min-w-0`}
 				style={{ borderColor: theme.colors.border, backgroundColor: theme.colors.bgMain }}
 			>
 				<label
@@ -714,7 +760,8 @@ export function AgentConfigPanel({
 						? `Remote command/binary for ${agent.binaryName}. Leave empty to use default.`
 						: `Path to the ${agent.binaryName} binary. Edit to override the auto-detected path.`}
 				</p>
-			</div>
+				<HeldByPolicyNote theme={theme} field="customPath" lock={heldLock('customPath')} />
+			</fieldset>
 
 			{/* Claude Token Source selector - Claude Code only. Picks how this agent
 			    runs a turn: claude --print, the Claude TUI via maestro-p, or Dynamic
@@ -853,8 +900,9 @@ export function AgentConfigPanel({
 			    option, because Custom Arguments are per-agent while config options
 			    are shared by every agent on the provider. */}
 			{agent.id === 'opencode' && (
-				<div
-					className={`${padding} rounded border`}
+				<fieldset
+					disabled={!!heldLock('customArgs')}
+					className={`${padding} rounded border min-w-0`}
 					style={{ borderColor: theme.colors.border, backgroundColor: theme.colors.bgMain }}
 				>
 					<label
@@ -883,12 +931,14 @@ export function AgentConfigPanel({
 						value is stored in Custom Arguments below. Plan mode still forces{' '}
 						<span className="font-mono">--agent plan</span>.
 					</p>
-				</div>
+					<HeldByPolicyNote theme={theme} field="customArgs" lock={heldLock('customArgs')} />
+				</fieldset>
 			)}
 
 			{/* Custom CLI arguments input */}
-			<div
-				className={`${padding} rounded border`}
+			<fieldset
+				disabled={!!heldLock('customArgs')}
+				className={`${padding} rounded border min-w-0`}
 				style={{ borderColor: theme.colors.border, backgroundColor: theme.colors.bgMain }}
 			>
 				<label className="block text-xs font-medium mb-2" style={{ color: theme.colors.textDim }}>
@@ -912,11 +962,13 @@ export function AgentConfigPanel({
 				<p className="text-xs opacity-50 mt-2">
 					Additional CLI arguments appended to all calls to this agent
 				</p>
-			</div>
+				<HeldByPolicyNote theme={theme} field="customArgs" lock={heldLock('customArgs')} />
+			</fieldset>
 
 			{/* Custom environment variables input */}
-			<div
-				className={`${padding} rounded border`}
+			<fieldset
+				disabled={!!heldLock('customEnvVars')}
+				className={`${padding} rounded border min-w-0`}
 				style={{ borderColor: theme.colors.border, backgroundColor: theme.colors.bgMain }}
 			>
 				<label className="block text-xs font-medium mb-2" style={{ color: theme.colors.textDim }}>
@@ -1066,15 +1118,17 @@ export function AgentConfigPanel({
 					Agent-specific environment variables (overrides global environment variables from
 					Settings). These are passed to all calls to this agent.
 				</p>
-			</div>
+				<HeldByPolicyNote theme={theme} field="customEnvVars" lock={heldLock('customEnvVars')} />
+			</fieldset>
 
 			{/* Agent-specific configuration options (contextWindow, model, etc.) */}
 			{agent.configOptions &&
 				agent.configOptions.length > 0 &&
 				agent.configOptions.map((option: AgentConfigOption) => (
-					<div
+					<fieldset
+						disabled={!!heldLock(configOptionLockField(option.key))}
 						key={option.key}
-						className={`${padding} rounded border`}
+						className={`${padding} rounded border min-w-0`}
 						style={{ borderColor: theme.colors.border, backgroundColor: theme.colors.bgMain }}
 					>
 						<label
@@ -1193,7 +1247,12 @@ export function AgentConfigPanel({
 							</p>
 						)}
 						<p className="text-xs opacity-50 mt-2">{option.description}</p>
-					</div>
+						<HeldByPolicyNote
+							theme={theme}
+							field={configOptionLockField(option.key)}
+							lock={heldLock(configOptionLockField(option.key))}
+						/>
+					</fieldset>
 				))}
 
 			{/* Automatic usage resets - Codex only, and last, so it sits directly
