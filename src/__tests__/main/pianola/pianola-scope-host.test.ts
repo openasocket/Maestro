@@ -111,7 +111,8 @@ const cli = (overrides = {}) =>
 const lastOutput = () => JSON.parse(String(logs.mock.calls.at(-1)![0]));
 
 beforeEach(async () => {
-	const root = os.tmpdir();
+	// The proof-file store refuses a non-canonical base (macOS tmpdir is under /var).
+	const root = fs.realpathSync(os.tmpdir());
 	fs.mkdirSync(root, { recursive: true });
 	directory = fs.mkdtempSync(path.join(root, 'scope-host-'));
 	vi.stubEnv('MAESTRO_USER_DATA', directory);

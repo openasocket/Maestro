@@ -104,7 +104,8 @@ function ownership(tabId: string, agentId = 'owner') {
 }
 
 beforeEach(() => {
-	const root = os.tmpdir();
+	// The proof-file store refuses a non-canonical base (macOS tmpdir is under /var).
+	const root = fs.realpathSync(os.tmpdir());
 	fs.mkdirSync(root, { recursive: true });
 	directory = fs.mkdtempSync(path.join(root, 'legacy-migration-'));
 	// The checkout's ancestors are group writable on this CI host. Simulate
