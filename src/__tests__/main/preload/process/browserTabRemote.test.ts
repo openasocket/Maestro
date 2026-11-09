@@ -185,7 +185,9 @@ describe('Process BrowserTabRemote Preload API', () => {
 			const callback = vi.fn();
 			api.onRemoteNewAITabWithPrompt(callback);
 
-			// Exactly what browserTabCallbacks.ts sends over the wire.
+			// Exactly what browserTabCallbacks.ts sends over the wire: upstream's
+			// Pianola new-tab control keeps the slot after the routing, and the
+			// delegation and the ticket follow it.
 			registeredHandler('remote:newAITabWithPrompt')(
 				null,
 				'session-1',
@@ -194,6 +196,7 @@ describe('Process BrowserTabRemote Preload API', () => {
 				true,
 				false,
 				'consult-first',
+				undefined,
 				delegation,
 				'tkt-2'
 			);
@@ -206,6 +209,7 @@ describe('Process BrowserTabRemote Preload API', () => {
 				true,
 				false,
 				'consult-first',
+				undefined,
 				delegation,
 				'tkt-2'
 			);
@@ -217,12 +221,13 @@ describe('Process BrowserTabRemote Preload API', () => {
 
 			registeredHandler('remote:newAITabWithPrompt')(null, 'session-1', 'prompt', 'resp-1', false);
 
+			// hidden, mentionRouting and control stay as undefined slots; the
+			// delegation and the ticket are not handed over when unset.
 			expect(callback).toHaveBeenCalledWith(
 				'session-1',
 				'prompt',
 				'resp-1',
 				false,
-				undefined,
 				undefined,
 				undefined,
 				undefined
