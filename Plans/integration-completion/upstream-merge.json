@@ -2099,6 +2099,30 @@
 				"semanticConflictsForC": [],
 				"notes": "No case, field or guard dropped. No semantic conflict left for 00C from these files.",
 				"unmergedAfter": 38
+			},
+			"MCOMP-33-00R26": {
+				"resolvedAt": "2026-11-09",
+				"resolvedBy": "Maestro-Claude",
+				"files": [
+					"src/main/permission-relay/PermissionRelayServer.ts",
+					"src/main/permission-relay/integration.ts"
+				],
+				"method": "Three hunks resolved by a shape-asserting script (Working/mcomp-33-00r26/resolve.mjs, both sides read in full, every replacement computed before any write); staged through merge-tool.mjs stage (prettier left both unchanged, 36 unmerged left). Working/mcomp-33-00r26/check.mjs: 0 syntax diagnostics, no markers, every seam count at least the larger side. Permission relay suites (relay-core, question-authority) plus enterprise listener-policy and relay-coworking-listener-holds: 4 files, 108/108.",
+				"hunks": {
+					"src/main/permission-relay/PermissionRelayServer.ts": [
+						"Hunk 1 (imports): union. HEAD holdListener, PermissionDecision and RelaySpawnBinding types, effectGranted and ManagedEffectDecision; upstream resolvePending, parseAutomatableQuestionRequest, rateRisk, canonicalJson, nativeCurrentTurns.",
+						"Hunk 2 (request flow): HEAD managed verdict runs first on the bridge request id (anything but allow denies at once, neither the user nor the upstream native question automation is reached); then upstream native turn lookup, question authority, createPending with the native question and isOpen authority check, and the socket close listener that denies on disconnect; the decision is now let (PermissionDecision) so HEAD post-consent recheck against the live lease still turns an allow into a deny. Upstream automated question answers pass through the same recheck."
+					],
+					"src/main/permission-relay/integration.ts": [
+						"Hunk 1 (imports): union. HEAD type RelayManagedGate import beside upstream subscribePendingPermissions, lookupBindingForHint and createSafeSend."
+					]
+				},
+				"outsideHunks": [
+					"PermissionRelayServer.ts: setQuestionAuthority (upstream) and setManagedGate / managedVerdict / holdListener (HEAD) auto-merged and kept."
+				],
+				"semanticConflictsForC": [],
+				"notes": "No case, field or guard dropped. No semantic conflict left for 00C from these files.",
+				"unmergedAfter": 36
 			}
 		}
 	}
