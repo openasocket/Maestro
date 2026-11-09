@@ -3048,6 +3048,33 @@
 					"result": "managed spawn 25/25 in 1.1s (was 19 failed of 24, ~200s); wider run 102 files, 3742 passed, 7 skipped, 0 failed"
 				},
 				"tools": "Working/mcomp-33-00s5 (apply.mjs, apply2.mjs, apply3.mjs, debug.mjs, tsc-suite.mjs, commit-wt.mjs, record.mjs)"
+			},
+			"MCOMP-33-00S6": {
+				"completedAt": "2026-11-09",
+				"completedBy": "Maestro-Claude",
+				"worktreeCommit": "85218010c",
+				"worktreeParent": "7454045b1",
+				"verdict": "Two sides. (1) Suite side (new-tab-supervision forged case): the suite is upstream-only and asserted 5 arguments; the merged unmanaged new-tab call is upstream slots 0-4, an empty control slot 5, then HEAD delegation 6 and ticket 7 (MRC-08-02, R29 wire). The handler only grows by the HEAD slots and still drops the forged fromSessionId/fromTabId: control and delegation stay undefined, the ticket is the unmanaged path own, and no admission is returned. The case now asserts that shape. (2) Source side: upstream supervised send_command (runExisting) released through the admission adapter executeCommand with 10 slots, so the spawn carried no ticket and no delegation. The supervised existing-tab branch now reads the delegation (malformed refused as INVALID_OPTIONS before admission), issues a ticket for the target tab, binds both by dispatch id in the map the new-tab release uses (bindSupervisedDispatch, exported from tabs.ts), and the adapter appends them at slots 10 and 11 when slot 9 names a bound dispatch. The owner settles on completion: the ticket is withdrawn unless a release handed it on and the outcome is accepted or unknown; a second message on a held dispatch id withdraws its own ticket at once.",
+				"change": {
+					"src/main/web-server/handlers/messageHandlers/tabs.ts": "binding map gains released; new export bindSupervisedDispatch(dispatchId, delegation, ticket) returning a settle(started) function; admission adapter executeCommand appends bound delegation and ticket when args[9] is a bound dispatch id.",
+					"src/main/web-server/handlers/messageHandlers/commands.ts": "supervised branch reads the delegation, issues a tab-bound ticket, binds it before runExisting, settles it in then/catch.",
+					"src/__tests__/main/web-server/new-tab-supervision.test.ts": "forged-fields case asserts the merged 8-slot shape (control and delegation empty, ticket a string); two new existing-tab cases: release tail carries the admitted delegation and a claimable tab-bound ticket; repeat releases once (12-slot first call) and a malformed delegation is refused before admission."
+				},
+				"mutation": "With tabs.ts and commands.ts stashed both new cases fail (delegation undefined at slot 10; first release call length 10 not 12); 21 others pass (Working/mcomp-33-00s6/mutate.mjs).",
+				"typeCheck": {
+					"tsconfig.main.json": {
+						"exit": 0,
+						"errors": 0
+					},
+					"testFiles": "suite in no project config; ad hoc config over it gives 23 errors before and after, 0 in the suite itself (Working/mcomp-33-00s6/tsc-suite.mjs)"
+				},
+				"suites": {
+					"run": "src/__tests__/main/web-server (all), pianola/pianola-new-tab-dispatch.test.ts",
+					"result": "new-tab-supervision 23/23 (was 1 failed of 21); wider run 65 files, 1537 passed, 0 failed"
+				},
+				"static": "prettier --check clean after --write on two files; eslint 0 errors (suite file is eslint-ignored)",
+				"tools": "Working/mcomp-33-00s6 (apply.mjs, apply-test.mjs, mutate.mjs, tsc-suite.mjs, commit-wt.mjs, record.mjs)",
+				"note": "The supervised new-tab path (00R33) keeps its own ownsBinding logic: a repeat on an already-finished dispatch id there issues a ticket that is never withdrawn and expires by TTL; not changed here (scope)."
 			}
 		}
 	}
