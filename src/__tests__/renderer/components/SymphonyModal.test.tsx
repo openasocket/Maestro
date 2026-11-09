@@ -6,14 +6,17 @@
  * - Blocking error when gh is not installed
  * - Blocking error when gh is not authenticated
  * - Proceeding to build tools warning when gh is OK
+ * - Agent creation: the host admits the agent before any repository step
  */
 
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
+import { render, renderHook, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import SymphonyModal from '../../../renderer/components/SymphonyModal';
 import type { SymphonyModalProps } from '../../../renderer/components/SymphonyModal';
 import type { Theme } from '../../../renderer/types';
+import { useSymphonyContribution } from '../../../renderer/hooks/symphony/useSymphonyContribution';
+import { useSessionStore } from '../../../renderer/stores/sessionStore';
 import type {
 	RegisteredRepository,
 	SymphonyIssue,
@@ -587,6 +590,184 @@ describe('SymphonyModal', () => {
 			expect(call[4]).toBe('/home/u/Maestro-Symphony/test-owner-test-repo-42');
 			expect(result).toEqual({ success: false, error: 'Failed to clone repository' });
 			expect(screen.getByTestId('agent-creation-dialog')).toBeInTheDocument();
+		});
+
+		describe('wired to the contribution handler (MCOMP-23-04E)', () => {
+			type CommitRequest = { operation: string; record: Record<string, unknown> } & {
+				expectedPolicyRevision?: number | null;
+			};
+			let events: string[];
+			let saved: Record<string, unknown>;
+			const commitAgent = vi.fn();
+			const cloneRepo = vi.fn();
+			const startContributionIpc = vi.fn();
+			const setMany = vi.fn();
+
+			beforeEach(() => {
+				events = [];
+				saved = {
+					commitAgent: window.maestro.sessions.commitAgent,
+					getAgent: window.maestro.agents.get,
+					setMany: window.maestro.sessions.setMany,
+					cloneRepo: window.maestro.symphony.cloneRepo,
+					startContribution: window.maestro.symphony.startContribution,
+				};
+				// A managed host at revision 6 (stale for any other revision).
+				commitAgent.mockReset().mockImplementation(async (request: CommitRequest) => {
+					events.push(`commit:${request.operation}`);
+					if (request.operation === 'create' && request.expectedPolicyRevision !== 6) {
+						return {
+							ok: false,
+							code: 'stale',
+							reason: 'The policy changed; review the choices again.',
+							policyRevision: 6,
+							fields: [],
+						};
+					}
+					return { ok: true, record: request.record, managed: true, policyRevision: 6 };
+				});
+				cloneRepo.mockReset().mockImplementation(async () => {
+					events.push('cloneRepo');
+					return { success: true };
+				});
+				startContributionIpc
+					.mockReset()
+					.mockImplementation(async (params: { sessionId: string }) => {
+						events.push(`startContribution:${params.sessionId}`);
+						return {
+							success: true,
+							branchName: 'symphony/issue-42',
+							autoRunPath: '/tmp/docs',
+							draftPrNumber: 4,
+							draftPrUrl: 'https://github.com/test-owner/test-repo/pull/4',
+						};
+					});
+				setMany.mockReset().mockImplementation(async () => {
+					events.push('withdraw');
+					return true;
+				});
+				Object.assign(window.maestro.sessions, { commitAgent, setMany });
+				window.maestro.agents.get = vi
+					.fn()
+					.mockResolvedValue({ id: 'claude-code', name: 'Claude Code' });
+				Object.assign(window.maestro.symphony, {
+					cloneRepo,
+					startContribution: startContributionIpc,
+				});
+				// useSymphony's startContribution body over the IPC doubles.
+				mockUseSymphonyReturn.startContribution = vi.fn(
+					async (
+						_repo: unknown,
+						issue: SymphonyIssue,
+						_type: string,
+						sessionId: string,
+						dir: string
+					) => {
+						const clone = await window.maestro.symphony.cloneRepo({
+							repoUrl: mockRepo.url,
+							localPath: dir,
+						});
+						if (!clone.success) return { success: false, error: clone.error };
+						const start = await window.maestro.symphony.startContribution({
+							contributionId: 'contrib_wired',
+							sessionId,
+							repoSlug: mockRepo.slug,
+							issueNumber: issue.number,
+							issueTitle: issue.title,
+							localPath: dir,
+							documentPaths: issue.documentPaths,
+						});
+						if (!start.success) return { success: false, error: start.error };
+						return { success: true, contributionId: 'contrib_wired', ...start };
+					}
+				);
+				useSessionStore.setState({ sessions: [], activeSessionId: '' } as never);
+			});
+
+			afterEach(() => {
+				Object.assign(window.maestro.sessions, {
+					commitAgent: saved.commitAgent,
+					setMany: saved.setMany,
+				});
+				window.maestro.agents.get = saved.getAgent as typeof window.maestro.agents.get;
+				Object.assign(window.maestro.symphony, {
+					cloneRepo: saved.cloneRepo,
+					startContribution: saved.startContribution,
+				});
+				useSessionStore.setState({ sessions: [], activeSessionId: '' } as never);
+			});
+
+			const openWired = async () => {
+				const { result } = renderHook(() =>
+					useSymphonyContribution({ startBatchRun: vi.fn(), inputRef: { current: null } })
+				);
+				await openDialog(result.current.handleStartContribution);
+			};
+
+			it('a stale answer reaches the dialog and no repository step runs', async () => {
+				await openWired();
+
+				let result: unknown;
+				await act(async () => {
+					result = await dialogProps.current!.onCreateAgent(config(5));
+				});
+				expect(result).toEqual({
+					success: false,
+					error: expect.stringContaining('The policy changed'),
+					refusal: expect.objectContaining({ code: 'stale', policyRevision: 6 }),
+				});
+				expect(events).toEqual(['commit:create']);
+				expect(window.maestro.symphony.registerActive).not.toHaveBeenCalled();
+				expect(useSessionStore.getState().sessions).toEqual([]);
+				expect(screen.getByTestId('agent-creation-dialog')).toBeInTheDocument();
+			});
+
+			it('a failed start after the admit leaves no agent and returns the error to the dialog', async () => {
+				startContributionIpc.mockImplementation(async () => {
+					events.push('startContribution');
+					return { success: false, error: 'Could not open the draft PR' };
+				});
+				await openWired();
+
+				let result: unknown;
+				await act(async () => {
+					result = await dialogProps.current!.onCreateAgent(config(6));
+				});
+				expect(events).toEqual(['commit:create', 'cloneRepo', 'startContribution', 'withdraw']);
+				expect(result).toEqual({ success: false, error: 'Could not open the draft PR' });
+				const admitted = (commitAgent.mock.calls[0][0] as CommitRequest).record.id;
+				expect(setMany).toHaveBeenCalledWith([], [admitted]);
+				expect(useSessionStore.getState().sessions).toEqual([]);
+				expect(window.maestro.symphony.registerActive).not.toHaveBeenCalled();
+				expect(screen.getByTestId('agent-creation-dialog')).toBeInTheDocument();
+			});
+
+			it('an admit and a successful start close the dialog on one running agent', async () => {
+				await openWired();
+
+				let result: unknown;
+				await act(async () => {
+					result = await dialogProps.current!.onCreateAgent(config(6));
+				});
+				const sessions = useSessionStore.getState().sessions;
+				expect(sessions).toHaveLength(1);
+				expect(events).toEqual([
+					'commit:create',
+					'cloneRepo',
+					`startContribution:${sessions[0].id}`,
+					'commit:edit',
+				]);
+				expect(result).toEqual({ success: true });
+				expect(sessions[0].autoRunFolderPath).toBe('/tmp/docs');
+				expect(sessions[0].symphonyMetadata).toMatchObject({
+					contributionId: 'contrib_wired',
+					status: 'running',
+				});
+				expect(window.maestro.symphony.registerActive).toHaveBeenCalledWith(
+					expect.objectContaining({ sessionId: sessions[0].id, draftPrNumber: 4 })
+				);
+				expect(screen.queryByTestId('agent-creation-dialog')).not.toBeInTheDocument();
+			});
 		});
 	});
 });

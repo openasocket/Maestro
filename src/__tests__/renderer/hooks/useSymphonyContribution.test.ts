@@ -18,6 +18,7 @@
  *   - Skips batch run when no documents
  *   - Custom agent config (customPath, customArgs, customEnvVars) passed through
  *   - Error in registerActive is caught and logged (doesn't throw)
+ *   - Admits the agent before any repository step (refusals, failed start, edit)
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -1437,6 +1438,319 @@ describe('useSymphonyContribution', () => {
 			// Session should exist and modal should be closed
 			expect(useSessionStore.getState().sessions).toHaveLength(1);
 			expect(setSymphonyModalOpen).toHaveBeenCalledWith(false);
+		});
+	});
+
+	// ========================================================================
+	// Admit before any repository effect (MCOMP-23-04E)
+	// ========================================================================
+	describe('admit before the repository steps', () => {
+		/** Every host and repository effect, in the order the hook caused it. */
+		let events: string[];
+		const cloneRepo = vi.fn();
+		const startContributionIpc = vi.fn();
+		const setMany = vi.fn();
+
+		/**
+		 * The repository steps SymphonyModal hands over: useSymphony's
+		 * startContribution body (clone, then branch/documents/draft PR) over
+		 * explicit `symphony.cloneRepo` / `symphony.startContribution` doubles.
+		 */
+		const startRepository = async (sessionId: string) => {
+			const clone = await window.maestro.symphony.cloneRepo({
+				repoUrl: 'https://github.com/owner/repo',
+				localPath: '/tmp/cloned-repo',
+			});
+			if (!clone.success) return { success: false, error: clone.error };
+			const start = await window.maestro.symphony.startContribution({
+				contributionId: 'contrib_live',
+				sessionId,
+				repoSlug: 'owner/repo',
+				issueNumber: 42,
+				issueTitle: 'Fix the thing',
+				localPath: '/tmp/cloned-repo',
+				documentPaths: [],
+			});
+			if (!start.success) return { success: false, error: start.error };
+			return {
+				success: true,
+				contributionId: 'contrib_live',
+				branchName: start.branchName,
+				autoRunPath: start.autoRunPath,
+				draftPrNumber: start.draftPrNumber,
+				draftPrUrl: start.draftPrUrl,
+			};
+		};
+
+		/** What the creation dialog sends: no contribution yet, only the steps. */
+		const dialogData = (expectedPolicyRevision: number | null = 6) =>
+			({
+				...createContributionData({ expectedPolicyRevision }),
+				contributionId: undefined,
+				autoRunPath: undefined,
+				branchName: undefined,
+				draftPrNumber: undefined,
+				draftPrUrl: undefined,
+				startRepository,
+			}) as SymphonyContributionData;
+
+		type CommitRequest = {
+			operation: string;
+			record: Record<string, unknown>;
+			expectedPolicyRevision?: number | null;
+		};
+
+		/**
+		 * A managed host at revision 6: answers `stale` for another revision on a
+		 * create, and lets a test answer the finishing edit. The edit record it
+		 * returns is canonical (a host-normalized Auto Run folder), so the test can
+		 * tell the edit commit's values from the draft's.
+		 */
+		function host(
+			options: {
+				create?: (request: CommitRequest) => unknown;
+				edit?: (request: CommitRequest) => unknown;
+			} = {}
+		) {
+			mockCommitAgent.mockImplementation((async (request: CommitRequest) => {
+				events.push(`commit:${request.operation}`);
+				if (request.operation === 'edit') {
+					if (options.edit) return options.edit(request);
+					return {
+						ok: true,
+						record: { ...request.record, autoRunFolderPath: '/canonical/auto-run' },
+						managed: true,
+						policyRevision: 6,
+					};
+				}
+				if (options.create) return options.create(request);
+				if (request.expectedPolicyRevision !== 6) {
+					return {
+						ok: false,
+						code: 'stale',
+						reason: 'The policy changed; review the choices again.',
+						policyRevision: 6,
+						fields: [],
+					};
+				}
+				return { ok: true, record: request.record, managed: true, policyRevision: 6 };
+			}) as never);
+		}
+
+		async function start(data: SymphonyContributionData) {
+			const deps = createDeps();
+			const { result } = renderHook(() => useSymphonyContribution(deps));
+			vi.useFakeTimers();
+			let outcome: unknown;
+			try {
+				await act(async () => {
+					outcome = await result.current.handleStartContribution(data);
+				});
+				vi.advanceTimersByTime(1000);
+			} finally {
+				vi.useRealTimers();
+			}
+			return { deps, outcome: outcome as Record<string, unknown> };
+		}
+
+		const expectNothingStarted = (deps: UseSymphonyContributionDeps) => {
+			expect(cloneRepo).not.toHaveBeenCalled();
+			expect(startContributionIpc).not.toHaveBeenCalled();
+			expect(mockRegisterActive).not.toHaveBeenCalled();
+			expect(mockRecordSessionCreated).not.toHaveBeenCalled();
+			expect(deps.startBatchRun).not.toHaveBeenCalled();
+			expect(useSessionStore.getState().sessions).toEqual([]);
+		};
+
+		beforeEach(() => {
+			events = [];
+			cloneRepo.mockReset().mockImplementation(async () => {
+				events.push('cloneRepo');
+				return { success: true };
+			});
+			startContributionIpc.mockReset().mockImplementation(async (params: { sessionId: string }) => {
+				events.push(`startContribution:${params.sessionId}`);
+				return {
+					success: true,
+					branchName: 'symphony/issue-42',
+					autoRunPath: '/tmp/cloned-repo/.maestro/auto-run',
+					draftPrNumber: 9,
+					draftPrUrl: 'https://github.com/owner/repo/pull/9',
+				};
+			});
+			setMany.mockReset().mockImplementation(async () => {
+				events.push('withdraw');
+				return true;
+			});
+			Object.assign(mockMaestro.symphony, {
+				cloneRepo,
+				startContribution: startContributionIpc,
+			});
+			Object.assign(mockMaestro.sessions, { setMany });
+			vi.spyOn(logger, 'warn').mockImplementation(() => {});
+		});
+
+		afterEach(() => {
+			const symphony = mockMaestro.symphony as Record<string, unknown>;
+			delete symphony.cloneRepo;
+			delete symphony.startContribution;
+			delete (mockMaestro.sessions as Record<string, unknown>).setMany;
+		});
+
+		it('a field refusal reaches the dialog with no clone, start, registration or run', async () => {
+			host({
+				create: () => ({
+					ok: false,
+					code: 'field',
+					reason: 'A choice is not approved.',
+					policyRevision: 6,
+					fields: [{ field: 'workspace', reason: 'not an approved workspace' }],
+				}),
+			});
+			const { deps, outcome } = await start(dialogData());
+
+			expect(events).toEqual(['commit:create']);
+			expect(outcome).toEqual({
+				ok: false,
+				error: expect.stringContaining('workspace: not an approved workspace'),
+				refusal: expect.objectContaining({ code: 'field' }),
+			});
+			expectNothingStarted(deps);
+			expect(notifyToast).not.toHaveBeenCalled();
+		});
+
+		it('a stale answer reaches the dialog with no clone, start, registration or run', async () => {
+			host();
+			const { deps, outcome } = await start(dialogData(5));
+
+			expect(events).toEqual(['commit:create']);
+			expect(outcome).toMatchObject({ ok: false, refusal: { code: 'stale', policyRevision: 6 } });
+			expectNothingStarted(deps);
+		});
+
+		it('admits, then starts with the admitted id, then fills the agent from the edit commit', async () => {
+			host();
+			const { deps, outcome } = await start(dialogData());
+
+			const sessions = useSessionStore.getState().sessions;
+			expect(sessions).toHaveLength(1);
+			const agent = sessions[0];
+			expect(events).toEqual([
+				'commit:create',
+				'cloneRepo',
+				`startContribution:${agent.id}`,
+				'commit:edit',
+			]);
+			expect(outcome).toEqual({ ok: true });
+
+			// The create carried no contribution; the edit carried the started one.
+			const [create, edit] = mockCommitAgent.mock.calls.map(
+				(call) => call[0] as unknown as CommitRequest
+			);
+			expect(create.record.id).toBe(agent.id);
+			expect(create.record.autoRunFolderPath).toBeUndefined();
+			expect(create.record.symphonyMetadata).toMatchObject({
+				contributionId: '',
+				status: 'cloning',
+			});
+			expect(edit.record.id).toBe(agent.id);
+			expect(edit.record).toMatchObject({
+				autoRunFolderPath: '/tmp/cloned-repo/.maestro/auto-run',
+				symphonyMetadata: { contributionId: 'contrib_live', status: 'running' },
+			});
+
+			// The agent holds the host's canonical answer to the edit commit.
+			expect(agent.autoRunFolderPath).toBe('/canonical/auto-run');
+			expect(agent.symphonyMetadata).toMatchObject({
+				contributionId: 'contrib_live',
+				status: 'running',
+			});
+			expect(mockRegisterActive).toHaveBeenCalledTimes(1);
+			expect(mockRegisterActive.mock.calls[0][0]).toMatchObject({
+				contributionId: 'contrib_live',
+				sessionId: agent.id,
+				branchName: 'symphony/issue-42',
+				draftPrNumber: 9,
+				draftPrUrl: 'https://github.com/owner/repo/pull/9',
+			});
+			expect(deps.startBatchRun).toHaveBeenCalledTimes(1);
+			expect(deps.startBatchRun).toHaveBeenCalledWith(
+				agent.id,
+				expect.objectContaining({ documents: expect.any(Array) }),
+				'/canonical/auto-run'
+			);
+			expect(setMany).not.toHaveBeenCalled();
+		});
+
+		it('a failed clone withdraws the admitted agent and returns the clone error', async () => {
+			host();
+			cloneRepo.mockImplementation(async () => {
+				events.push('cloneRepo');
+				return { success: false, error: 'Failed to clone repository: denied' };
+			});
+			const { deps, outcome } = await start(dialogData());
+
+			const admittedId = (mockCommitAgent.mock.calls[0][0] as unknown as CommitRequest).record.id;
+			expect(events).toEqual(['commit:create', 'cloneRepo', 'withdraw']);
+			expect(setMany).toHaveBeenCalledWith([], [admittedId]);
+			expect(outcome).toEqual({ ok: false, error: 'Failed to clone repository: denied' });
+			expect(startContributionIpc).not.toHaveBeenCalled();
+			expect(mockRegisterActive).not.toHaveBeenCalled();
+			expect(deps.startBatchRun).not.toHaveBeenCalled();
+			expect(useSessionStore.getState().sessions).toEqual([]);
+		});
+
+		it('a failed start withdraws the admitted agent and returns the start error', async () => {
+			host();
+			startContributionIpc.mockImplementation(async () => {
+				events.push('startContribution');
+				return { success: false, error: 'Could not open the draft PR' };
+			});
+			const { deps, outcome } = await start(dialogData());
+
+			expect(events).toEqual(['commit:create', 'cloneRepo', 'startContribution', 'withdraw']);
+			expect(outcome).toEqual({ ok: false, error: 'Could not open the draft PR' });
+			expect(mockCommitAgent).toHaveBeenCalledTimes(1);
+			expect(mockRegisterActive).not.toHaveBeenCalled();
+			expect(deps.startBatchRun).not.toHaveBeenCalled();
+			expect(useSessionStore.getState().sessions).toEqual([]);
+		});
+
+		it('a refused finishing edit is reported to the dialog, registered, and runs nothing', async () => {
+			host({
+				edit: () => ({
+					ok: false,
+					code: 'locked',
+					reason: 'The Auto Run folder is held by policy.',
+					policyRevision: 6,
+					fields: [],
+				}),
+			});
+			const { deps, outcome } = await start(dialogData());
+
+			expect(events).toEqual([
+				'commit:create',
+				'cloneRepo',
+				expect.stringMatching(/^startContribution:/),
+				'commit:edit',
+			]);
+			expect(outcome).toEqual({
+				ok: false,
+				error: expect.stringContaining('The Auto Run folder is held by policy.'),
+				refusal: expect.objectContaining({ code: 'locked' }),
+			});
+			// The contribution exists, so the agent stays and is registered (the
+			// Active tab can cancel it), but it keeps the admitted values.
+			const sessions = useSessionStore.getState().sessions;
+			expect(sessions).toHaveLength(1);
+			expect(sessions[0].autoRunFolderPath).toBeUndefined();
+			expect(mockRegisterActive).toHaveBeenCalledWith(
+				expect.objectContaining({ contributionId: 'contrib_live', draftPrNumber: 9 })
+			);
+			expect(deps.startBatchRun).not.toHaveBeenCalled();
+			expect(setMany).not.toHaveBeenCalled();
+			// The dialog reports it; no second toast.
+			expect(notifyToast).not.toHaveBeenCalled();
 		});
 	});
 });
