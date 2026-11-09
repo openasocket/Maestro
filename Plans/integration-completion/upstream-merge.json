@@ -1489,6 +1489,26 @@
 				},
 				"semanticConflictsForC": [],
 				"unmergedAfter": 91
+			},
+			"MCOMP-33-00R03": {
+				"resolvedAt": "2026-11-09",
+				"resolvedBy": "Maestro-Claude",
+				"files": [".gitignore", "docs/maestro-lib.md", "src/shared/maestro-lib/version.ts"],
+				"method": "One hunk per file, resolved by a shape-asserting script (Working/mcomp-33-00r03/resolve.mjs, both sides and the base read in full); staged through merge-tool.mjs stage (prettier unchanged). docs:verify in the worktree: 1555 paths, 464/464 index entries, 0 findings.",
+				"hunks": {
+					".gitignore": [
+						"Both sides appended after the Lite prototype entry: the integration vendored Mega-Maestro contracts block (vendor/mega-maestro/contracts/, .import-*/) kept, then upstream local scratch and Python cache block (.tmp-*, __pycache__/, .pytest_cache/)."
+					],
+					"src/shared/maestro-lib/version.ts": [
+						"MAESTRO_LIB_VERSION: integration 0.36.0, upstream 0.6.0 (upstream numbered 0.4.0-0.6.0 from the shared base 0.3.0); taken as 0.37.0, above both. The integration MAESTRO_LIB_NODE_RANGE, MaestroLibVersionInfo and MAESTRO_LIB_VERSION_INFO (managed contract version) kept. A 0.37.0 history note added naming upstream additions: cmdShellArgsRefusal (launch/windows-command, upstream 0.4.0) and the CurrentTurnCursor/CurrentTurnMessage/CurrentTurnRead types (upstream 0.5.0-0.6.0); upstream had no history notes of its own to keep."
+					],
+					"docs/maestro-lib.md": [
+						"Provider-support version line set to 0.37.0 (equal to version.ts); outside the hunk the managed summary line moved to 0.37.0 and a Since 0.37.0 paragraph added after the 0.36.0 one. Upstream auto-merged prose (cmd.exe refusal rule, Desktop current-turn observations section) kept as merged."
+					]
+				},
+				"semanticConflictsForC": [],
+				"notes": "contracts.test.ts (the committed runtime pin names this source) fails on the library version until the MCOMP-33-00P re-pin, as after every bump; docs-examples.test.ts cannot load while src/shared/maestro-lib/launch/agent-args.ts is unmerged (MCOMP-33-00R21).",
+				"unmergedAfter": 88
 			}
 		}
 	}
