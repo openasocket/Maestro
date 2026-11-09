@@ -29,6 +29,13 @@ import {
 	type RepositoryEffectReceipt,
 	type RepositoryEffectRequest,
 } from '../enterprise/repository-policy';
+import {
+	holdDeleteOfHandles,
+	LocalEffectRefusedError,
+	readLocalPathHandle,
+	type LocalEffectAuthority,
+	type LocalPathHandle,
+} from '../enterprise/local-effects-policy';
 import { getActingTransport, transportSpawnActor } from '../web-server/auth/transport-actor';
 
 const LOG_CONTEXT = '[SymphonyRunner]';
@@ -42,6 +49,13 @@ const LOG_CONTEXT = '[SymphonyRunner]';
 export interface SymphonyRepositoryGate {
 	authority: RepositoryEffectAuthority | null;
 	actor?: RepositoryEffectActor;
+	/**
+	 * The local-effects ceiling the clone cleanup is held against (MCOMP-21-10):
+	 * removing the clone is a local delete, never covered by a repository
+	 * effect. Absent under a repository authority, the delete holds nothing
+	 * but still removes only the folder the clone made.
+	 */
+	localEffects?: LocalEffectAuthority | null;
 }
 
 interface RepositoryHold {
@@ -53,6 +67,11 @@ interface RepositoryHold {
 	): RepositoryEffectDecision;
 	/** Every managed answer, in order; empty on a standalone host. */
 	receipts: RepositoryEffectReceipt[];
+	/** Whether a repository authority is in place; false runs as before. */
+	managed: boolean;
+	/** The actor every hold names, the local delete included. */
+	actor: RepositoryEffectActor | null;
+	localEffects: LocalEffectAuthority | null;
 }
 
 type Refused = Extract<RepositoryEffectDecision, { allowed: false }>;
@@ -61,13 +80,23 @@ type Refused = Extract<RepositoryEffectDecision, { allowed: false }>;
 function repositoryHold(gate: SymphonyRepositoryGate | undefined): RepositoryHold {
 	const receipts: RepositoryEffectReceipt[] = [];
 	const authority = gate?.authority ?? null;
-	if (!authority) return { receipts, hold: () => ({ allowed: true }) };
+	if (!authority)
+		return {
+			receipts,
+			managed: false,
+			actor: null,
+			localEffects: null,
+			hold: () => ({ allowed: true }),
+		};
 	const actor: RepositoryEffectActor = gate?.actor ?? {
 		kind: 'transport',
 		actor: transportSpawnActor(getActingTransport()),
 	};
 	return {
 		receipts,
+		managed: true,
+		actor,
+		localEffects: gate?.localEffects ?? null,
 		hold(effect, resource, repository, remote) {
 			const decision = authority.authorize({
 				surface: 'symphony-runner',
@@ -117,8 +146,33 @@ async function originRemote(localPath: string): Promise<string | null> {
  * No provenance check here, unlike symphony:cancel: this runner clones into
  * localPath itself earlier in the same call, so the directory is known to be
  * ours, and a half-finished clone still has to be removable.
+ *
+ * Under management (MCOMP-21-10) the removal is a local delete held right now
+ * against the local-effects ceiling, never covered by the repository effect
+ * that preceded it, and it removes `localPath` only while it still names the
+ * entry `handle` read when the call examined it. Answers the reason nothing
+ * was removed, or null.
  */
-async function cleanupLocalRepo(localPath: string): Promise<void> {
+async function cleanupLocalRepo(
+	localPath: string,
+	gate?: RepositoryHold,
+	handle?: LocalPathHandle
+): Promise<string | null> {
+	if (gate?.managed && gate.actor) {
+		try {
+			const { current } = await holdDeleteOfHandles(
+				gate.localEffects,
+				[{ path: localPath, handle: handle ?? 'unknown' }],
+				gate.actor,
+				LOG_CONTEXT
+			);
+			if (current.length === 0)
+				return 'the clone changed after it was examined; it was left in place';
+		} catch (error) {
+			if (error instanceof LocalEffectRefusedError) return error.message;
+			throw error;
+		}
+	}
 	try {
 		await fs.rm(localPath, { recursive: true, force: true });
 		logger.info('Cleaned up local repository', LOG_CONTEXT, { localPath });
@@ -126,6 +180,7 @@ async function cleanupLocalRepo(localPath: string): Promise<void> {
 		void captureException(error);
 		logger.warn('Failed to cleanup local repository', LOG_CONTEXT, { localPath, error });
 	}
+	return null;
 }
 
 export interface SymphonyRunnerOptions {
@@ -386,6 +441,9 @@ export async function startContribution(options: SymphonyRunnerOptions): Promise
 	const gate = repositoryHold(options.gate);
 	const refused = (decision: Refused) =>
 		withReceipts({ success: false, error: refusal(decision) }, gate);
+	// What the clone named when it was made: the only entry a cleanup removes.
+	let cloneHandle: LocalPathHandle | undefined;
+	const discardClone = () => cleanupLocalRepo(localPath, gate, cloneHandle);
 
 	try {
 		// 1. Clone
@@ -395,34 +453,40 @@ export async function startContribution(options: SymphonyRunnerOptions): Promise
 		if (!(await cloneRepo(repoUrl, localPath))) {
 			return withReceipts({ success: false, error: 'Clone failed' }, gate);
 		}
+		cloneHandle = gate.managed ? await readLocalPathHandle(localPath) : undefined;
 
 		// 2. Create branch
 		onStatusChange?.('setting_up');
 		const branchHold = gate.hold('branch', 'local', repoSlug, null);
 		if (!branchHold.allowed) {
-			await cleanupLocalRepo(localPath);
+			await discardClone();
 			return refused(branchHold);
 		}
 		if (!(await createBranch(localPath, branchName))) {
-			await cleanupLocalRepo(localPath);
+			await discardClone();
 			return withReceipts({ success: false, error: 'Branch creation failed' }, gate);
 		}
 
 		// 2.5. Fork setup - detect if user needs a fork for push access. The
 		// fork itself is held where it happens, right before `gh repo fork`.
 		logger.info('Checking fork requirements', LOG_CONTEXT, { repoSlug });
+		// Every remote change after it (rename, set-url, add, set-head) is held
+		// again by itself, fresh, against the destination it reaches.
 		const forkGate: { refused: Refused | null } = { refused: null };
-		const forkResult = options.gate?.authority
+		const held = (decision: RepositoryEffectDecision): string | null => {
+			forkGate.refused = decision.allowed ? null : decision;
+			return forkGate.refused ? refusal(forkGate.refused) : null;
+		};
+		const forkResult = gate.managed
 			? await ensureForkSetup(localPath, repoSlug, {
-					beforeFork: async () => {
-						const decision = gate.hold('fork', 'remote', repoSlug, repoUrl);
-						forkGate.refused = decision.allowed ? null : decision;
-						return forkGate.refused ? refusal(forkGate.refused) : null;
-					},
+					beforeFork: async () => held(gate.hold('fork', 'remote', repoSlug, repoUrl)),
+					beforeRemoteChange: async (change) =>
+						held(gate.hold(change.effect, change.resource, repoSlug, change.remote)),
+					expectedOrigin: repoUrl,
 				})
 			: await ensureForkSetup(localPath, repoSlug);
 		if (forkResult.error) {
-			await cleanupLocalRepo(localPath);
+			await discardClone();
 			if (forkGate.refused) return refused(forkGate.refused);
 			return withReceipts(
 				{ success: false, error: `Fork setup failed: ${forkResult.error}` },
@@ -444,12 +508,12 @@ export async function startContribution(options: SymphonyRunnerOptions): Promise
 		// 3. Empty commit
 		const commitHold = gate.hold('commit', 'local', repoSlug, null);
 		if (!commitHold.allowed) {
-			await cleanupLocalRepo(localPath);
+			await discardClone();
 			return refused(commitHold);
 		}
 		const commitMessage = `[Symphony] Start contribution for #${issueNumber}`;
 		if (!(await createEmptyCommit(localPath, commitMessage))) {
-			await cleanupLocalRepo(localPath);
+			await discardClone();
 			return withReceipts({ success: false, error: 'Empty commit failed' }, gate);
 		}
 
@@ -461,18 +525,18 @@ export async function startContribution(options: SymphonyRunnerOptions): Promise
 			pushDestination(repoUrl, forkResult.isFork ? forkResult.forkSlug : undefined)
 		);
 		if (!pushHold.allowed) {
-			await cleanupLocalRepo(localPath);
+			await discardClone();
 			return refused(pushHold);
 		}
 		if (!(await pushBranch(localPath, branchName))) {
-			await cleanupLocalRepo(localPath);
+			await discardClone();
 			return withReceipts({ success: false, error: 'Push failed' }, gate);
 		}
 
 		// 5. Create draft PR (cross-fork if needed)
 		const prHold = gate.hold('pull-request', 'remote', repoSlug, repoUrl);
 		if (!prHold.allowed) {
-			await cleanupLocalRepo(localPath);
+			await discardClone();
 			return refused(prHold);
 		}
 		const forkOwner =
@@ -492,7 +556,7 @@ export async function startContribution(options: SymphonyRunnerOptions): Promise
 			forkOwner
 		);
 		if (!prResult.success) {
-			await cleanupLocalRepo(localPath);
+			await discardClone();
 			return withReceipts({ success: false, error: prResult.error }, gate);
 		}
 
@@ -514,7 +578,7 @@ export async function startContribution(options: SymphonyRunnerOptions): Promise
 			gate
 		);
 	} catch (error) {
-		await cleanupLocalRepo(localPath);
+		await discardClone();
 		return withReceipts(
 			{
 				success: false,
@@ -625,8 +689,14 @@ Closes #${issueNumber}
 /**
  * Cancel a contribution by closing the draft PR and cleaning up.
  *
- * Under management the cancel (the PR closed on the forge, the remote branch
- * deleted) is held before `gh pr close` runs, against what origin points at.
+ * Under management the cancel (the PR closed on the forge) is held before
+ * `gh pr close` runs, against what origin points at. Deleting the remote
+ * branch (`--delete-branch`) is its own sink (MCOMP-21-10): a `push` of the
+ * deletion held by itself against the same origin, and a refusal of either
+ * leaves the PR, the branch and the clone untouched. The local cleanup is a
+ * delete held against the local-effects ceiling, of the folder examined at
+ * the start of the call only; a refused or moved cleanup is reported as
+ * `cleanupProblem` on a cancel that otherwise succeeded.
  */
 export async function cancelContribution(
 	localPath: string,
@@ -634,17 +704,24 @@ export async function cancelContribution(
 	cleanup: boolean = true,
 	upstreamSlug?: string,
 	gate?: SymphonyRepositoryGate
-): Promise<{ success: boolean; error?: string; managed?: RepositoryEffectReceipt[] }> {
+): Promise<{
+	success: boolean;
+	error?: string;
+	cleanupProblem?: string;
+	managed?: RepositoryEffectReceipt[];
+}> {
 	const hold = repositoryHold(gate);
-	const remote = gate?.authority ? await originRemote(localPath) : null;
-	const cancelHold = hold.hold(
-		'cancel',
-		'remote',
-		upstreamSlug ?? repositorySlugFromRemote(remote),
-		remote
-	);
+	const handle = hold.managed && cleanup ? await readLocalPathHandle(localPath) : undefined;
+	const remote = hold.managed ? await originRemote(localPath) : null;
+	const repository = upstreamSlug ?? repositorySlugFromRemote(remote);
+	const cancelHold = hold.hold('cancel', 'remote', repository, remote);
 	if (!cancelHold.allowed)
 		return withReceipts({ success: false, error: refusal(cancelHold) }, hold);
+	if (!upstreamSlug) {
+		const deleteBranchHold = hold.hold('push', 'remote', repository, remote);
+		if (!deleteBranchHold.allowed)
+			return withReceipts({ success: false, error: refusal(deleteBranchHold) }, hold);
+	}
 
 	// Close the draft PR
 	const ghCommand = await resolveGhPath();
@@ -668,9 +745,7 @@ export async function cancelContribution(
 	}
 
 	// Clean up local directory using Node.js fs API
-	if (cleanup) {
-		await cleanupLocalRepo(localPath);
-	}
+	const cleanupProblem = cleanup ? await cleanupLocalRepo(localPath, hold, handle) : null;
 
-	return withReceipts({ success: true }, hold);
+	return withReceipts({ success: true, ...(cleanupProblem ? { cleanupProblem } : {}) }, hold);
 }

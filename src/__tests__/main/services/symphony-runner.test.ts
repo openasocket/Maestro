@@ -15,6 +15,9 @@ vi.mock('fs/promises', () => ({
 		rm: vi.fn(),
 		writeFile: vi.fn(),
 		copyFile: vi.fn(),
+		// The managed cleanup reads the clone's handle (MCOMP-21-10); a plain
+		// function so clearAllMocks keeps it, the same entry every read.
+		lstat: async () => ({ dev: 1n, ino: 1n }),
 	},
 }));
 
@@ -1958,9 +1961,16 @@ describe('Symphony Runner under a managed repository gate (MRC-09-05)', () => {
 						repository: 'acme/widgets',
 						remote: 'https://github.com/acme/widgets.git',
 					}),
+					// --delete-branch is its own sink (MCOMP-21-10), held by itself.
+					expect.objectContaining({
+						effect: 'push',
+						repository: 'acme/widgets',
+						remote: 'https://github.com/acme/widgets.git',
+					}),
 				],
 			});
 			expect(auth.requests[0].resource).toBe('remote');
+			expect(auth.requests[1].resource).toBe('remote');
 			expect(vi.mocked(execFileNoThrow).mock.calls[1][1]).toEqual([
 				'pr',
 				'close',
@@ -2114,6 +2124,7 @@ describe('Symphony Runner over the real repository ceiling (MRC-09-07)', () => {
 			success: true,
 			managed: [
 				expect.objectContaining({ effect: 'cancel', remote: 'file:', outcome: 'within-ceiling' }),
+				expect.objectContaining({ effect: 'push', remote: 'file:', outcome: 'within-ceiling' }),
 			],
 		});
 		expect(ran('gh', 'pr', 'close', '9')).toBe(true);

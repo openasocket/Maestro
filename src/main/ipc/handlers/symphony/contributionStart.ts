@@ -219,8 +219,11 @@ async function createBranch(
 /**
  * Fork setup with the fork held where it happens: under a ceiling the hook is
  * handed to `ensureForkSetup`, which calls it only when a fork is needed and
- * right before `gh repo fork`. The standalone call keeps its two arguments.
- * `refused` is the ceiling's answer when the hook ended the setup.
+ * right before `gh repo fork`. Every remote change after the fork (rename,
+ * set-url fallback, add, set-head) is held again by itself, fresh, against
+ * the destination it reaches, after the remote it acts on is re-read against
+ * `remote` (MCOMP-21-10). The standalone call keeps its two arguments.
+ * `refused` is the ceiling's answer when a hook ended the setup.
  */
 async function setUpFork(
 	localPath: string,
@@ -231,12 +234,21 @@ async function setUpFork(
 		return { result: await ensureForkSetup(localPath, repoSlug), refused: null };
 	}
 	const gate: { refused: RepositoryRefusal | null } = { refused: null };
+	const held = (decision: ReturnType<typeof holdRepositoryEffect>): string | null => {
+		gate.refused = decision.allowed ? null : decision;
+		return gate.refused ? managedRefusal(gate.refused) : null;
+	};
 	const result = await ensureForkSetup(localPath, repoSlug, {
-		beforeFork: async () => {
-			const decision = holdRepositoryEffect('fork', 'remote', { repository: repoSlug, remote });
-			gate.refused = decision.allowed ? null : decision;
-			return gate.refused ? managedRefusal(gate.refused) : null;
-		},
+		beforeFork: async () =>
+			held(holdRepositoryEffect('fork', 'remote', { repository: repoSlug, remote })),
+		beforeRemoteChange: async (change) =>
+			held(
+				holdRepositoryEffect(change.effect, change.resource, {
+					repository: repoSlug,
+					remote: change.remote,
+				})
+			),
+		...(remote ? { expectedOrigin: remote } : {}),
 	});
 	return { result, refused: gate.refused };
 }

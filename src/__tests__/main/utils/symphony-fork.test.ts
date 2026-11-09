@@ -230,13 +230,23 @@ describe('ensureForkSetup under a managed hold (MRC-09-05)', () => {
 			.mockResolvedValueOnce(ok('https://github.com/chris/repo.git\n')) // clone_url
 			.mockResolvedValueOnce(ok('')) // remote rename
 			.mockResolvedValueOnce(ok('')) // remote add
+			.mockResolvedValueOnce(ok('https://github.com/chris/repo.git\n')) // origin re-read before set-head
 			.mockResolvedValueOnce(ok('')); // remote set-head
 		const beforeFork = vi.fn().mockResolvedValue(null);
+		const beforeRemoteChange = vi.fn().mockResolvedValue(null);
 
-		const result = await ensureForkSetup('/tmp/repo', 'owner/repo', { beforeFork });
+		const result = await ensureForkSetup('/tmp/repo', 'owner/repo', {
+			beforeFork,
+			beforeRemoteChange,
+		});
 
 		expect(result).toEqual({ isFork: true, forkSlug: 'chris/repo' });
 		expect(beforeFork).toHaveBeenCalledTimes(1);
+		expect(beforeRemoteChange.mock.calls.map(([change]) => change.step)).toEqual([
+			'rename',
+			'add',
+			'set-head',
+		]);
 		expect(mockExecFileNoThrow.mock.calls[2][1]).toEqual([
 			'repo',
 			'fork',
