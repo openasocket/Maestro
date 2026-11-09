@@ -6,6 +6,7 @@ import { directTailnetOrigin } from './tailnet-origin';
 import { lanDestination, lanOrigin } from './lan';
 import { CONNECT_PATH, ADMISSION_HEADER } from './pairing/protocol';
 import { isLitePairingCredential } from '../../shared/litePairingCredential';
+import { holdListener } from '../enterprise/listener-gate';
 
 /** Private browser adapter: localhost remains a secure browser context, upstream binds the verified private interface.
  * Never a general proxy. Only the selected paired host's application subtree and credential are accepted.
@@ -66,6 +67,11 @@ async function openPairedRelay<T extends { hostname: string; port: number; local
 ): Promise<{ url: URL; tunnel: { stop(): Promise<void> } }> {
 	if (endpoint.pathname !== CONNECT_PATH || !isLitePairingCredential(credential))
 		throw new Error('Invalid paired private connection.');
+	// The Lite client's loopback forward to a paired host is the same direction and
+	// reach as the `ssh -L` forward (src/main/lite/tunnel.ts), so it is held as
+	// `ssh-tunnel` BEFORE the destination read and the bind: a refusal throws
+	// `ListenerDeniedError`, nothing listens and the host is never contacted.
+	holdListener({ kind: 'ssh-tunnel', bind: '127.0.0.1', port: 0 });
 	const initial = await readDestination();
 	let bound = initial,
 		checkedAt = Date.now(),

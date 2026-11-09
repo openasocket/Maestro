@@ -2,9 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createServer, type Server } from 'node:http';
 import { once } from 'node:events';
 import WebSocket, { WebSocketServer } from 'ws';
-const provider = vi.hoisted(() => ({ port: 0, peerId: 'host-node' }));
+const provider = vi.hoisted(() => ({ port: 0, peerId: 'host-node', reads: 0 }));
 vi.mock('../../../main/lite/tailnet', () => ({
 	tailnetDestination: async () => ({
+		...(provider.reads++, {}),
 		hostname: '127.0.0.1',
 		port: provider.port,
 		localAddress: '127.0.0.1',
@@ -16,6 +17,7 @@ vi.mock('../../../main/lite/tailnet', () => ({
 vi.mock('../../../main/lite/lan', async (original) => ({
 	...(await original<typeof import('../../../main/lite/lan')>()),
 	lanDestination: async () => ({
+		...(provider.reads++, {}),
 		hostname: '127.0.0.1',
 		port: provider.port,
 		localAddress: '127.0.0.1',
@@ -23,6 +25,16 @@ vi.mock('../../../main/lite/lan', async (original) => ({
 }));
 import { openTailnetRelay, openLanRelay } from '../../../main/lite/tailnet-relay';
 import { ADMISSION_HEADER, CONNECT_PATH } from '../../../main/lite/pairing/protocol';
+import {
+	heldListeners,
+	isListenerDeniedError,
+	setListenerAuthority,
+} from '../../../main/enterprise/listener-gate';
+import {
+	listenerVerdict,
+	type ListenerCeilingEntry,
+	type ListenerRequest,
+} from '../../../main/enterprise/listener-policy';
 const credential = 'A'.repeat(43) + '.' + 'B'.repeat(43);
 let endpoint: URL;
 let server: Server,
@@ -35,6 +47,7 @@ beforeEach(async () => {
 	requests = 0;
 	commands = 0;
 	provider.peerId = 'host-node';
+	provider.reads = 0;
 	abort = new AbortController();
 	server = createServer((req, res) => {
 		requests++;
@@ -65,6 +78,7 @@ function assertHost(host: string | undefined) {
 }
 afterEach(async () => {
 	vi.restoreAllMocks();
+	setListenerAuthority(null);
 	await relay?.tunnel.stop();
 	for (const socket of ws.clients) socket.terminate();
 	ws.close();
@@ -147,6 +161,78 @@ describe.each(['tailscale', 'lan'] as const)(
 			await closed;
 			expect(socket.readyState).toBe(WebSocket.CLOSED);
 			expect(commands).toBe(1);
+		});
+	}
+);
+
+/** Install a managed ceiling listing `listeners` over the real verdict; returns every request it was asked. */
+function installCeiling(listeners: ListenerCeilingEntry[]): ListenerRequest[] {
+	const asked: ListenerRequest[] = [];
+	setListenerAuthority({
+		evaluateListener(request) {
+			asked.push(request);
+			return listenerVerdict(
+				{ standing: 'managed', ceiling: { policyRevision: 3, listeners }, policyRevision: 3 },
+				request
+			);
+		},
+	});
+	return asked;
+}
+describe.each(['tailscale', 'lan'] as const)(
+	'private paired browser relay listener hold over %s',
+	(transport) => {
+		const open = () =>
+			transport === 'lan'
+				? openLanRelay(endpoint, credential, abort.signal)
+				: openTailnetRelay(endpoint, credential, abort.signal, 'host-node');
+		beforeEach(() => {
+			endpoint = new URL(
+				(transport === 'lan' ? 'http://192.168.1.10:56036' : 'http://100.64.0.10:56036') +
+					CONNECT_PATH
+			);
+		});
+		it('refused: throws the managed hold before the destination read and binds nothing', async () => {
+			const asked = installCeiling([{ kind: 'web', reach: 'loopback' }]);
+			const error = await open().catch((e: unknown) => e);
+			expect(isListenerDeniedError(error)).toBe(true);
+			expect((error as Error).message).toMatch(/^\[managed-kind-denied\] /);
+			expect(asked).toEqual([{ kind: 'ssh-tunnel', bind: '127.0.0.1', port: 0 }]);
+			expect(provider.reads).toBe(0);
+			expect(requests).toBe(0);
+			expect(heldListeners()).toMatchObject([
+				{ kind: 'ssh-tunnel', reach: 'loopback', code: 'kind-denied', port: 0 },
+			]);
+		});
+		it('refused: an invalid connection is still reported as invalid, before the ceiling is asked', async () => {
+			const asked = installCeiling([]);
+			const error = await openLanRelay(
+				new URL('http://192.168.1.10:56036/elsewhere'),
+				credential,
+				abort.signal
+			).catch((e: unknown) => e);
+			expect(isListenerDeniedError(error)).toBe(false);
+			expect((error as Error).message).toBe('Invalid paired private connection.');
+			expect(asked).toHaveLength(0);
+		});
+		it('admitted: asks once with the exact request, then relays as before', async () => {
+			const asked = installCeiling([{ kind: 'ssh-tunnel', reach: 'loopback' }]);
+			relay = await open();
+			expect(asked).toEqual([{ kind: 'ssh-tunnel', bind: '127.0.0.1', port: 0 }]);
+			expect(provider.reads).toBe(1);
+			expect(
+				(await fetch(relay.url + '/api/sessions', { headers: { [ADMISSION_HEADER]: credential } }))
+					.status
+			).toBe(200);
+			expect(heldListeners()).toEqual([]);
+		});
+		it('standalone: with no authority nothing is asked and the relay listens', async () => {
+			relay = await open();
+			expect(
+				(await fetch(relay.url + '/api/sessions', { headers: { [ADMISSION_HEADER]: credential } }))
+					.status
+			).toBe(200);
+			expect(heldListeners()).toEqual([]);
 		});
 	}
 );
