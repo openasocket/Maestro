@@ -2723,7 +2723,7 @@ managedInbox
 const managedCommandGroup = managed
 	.command('command')
 	.description(
-		"Typed runtime commands this desktop executes, issued here under the registered actor and recorded in the same ledger as the endpoint's. Pause and resume are not offered: the command contract has no such action (CP-05)"
+		"Typed runtime commands this desktop executes, issued here under the registered actor and recorded in the same ledger as the endpoint's. Pause and resume are cooperative at a task boundary, never an OS suspension"
 	);
 
 managedCommandGroup
@@ -2741,6 +2741,24 @@ managedCommandGroup
 	)
 	.option('--json', 'Output as JSON (for scripting)')
 	.action((runId, options) => managedCommand({ kind: 'cancel-run', runId }, options));
+
+managedCommandGroup
+	.command('pause-run <runId>')
+	.alias('pause')
+	.description(
+		'Pause a managed run cooperatively at its next task boundary: the task in flight finishes first and no process is suspended; a host whose runs do not check in between tasks refuses it unsupported-capability'
+	)
+	.option('--json', 'Output as JSON (for scripting)')
+	.action((runId, options) => managedCommand({ kind: 'pause-run', runId }, options));
+
+managedCommandGroup
+	.command('resume-run <runId>')
+	.alias('resume')
+	.description(
+		'Release a run parked at a task boundary by pause-run (or withdraw a pause it has not reached yet)'
+	)
+	.option('--json', 'Output as JSON (for scripting)')
+	.action((runId, options) => managedCommand({ kind: 'resume-run', runId }, options));
 
 managedCommandGroup
 	.command('report-status')

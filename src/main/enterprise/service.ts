@@ -424,6 +424,9 @@ export function validateLocalCommand(raw: unknown): LocalCommandAction {
 	switch (input.kind) {
 		case 'cancel-run':
 			return { kind: 'cancel-run', runId: managedMessageId(input.runId, 'action.runId') };
+		case 'pause-run':
+		case 'resume-run':
+			return { kind: input.kind, runId: managedMessageId(input.runId, 'action.runId') };
 		case 'report-status':
 			return { kind: 'report-status' };
 		case 'refresh-policy': {
@@ -435,7 +438,9 @@ export function validateLocalCommand(raw: unknown): LocalCommandAction {
 			return { kind: 'refresh-policy', desiredRevision: revision };
 		}
 		default:
-			throw new Error('action.kind must be one of cancel-run, report-status, refresh-policy.');
+			throw new Error(
+				'action.kind must be one of cancel-run, pause-run, resume-run, report-status, refresh-policy.'
+			);
 	}
 }
 

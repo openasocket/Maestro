@@ -399,7 +399,7 @@ Notification center history uses the live desktop `notificationStore` over a req
 
 ### Managed operation (Mega-Maestro)
 
-Every `managed` verb sends one typed message over the bridge (`src/cli/commands/managed.ts`, `src/cli/commands/managed-inbox.ts`) that `src/main/web-server/handlers/messageHandlers/managed.ts` answers from `EnterpriseService.managed`, the facade the pane and the `enterprise:*` IPC handlers read, so the UI and the CLI say the same sentence. Every write prints the durable receipt (the inbox receipt ledger's record, the command ledger's id and evidence digest) or the word `unknown` when this host recorded the act and never saw the endpoint's answer. Nothing printed is a secret: every answer is the pane's projection. A detached host (`maestro-cli host start`) answers `managed inbox list|read|ack|reply`, `managed command <action>` and `managed command status` with the same reply over its own inbox and command service (`answerManagedCommunication()` in `src/main/enterprise/service.ts`, MCOMP-29-03A); a host with no managed standing refuses each by name and never reads the ledger files. `managed run <leaseId>` reads the same `EnterpriseService.managed.run()` the renderer's `enterprise:managedRun` reads (MCOMP-25-01B); it is desktop-and-CLI only, absent from the browser bridge inventory. `managed command status`, `cancel-run <runId>`, `report-status` and `refresh-policy [--revision n]` are CLI-first: no pane reads the command ledger or issues a local command, and `CommandService.issueLocal()` binds one to the standing of the moment and records it in the same ledger as an endpoint command. The bridge admits exactly `enterprise` `managedState inventory inboxState inboxRefresh inboxAct` and `settings managedLocks` to a web-desktop client (`bridgeDenyList.ts`); an enrollment request, a policy refresh and a command are admitted from a CLI-secret client alone, so a browser never enrolls.
+Every `managed` verb sends one typed message over the bridge (`src/cli/commands/managed.ts`, `src/cli/commands/managed-inbox.ts`) that `src/main/web-server/handlers/messageHandlers/managed.ts` answers from `EnterpriseService.managed`, the facade the pane and the `enterprise:*` IPC handlers read, so the UI and the CLI say the same sentence. Every write prints the durable receipt (the inbox receipt ledger's record, the command ledger's id and evidence digest) or the word `unknown` when this host recorded the act and never saw the endpoint's answer. Nothing printed is a secret: every answer is the pane's projection. A detached host (`maestro-cli host start`) answers `managed inbox list|read|ack|reply`, `managed command <action>` and `managed command status` with the same reply over its own inbox and command service (`answerManagedCommunication()` in `src/main/enterprise/service.ts`, MCOMP-29-03A); a host with no managed standing refuses each by name and never reads the ledger files. `managed run <leaseId>` reads the same `EnterpriseService.managed.run()` the renderer's `enterprise:managedRun` reads (MCOMP-25-01B); it is desktop-and-CLI only, absent from the browser bridge inventory. `managed command status`, `cancel-run <runId>`, `pause-run <runId>`, `resume-run <runId>`, `report-status` and `refresh-policy [--revision n]` are CLI-first: no pane reads the command ledger or issues a local command, and `CommandService.issueLocal()` binds one to the standing of the moment and records it in the same ledger as an endpoint command. The bridge admits exactly `enterprise` `managedState inventory inboxState inboxRefresh inboxAct` and `settings managedLocks` to a web-desktop client (`bridgeDenyList.ts`); an enrollment request, a policy refresh and a command are admitted from a CLI-secret client alone, so a browser never enrolls.
 
 ### Isolated Lite connection controls
 
@@ -511,16 +511,15 @@ pipeline` reaches the graph but cannot name what it shows. Pure view state
    filters is already readable through `cue pipeline` and `cue list`. Closing
    it means carrying a target through `open_modal` into `CueModal`'s
    `pendingGraphTarget`.
-4. **Pause and resume a managed run.** Neither the Mega-Maestro pane nor
-   `managed command` offers them: the published command action union is
-   `cancel_run`, `refresh_policy` and `report_status`, and
-   `DESKTOP_UNCOMPOSED_COMMANDS` in `src/main/enterprise/commands.ts` answers
-   `pause_run` and `resume_run` unsupported by name until the counterpart
-   publishes the actions (CP-05 in `Plans/mega-maestro-rc/counterpart-requests.md`).
-   When it does, the verb is `managed command pause-run <runId>` /
-   `resume-run <runId>` over `CommandService.issueLocal()`, and the pane gains
-   the same two controls in the same change. (The settings-locks read this
-   item once named is covered: `managed locks`.)
+4. **Pause and resume a managed run in the pane.** The CLI verbs exist
+   (MCOMP-29-03B): `managed command pause-run <runId>` / `resume-run <runId>`
+   (aliases `pause` / `resume`) over `CommandService.issueLocal()`, the
+   cooperative task-boundary pause, never an OS suspension. They execute only
+   on a host that composes `cooperativePause` (a detached host); the desktop
+   does not, and answers both `unsupported-capability` by name
+   (`DESKTOP_UNCOMPOSED_COMMANDS`). No pane issues a local command today, so
+   the pane gains the two controls when the desktop composes the gate. (The
+   settings-locks read this item once named is covered: `managed locks`.)
 
 ### Audit backlog (2026-09-27, re-verified 2026-10-19)
 

@@ -67,6 +67,7 @@ import {
 } from '../../../cli/commands/managed';
 import {
 	managedCommand,
+	COOPERATIVE_PAUSE_LABEL,
 	managedCommandStatus,
 	managedInboxAct,
 	managedInboxList,
@@ -608,6 +609,34 @@ describe('maestro-cli managed over the real bridge and facade (MRC2-07-08)', () 
 		expect(json(missing.out).error).toContain(
 			"Lease lease-9 is not in this host's dispatch ledger."
 		);
+	});
+
+	it('pause-run and resume-run reach issueLocal with their run, and a receipt is labelled cooperative, never a suspension (MCOMP-29-03B)', async () => {
+		commands.issueLocal.mockResolvedValueOnce({
+			status: 'accepted',
+			commandId: 'local-1',
+			duplicate: false,
+			evidenceDigest: null,
+			detail: null,
+			facts: { runId: 'run-1', mode: 'cooperative-task-boundary', osSuspension: false },
+		} as never);
+		const pause = await run(() => managedCommand({ kind: 'pause-run', runId: 'run-1' }, {}));
+		expect(pause.code).toBeNull();
+		expect(commands.issueLocal).toHaveBeenCalledWith({ kind: 'pause-run', runId: 'run-1' });
+		expect(pause.out).toContain('Command local-1 accepted');
+		expect(pause.out).toContain(COOPERATIVE_PAUSE_LABEL);
+
+		commands.issueLocal.mockResolvedValueOnce({
+			status: 'denied',
+			commandId: null,
+			reason: 'unsupported-capability',
+			detail: 'this host does not execute command-resume_run',
+		} as never);
+		const resume = await run(() => managedCommand({ kind: 'resume-run', runId: 'run-1' }, {}));
+		expect(resume.code).toBe(1);
+		expect(commands.issueLocal).toHaveBeenCalledWith({ kind: 'resume-run', runId: 'run-1' });
+		expect(resume.err).toContain('Refused (unsupported-capability)');
+		expect(resume.err).not.toContain(COOPERATIVE_PAUSE_LABEL);
 	});
 
 	it('spoke every one of the eleven managed message types and nothing else', () => {

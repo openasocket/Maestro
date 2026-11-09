@@ -11,6 +11,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import {
 	COMMAND_CORRELATION_FEATURE,
 	createCommandService,
+	LOCAL_COMMAND_ID_PREFIX,
 	type CommandServiceDeps,
 } from '../../../main/enterprise/commands';
 import { createLocalHostAuthority } from '../../../shared/maestro-lib/managed/authority';
@@ -304,5 +305,53 @@ describe('v2 command deliveries (MCOMP-29-01)', () => {
 		);
 		const receipt = await service.receiveV2(request('pause_run'));
 		expect(receipt).toEqual({ outcome: 'denied', reason: 'unsupported_capability' });
+	});
+});
+
+describe('local pause and resume (MCOMP-29-03B)', () => {
+	it('a local pause binds its run, answers accepted with the cooperative label, and parks the run at its boundary', async () => {
+		const { service } = harness();
+		const run = service.runControl!.track('run-1');
+		const pause = await service.issueLocal({ kind: 'pause-run', runId: 'run-1' });
+		expect(pause).toMatchObject({
+			status: 'accepted',
+			facts: { runId: 'run-1', mode: COOPERATIVE_PAUSE_MODE, osSuspension: false },
+		});
+		const record = service.ledger.get(pause.commandId!);
+		expect(record).toMatchObject({ runId: 'run-1', kind: 'pause-run', delivery: null });
+		expect(record?.commandId.startsWith(LOCAL_COMMAND_ID_PREFIX)).toBe(true);
+
+		let verdict: string | null = null;
+		const parked = run.atBoundary().then((v) => (verdict = v));
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(verdict).toBeNull();
+		expect(service.ledger.get(pause.commandId!)?.state).toBe('completed');
+
+		const resume = await service.issueLocal({ kind: 'resume-run', runId: 'run-1' });
+		expect(resume.status).toBe('completed');
+		await parked;
+		expect(verdict).toBe('continue');
+	});
+
+	it('a run this host does not track is refused stale-run, not approximated', async () => {
+		const { service } = harness();
+		const pause = await service.issueLocal({ kind: 'pause-run', runId: 'run-unknown' });
+		expect(pause).toMatchObject({ status: 'denied', reason: 'stale-run' });
+	});
+
+	it('a host without cooperativePause refuses both unsupported-capability by name, recording nothing', async () => {
+		const { service } = harness({ cooperativePause: false });
+		for (const kind of ['pause-run', 'resume-run'] as const) {
+			const execution = await service.issueLocal({ kind, runId: 'run-1' });
+			expect(execution).toMatchObject({
+				status: 'denied',
+				commandId: null,
+				reason: 'unsupported-capability',
+				detail: expect.stringContaining(
+					`command-${kind === 'pause-run' ? 'pause_run' : 'resume_run'}`
+				),
+			});
+		}
+		expect(service.ledger.list()).toEqual([]);
 	});
 });

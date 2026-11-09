@@ -26,8 +26,9 @@
 //
 // A notice body is for the person at the terminal and nothing else
 // (`agentInput: false` is the contract's word): `list` prints ids and states
-// and shows a body only under `--bodies`. Pause and resume of a run are not
-// offered: the command contract has no such action (CP-05).
+// and shows a body only under `--bodies`. Pause and resume of a run
+// (MCOMP-29-03B) are the cooperative task-boundary pause: the receipt line
+// says so, and never reads as an OS process suspension.
 
 import type { CommandServiceStatus, LocalCommandAction } from '../../main/enterprise/commands';
 import type { ManagedRunView } from '../../main/enterprise/dispatch';
@@ -228,7 +229,7 @@ export async function managedInboxAct(
 	failCommand(formatInboxReceipt(outcome), options.json);
 }
 
-/** `managed command cancel-run|report-status|refresh-policy`: a local operator's typed command through the real executor and ledger. */
+/** `managed command cancel-run|pause-run|resume-run|report-status|refresh-policy`: a local operator's typed command through the real executor and ledger. */
 export async function managedCommand(
 	action: LocalCommandAction,
 	options: ManagedCommandOptions
@@ -255,12 +256,18 @@ export async function managedCommand(
 		if (!ok) exitWith(ExitCode.GeneralError);
 		return;
 	}
+	const pausing = action.kind === 'pause-run' || action.kind === 'resume-run';
+	const line = `${formatCommandReceipt(execution)}${pausing && ok ? `\n${COOPERATIVE_PAUSE_LABEL}` : ''}`;
 	if (ok) {
-		if (!isQuiet()) console.log(formatSuccess(formatCommandReceipt(execution)));
+		if (!isQuiet()) console.log(formatSuccess(line));
 		return;
 	}
-	failCommand(formatCommandReceipt(execution), options.json);
+	failCommand(line, options.json);
 }
+
+/** What a pause or resume receipt is, in words: never an OS process suspension. */
+export const COOPERATIVE_PAUSE_LABEL =
+	'Cooperative pause at a task boundary: the task in flight finishes first; no process is suspended.';
 
 /** `managed command status`: what this desktop executes and refuses by name, and the ledger's counts (the read for every write above). */
 export async function managedCommandStatus(options: ManagedOptions): Promise<void> {

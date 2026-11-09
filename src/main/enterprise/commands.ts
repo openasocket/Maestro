@@ -171,9 +171,15 @@ export interface UncomposedCommand {
 	reason: string;
 }
 
-/** The actions a local operator may issue (MRC2-07-02); pause and resume are not among them (CP-05). */
+/**
+ * The actions a local operator may issue (MRC2-07-02). Pause and resume (MCOMP-29-03B) are the
+ * cooperative task-boundary pause, bound to their run like a cancel; a host that composed no
+ * `cooperativePause` refuses them `unsupported-capability` by name, nothing recorded.
+ */
 export type LocalCommandAction =
 	| { kind: 'cancel-run'; runId: string }
+	| { kind: 'pause-run'; runId: string }
+	| { kind: 'resume-run'; runId: string }
 	| { kind: 'report-status' }
 	| { kind: 'refresh-policy'; desiredRevision?: number };
 
@@ -487,6 +493,14 @@ export function createCommandService(deps: CommandServiceDeps): CommandService {
 				detail: 'the standing names no tenant, enrollment or applied policy revision',
 			};
 		}
+		if ((action.kind === 'pause-run' || action.kind === 'resume-run') && gate === null) {
+			return {
+				status: 'denied',
+				commandId: null,
+				reason: 'unsupported-capability',
+				detail: `this host does not execute ${commandCapability(action.kind)}: ${DESKTOP_UNCOMPOSED_COMMANDS[action.kind]}`,
+			};
+		}
 		let typed: ManagedCommandAction;
 		if (action.kind === 'refresh-policy') {
 			const desiredRevision = action.desiredRevision ?? deps.host.policyStatus().desiredRevision;
@@ -510,7 +524,7 @@ export function createCommandService(deps: CommandServiceDeps): CommandService {
 				installationId: deps.installation.installationId,
 				runtimeId: deps.installation.runtimeId,
 				processEpoch: deps.installation.processEpoch,
-				runId: action.kind === 'cancel-run' ? action.runId : null,
+				runId: 'runId' in action ? action.runId : null,
 			},
 			action: typed,
 			preconditions: {

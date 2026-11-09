@@ -204,7 +204,18 @@ describe('managed bridge handlers (MRC2-07-03)', () => {
 
 		expect(
 			await ask(handler, cli(), { type: 'managed_command', action: { kind: 'pause-run' } })
+		).toMatchObject({ success: false, error: expect.stringContaining('action.runId') });
+		expect(
+			await ask(handler, cli(), { type: 'managed_command', action: { kind: 'suspend-run' } })
 		).toMatchObject({ success: false, error: expect.stringContaining('action.kind') });
+		expect(validateLocalCommand({ kind: 'pause-run', runId: 'run-1' })).toEqual({
+			kind: 'pause-run',
+			runId: 'run-1',
+		});
+		expect(validateLocalCommand({ kind: 'resume-run', runId: 'run-1' })).toEqual({
+			kind: 'resume-run',
+			runId: 'run-1',
+		});
 		expect(() => validateLocalCommand({ kind: 'refresh-policy', desiredRevision: -1 })).toThrow(
 			/desiredRevision/
 		);
