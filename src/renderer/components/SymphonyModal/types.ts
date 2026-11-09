@@ -1,5 +1,6 @@
 import type { Theme } from '../../types';
 import type { RegisteredRepository, SymphonyIssue } from '../../../shared/symphony-types';
+import type { AgentCommitRefusal } from '../../services/agentCommit';
 
 export interface SymphonyContributionData {
 	contributionId: string;
@@ -15,13 +16,30 @@ export interface SymphonyContributionData {
 	customPath?: string;
 	customArgs?: string;
 	customEnvVars?: Record<string, string>;
+	/**
+	 * The policy revision the creation dialog's approved choices were read from
+	 * (null standalone), so the host can answer `stale` for an agent built from an
+	 * older policy (MCOMP-23-04B). Absent: the caller sent none.
+	 */
+	expectedPolicyRevision?: number | null;
 }
+
+/**
+ * What starting a contribution's agent came to. A refusal by the host commit
+ * carries the refusal, so the creation dialog keeps its draft and shows the
+ * reasons by field. A handler that resolves nothing reported its own outcome.
+ */
+export type SymphonyContributionOutcome =
+	| { ok: true }
+	| { ok: false; error: string; refusal?: AgentCommitRefusal };
 
 export interface SymphonyModalProps {
 	theme: Theme;
 	isOpen: boolean;
 	onClose: () => void;
-	onStartContribution: (data: SymphonyContributionData) => void;
+	onStartContribution: (
+		data: SymphonyContributionData
+	) => void | Promise<SymphonyContributionOutcome | void>;
 	onSelectSession: (sessionId: string) => void;
 }
 

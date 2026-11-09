@@ -12,6 +12,7 @@ import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import SymphonyModal from '../../../renderer/components/SymphonyModal';
+import type { SymphonyModalProps } from '../../../renderer/components/SymphonyModal';
 import type { Theme } from '../../../renderer/types';
 import type {
 	RegisteredRepository,
@@ -35,8 +36,20 @@ vi.mock('../../../renderer/contexts/LayerStackContext', () => ({
 	}),
 }));
 
+// The dialog's own behavior is tested in AgentCreationDialog.test.tsx; here it
+// records its props so a test can drive onCreateAgent (MCOMP-23-04B).
+const dialogProps = vi.hoisted(() => ({
+	current: null as null | {
+		onCreateAgent: (
+			config: import('../../../renderer/components/AgentCreationDialog').AgentCreationConfig
+		) => Promise<import('../../../renderer/components/AgentCreationDialog').AgentCreationResult>;
+	},
+}));
 vi.mock('../../../renderer/components/AgentCreationDialog', () => ({
-	AgentCreationDialog: () => <div data-testid="agent-creation-dialog" />,
+	AgentCreationDialog: (props: { isOpen: boolean; onCreateAgent: never }) => {
+		dialogProps.current = props;
+		return props.isOpen ? <div data-testid="agent-creation-dialog" /> : null;
+	},
 }));
 
 vi.mock('../../../renderer/utils/markdownConfig', () => ({
@@ -432,6 +445,134 @@ describe('SymphonyModal', () => {
 			await waitFor(() => {
 				expect(screen.getByText('GitHub CLI Required')).toBeInTheDocument();
 			});
+		});
+	});
+
+	describe('agent creation through the host commit (MCOMP-23-04B)', () => {
+		const started = {
+			success: true,
+			contributionId: 'contrib_1',
+			branchName: 'symphony/issue-42',
+			autoRunPath: '/tmp/docs',
+		};
+		const config = (expectedPolicyRevision?: number | null) => ({
+			agentType: 'claude-code',
+			sessionName: 'Symphony: test-owner/test-repo #42',
+			workingDirectory: '/home/u/Maestro-Symphony/test-owner-test-repo-42',
+			repo: mockRepo,
+			issue: mockIssue,
+			...(expectedPolicyRevision !== undefined && { expectedPolicyRevision }),
+		});
+		const refusal = {
+			ok: false as const,
+			code: 'field' as const,
+			reason: 'This working directory is not an approved choice.',
+			policyRevision: 6,
+			fields: [{ field: 'workspace' as const, reason: 'Not an approved workspace.' }],
+		};
+
+		const openDialog = async (onStartContribution: SymphonyModalProps['onStartContribution']) => {
+			checkGhCliMock.mockResolvedValue({ installed: true, authenticated: true });
+			render(
+				<SymphonyModal
+					theme={testTheme}
+					isOpen={true}
+					onClose={vi.fn()}
+					onStartContribution={onStartContribution}
+					onSelectSession={vi.fn()}
+				/>
+			);
+			await navigateToStartButton();
+			await act(async () => {
+				fireEvent.click(screen.getByText('Start Symphony'));
+			});
+			await act(async () => {
+				fireEvent.click(await screen.findByText('I Have the Build Tools'));
+			});
+			expect(await screen.findByTestId('agent-creation-dialog')).toBeInTheDocument();
+		};
+
+		beforeEach(() => {
+			dialogProps.current = null;
+			mockUseSymphonyReturn.startContribution = vi.fn().mockResolvedValue(started);
+		});
+
+		it('keeps the dialog open until the agent is committed, then closes it', async () => {
+			let resolveCommit!: (value: { ok: true }) => void;
+			const onStartContribution = vi.fn(
+				() => new Promise<{ ok: true }>((resolve) => (resolveCommit = resolve))
+			);
+			await openDialog(onStartContribution);
+
+			let result: Promise<unknown>;
+			await act(async () => {
+				result = dialogProps.current!.onCreateAgent(config(6));
+			});
+			expect(onStartContribution).toHaveBeenCalledTimes(1);
+			expect(onStartContribution.mock.calls[0][0]).toMatchObject({
+				contributionId: 'contrib_1',
+				localPath: '/home/u/Maestro-Symphony/test-owner-test-repo-42',
+				expectedPolicyRevision: 6,
+			});
+			// The commit has not answered: the dialog still holds the draft.
+			expect(screen.getByTestId('agent-creation-dialog')).toBeInTheDocument();
+
+			await act(async () => {
+				resolveCommit({ ok: true });
+				await expect(result).resolves.toEqual({ success: true });
+			});
+			expect(screen.queryByTestId('agent-creation-dialog')).not.toBeInTheDocument();
+		});
+
+		it('returns a host refusal to the dialog and leaves it open', async () => {
+			const onStartContribution = vi.fn().mockResolvedValue({
+				ok: false,
+				error:
+					'This working directory is not an approved choice. (workspace: Not an approved workspace.)',
+				refusal,
+			});
+			await openDialog(onStartContribution);
+
+			let result: unknown;
+			await act(async () => {
+				result = await dialogProps.current!.onCreateAgent(config(6));
+			});
+			expect(result).toEqual({
+				success: false,
+				error:
+					'This working directory is not an approved choice. (workspace: Not an approved workspace.)',
+				refusal,
+			});
+			expect(screen.getByTestId('agent-creation-dialog')).toBeInTheDocument();
+		});
+
+		it('sends no revision when the dialog sent none, and treats a void handler as done', async () => {
+			const onStartContribution = vi.fn().mockResolvedValue(undefined);
+			await openDialog(onStartContribution);
+
+			let result: unknown;
+			await act(async () => {
+				result = await dialogProps.current!.onCreateAgent(config());
+			});
+			expect(onStartContribution.mock.calls[0][0]).not.toHaveProperty('expectedPolicyRevision');
+			expect(result).toEqual({ success: true });
+			expect(screen.queryByTestId('agent-creation-dialog')).not.toBeInTheDocument();
+		});
+
+		it('never reaches the agent commit when the contribution does not start', async () => {
+			mockUseSymphonyReturn.startContribution = vi
+				.fn()
+				.mockResolvedValue({ success: false, error: 'Failed to clone repository' });
+			const onStartContribution = vi.fn();
+			await openDialog(onStartContribution);
+
+			let result: unknown;
+			await act(async () => {
+				result = await dialogProps.current!.onCreateAgent(config(6));
+			});
+			expect(onStartContribution).not.toHaveBeenCalled();
+			expect(result).toEqual({ success: false, error: 'Failed to clone repository' });
+			expect(screen.getByTestId('agent-creation-dialog')).toBeInTheDocument();
 		});
 	});
 });

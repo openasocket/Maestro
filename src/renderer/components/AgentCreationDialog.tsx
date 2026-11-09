@@ -28,6 +28,9 @@ import { isAdaptiveModeDefaultOn } from '../../shared/agentConstants';
 import { logger } from '../utils/logger';
 import { ResizeHandles } from './ui/ResizeHandles';
 import { withBlankEnvVarRow } from '../../shared/envVarCatalog';
+import { ManagedChoicesNotice } from './NewInstanceModal/NewInstanceModal';
+import { useManagedAgentOptions } from '../hooks/enterprise/useManagedAgentOptions';
+import type { AgentCommitRefusal } from '../services/agentCommit';
 
 // ============================================================================
 // Types
@@ -39,7 +42,18 @@ export interface AgentCreationDialogProps {
 	onClose: () => void;
 	repo: RegisteredRepository;
 	issue: SymphonyIssue;
-	onCreateAgent: (config: AgentCreationConfig) => Promise<{ success: boolean; error?: string }>;
+	onCreateAgent: (config: AgentCreationConfig) => Promise<AgentCreationResult>;
+}
+
+/**
+ * What creating the agent came to. `refusal` is the host commit's refusal
+ * (MCOMP-23-04B): the dialog keeps its draft, lists the reasons by field and
+ * refreshes the approved choices after a `stale` one.
+ */
+export interface AgentCreationResult {
+	success: boolean;
+	error?: string;
+	refusal?: AgentCommitRefusal;
 }
 
 export interface AgentCreationConfig {
@@ -67,6 +81,12 @@ export interface AgentCreationConfig {
 	maestroPMode?: 'interactive' | 'dynamic';
 	/** Optional override for the maestro-p binary path. */
 	maestroPPath?: string;
+	/**
+	 * The policy revision the approved choices on screen came from (null
+	 * standalone), so the host can answer `stale` for an agent built from an older
+	 * policy (MCOMP-23-04B).
+	 */
+	expectedPolicyRevision?: number | null;
 }
 
 // ============================================================================
@@ -116,6 +136,12 @@ export function AgentCreationDialog({
 	const [isCreating, setIsCreating] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const [refreshingAgent, setRefreshingAgent] = useState<string | null>(null);
+	// Managed installations: the host's approved choices, and the last refused
+	// create (MCOMP-23-04B). A refusal created nothing, so the draft stays.
+	const managedChoices = useManagedAgentOptions();
+	const formPolicyRevision = managedChoices.managed ? managedChoices.options.policyRevision : null;
+	const refreshManagedChoices = managedChoices.refresh;
+	const [createRefusal, setCreateRefusal] = useState<AgentCommitRefusal | null>(null);
 
 	// Per-agent customization state
 	const [customAgentPaths, setCustomAgentPaths] = useState<Record<string, string>>({});
@@ -152,6 +178,7 @@ export function AgentCreationDialog({
 		if (isOpen) {
 			// Reset error state
 			setError(null);
+			setCreateRefusal(null);
 			setIsCreating(false);
 
 			// Generate default values for this repo/issue
@@ -281,6 +308,7 @@ export function AgentCreationDialog({
 
 		setIsCreating(true);
 		setError(null);
+		setCreateRefusal(null);
 
 		try {
 			const result = await onCreateAgent({
@@ -301,9 +329,14 @@ export function AgentCreationDialog({
 						? (maestroPModeByAgent[selectedAgent] ?? 'dynamic')
 						: undefined,
 				maestroPPath: maestroPPathByAgent[selectedAgent] || undefined,
+				expectedPolicyRevision: formPolicyRevision,
 			});
 
-			if (!result.success) {
+			if (result.refusal) {
+				// Shown by field in the managed notice; refreshed when the policy moved.
+				setCreateRefusal(result.refusal);
+				if (result.refusal.code === 'stale') void refreshManagedChoices();
+			} else if (!result.success) {
 				setError(result.error ?? 'Failed to create agent session');
 			}
 			// On success, parent will close dialog
@@ -325,6 +358,8 @@ export function AgentCreationDialog({
 		enableMaestroPByAgent,
 		maestroPModeByAgent,
 		maestroPPathByAgent,
+		formPolicyRevision,
+		refreshManagedChoices,
 		onCreateAgent,
 	]);
 	const resizableModal = useResizableModal({
@@ -335,6 +370,10 @@ export function AgentCreationDialog({
 	});
 
 	if (!isOpen) return null;
+
+	const workspaceRefusal = createRefusal?.fields.find(
+		(field) => field.field === 'workspace'
+	)?.reason;
 
 	const modalContent = (
 		<div
@@ -403,6 +442,16 @@ export function AgentCreationDialog({
 							{issue.documentPaths.length !== 1 ? 's' : ''}
 						</p>
 					</div>
+
+					<ManagedChoicesNotice
+						theme={theme}
+						managed={managedChoices.managed}
+						options={managedChoices.options}
+						policySource={managedChoices.policySource}
+						refreshing={managedChoices.refreshing}
+						onRefresh={() => void managedChoices.refresh()}
+						refusal={createRefusal}
+					/>
 
 					{/* Agent selection with accordion */}
 					<div>
@@ -656,6 +705,15 @@ export function AgentCreationDialog({
 						<p className="text-xs mt-1" style={{ color: theme.colors.textDim }}>
 							Repository will be cloned here
 						</p>
+						{workspaceRefusal && (
+							<p
+								className="text-xs mt-1"
+								style={{ color: theme.colors.error }}
+								data-testid="symphony-workspace-refusal"
+							>
+								{workspaceRefusal}
+							</p>
+						)}
 					</div>
 
 					{/* Error display */}

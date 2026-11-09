@@ -18,7 +18,11 @@ import { useResizableModal } from '../../hooks/ui/useResizableModal';
 import { MODAL_PRIORITIES } from '../../constants/modalPriorities';
 import { useSymphony } from '../../hooks/symphony';
 import { useContributorStats } from '../../hooks/symphony/useContributorStats';
-import { AgentCreationDialog, type AgentCreationConfig } from '../AgentCreationDialog';
+import {
+	AgentCreationDialog,
+	type AgentCreationConfig,
+	type AgentCreationResult,
+} from '../AgentCreationDialog';
 import type { ModalTab, SymphonyModalProps } from './types';
 import {
 	useGhCliPreflight,
@@ -192,7 +196,7 @@ export function SymphonyModal({
 
 	// Handle agent creation from dialog
 	const handleCreateAgent = useCallback(
-		async (config: AgentCreationConfig): Promise<{ success: boolean; error?: string }> => {
+		async (config: AgentCreationConfig): Promise<AgentCreationResult> => {
 			if (!selectedRepo || !selectedIssue) {
 				return { success: false, error: 'No repository or issue selected' };
 			}
@@ -208,32 +212,45 @@ export function SymphonyModal({
 				setIsStarting(false);
 			});
 
-			if (result.success && result.contributionId) {
-				// Close the agent dialog
-				setShowAgentDialog(false);
-				// Switch to Active tab
-				setActiveTab('active');
-				handleBack();
-				// Notify parent with all data needed to create the session
-				onStartContribution({
-					contributionId: result.contributionId,
-					localPath: config.workingDirectory,
-					autoRunPath: result.autoRunPath,
-					branchName: result.branchName,
-					draftPrNumber: result.draftPrNumber,
-					draftPrUrl: result.draftPrUrl,
-					agentType: config.agentType,
-					sessionName: config.sessionName,
-					repo: config.repo,
-					issue: config.issue,
-					customPath: config.customPath,
-					customArgs: config.customArgs,
-					customEnvVars: config.customEnvVars,
-				});
-				return { success: true };
+			if (!result.success || !result.contributionId) {
+				return { success: false, error: result.error ?? 'Failed to start contribution' };
 			}
 
-			return { success: false, error: result.error ?? 'Failed to start contribution' };
+			// The parent commits the agent through the host (MCOMP-23-04B). The dialog
+			// stays open until that answers, so a refusal reaches the dialog, which
+			// keeps its draft and shows the reasons by field.
+			const outcome = await onStartContribution({
+				contributionId: result.contributionId,
+				localPath: config.workingDirectory,
+				autoRunPath: result.autoRunPath,
+				branchName: result.branchName,
+				draftPrNumber: result.draftPrNumber,
+				draftPrUrl: result.draftPrUrl,
+				agentType: config.agentType,
+				sessionName: config.sessionName,
+				repo: config.repo,
+				issue: config.issue,
+				customPath: config.customPath,
+				customArgs: config.customArgs,
+				customEnvVars: config.customEnvVars,
+				...(config.expectedPolicyRevision !== undefined && {
+					expectedPolicyRevision: config.expectedPolicyRevision,
+				}),
+			});
+			if (outcome && !outcome.ok) {
+				return {
+					success: false,
+					error: outcome.error,
+					...(outcome.refusal && { refusal: outcome.refusal }),
+				};
+			}
+
+			// Close the agent dialog
+			setShowAgentDialog(false);
+			// Switch to Active tab
+			setActiveTab('active');
+			handleBack();
+			return { success: true };
 		},
 		[selectedRepo, selectedIssue, startContribution, onStartContribution, handleBack]
 	);
