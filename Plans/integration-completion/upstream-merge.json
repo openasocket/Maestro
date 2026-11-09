@@ -2972,6 +2972,35 @@
 					"result": "40 passed, 0 failed (was 26 failed: 8 + 9 + 9)"
 				},
 				"tools": "Working/mcomp-33-00s2 (apply.mjs, apply-exit.mjs, commit-wt.mjs, record.mjs)"
+			},
+			"MCOMP-33-00S3": {
+				"completedAt": "2026-11-09",
+				"completedBy": "Maestro-Claude",
+				"worktreeCommit": "142f3c686",
+				"worktreeParent": "e95025401",
+				"carries": ["00R34"],
+				"verdict": "Suite side only. The merged preload bridges (src/main/preload/process/commandRemote.ts, browserTabRemote.ts, queueRemote.ts), the senders in src/main/web-server/callbacks/ (commandCallbacks, browserTabCallbacks, queueCallbacks) and the renderer consumer src/renderer/hooks/remote/useRemoteIntegration.ts agree on one order; the suites asserted the HEAD order (delegation, ticket, receipt). No source repair, so no mutation case.",
+				"mergedOrder": {
+					"onRemoteCommand": "wire ..., mentionRouting, [pianolaDispatchId, delegation, dispatchTicket] (id padded when delegation or ticket set, all omitted when unset), receiptChannel appended last; callback ..., mentionRouting, receiptChannel, pianolaDispatchId, delegation, dispatchTicket (trailing groups only when set)",
+					"onRemoteNewAITabWithPrompt": "..., hidden, mentionRouting, control, [delegation, dispatchTicket] only when set",
+					"onRemoteEnqueueCommand": "..., held, mentionRouting, dispatchCallback, [control | control, delegation, dispatchTicket] only when set"
+				},
+				"change": {
+					"src/__tests__/main/preload/process/commandRemote.test.ts": "5 cases re-slotted: plain and legacy cases end at the receipt channel; the delegation cases send the padded dispatch id (or dispatch-9) and assert receipt, dispatch id, delegation and ticket slots.",
+					"src/__tests__/main/preload/process/browserTabRemote.test.ts": "2 cases: control slot (undefined) ahead of delegation and ticket; plain case ends at control.",
+					"src/__tests__/main/preload/process/queueRemote.test.ts": "plain case ends at dispatchCallback (length 10 asserted); the delegation case, which passed by accident (delegation landed in dispatchCallback, ticket in control), now sends and asserts dispatchCallback and control ahead of delegation and ticket."
+				},
+				"typeCheck": {
+					"tsconfig.lint.json": {
+						"exit": 0,
+						"errors": 0
+					}
+				},
+				"suites": {
+					"run": "src/__tests__/main/preload (42 files)",
+					"result": "597 passed, 0 failed (was 8 failed: 5 + 2 + 1)"
+				},
+				"tools": "Working/mcomp-33-00s3 (check.mjs, commit-wt.mjs, record.mjs)"
 			}
 		}
 	}
