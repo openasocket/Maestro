@@ -1637,6 +1637,8 @@ describe('WebSocketMessageHandler', () => {
 					false,
 					undefined,
 					undefined,
+					undefined,
+					undefined,
 					expect.any(String)
 				);
 			});
@@ -1665,6 +1667,8 @@ describe('WebSocketMessageHandler', () => {
 					undefined,
 					false,
 					'consult-first',
+					undefined,
+					undefined,
 					undefined,
 					expect.any(String)
 				);
@@ -1767,6 +1771,8 @@ describe('WebSocketMessageHandler', () => {
 					false,
 					undefined,
 					undefined,
+					undefined,
+					undefined,
 					undefined
 				);
 			});
@@ -1795,7 +1801,11 @@ describe('WebSocketMessageHandler', () => {
 					false,
 					undefined,
 					false,
-					undefined
+					undefined,
+					undefined,
+					undefined,
+					undefined,
+					expect.any(String)
 				);
 			});
 			const response = JSON.parse((client.socket.send as any).mock.calls[0][0]);
@@ -1878,6 +1888,8 @@ describe('WebSocketMessageHandler', () => {
 					false,
 					undefined,
 					undefined,
+					undefined,
+					undefined,
 					expect.any(String)
 				);
 			});
@@ -1910,6 +1922,8 @@ describe('WebSocketMessageHandler', () => {
 					false,
 					images,
 					false,
+					undefined,
+					undefined,
 					undefined,
 					undefined,
 					expect.any(String)
@@ -1954,6 +1968,8 @@ describe('WebSocketMessageHandler', () => {
 					false,
 					undefined,
 					undefined,
+					undefined,
+					undefined,
 					expect.any(String)
 				);
 			});
@@ -1979,6 +1995,8 @@ describe('WebSocketMessageHandler', () => {
 					true,
 					undefined,
 					false,
+					undefined,
+					undefined,
 					undefined,
 					undefined,
 					expect.any(String)
@@ -2010,6 +2028,8 @@ describe('WebSocketMessageHandler', () => {
 					true,
 					undefined,
 					undefined,
+					undefined,
+					undefined,
 					expect.any(String)
 				);
 			});
@@ -2035,6 +2055,8 @@ describe('WebSocketMessageHandler', () => {
 					false,
 					undefined,
 					false,
+					undefined,
+					undefined,
 					undefined,
 					undefined,
 					expect.any(String)
@@ -2154,6 +2176,8 @@ describe('WebSocketMessageHandler', () => {
 					undefined,
 					true,
 					undefined,
+					undefined,
+					undefined,
 					delegation,
 					expect.any(String)
 				);
@@ -2208,6 +2232,8 @@ describe('WebSocketMessageHandler', () => {
 					false,
 					true,
 					undefined,
+					undefined,
+					undefined,
 					delegation,
 					expect.any(String)
 				);
@@ -2250,6 +2276,7 @@ describe('WebSocketMessageHandler', () => {
 					'build it',
 					true,
 					true,
+					undefined,
 					undefined,
 					delegation,
 					expect.any(String)
@@ -2295,6 +2322,8 @@ describe('WebSocketMessageHandler', () => {
 					false,
 					undefined,
 					undefined,
+					undefined,
+					undefined,
 					expect.any(String)
 				);
 			});
@@ -2312,7 +2341,7 @@ describe('WebSocketMessageHandler', () => {
 	 */
 	describe('Dispatch ticket (MRC-08-01B)', () => {
 		const sent = () => vi.mocked(callbacks.executeCommand).mock.calls[0];
-		const ticketSent = (): string | undefined => sent()[9] as string | undefined;
+		const ticketSent = (): string | undefined => sent()[11] as string | undefined;
 
 		it('issues a ticket for a CLI dispatch that the sink claims as the host secret, once', async () => {
 			handler.handleMessage(
@@ -2446,9 +2475,9 @@ describe('WebSocketMessageHandler', () => {
 	 */
 	describe('Dispatch ticket on new_ai_tab_with_prompt and enqueue_command (MRC-08-02)', () => {
 		const newTabTicket = (): string | undefined =>
-			vi.mocked(callbacks.newAITabWithPrompt).mock.calls[0]?.[6] as string | undefined;
+			vi.mocked(callbacks.newAITabWithPrompt).mock.calls[0]?.[7] as string | undefined;
 		const enqueueTicket = (): string | undefined =>
-			vi.mocked(callbacks.enqueueCommand).mock.calls[0]?.[9] as string | undefined;
+			vi.mocked(callbacks.enqueueCommand).mock.calls[0]?.[11] as string | undefined;
 		const lastSent = (): Record<string, unknown> => {
 			const calls = vi.mocked(client.socket.send).mock.calls;
 			return JSON.parse(String(calls[calls.length - 1][0]));
@@ -2851,7 +2880,7 @@ describe('WebSocketMessageHandler', () => {
 			tabId: 'tab-1',
 		});
 		const sentTickets = (): string[] =>
-			vi.mocked(callbacks.executeCommand).mock.calls.map((call) => call[9] as string);
+			vi.mocked(callbacks.executeCommand).mock.calls.map((call) => call[11] as string);
 		const claimed = (ticket: string) =>
 			transportSpawnActor(claimDispatchTicket(ticket, { agentId: 'session-1', tabId: 'tab-1' })!);
 		const device = (id: string, name: string, extra: Partial<WebClient> = {}): WebClient => ({
@@ -4775,6 +4804,7 @@ describe('WebSocketMessageHandler', () => {
 					false,
 					'only',
 					undefined,
+					undefined,
 					expect.any(String)
 				);
 			});
@@ -4812,6 +4842,7 @@ describe('WebSocketMessageHandler', () => {
 					false,
 					undefined,
 					undefined,
+					undefined,
 					expect.any(String)
 				);
 			});
@@ -4841,6 +4872,7 @@ describe('WebSocketMessageHandler', () => {
 					false,
 					undefined,
 					undefined,
+					undefined,
 					expect.any(String)
 				);
 			});
@@ -4863,6 +4895,7 @@ describe('WebSocketMessageHandler', () => {
 					true,
 					undefined,
 					undefined,
+					undefined,
 					expect.any(String)
 				);
 			});
@@ -4883,6 +4916,7 @@ describe('WebSocketMessageHandler', () => {
 					'Summarize the repo',
 					false,
 					false,
+					undefined,
 					undefined,
 					undefined,
 					expect.any(String)
@@ -5202,6 +5236,8 @@ describe('WebSocketMessageHandler', () => {
 					false,
 					undefined,
 					undefined,
+					undefined,
+					undefined,
 					expect.any(String)
 				);
 			});
@@ -5236,6 +5272,8 @@ describe('WebSocketMessageHandler', () => {
 					false,
 					false,
 					'handoff',
+					undefined,
+					undefined,
 					undefined,
 					expect.any(String)
 				);
@@ -5440,6 +5478,8 @@ describe('WebSocketMessageHandler', () => {
 					undefined,
 					false,
 					true,
+					undefined,
+					undefined,
 					undefined,
 					undefined,
 					expect.any(String)

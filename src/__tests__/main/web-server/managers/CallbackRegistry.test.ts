@@ -384,8 +384,6 @@ describe('CallbackRegistry', () => {
 				undefined,
 				undefined,
 				undefined,
-				undefined,
-				undefined,
 				undefined
 			);
 		});
@@ -400,8 +398,6 @@ describe('CallbackRegistry', () => {
 				'session-5',
 				'npm test',
 				'terminal',
-				undefined,
-				undefined,
 				undefined,
 				undefined,
 				undefined,
@@ -424,8 +420,6 @@ describe('CallbackRegistry', () => {
 				undefined,
 				undefined,
 				undefined,
-				undefined,
-				undefined,
 				undefined
 			);
 		});
@@ -441,8 +435,6 @@ describe('CallbackRegistry', () => {
 				'follow up',
 				'ai',
 				'tab-xyz',
-				undefined,
-				undefined,
 				undefined,
 				undefined,
 				undefined,
@@ -464,10 +456,101 @@ describe('CallbackRegistry', () => {
 				true,
 				undefined,
 				undefined,
-				undefined,
-				undefined,
 				undefined
 			);
+		});
+
+		it('forwards the receipt and Pianola dispatch id without a delegation or ticket', async () => {
+			const callback = vi.fn().mockResolvedValue(true);
+			registry.setExecuteCommandCallback(callback);
+
+			await registry.executeCommand(
+				'session-5',
+				'go',
+				'ai',
+				'tab-1',
+				undefined,
+				undefined,
+				undefined,
+				undefined,
+				true,
+				'pianola-dispatch-1'
+			);
+
+			expect(callback).toHaveBeenCalledWith(
+				'session-5',
+				'go',
+				'ai',
+				'tab-1',
+				undefined,
+				undefined,
+				undefined,
+				undefined,
+				true,
+				'pianola-dispatch-1'
+			);
+		});
+
+		it('carries the delegation and dispatch ticket in slots 11 and 12, after the receipt and dispatch id', async () => {
+			const callback = vi.fn().mockResolvedValue(true);
+			registry.setExecuteCommandCallback(callback);
+			const delegation = { operationId: 'op-1' } as unknown as NonNullable<
+				Parameters<CallbackRegistry['executeCommand']>[10]
+			>;
+
+			await registry.executeCommand(
+				'session-5',
+				'go',
+				'ai',
+				'tab-1',
+				undefined,
+				undefined,
+				true,
+				undefined,
+				undefined,
+				undefined,
+				delegation,
+				'ticket-1'
+			);
+
+			expect(callback).toHaveBeenCalledWith(
+				'session-5',
+				'go',
+				'ai',
+				'tab-1',
+				undefined,
+				undefined,
+				true,
+				undefined,
+				undefined,
+				undefined,
+				delegation,
+				'ticket-1'
+			);
+		});
+
+		it('carries a lone dispatch ticket, with no delegation, in slot 12', async () => {
+			const callback = vi.fn().mockResolvedValue(true);
+			registry.setExecuteCommandCallback(callback);
+
+			await registry.executeCommand(
+				'session-5',
+				'go',
+				'ai',
+				undefined,
+				undefined,
+				undefined,
+				undefined,
+				undefined,
+				undefined,
+				undefined,
+				undefined,
+				'ticket-2'
+			);
+
+			expect(callback.mock.calls[0]).toHaveLength(12);
+			expect(callback.mock.calls[0][11]).toBe('ticket-2');
+			expect(callback.mock.calls[0][10]).toBeUndefined();
 		});
 
 		it('passes images argument so pasted attachments survive the boundary', async () => {
@@ -491,8 +574,6 @@ describe('CallbackRegistry', () => {
 				undefined,
 				undefined,
 				images,
-				undefined,
-				undefined,
 				undefined,
 				undefined
 			);
