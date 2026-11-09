@@ -3001,6 +3001,29 @@
 					"result": "597 passed, 0 failed (was 8 failed: 5 + 2 + 1)"
 				},
 				"tools": "Working/mcomp-33-00s3 (check.mjs, commit-wt.mjs, record.mjs)"
+			},
+			"MCOMP-33-00S4": {
+				"completedAt": "2026-11-09",
+				"completedBy": "Maestro-Claude",
+				"worktreeCommit": "6fd95640e",
+				"worktreeParent": "142f3c686",
+				"verdict": "Suite side only. The merged spawn handler (src/main/ipc/handlers/process/handle-spawn.ts) asks processManager.managedPort() before the launch plan, spawns through spawnAdmitted() and reads admissionOf() for the managed run it returns (all HEAD seams). The upstream-new handle-spawn-native suite and the upstream durable-readback cases of persistence.test built their doubles before those seams, so every case reaching the handler threw \"managedPort is not a function\". The doubles now carry the standalone seams of a real ProcessManager with no authority (managedPort null, admissionOf null, spawnAdmitted = spawn); the handler still requires the port. No source repair, so no mutation case.",
+				"change": {
+					"src/__tests__/main/ipc/handlers/persistence.test.ts": "new withStandaloneManagedPort() helper; wraps the five handler-facing manager doubles (codex queue capture, durable readback, peer manager, two Pianola native spawn doubles). The managed consult fixture still overrides spawnAdmitted where it asserts the actor.",
+					"src/__tests__/main/ipc/handlers/process/handle-spawn-native.test.ts": "literal double gets managedPort, admissionOf (both null) and spawnAdmitted delegating to spawn."
+				},
+				"typeCheck": {
+					"tsconfig.lint.json": {
+						"exit": 0,
+						"errors": 0
+					},
+					"testFiles": "not in any project config; an ad hoc config over the two suites gives the same 54 pre-existing errors before and after (none on changed lines)"
+				},
+				"suites": {
+					"run": "persistence.test.ts, process/handle-spawn-native.test.ts",
+					"result": "540 passed, 0 failed (was 157 failed: 136 + 21)"
+				},
+				"tools": "Working/mcomp-33-00s4 (apply.mjs, apply2.mjs, commit-wt.mjs, record.mjs)"
 			}
 		}
 	}
