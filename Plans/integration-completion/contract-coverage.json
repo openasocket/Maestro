@@ -363,7 +363,13 @@
 			"installation": "The consumer reuses desktop-policy schema 1, ManagedRouteCeiling, parseManagedSettingsPolicy and nine existing ceiling parsers. It validates tenant/org/enrollment/installation/actor/runtime/epoch, applied revision, freshness, complete sections and route shape before one atomic in-memory replacement. Connection/trust/registration/source changes and superseded requests are rejected. Same-revision content conflicts, rollback and older projections retain the previous restrictions. Reads return copies scoped to identity/actor/trust; disconnected or expired policy never grants execution, and restart defaults to unavailable until verified refresh. Settings/choice/effect sink composition remains in the dependent implementation tasks.",
 			"missing": "Authenticated registration/policy digest and revision, projection freshness, approved provider/model/account/workspace/tool/credential references, and explicit browser/shell/plugin/install/egress/listener/custody constraints. Published UI projection alone cannot authorize host mutations or effects.",
 			"approvedOptions": "MCOMP-15-03 returns only bounded opaque desktop references with locks, revision and an expiry bounded by projection, registration and observation freshness. Optional host-only executionChoices binds providerRef to explicit permission modes and opaque transport references, limited to 128 providers and 128 transports each. The whole extension must be signed in the native batch. Missing executionChoices yields unavailable fields, never unrestricted options. Current port, actor/trust/runtime/epoch, connection and applied revision are rechecked on every read. Commit/run must revalidate independently; no producer or wire capability is supplied.",
-			"implementationTasks": ["MCOMP-15-01", "MCOMP-15-02", "MCOMP-15-03", "MCOMP-15-04"],
+			"implementationTasks": [
+				"MCOMP-15-01",
+				"MCOMP-15-02",
+				"MCOMP-15-03",
+				"MCOMP-15-04",
+				"MCOMP-21-01"
+			],
 			"pairedVerification": [
 				"MCOMP-16-01",
 				"MCOMP-20-01",
@@ -371,7 +377,8 @@
 				"MCOMP-24-01",
 				"MCOMP-26-01"
 			],
-			"credentialResolution": "MCOMP-15-04 reuses bindApprovedCredentials and buildAgentLaunchPlan. Branded entries are immutable; every launch must supply a fresh host-authenticated credentialConsumer (tenant, actor, agent, applied revision) independent of the reference. Provider, destination and opaque account digest must also match the actual route before secret lookup. Expired/future bindings, unknown routes and unapproved OAuth/env/config/args overrides are held. Credential references and a UI choice are not authority: the public protocol still lacks authenticated reference/source resolution, consumer binding and revocation delivery. No production credential producer or wire capability is supplied; DESKTOP-LOCAL/1 and PREPARED/1 must bind the actual process/sink before production use. Native account-file/keychain isolation and provider behavior remain separate qualification obligations."
+			"credentialResolution": "MCOMP-15-04 reuses bindApprovedCredentials and buildAgentLaunchPlan. Branded entries are immutable; every launch must supply a fresh host-authenticated credentialConsumer (tenant, actor, agent, applied revision) independent of the reference. Provider, destination and opaque account digest must also match the actual route before secret lookup. Expired/future bindings, unknown routes and unapproved OAuth/env/config/args overrides are held. Credential references and a UI choice are not authority: the public protocol still lacks authenticated reference/source resolution, consumer binding and revocation delivery. No production credential producer or wire capability is supplied; DESKTOP-LOCAL/1 and PREPARED/1 must bind the actual process/sink before production use. Native account-file/keychain isolation and provider behavior remain separate qualification obligations.",
+			"standaloneListeners": "MCOMP-21-01 composes the headless Cue engine onto the same leaf listener gate before it binds: buildStandaloneCueListenerAuthority (src/cli/services/cue-standalone-engine.ts) reads the protected installation standing per bind and judges cue-webhook and cue-status with managedListenerStanding and listenerVerdict under the attached host applied revision, else the record revision. No published operation delivers a listener ceiling, so an enrolled, unavailable or unreadable standing refuses both kinds unavailable by name and standalone binds as before. The listener constraint of this batch must reach that consumer before a managed headless engine may open either socket."
 		},
 		{
 			"id": "CONTENT-LOCAL/1",

@@ -23,18 +23,19 @@
  * request, and the readiness re-check is cached (see `ensureFreshReadiness`).
  * No Electron imports.
  *
- * Under the managed listener ceiling (MRC2-05-06B) this server is recorded
- * as loopback-only observability, kind `cue-status` in the ceiling
- * vocabulary, and is NOT held at the gate: it binds 127.0.0.1 with no
- * override, serves nothing an agent acts on, and only the headless engine
- * (which installs no listener authority) ever starts it. A policy that
- * forbids loopback observability is the one reason to hold it; that would
- * be `holdListener({ kind: "cue-status", bind: CUE_STATUS_HOST, port })`
- * before `createServer` in `startCueStatusServer()`.
+ * Under the managed listener ceiling this server is kind `cue-status`, held
+ * at the gate BEFORE the socket exists (MCOMP-21-01): the headless engine
+ * installs its listener authority over the installation standing
+ * (`buildStandaloneCueListenerAuthority` in `cue-standalone-engine.ts`)
+ * before the command starts this server, so a managed host whose ceiling
+ * does not admit loopback observability never opens it. A refusal rejects
+ * with the gate's `ListenerDeniedError` (`[managed-<code>] ...`), never a
+ * port collision. Standalone nothing is consulted.
  */
 
 import * as http from 'http';
 import type { CueGraphSession, CueRunResult, CueSessionStatus } from '../../shared/cue/contracts';
+import { holdListener } from '../enterprise/listener-gate';
 import type { CueReadinessGap, CueReadinessReport } from './cue-readiness';
 import { evaluateLiveness, evaluateReadiness, type CueEngineHealth } from './cue-engine-health';
 
@@ -242,11 +243,17 @@ async function handle(
 /**
  * Bind the status server on 127.0.0.1. Resolves once listening; rejects with
  * {@link CueStatusPortInUseError} when the port is taken, before the caller
- * has armed anything.
+ * has armed anything, and with the listener gate's `ListenerDeniedError` when
+ * the managed ceiling holds it, before any socket exists.
  */
 export function startCueStatusServer(
 	options: CueStatusServerOptions
 ): Promise<CueStatusServerHandle> {
+	try {
+		holdListener({ kind: 'cue-status', bind: CUE_STATUS_HOST, port: options.port });
+	} catch (err) {
+		return Promise.reject(err);
+	}
 	const server = http.createServer((req, res) => {
 		handle(req, res, options).catch(() => {
 			// A bug in our own handler, not a bad request: answer rather than hang.

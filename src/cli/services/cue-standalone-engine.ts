@@ -76,6 +76,7 @@ import {
 } from '../../main/cue/cue-run-router';
 import type { CueRunResult } from '../../shared/cue/contracts';
 import type { CueExternalNotification } from '../../main/cue/cue-notify-webhook';
+import type { ListenerAuthority } from '../../main/enterprise/listener-policy';
 import { formatJsonLogLine } from '../../shared/jsonLogLine';
 // The managed binding and the headless port: plain maestro-lib, no Electron,
 // the same modules `agent-spawner.ts` holds statically for every CLI verb.
@@ -600,6 +601,64 @@ export function buildStandaloneCueWorkflowFence(options: {
 		);
 }
 
+/**
+ * The listener authority a standalone Cue engine holds its inbound sockets to
+ * (MCOMP-21-01): the webhook receiver (`cue-webhook`, opened when the engine
+ * arms its first webhook subscription) and the `--status-port` server
+ * (`cue-status`). The desktop installs `createListenerPolicySource()` at
+ * app-ready; this process never reaches that block, so without this the leaf
+ * gate held nothing and an enrolled machine's headless engine bound both as
+ * if it were standalone.
+ *
+ * Read fresh on every bind over the same installation standing the spawn port
+ * and the workflow fence read (`readStandaloneCueStanding`), so the protected
+ * custody decides, never the binding file alone: no binding and no custody
+ * record is standalone and every listener binds as before; anything else
+ * (enrolled, enrolled with no reachable authority, an unreadable binding) is
+ * managed. A managed standing is judged with the desktop's own rule
+ * (`managedListenerStanding` + `listenerVerdict`) under the attached host's
+ * applied revision, else the record's last applied one (the policy kept
+ * offline). No endpoint operation delivers a listener ceiling yet
+ * (DESKTOP-LOCAL/1 in `Plans/integration-completion/contract-coverage.json`),
+ * so the ceiling is always absent and a managed engine opens no listener,
+ * refused `unavailable` by name, exactly as the desktop does. An omitted host
+ * never reads as standalone.
+ *
+ * Async because `listener-policy.ts` is loaded on demand: this module is
+ * reachable from every `maestro-cli` verb (see the import note above).
+ */
+export async function buildStandaloneCueListenerAuthority(options: {
+	managedHost: StandaloneCueManagedHost | null;
+	/** The installation standing the binding is held to. Default: this process's own read. */
+	standing?: InstallationStandingSource;
+	now?: () => number;
+}): Promise<ListenerAuthority> {
+	const { listenerVerdict, managedListenerStanding } =
+		await import('../../main/enterprise/listener-policy');
+	const startedAt = new Date().toISOString();
+	const now = options.now ?? (() => Date.now());
+	return {
+		evaluateListener(request) {
+			const host = options.managedHost;
+			const { binding } = readStandaloneCueStanding(host, now, startedAt, options.standing);
+			const policy =
+				binding.state === 'enrolled' && host
+					? host.policyStatus()
+					: 'record' in binding
+						? { appliedRevision: binding.record.policyRevision }
+						: null;
+			return listenerVerdict(
+				managedListenerStanding({
+					enrolled: binding.state !== 'standalone',
+					policy,
+					ceiling: null,
+				}),
+				request
+			);
+		},
+	};
+}
+
 export interface StandaloneCueEngineOptions {
 	onLog?: StandaloneCueLog;
 	/**
@@ -696,7 +755,18 @@ export async function createStandaloneCueEngine(
 	// for something else entirely (`cue schedule`, `cue list`) should not pay
 	// the load cost for. Every `cue-engine` subcommand is the one place that
 	// cost is worth paying.
-	const { CueEngine: CueEngineCtor } = await import('../../main/cue/cue-engine');
+	const [{ CueEngine: CueEngineCtor }, { setListenerAuthority }, listeners] = await Promise.all([
+		import('../../main/cue/cue-engine'),
+		import('../../main/enterprise/listener-gate'),
+		buildStandaloneCueListenerAuthority({
+			managedHost: options.managedHost ?? null,
+			...(options.standing ? { standing: options.standing } : {}),
+		}),
+	]);
+	// Installed before the engine exists, so the webhook receiver its first
+	// webhook subscription opens and the status server the command binds next
+	// are both held at the gate (MCOMP-21-01). Process-wide, like the desktop's.
+	setListenerAuthority(listeners);
 	return new CueEngineCtor(buildStandaloneCueEngineDeps(options));
 }
 

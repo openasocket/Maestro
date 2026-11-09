@@ -28,8 +28,11 @@
  *  - Under a managed listener ceiling the bind is held by name before the
  *    socket exists (`listenerHoldFor`, kind `cue-webhook`; MRC2-05-06B). A
  *    hold is as sticky as a failed bind and is read back with
- *    {@link getCueWebhookListenerHold}. The headless engine installs no
- *    listener authority, so there nothing is consulted.
+ *    {@link getCueWebhookListenerHold}. The desktop installs the authority
+ *    at app-ready; the headless engine installs its own over the
+ *    installation standing before it arms a trigger
+ *    (`buildStandaloneCueListenerAuthority`, MCOMP-21-01), so an enrolled
+ *    machine's `maestro-cli cue engine start` is held here too.
  */
 
 import * as crypto from 'crypto';
