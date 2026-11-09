@@ -1780,6 +1780,38 @@
 				],
 				"notes": "No guard dropped; no hunk took one whole side.",
 				"unmergedAfter": 66
+			},
+			"MCOMP-33-00R15": {
+				"resolvedAt": "2026-11-09",
+				"resolvedBy": "Maestro-Claude",
+				"files": [
+					"src/cli/services/agent-spawner.ts",
+					"src/__tests__/main/utils/ssh-spawn-wrapper.test.ts"
+				],
+				"method": "Seven hunks (6 + 1) resolved by a shape-asserting script (Working/mcomp-33-00r15/resolve.mjs, both sides read in full, all replacements computed before any write); staged through merge-tool.mjs stage (prettier reflowed agent-spawner.ts indentation, suite unchanged, 64 unmerged left). Working/mcomp-33-00r15/check.mjs: 0 syntax diagnostics in both, every export of HEAD and MERGE_HEAD present, no markers, every seam count at least the larger of HEAD and MERGE_HEAD. git diff HEAD +575 -240, git diff MERGE_HEAD +667 -109. ssh-spawn-wrapper suite 21/21 pass; the agent-spawner suite is 00R16 and the spawner cannot load until launch/agent-args.ts (00R21) merges.",
+				"hunks": {
+					"src/cli/services/agent-spawner.ts": [
+						"Imports 1: HEAD's managed imports (authority, host-adapter, binding, host-managed, ManagedDenialCode, user data dirs) kept; the TurnCapture line is upstream's (adds usageReportingFor).",
+						"Imports 2: both; HEAD's tui-handshake import closed, then upstream's native-control, harness-control types and spawnNativeSdkAgent imports under their own import {.",
+						"Claude path launch: upstream's abort and absolute-deadline checks first, then HEAD's final TurnProcessSpec, admitCliLaunch and withCliTuiStamp, refusal-catching startTurn(spec, ..., cliTurnOptions(undefined, admitted.admission)); upstream's onLine (claudeParser event to supervision.observe, then processLine) replaces HEAD's onLine: processLine in that call.",
+						"Generic path launch (inside upstream's promptFileArgs try/finally): upstream's abort and deadline checks, then HEAD's spec (args already carry promptFileArgs, so the admission binds them), admitCliLaunch with cliAttribution, and the refusal-catching startTurn.",
+						"onEvent: upstream's supervision.observe(event) supersedes HEAD's Codex-only modelActivity() rule (the shared supervisor disarms startup on real model and tool work for every provider and ignores retry notices); upstream's nonfatal warning to stderr kept.",
+						"Turn tail: HEAD's cliTurnOptions(undefined, admitted.admission) and DispatchRefusedError catch, then upstream's supervision (deadline-bounded timeout, idle, usageReportingFor, onStatus progress, startup budget, requireProcessExit) and result tail."
+					],
+					"src/__tests__/main/utils/ssh-spawn-wrapper.test.ts": [
+						"Imports: both; HEAD's MANAGED_CONTRACT_VERSION and upstream's prompt-delivery argv-limit imports."
+					]
+				},
+				"outsideHunks": [
+					"spawnAgentOnce: upstream's native CLI control branch (resolveHarnessControlMode native, spawnNativeSdkAgent) ran before the admission and so bypassed it; it now refuses with managedRefusal('denied', 'policy-denied') whenever (options.managed ?? cliSpawnAuthority()).standing() is not standalone, matching the 00R12 desktop refusal of managed native launches. A standalone CLI keeps upstream's native path unchanged."
+				],
+				"semanticConflictsForC": [
+					"The managed native CLI refusal above is lifted only once the native SDK launch (its command, native args, permissionMode) is bound into a dispatch snapshot and admitted, together with the 00R12 desktop refusal.",
+					"The Claude path's onLine closure reads supervision before its const declaration; lines only arrive after startTurn returns and supervision is assigned synchronously after it, so there is no TDZ at run time, but 00C's type-check should confirm the compiler accepts it (upstream used the same shape).",
+					"The admission is awaited after upstream's absolute-deadline check; a slow admission can consume the remaining budget, which upstream's Math.max(1, deadlineAt - now) timeout then stops at once. Confirm that is the wanted outcome rather than a re-check after admission."
+				],
+				"notes": "No guard dropped; no hunk took one whole side. cliSpawnAuthority(), SpawnAgentOptions.managed and AgentResult.managed stay; an unresolved SSH remote still fails loudly through sshUnresolvedFailure (3 call sites, both sides).",
+				"unmergedAfter": 64
 			}
 		}
 	}
