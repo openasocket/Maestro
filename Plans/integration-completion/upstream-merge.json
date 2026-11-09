@@ -2361,6 +2361,24 @@
 					"00R35 global.d.ts / useRemoteHandlers must read executeCommand receiptChannel 9, pianolaDispatchId 10, delegation 11, ticket 12; newAITabWithPrompt control 7, delegation 8, ticket 9; enqueueCommand dispatchCallback 10, control 11, delegation 12, ticket 13."
 				],
 				"tests": "40/48 across the nine preload process suites; the 8 failures are the HEAD-wire cases above; core.test.ts cannot parse until core.ts (00R35)."
+			},
+			"MCOMP-33-00R35": {
+				"resolvedAt": "2026-11-09",
+				"resolvedBy": "Maestro-Claude",
+				"files": [
+					"src/main/preload/process/core.ts",
+					"src/renderer/global.d.ts",
+					"src/renderer/hooks/remote/useRemoteHandlers.ts"
+				],
+				"method": "Nine hunks resolved by a shape-asserting script (Working/mcomp-33-00r35/resolve.mjs, both sides read in full, every replacement computed before any write); staged through merge-tool.mjs stage (12 unmerged left; prettier left all three unchanged). Working/mcomp-33-00r35/check.mjs: 0 syntax diagnostics, every HEAD and MERGE_HEAD seam count kept.",
+				"hunks": {
+					"core.ts": "imports (1): kept both (ManagedRunView, harness-interaction types).",
+					"global.d.ts": "imports (2): kept both (UpdateHoldView/UpdateStatus + harness types; EnterpriseApi + FederationApi); process.spawn (1): upstream ProcessSpawnResponse reference; onRemoteCommand (1): receiptChannel, pianolaDispatchId, delegation, dispatchTicket; onRemoteNewAITabWithPrompt (1): control, delegation, dispatchTicket; onRemoteEnqueueCommand (1): dispatchCallback, control, delegation, dispatchTicket.",
+					"useRemoteHandlers.ts": "event detail type and destructure (2): upstream pianolaDispatchId plus HEAD delegation and dispatchTicket with their doc comments."
+				},
+				"outsideHunks": "core.ts ProcessSpawnResponse gained HEAD's managed sink refusal field (previously inline in global.d.ts); global.d.ts dead ManagedRunView import removed.",
+				"semanticFor00C": [],
+				"tests": "core.test.ts + useRemoteHandlers.test.ts 116/116."
 			}
 		}
 	}
