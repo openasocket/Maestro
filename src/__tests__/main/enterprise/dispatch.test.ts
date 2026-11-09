@@ -19,6 +19,7 @@ import {
 	createBrokerDispatch,
 	DISPATCH_RECEIPTS_FILE_NAME,
 	managedRunViewOf,
+	managedRunViewOfReceipt,
 	admitCueShell,
 	cueShellAttribution,
 	cueShellRouteSupport,
@@ -44,6 +45,7 @@ import {
 import { inProcessContext } from '../../../shared/maestro-lib/managed/operations';
 import { startFakeEndpoint, type FakeEndpoint } from './fakeEndpoint';
 import { fakeAdmission } from '../../helpers/managedSpawnPort';
+import { createManagedOperations } from '../../../main/enterprise/service';
 
 const T0 = Date.parse('2026-10-21T12:00:00Z');
 const INSTALLATION = {
@@ -276,6 +278,61 @@ describe('broker dispatch bridge', () => {
 			state: 'released',
 			release: { outcome: 'stopped', by: 'caller' },
 			reason: null,
+		});
+	});
+
+	it('reads a managed run back from the ledger by lease id: released after a stop, unknown after a restart, null for a lease never admitted (MCOMP-25-01B)', async () => {
+		const first = bridge();
+		await first.dispatch.load();
+		const facade = (dispatch: typeof first.dispatch) =>
+			createManagedOperations({
+				lifecycle: {} as never,
+				policy: {} as never,
+				identity: {} as never,
+				inventory: {} as never,
+				dispatch,
+			});
+		const stopped = await first.dispatch.authority.admit(admission('req-s', 'att-s'));
+		const running = await first.dispatch.authority.admit(admission('req-r', 'att-r'));
+		expect(stopped.state).toBe('admitted');
+		expect(running.state).toBe('admitted');
+		if (stopped.state !== 'admitted' || running.state !== 'admitted') return;
+		stopped.lease.bind(101);
+		stopped.lease.release({ outcome: 'stopped', by: 'caller' });
+		running.lease.bind(202);
+
+		const live = facade(first.dispatch);
+		const read = live.run(stopped.lease.leaseId);
+		expect(read).toMatchObject({
+			leaseId: stopped.lease.leaseId,
+			authorityId: stopped.lease.authorityId,
+			requestId: 'req-s',
+			attemptId: 'att-s',
+			runId: 'run-1',
+			// The ledger's snapshot digest is the digest of the request the lease covers.
+			requestDigest: stopped.lease.snapshotDigest,
+			decision: { decisionId: expect.stringMatching(/^decision-/), brokerId: 'broker-1' },
+			effect: { state: 'released', release: { outcome: 'stopped', by: 'caller' } },
+		});
+		// The same shape the live view has: identifiers only.
+		expect(Object.keys(read!).sort()).toEqual(
+			Object.keys(managedRunViewOfReceipt(first.dispatch.receipt(stopped.lease.leaseId)!)).sort()
+		);
+		expect(live.run(running.lease.leaseId)?.effect.state).toBe('bound');
+		expect(live.run('lease-never-admitted')).toBeNull();
+		// No ledger composed: nothing to read, never a fabricated run.
+		expect(facade(undefined as never).run(stopped.lease.leaseId)).toBeNull();
+
+		// A restart: the run still bound at exit reads back unknown, never resent or shown live.
+		await first.dispatch.flush();
+		const second = bridge();
+		const loaded = await second.dispatch.load();
+		expect(loaded).toMatchObject({ ok: true, recoveredUnknown: 1 });
+		const after = facade(second.dispatch);
+		expect(after.run(running.lease.leaseId)?.effect.state).toBe('unknown');
+		expect(after.run(stopped.lease.leaseId)?.effect).toMatchObject({
+			state: 'released',
+			release: { outcome: 'stopped', by: 'caller' },
 		});
 	});
 

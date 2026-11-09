@@ -74,7 +74,13 @@ import {
 	type CommandServiceStatus,
 	type LocalCommandAction,
 } from './commands';
-import { createBrokerDispatch, DISPATCH_RECEIPTS_FILE_NAME, type BrokerDispatch } from './dispatch';
+import {
+	createBrokerDispatch,
+	DISPATCH_RECEIPTS_FILE_NAME,
+	managedRunViewOfReceipt,
+	type BrokerDispatch,
+	type ManagedRunView,
+} from './dispatch';
 import {
 	createInboxClient,
 	createInboxReceiptLedger,
@@ -216,6 +222,8 @@ export interface ManagedOperationsDeps {
 	inbox?: InboxClient;
 	/** The command service (MRC-11-01B); absent on a host that composes none. */
 	commands?: CommandService;
+	/** The dispatch ledger a managed run is read back from (MCOMP-25-01B); absent on a host that composes none. */
+	dispatch?: Pick<BrokerDispatch, 'receipt'>;
 }
 
 /** One `managed inbox list`: the endpoint's answer to the listing (null when only the held set was read) and the view the pane draws. */
@@ -278,6 +286,14 @@ export interface ManagedOperations {
 	command(action: LocalCommandAction): Promise<CommandExecution>;
 	/** What this desktop executes and refuses by name, the ledger's counts and the standing; null when no service is composed. */
 	commandStatus(): CommandServiceStatus | null;
+	/**
+	 * A managed run read back from the dispatch ledger by its lease id
+	 * (MCOMP-25-01B): what the composer recorded at send, now with the effect
+	 * the ledger holds (bound, released, revoked, expired, or `unknown` after a
+	 * restart). Identifiers only; null for a lease this host never admitted or
+	 * when no ledger is composed. A record to show, never a permit to resend.
+	 */
+	run(leaseId: string): ManagedRunView | null;
 }
 
 export function createManagedOperations(deps: ManagedOperationsDeps): ManagedOperations {
@@ -361,6 +377,10 @@ export function createManagedOperations(deps: ManagedOperationsDeps): ManagedOpe
 						detail: 'No command service is composed in this desktop.',
 					}),
 		commandStatus: () => deps.commands?.status() ?? null,
+		run: (leaseId) => {
+			const receipt = deps.dispatch?.receipt(leaseId) ?? null;
+			return receipt ? managedRunViewOfReceipt(receipt) : null;
+		},
 	};
 }
 
@@ -717,6 +737,7 @@ export function createEnterpriseService(deps: EnterpriseServiceDeps): Enterprise
 		inventory,
 		inbox,
 		commands,
+		dispatch,
 		...(deps.holds ? { holds: deps.holds } : {}),
 	});
 	return {

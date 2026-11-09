@@ -40,6 +40,7 @@ describe('Enterprise Preload API', () => {
 			'inboxRefresh',
 			'inboxState',
 			'inventory',
+			'managedRun',
 			'managedState',
 			'policyStatus',
 			'recoverPolicy',
@@ -62,6 +63,7 @@ describe('Enterprise Preload API', () => {
 		await api.inboxState();
 		await api.inboxRefresh();
 		await api.commandStatus();
+		await api.managedRun('lease-1');
 		await api.connect();
 		await api.beginRegistration();
 		await api.completeRegistration();
@@ -79,6 +81,7 @@ describe('Enterprise Preload API', () => {
 			'enterprise:inboxState',
 			'enterprise:inboxRefresh',
 			'enterprise:commandStatus',
+			'enterprise:managedRun',
 			'enterprise:connect',
 			'enterprise:beginRegistration',
 			'enterprise:completeRegistration',

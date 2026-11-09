@@ -450,6 +450,41 @@ export function managedRunViewOf(
 	};
 }
 
+/**
+ * The same view read back from the ledger after the turn ended, when the
+ * process (and so its admission) is gone: a stopped, released, revoked,
+ * expired or restart-`unknown` run says so from the durable record. The
+ * receipt's `snapshotDigest` is the digest of the request the lease covers
+ * (`dispatchSnapshotDigest()` of the same snapshot), so it is the view's
+ * `requestDigest`. Identifiers only, never a permit, like the live view.
+ */
+export function managedRunViewOfReceipt(receipt: DispatchReceiptRecord): ManagedRunView {
+	return {
+		leaseId: receipt.leaseId,
+		authorityId: receipt.authorityId,
+		requestId: receipt.requestId,
+		attemptId: receipt.attemptId,
+		runId: receipt.runId,
+		requestDigest: receipt.snapshotDigest,
+		provider: receipt.provider,
+		operation: receipt.operation,
+		actor: { ...receipt.actor },
+		policyRevision: receipt.policyRevision,
+		decision: receipt.decision
+			? {
+					decisionId: receipt.decision.decisionId,
+					brokerId: receipt.decision.brokerId,
+					policyRevision: receipt.decision.policyRevision,
+				}
+			: null,
+		effect: {
+			state: receipt.effect.state,
+			release: receipt.effect.release,
+			reason: receipt.effect.reason,
+		},
+	};
+}
+
 // ---------------------------------------------------------------------------
 // The synthetic harness route through the protected dispatch
 // ---------------------------------------------------------------------------

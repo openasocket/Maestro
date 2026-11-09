@@ -108,6 +108,9 @@ function facadeDouble(overrides: Partial<ManagedOperations> = {}): ManagedOperat
 		inboxAct: vi.fn(async () => ({ status: 'recorded', duplicate: false, record: {} }) as never),
 		command: vi.fn(async () => ({ status: 'completed', commandId: 'local-1' }) as never),
 		commandStatus: vi.fn(() => ({ standing: { ok: true } }) as never),
+		run: vi.fn((leaseId: string) =>
+			leaseId === 'lease-1' ? ({ leaseId, effect: { state: 'released' } } as never) : null
+		),
 		...overrides,
 	};
 }
@@ -255,6 +258,26 @@ describe('managed bridge handlers (MRC2-07-03)', () => {
 		expect(await ask(handler, createClient(), { type: 'managed_status' })).toMatchObject({
 			success: false,
 			error: 'the lifecycle is closed',
+		});
+	});
+
+	it('reads a managed run by lease id, refusing an unknown lease and a missing id by name (MCOMP-25-01B)', async () => {
+		expect(
+			await ask(handler, createClient({ cli: true }), { type: 'managed_run', leaseId: 'lease-1' })
+		).toMatchObject({
+			type: 'managed_run_result',
+			success: true,
+			run: { leaseId: 'lease-1', effect: { state: 'released' } },
+		});
+		expect(
+			await ask(handler, createClient({ cli: true }), { type: 'managed_run', leaseId: 'lease-9' })
+		).toMatchObject({
+			success: false,
+			error: "Lease lease-9 is not in this host's dispatch ledger.",
+		});
+		expect(await ask(handler, createClient({ cli: true }), { type: 'managed_run' })).toMatchObject({
+			success: false,
+			error: expect.stringMatching(/leaseId/),
 		});
 	});
 
@@ -529,7 +552,7 @@ describe('managed bridge handlers (MRC2-07-03)', () => {
 		}
 	});
 
-	it('routes exactly the ten managed message types and admits exactly the intended remote methods', () => {
+	it('routes exactly the eleven managed message types and admits exactly the intended remote methods', () => {
 		expect([...MANAGED_MESSAGE_TYPES].sort()).toEqual(
 			[
 				'managed_command',
@@ -540,6 +563,7 @@ describe('managed bridge handlers (MRC2-07-03)', () => {
 				'managed_inventory',
 				'managed_locks',
 				'managed_policy_refresh',
+				'managed_run',
 				'managed_status',
 				'managed_support_matrix',
 			].sort()

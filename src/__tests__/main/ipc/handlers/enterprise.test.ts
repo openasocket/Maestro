@@ -161,6 +161,7 @@ describe('enterprise handlers', () => {
 			'enterprise:inboxRefresh',
 			'enterprise:inboxState',
 			'enterprise:inventory',
+			'enterprise:managedRun',
 			'enterprise:managedState',
 			'enterprise:policyStatus',
 			'enterprise:recoverPolicy',
@@ -220,6 +221,13 @@ describe('enterprise handlers', () => {
 		expect(await invoke('enterprise:commandStatus')).toEqual(status);
 		expect(registeredHandlers.has('enterprise:commandReceive')).toBe(false);
 		expect(commands.receive).not.toHaveBeenCalled();
+	});
+
+	it('reads a managed run by lease id through the facade, validates the id, and answers null for an unknown lease (MCOMP-25-01B)', async () => {
+		// The facade built in beforeEach composes no ledger: an honest null.
+		expect(await invoke('enterprise:managedRun', 'lease-1')).toBeNull();
+		await expect(invoke('enterprise:managedRun', '')).rejects.toThrow(/leaseId/);
+		await expect(invoke('enterprise:managedRun', 'x'.repeat(257))).rejects.toThrow(/leaseId/);
 	});
 
 	it('validates the enrollment request before the lifecycle sees it', async () => {

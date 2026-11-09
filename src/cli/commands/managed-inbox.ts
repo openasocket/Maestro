@@ -9,7 +9,8 @@
 // Wire contract (the bridge handlers of MRC2-07-03 answer these; each
 // `<type>_result` carries `success` and the named field):
 //   managed_inbox_list (listing), managed_inbox_act (outcome),
-//   managed_command (execution), managed_command_status (status)
+//   managed_command (execution), managed_command_status (status),
+//   managed_run (run; refused by name for a lease this host never admitted)
 //
 // Every write verb prints the durable receipt (the receipt ledger's record for
 // an inbox act, the command ledger's id and evidence digest for a command) or
@@ -22,6 +23,7 @@
 // offered: the command contract has no such action (CP-05).
 
 import type { CommandServiceStatus, LocalCommandAction } from '../../main/enterprise/commands';
+import type { ManagedRunView } from '../../main/enterprise/dispatch';
 import type { InboxActionOutcome, NoticeView } from '../../main/enterprise/inbox';
 import type { ManagedInboxListing } from '../../main/enterprise/service';
 import type { CommandExecution } from '../../shared/maestro-lib/managed/commands';
@@ -135,6 +137,33 @@ export function formatCommandStatus(status: CommandServiceStatus): string {
 	return lines.join('\n');
 }
 
+/** How a lease ended, in the words of its release. */
+function describeRelease(release: NonNullable<ManagedRunView['effect']['release']>): string {
+	switch (release.outcome) {
+		case 'stopped':
+			return `stopped by ${release.by}`;
+		case 'exited':
+			return `exited ${release.exitCode ?? release.signal ?? 'with no code'}`;
+		case 'spawn-failed':
+		case 'unknown':
+			return `${release.outcome}: ${release.message}`;
+	}
+}
+
+/** One managed run as the ledger holds it: identifiers, the decision and the effect. */
+export function formatManagedRun(run: ManagedRunView): string {
+	const effect = run.effect;
+	const decision = run.decision
+		? `decision ${run.decision.decisionId} by ${run.decision.brokerId} at revision ${run.decision.policyRevision}`
+		: 'no broker decision recorded';
+	return [
+		`Lease ${run.leaseId}: ${effect.state}${effect.release ? ` (${describeRelease(effect.release)})` : ''}${effect.reason ? `: ${effect.reason}` : ''}`,
+		`  ${run.provider} ${run.operation}, run ${run.runId ?? 'none'}, request ${run.requestId}, attempt ${run.attemptId}`,
+		`  policy revision ${run.policyRevision ?? 'none'}; ${decision}`,
+		`  authority ${run.authorityId}, request digest ${run.requestDigest}`,
+	].join('\n');
+}
+
 // ---------------------------------------------------------------------------
 // Verbs
 // ---------------------------------------------------------------------------
@@ -236,4 +265,16 @@ export async function managedCommandStatus(options: ManagedOptions): Promise<voi
 	);
 	if (options.json) console.log(JSON.stringify({ success: true, status }));
 	else console.log(formatCommandStatus(status));
+}
+
+/** `managed run <leaseId>`: read a managed run back from the dispatch ledger (the record the composer keeps on the AI tab). */
+export async function managedRun(leaseId: string, options: ManagedOptions): Promise<void> {
+	const run = await askDesktop<ManagedRunView>(
+		{ type: 'managed_run', leaseId },
+		'managed_run_result',
+		'run',
+		options.json
+	);
+	if (options.json) console.log(JSON.stringify({ success: true, run }));
+	else console.log(formatManagedRun(run));
 }

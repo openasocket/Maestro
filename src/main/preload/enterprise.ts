@@ -23,6 +23,7 @@ import type {
 	ManagedPolicyStatus,
 } from '../../shared/maestro-lib/managed/host-adapter';
 import type { CommandServiceStatus } from '../enterprise/commands';
+import type { ManagedRunView } from '../enterprise/dispatch';
 import type {
 	EnrollmentRequestInput,
 	LifecycleOutcome,
@@ -60,6 +61,9 @@ export function createEnterpriseApi() {
 			messageId: string;
 			action: EndpointInboxAction;
 		}): Promise<InboxActionOutcome> => ipcRenderer.invoke('enterprise:inboxAct', input),
+		/** A managed run read back from the dispatch ledger by lease id; null when this host never admitted it. */
+		managedRun: (leaseId: string): Promise<ManagedRunView | null> =>
+			ipcRenderer.invoke('enterprise:managedRun', leaseId),
 		requestEnrollment: (
 			input: EnrollmentRequestInput
 		): Promise<LifecycleOutcome<EndpointEnrollmentResult>> =>

@@ -219,6 +219,7 @@ import {
 	managedInboxAct,
 	managedCommand,
 	managedCommandStatus,
+	managedRun,
 } from './commands/managed-inbox';
 import {
 	computerHistoryApps,
@@ -2667,6 +2668,14 @@ managedEnroll
 	.option('--trust-root <digest>', "Override the file's trustRootDigest (sha256 hex)")
 	.option('--json', 'Output as JSON (for scripting)')
 	.action((options) => managedEnrollRequest(options));
+
+managed
+	.command('run <leaseId>')
+	.description(
+		"Read a managed run back from the dispatch ledger by its lease id (the run an AI tab's send started): identifiers, the broker decision and the effect (bound, released, revoked, expired, unknown)"
+	)
+	.option('--json', 'Output as JSON (for scripting)')
+	.action((leaseId, options) => managedRun(leaseId, options));
 
 // The Managed inbox (notices the endpoint addressed to this desktop) and the
 // typed runtime commands this desktop executes. Every write prints the durable

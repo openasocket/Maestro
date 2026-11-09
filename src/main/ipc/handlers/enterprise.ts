@@ -27,6 +27,7 @@ import * as path from 'path';
 import { isEndpointDigest } from '../../../shared/maestro-lib/managed/endpoint-port';
 import type { EndpointInboxAction } from '../../../shared/maestro-lib/managed/host-adapter';
 import type { CommandService, CommandServiceStatus } from '../../enterprise/commands';
+import type { ManagedRunView } from '../../enterprise/dispatch';
 import type {
 	EnrollmentLifecycle,
 	EnrollmentRequestInput,
@@ -243,6 +244,18 @@ export function registerEnterpriseHandlers(deps: EnterpriseHandlerDependencies):
 		withIpcErrorLogging(
 			handlerOpts('commandStatus'),
 			async (): Promise<CommandServiceStatus | null> => deps.getCommands()?.status() ?? null
+		)
+	);
+
+	// A managed run read back from the dispatch ledger by lease id (MCOMP-25-01B):
+	// the composer's record after the turn ended, so a stopped, revoked or
+	// restart-`unknown` run reads back truthfully instead of being resent.
+	ipcMain.handle(
+		'enterprise:managedRun',
+		withIpcErrorLogging(
+			handlerOpts('managedRun'),
+			async (raw: unknown): Promise<ManagedRunView | null> =>
+				deps.getManaged()?.run(text(raw, 'leaseId', MAX_ID)) ?? null
 		)
 	);
 

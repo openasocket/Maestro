@@ -860,6 +860,7 @@ export class WebSocketMessageHandler {
 			case 'managed_inbox_act':
 			case 'managed_command':
 			case 'managed_command_status':
+			case 'managed_run':
 				void handleManagedMessage(this.ctx, client, message);
 				break;
 

@@ -70,6 +70,7 @@ import {
 	managedCommandStatus,
 	managedInboxAct,
 	managedInboxList,
+	managedRun,
 } from '../../../cli/commands/managed-inbox';
 import { openModal } from '../../../cli/commands/open-modal';
 import { resolveUiSurface } from '../../../shared/uiSurfaces';
@@ -560,7 +561,56 @@ describe('maestro-cli managed over the real bridge and facade (MRC2-07-08)', () 
 		});
 	});
 
-	it('spoke every one of the ten managed message types and nothing else', () => {
+	it('reads a managed run back from the ledger by lease id, and refuses a lease never admitted (MCOMP-25-01B)', async () => {
+		const RECEIPT = {
+			leaseId: 'lease-7',
+			authorityId: 'authority-1',
+			snapshotDigest: 'd'.repeat(64),
+			decision: { decisionId: 'decision-1', brokerId: 'broker-1', policyRevision: 3 },
+			requestId: 'req-7',
+			attemptId: 'att-7',
+			runId: 'run-7',
+			actor: { kind: 'user', id: 'actor-1' },
+			policyRevision: 3,
+			provider: 'claude-code',
+			operation: 'conversation',
+			registration: null,
+			admittedAt: '2026-11-09T10:00:00.000Z',
+			effect: {
+				state: 'unknown',
+				pid: null,
+				boundAt: '2026-11-09T10:00:01.000Z',
+				endedAt: null,
+				release: null,
+				reason: 'bound when this host last exited',
+			},
+		};
+		managed = createManagedOperations({
+			lifecycle: lifecycle as never,
+			policy: policy as never,
+			identity: identity as never,
+			inventory: { snapshot: () => INVENTORY } as never,
+			holds: { egress: () => [], update: () => null, listeners: () => [] },
+			dispatch: { receipt: (id: string) => (id === 'lease-7' ? (RECEIPT as never) : null) },
+		});
+		const read = await run(() => managedRun('lease-7', { json: true }));
+		expect(read.code).toBeNull();
+		expect(json(read.out)).toEqual({ success: true, run: managed.run('lease-7') });
+		expect(json(read.out).run).toMatchObject({
+			requestDigest: 'd'.repeat(64),
+			effect: { state: 'unknown', reason: 'bound when this host last exited' },
+		});
+		const human = await run(() => managedRun('lease-7', {}));
+		expect(human.out).toContain('Lease lease-7: unknown: bound when this host last exited');
+		expect(human.out).toContain('decision decision-1 by broker-1 at revision 3');
+		const missing = await run(() => managedRun('lease-9', { json: true }));
+		expect(missing.code).toBe(1);
+		expect(json(missing.out).error).toContain(
+			"Lease lease-9 is not in this host's dispatch ledger."
+		);
+	});
+
+	it('spoke every one of the eleven managed message types and nothing else', () => {
 		expect([...spoken].sort()).toEqual([...MANAGED_MESSAGE_TYPES].sort());
 	});
 });

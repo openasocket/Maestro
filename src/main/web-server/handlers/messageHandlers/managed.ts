@@ -4,7 +4,7 @@
  * Handles: managed_status, managed_inventory, managed_support_matrix,
  * managed_locks, managed_policy_refresh, managed_enroll_request,
  * managed_inbox_list, managed_inbox_act, managed_command,
- * managed_command_status. Every one is answered from the one facade the
+ * managed_command_status, managed_run. Every one is answered from the one facade the
  * Settings > Environment pane and the `enterprise:*` IPC handlers read as
  * well, `EnterpriseService.managed` (`createManagedOperations()` in
  * `src/main/enterprise/service.ts`), so `maestro-cli managed` says the same
@@ -52,6 +52,7 @@ export const MANAGED_MESSAGE_TYPES = [
 	'managed_inbox_act',
 	'managed_command',
 	'managed_command_status',
+	'managed_run',
 ] as const;
 export type ManagedMessageType = (typeof MANAGED_MESSAGE_TYPES)[number];
 
@@ -154,6 +155,12 @@ async function answer(
 			const status = managed.commandStatus();
 			if (!status) throw new Error(NO_COMMANDS_MESSAGE);
 			return { status };
+		}
+		case 'managed_run': {
+			const leaseId = id(message.leaseId, 'leaseId');
+			const run = managed.run(leaseId);
+			if (!run) throw new Error(`Lease ${leaseId} is not in this host's dispatch ledger.`);
+			return { run };
 		}
 	}
 	throw new Error(`Unknown managed message ${message.type}.`);
