@@ -1,0 +1,422 @@
+{
+	"schemaVersion": 1,
+	"schema": "maestro-integration-build/1",
+	"artifactId": "MAESTRO-RESIDUAL-GAP-CLOSURE-BUILD",
+	"owner": "maestro",
+	"proofClass": "implementation-input",
+	"status": "complete-local-consumer-build",
+	"producerDocument": "MCOMP-21",
+	"task": "MCOMP-21-16",
+	"stage": "S12",
+	"backlog": ["G-07", "M-01", "M-02", "M-04", "M-05", "M-06", "QUAL-01", "QUAL-03"],
+	"recordedAt": "2026-11-09T06:04:52.004Z",
+	"standing": "Compiled and locally tested inputs published at the content-addressed paths below. Grants no execution authority and proves no paired, native, GUI or real-provider support.",
+	"grants": {
+		"authority": "none",
+		"lease": "none",
+		"policy": "none"
+	},
+	"qualification": {
+		"paired": false,
+		"provider": false,
+		"native": false,
+		"desktopGui": false
+	},
+	"implementationRevision": "de90dfe6a405e6b5c3dc4298784f5088bda82c01",
+	"observedRevision": "f82d25169a2cb80ef39926b1114655d9327634c4",
+	"inputDigest": "11c45a0d05180aee768b58de55b51b4b64c43a9b7d82c5b925f5605b3c869406",
+	"snapshot": {
+		"implementationClean": true,
+		"checkoutClean": false,
+		"implementationDigest": "c82b78305ba8d9f9edd56259ed6698d62ab6fa774962cbc7a3f5de0996a88595",
+		"implementationFiles": 6938,
+		"inputMap": {
+			"path": ".maestro/playbooks/Working/MCOMP-21-16/input-map.json",
+			"sha256": "19b85cfc7f808b2f5a03b1d81664b356d2de147bcb33fdedd3ff4e95fb9a7bb6"
+		},
+		"inputDigestEncoding": "sha256(canonicalJson(inputMap.inputs))",
+		"implementationMap": "/Users/dr3/dev-shit/Maestro/dist/mega-maestro-runtime/0.36.0/b6f9487e5434fad1b2068d26bf568456e3ec0fbc87868e5073387472b932d961/runtime.tgz#package/source/implementation.json",
+		"libraryInputMap": "/Users/dr3/dev-shit/Maestro/dist/mega-maestro-runtime/0.36.0/b6f9487e5434fad1b2068d26bf568456e3ec0fbc87868e5073387472b932d961/runtime.tgz#package/source/library-inputs.json",
+		"changeRange": {
+			"from": "1dec5a731 (MCOMP-21-01, parent excluded)",
+			"to": "de90dfe6a405e6b5c3dc4298784f5088bda82c01",
+			"changedFiles": {
+				"path": ".maestro/playbooks/Working/MCOMP-21-16/checked-files.json",
+				"sha256": "e54644109a2669967776994f031475bd7e1bcd16b596e3018cd151caecb7074f"
+			}
+		},
+		"inputs": "All tracked implementation source, prompts, templates and schemas; package and lockfiles; main/renderer/library/test/lint/format configuration; packaged README and SDK metadata; coverage and archive plans; imported contracts and exact dependencies; all installed dependency bytes including compiler/native tools; verification harnesses and Node executable. Build override variables and renderer .env inputs were absent.",
+		"installedDependencyFiles": 77914,
+		"importedContractFiles": 891,
+		"testCoordinationInput": {
+			"path": "Plans/integration-completion/program.json",
+			"sha256": "722e36e007753674d732c67f8366759da878f11a56d6cf3f85086261d15fff87",
+			"committedSha256": "be425bb529dd5bfb58cd646fd9a97418331b582b1dcb1bee7ff4c257a21b099c",
+			"role": "Uncommitted coordination manifest read only to validate task IDs; excluded from production source cleanliness claim"
+		},
+		"preservedDiff": {
+			"path": ".maestro/playbooks/Working/MCOMP-21-16/initial-planning.patch",
+			"sha256": "b1cb77a0f94f6e0f82e74f45919d129bec15d831f8b392474d0681f8dcb17cb6"
+		},
+		"exclusions": "Existing planning amendments, checklist/coordination receipts, SlopTimize state and graph output are not application/build inputs. program.json is explicitly hashed as an uncommitted test coordination input. The full checkout and full test input set are not claimed committed. No private sibling implementation is loaded."
+	},
+	"dependencies": [
+		{
+			"artifactId": "MAESTRO-CONTRACT-INPUTS-BUILD",
+			"path": "Plans/integration-completion/evidence/contract-inputs-build.json",
+			"sha256": "206664f3ab7605927bbf9964597da12f4607da34bac5f601ce18e19fffca34c2",
+			"implementationRevision": "dc5938509be17742adcca713cca07c0176af6fe6",
+			"inputDigest": "115a3223b356e0975ca73b9a53c4b6e25031437915888b5534bcfd955f6116b5"
+		},
+		{
+			"artifactId": "MAESTRO-EFFECT-CONSUMERS-BUILD",
+			"path": "Plans/integration-completion/evidence/effect-build.json",
+			"sha256": "f5f81b81e3255ec225eb51d9e80c12f9c1a8ee921cc24aa7a13482cb29ae031e",
+			"implementationRevision": "4094931879e55287eec1a1306d857111293b7460",
+			"inputDigest": "901b2125ede561263fbe03428207fabb92c8ebc006d5b0410f038f48f0626b73"
+		},
+		{
+			"artifactId": "MAESTRO-POLICY-CONSUMERS-BUILD",
+			"path": "Plans/integration-completion/evidence/policy-build.json",
+			"sha256": "e253139055c3b804bbf2ff6e6f155d360e426c48132869d284c42c2a29232b09",
+			"implementationRevision": "d86ddb94c43360d46631a9f88e61f4a931435103",
+			"inputDigest": "9f5807ac2d21e92e9dd8952e3703e32ba4d90054bd8fa2ab432804cbe3ea6771"
+		},
+		{
+			"artifactId": "MAESTRO-WORKFLOW-CONSUMERS-BUILD",
+			"path": "Plans/integration-completion/evidence/workflow-build.json",
+			"sha256": "9f1105a55d036d31724b7e7960e4f77c56812ebce2bf3c3f23600bf332c08bec",
+			"implementationRevision": "59ea7a5309eecc8d7befafd56e6dd599b2fe3b11",
+			"inputDigest": "5b64f9ca421d985cb18538ffe720cccba91bbf18d46960bfe03876402b64ed2c"
+		}
+	],
+	"archives": {
+		"runtime": {
+			"path": "/Users/dr3/dev-shit/Maestro/dist/mega-maestro-runtime/0.36.0/b6f9487e5434fad1b2068d26bf568456e3ec0fbc87868e5073387472b932d961/runtime.tgz",
+			"sha256": "b6f9487e5434fad1b2068d26bf568456e3ec0fbc87868e5073387472b932d961",
+			"sha512": "8d74c3727e59691c710f7d97570c15253a43ff8d9918409034aa3f3dab34f6712bfe6954cf0224d3b9be260bfc73facd833be1eb1ee8365c3fed597a90b4d168",
+			"bytes": 2653979,
+			"manifest": {
+				"path": "/Users/dr3/dev-shit/Maestro/dist/mega-maestro-runtime/0.36.0/b6f9487e5434fad1b2068d26bf568456e3ec0fbc87868e5073387472b932d961/artifact.json",
+				"sha256": "d8f1b3214ae689bfe42d0082681f6efa7af133ad988684c22930be1f3c724d2c"
+			},
+			"sidecar": {
+				"path": "/Users/dr3/dev-shit/Maestro/dist/mega-maestro-runtime/0.36.0/b6f9487e5434fad1b2068d26bf568456e3ec0fbc87868e5073387472b932d961/runtime.tgz.sha256",
+				"sha256": "cb7a7685ba06a9b01ae625c8d199fe088e03bb50b03d0e8440099ff8c6364f43"
+			},
+			"payloadFiles": 309,
+			"payloadDigest": "946c21ba976501b66b5c551d5df1aaadab7238ce9f6c805f19bce673ed922b0b",
+			"payloadMap": "/Users/dr3/dev-shit/Maestro/dist/mega-maestro-runtime/0.36.0/b6f9487e5434fad1b2068d26bf568456e3ec0fbc87868e5073387472b932d961/artifact.json#/payloadSha256"
+		},
+		"desktopCompiled": {
+			"path": "/Users/dr3/dev-shit/Maestro/dist/mega-maestro-gaps01-desktop/1/7740bfd0cf671d7d67491376df2ed06712ac1f9518f1fce75ce660d7693e7d26/desktop-compiled.tgz",
+			"sha256": "7740bfd0cf671d7d67491376df2ed06712ac1f9518f1fce75ce660d7693e7d26",
+			"sha512": "b22161125173fb1b6960072b218d01d2028b15d6d5a005cc77c0d88b1a97ba7606b0cc5a15c0a016764edc727af00e492b316a2a3a0118a5e4344f500bd4bbd5",
+			"bytes": 19860496,
+			"manifest": {
+				"path": "/Users/dr3/dev-shit/Maestro/dist/mega-maestro-gaps01-desktop/1/7740bfd0cf671d7d67491376df2ed06712ac1f9518f1fce75ce660d7693e7d26/artifact.json",
+				"sha256": "7b372fde121236d84e5c4cad6212bbc3904334dcbf569b84e80f85ac2cb3b867"
+			},
+			"sidecar": {
+				"path": "/Users/dr3/dev-shit/Maestro/dist/mega-maestro-gaps01-desktop/1/7740bfd0cf671d7d67491376df2ed06712ac1f9518f1fce75ce660d7693e7d26/desktop-compiled.tgz.sha256",
+				"sha256": "7e8fdd3e01f5bddbb4027fc4b2f5a15ce7ff9a082334e423f912d4bcd1c5c5e9"
+			},
+			"payloadFiles": 2140,
+			"payloadDigest": "dafd578d525cda7e3e0d474b65c3bcbcaf90c4c0c1aeb1b353011cd5c9dc0fed",
+			"payloadMap": "/Users/dr3/dev-shit/Maestro/dist/mega-maestro-gaps01-desktop/1/7740bfd0cf671d7d67491376df2ed06712ac1f9518f1fce75ce660d7693e7d26/artifact.json#/payloadSha256"
+		},
+		"publicContracts": {
+			"name": "@mega-maestro/contracts",
+			"version": "0.1.0",
+			"path": "/Users/dr3/dev-shit/mega-maestro/artifacts/enterprise/0.1.0/c34e6cd0590fdce90cd2ace60f8f43ee278f6d24d62d4b6caab2bb4f720ab177/contracts.tgz",
+			"sha256": "c34e6cd0590fdce90cd2ace60f8f43ee278f6d24d62d4b6caab2bb4f720ab177",
+			"integrity": "sha512-MNZe6OgdHh5LwxRVY85zDkudqUFJjyQHdW/IgfuzH3S0cGnN1lKLaAV4dT1Z4hpyXzMbhIYiKQjpECt9RWNhTA==",
+			"manifest": {
+				"path": "/Users/dr3/dev-shit/mega-maestro/artifacts/enterprise/0.1.0/c34e6cd0590fdce90cd2ace60f8f43ee278f6d24d62d4b6caab2bb4f720ab177/artifact.json",
+				"sha256": "6c346c4fa4a7b7d4ec41b1624c7b155715128ec04c877bf0830910fd49aa127d"
+			},
+			"sidecar": {
+				"path": "/Users/dr3/dev-shit/mega-maestro/artifacts/enterprise/0.1.0/c34e6cd0590fdce90cd2ace60f8f43ee278f6d24d62d4b6caab2bb4f720ab177/contracts.tgz.sha256",
+				"sha256": "36b351059a4fc51fda3c278dc87d892fa098ac8ad8517972cec0f82f01a88fd6"
+			},
+			"payloadFiles": 46,
+			"payloadDigest": "12976943661224f30e6461430332d1fefb36f4133bd38e93cb02f006d52296fd"
+		}
+	},
+	"builds": {
+		"libraryProvenance": {
+			"path": ".maestro/playbooks/Working/MCOMP-21-16/library/provenance.json",
+			"sha256": "c774421011664b0ac44db82074b7cbcc34003e9dc504bef88741c0b2592905ba"
+		},
+		"desktopPayloadMap": {
+			"path": ".maestro/playbooks/Working/MCOMP-21-16/main-build-payload.json",
+			"sha256": "6b415f5cdd67e02e0317ee24ba098b303ef49b42e16a31f87d8baaefc95349f6"
+		},
+		"scope": "Runtime library, Electron main/shared/preload and renderer compiled locally. Desktop archive contains compiled inputs with external Electron/Node/native dependencies, not an installable native app. No GUI session was qualified."
+	},
+	"archiveValidation": {
+		"integrity": {
+			"path": ".maestro/playbooks/Working/MCOMP-21-16/archive-validation.json",
+			"sha256": "80fb90e6bca9a093d2bcdeb66497b4a81fda2325f00a4b21709581788454853b"
+		},
+		"importTrace": {
+			"path": ".maestro/playbooks/Working/MCOMP-21-16/archive-redirects.log",
+			"sha256": "6e18378d9ed17d8343dab55eb41e8bf333a732e56faecf343c4f6899e7e4f7dc"
+		},
+		"runtimeInput": {
+			"path": ".maestro/playbooks/Working/MCOMP-21-16/runtime-input-validation.json",
+			"sha256": "00b022d83321a7e2bdd20127d3ce51d00dcb4a56359041555bdf5a148888733b"
+		},
+		"desktopRedirects": 50,
+		"runtimeRedirects": 34,
+		"scope": "SHA-256/SHA-512, sidecars, manifests, member sets, safe paths and every payload hash verified before extraction. Every relative import of the desktop egress chokepoint (utils/fetchWithTimeout), listener gate (enterprise/listener-gate) and credential custody ceiling (enterprise/credential-custody) was redirected to the compiled desktop archive, and every import of the TUI admission stamp (managed/tui-handshake), launch argument builder (launch/agent-args) and provider definitions (providers/definitions) to the public runtime bundle; twelve suites (Cue status/webhook/notify/process sinks, standalone Cue engine, detached runtime host, listener sink scan, Lite transport and paired relay, Codex auth custody, web token custody, CLI spawner stamp, managed launch credentials) ran on those bytes. Suites whose subjects depend on vi.mock replacements of their own siblings (local-effects, worktree, Symphony, persistence, plugin ledger) stay source-only and are not claimed archive-tested. Public declaration checks and a plain Node load of the runtime (stamp refusal, inherited admission stripped, codex standard args, bounded-standard refusal) passed. Temporary identity-only pin leaves the historical runtime pin unchanged."
+	},
+	"tests": {
+		"source": {
+			"files": 28,
+			"passed": 1297,
+			"failed": 0,
+			"skipped": 0,
+			"results": {
+				"path": ".maestro/playbooks/Working/MCOMP-21-16/source-tests.json",
+				"sha256": "2165c0d041ea632aa513e973e5945f362343fe70c351b81fd347f8f4107832ad"
+			}
+		},
+		"archived": {
+			"files": 12,
+			"passed": 482,
+			"failed": 0,
+			"skipped": 0,
+			"results": {
+				"path": ".maestro/playbooks/Working/MCOMP-21-16/archive-tests.json",
+				"sha256": "3267b36c7c2761023e23d907359515bfd95f22f51cf97fd3536eaec2bc043956"
+			}
+		},
+		"boundary": "Local typed-port and public-schema fixtures, real ceiling sources over temporary directories and recording sinks only. No signed production delivery, real tenant, provider, native peer or live endpoint supplied authority."
+	},
+	"behavior": [
+		"Standalone Cue composes the installation standing before it binds: the status server and webhook listener are held at the listener gate (cue engine start reports LISTENER_HELD), the GitHub poller at the repository gate, outbound egress, credential custody (including a notify webhook URL credential) and the SusFactor scan policy are installed, and an omitted host is never read as standalone.",
+		"The detached runtime host holds its own listener (runtime-host kind) before telemetry, Cue or the server start, and composes the endpoint inbox client and command service over its own adapter.",
+		"Headless producers (CLI spawner, standalone and desktop Cue) strip an inherited maestro-p handshake and steering token and stamp the admission they signed for this run after the gate; an unsignable stamp refuses the launch and releases the lease.",
+		"Credential custody holds the web link token (sealed, owner-bound, anchored slot with migration and clear) and Codex auth reads; the plugin authorization ledger holds mint, allowlist widening and verify to the managed standing and the trusted-key pin.",
+		"Renderer agent-record writes are held field by field to the per-provider config locks and corrected back to clients; worktree cleanup, Symphony fork remote changes, clone cleanup and remote move/copy overwrites are held as git or delete effects against a re-read handle.",
+		"Plugin media fetches carry their egress class; Lite pairing transport and every paired relay request, upgrade and reconnect are held under the lite-peer class before and after the destination resolves.",
+		"A managed or explicitly standard batch turn uses each provider qualified bounded standard combination (codex, gemini-cli, grok) and refuses by name a provider with none."
+	],
+	"contractMappings": {
+		"pin": {
+			"path": "vendor/mega-maestro/contracts.pin.json",
+			"sha256": "8343292d926cf3ed7b67a3c6f34a88eecedf85045dddb187d0357deae3daf3f4"
+		},
+		"coverage": {
+			"path": "Plans/integration-completion/contract-coverage.json",
+			"sha256": "31864e1fda4d21be0ddcd10e31445ca12a5c57a9293a738b4c338ae22e9593f3"
+		},
+		"endpointProtocolsAccepted": [1],
+		"liveNegotiationPerformed": false,
+		"extensions": [
+			{
+				"id": "DESKTOP-LOCAL/1",
+				"status": "proposed-not-negotiated",
+				"productionProducer": false
+			},
+			{
+				"id": "CUE-DETECTION/1",
+				"status": "proposed-not-negotiated",
+				"productionProducer": false
+			}
+		],
+		"remaining": "Gap closures consume the existing local ceiling sources (listener, egress, credential custody, repository, local effects, settings, plugin) and record their Maestro-local behavior under DESKTOP-LOCAL/1 and CUE-DETECTION/1. Explicit constraints in authenticated policy remain pending in those proposals. No shipped wire operation or advertised capability was invented; production admission still requires authenticated negotiated authority."
+	},
+	"checks": [
+		{
+			"name": "archive-tests",
+			"command": "st node node_modules/vitest/vitest.mjs run --config .maestro/playbooks/Working/MCOMP-21-16/vitest.archive.config.mts src/__tests__/cli/commands/cue-engine-status-port.test.ts src/__tests__/cli/services/runtime-host.test.ts src/__tests__/main/enterprise/listener-policy.test.ts src/__tests__/main/lite/tailnet-relay.test.ts src/__tests__/main/lite/managed-effects.test.ts src/__tests__/main/agents/codex-auth.test.ts src/__tests__/main/web-server/web-link-custody.test.ts src/__tests__/main/cue/cue-notify-webhook.test.ts src/__tests__/main/cue/cue-process-lifecycle.managed.test.ts src/__tests__/shared/maestro-lib/managed/credentials.test.ts src/__tests__/cli/services/agent-spawner.test.ts src/__tests__/cli/services/cue-standalone-engine.test.ts --reporter=default --reporter=json --outputFile=.maestro/playbooks/Working/MCOMP-21-16/archive-tests.json",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-21-16/archive-tests.log",
+				"sha256": "984c563991b48507779549b1687a99c9a47c149b157e871f4ed225397fd56269"
+			}
+		},
+		{
+			"name": "build-library",
+			"command": "st node scripts/build-maestro-lib.mjs --out-dir .maestro/playbooks/Working/MCOMP-21-16/library",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-21-16/build-library.log",
+				"sha256": "f9c16a6e082b0266bb470030bd37a793ea88de583a289594ff9c70c251843aab"
+			}
+		},
+		{
+			"name": "build-main",
+			"command": "st npm run build:main",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-21-16/build-main.log",
+				"sha256": "539782dd44260aae9a62e655ed06b10ad73f74cb24be772fc2a7fba4d70f5223"
+			}
+		},
+		{
+			"name": "build-renderer",
+			"command": "st npm run build:renderer",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-21-16/build-renderer.log",
+				"sha256": "f98f353689560879103bfafb295f54812335096ee9c7795016694e3459c7fac1"
+			}
+		},
+		{
+			"name": "contract-vectors",
+			"command": "st node .maestro/playbooks/Working/MCOMP-00-03/exact-dependency-vectors.mjs",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-21-16/contract-vectors.log",
+				"sha256": "e15ef2fcaa677666d1461af0a5a760e956fee6ca69c90a14e15ea37d2443d295"
+			}
+		},
+		{
+			"name": "contracts",
+			"command": "st node .maestro/playbooks/Working/MCOMP-00-01/verify-inputs.mjs",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-21-16/contracts.log",
+				"sha256": "36eef50e024c7307bd9a3e4832a63c265dcb6df7b15878eb105b99f0b2f989a9"
+			}
+		},
+		{
+			"name": "dash-lint",
+			"command": "st node node_modules/eslint/bin/eslint.js -c eslint.dashes.config.mjs Plans/integration-completion/contract-coverage.json docs/agent-guides/CANONICAL-UTILITIES.md docs/agent-guides/CLI-HEADLESS.md docs/mega-maestro.md src/__tests__/cli/commands/cue-engine-status-port.test.ts src/__tests__/cli/services/agent-spawner.test.ts src/__tests__/cli/services/cue-standalone-engine.test.ts src/__tests__/cli/services/host-managed.test.ts src/__tests__/cli/services/runtime-host.test.ts src/__tests__/main/agents/codex-auth.test.ts src/__tests__/main/autorun-ipc.test.ts src/__tests__/main/cue/cue-notify-webhook.test.ts src/__tests__/main/cue/cue-process-lifecycle.managed.test.ts src/__tests__/main/cue/cue-susfactor.test.ts src/__tests__/main/enterprise/egress-policy.test.ts src/__tests__/main/enterprise/listener-policy.test.ts src/__tests__/main/ipc/handlers/autorun.managed.test.ts src/__tests__/main/ipc/handlers/autorun.test.ts src/__tests__/main/ipc/handlers/filesystem.managed.test.ts src/__tests__/main/ipc/handlers/git.test.ts src/__tests__/main/ipc/handlers/git/worktree.managed.test.ts src/__tests__/main/ipc/handlers/persistence.locks.test.ts src/__tests__/main/lite/managed-effects.test.ts src/__tests__/main/lite/tailnet-relay.test.ts src/__tests__/main/plugins/authorization-ledger.test.ts src/__tests__/main/plugins/plugin-host-deps-wiring.test.ts src/__tests__/main/services/symphony-runner.test.ts src/__tests__/main/utils/symphony-fork.test.ts src/__tests__/main/web-server/web-link-custody.test.ts src/__tests__/shared/maestro-lib/managed/credentials.test.ts src/__tests__/shared/managedSettingsLock.test.ts src/cli/commands/cue-engine.ts src/cli/commands/host.ts src/cli/services/agent-spawner.ts src/cli/services/cue-standalone-engine.ts src/cli/services/host-managed.ts src/cli/services/runtime-host.ts src/main/agents/codex-auth.ts src/main/agents/codex-usage-sampler.ts src/main/cue/cue-notify-webhook.ts src/main/cue/cue-process-lifecycle.ts src/main/cue/cue-spawn-builder.ts src/main/cue/cue-status-server.ts src/main/cue/cue-susfactor.ts src/main/cue/cue-webhook-server.ts src/main/enterprise/commands.ts src/main/enterprise/credential-custody.ts src/main/enterprise/egress-policy.ts src/main/enterprise/listener-policy.ts src/main/enterprise/local-effects-policy.ts src/main/enterprise/settings-policy.ts src/main/index.ts src/main/ipc/bootstrap/index.ts src/main/ipc/handlers/autorun.ts src/main/ipc/handlers/filesystem.ts src/main/ipc/handlers/git/shared.ts src/main/ipc/handlers/git/worktree.ts src/main/ipc/handlers/persistence.ts src/main/ipc/handlers/symphony/contributionStart.ts src/main/ipc/handlers/symphony/index.ts src/main/ipc/handlers/symphony/lifecycle.ts src/main/ipc/handlers/symphony/shared.ts src/main/ipc/handlers/web.ts src/main/lite/pairing/transport.ts src/main/lite/tailnet-relay.ts src/main/plugins/authorization-ledger.ts src/main/plugins/consent-minter.ts src/main/plugins/permission-broker.ts src/main/plugins/plugin-host-handlers.ts src/main/plugins/plugin-media-tools.ts src/main/preload/symphony.ts src/main/services/symphony-runner.ts src/main/utils/remote-fs.ts src/main/utils/symphony-fork.ts src/main/web-server/web-server-factory.ts src/shared/maestro-lib/launch/agent-args.ts src/shared/maestro-lib/managed/tui-handshake.ts src/shared/maestro-lib/providers/definitions.ts src/shared/maestro-lib/run/start-turn.ts src/shared/managedSettingsLock.ts",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-21-16/dash-lint.log",
+				"sha256": "b5ebaa2595d39fb2b6d784bc78213e6523133354ac702b7e9c68c1e90f518c86"
+			}
+		},
+		{
+			"name": "dependencies",
+			"command": "st node .maestro/playbooks/Working/MCOMP-21-16/verify-dependencies.mjs",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-21-16/dependencies.log",
+				"sha256": "f8eb733525ffdaed195613cb17ebf9f6bf00b132146ba5887d6704ff646e9bf6"
+			}
+		},
+		{
+			"name": "docs",
+			"command": "st npm run docs:verify",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-21-16/docs.log",
+				"sha256": "56683629ce6ed30d817e0a34bc4cde8c75211aade58d0b3584a9c459b85764b2"
+			}
+		},
+		{
+			"name": "eslint",
+			"command": "st node node_modules/eslint/bin/eslint.js src/cli/commands/cue-engine.ts src/cli/commands/host.ts src/cli/services/agent-spawner.ts src/cli/services/cue-standalone-engine.ts src/cli/services/host-managed.ts src/cli/services/runtime-host.ts src/main/agents/codex-auth.ts src/main/agents/codex-usage-sampler.ts src/main/cue/cue-notify-webhook.ts src/main/cue/cue-process-lifecycle.ts src/main/cue/cue-spawn-builder.ts src/main/cue/cue-status-server.ts src/main/cue/cue-susfactor.ts src/main/cue/cue-webhook-server.ts src/main/enterprise/commands.ts src/main/enterprise/credential-custody.ts src/main/enterprise/egress-policy.ts src/main/enterprise/listener-policy.ts src/main/enterprise/local-effects-policy.ts src/main/enterprise/settings-policy.ts src/main/index.ts src/main/ipc/bootstrap/index.ts src/main/ipc/handlers/autorun.ts src/main/ipc/handlers/filesystem.ts src/main/ipc/handlers/git/shared.ts src/main/ipc/handlers/git/worktree.ts src/main/ipc/handlers/persistence.ts src/main/ipc/handlers/symphony/contributionStart.ts src/main/ipc/handlers/symphony/index.ts src/main/ipc/handlers/symphony/lifecycle.ts src/main/ipc/handlers/symphony/shared.ts src/main/ipc/handlers/web.ts src/main/lite/pairing/transport.ts src/main/lite/tailnet-relay.ts src/main/plugins/authorization-ledger.ts src/main/plugins/consent-minter.ts src/main/plugins/permission-broker.ts src/main/plugins/plugin-host-handlers.ts src/main/plugins/plugin-media-tools.ts src/main/preload/symphony.ts src/main/services/symphony-runner.ts src/main/utils/remote-fs.ts src/main/utils/symphony-fork.ts src/main/web-server/web-server-factory.ts src/shared/maestro-lib/launch/agent-args.ts src/shared/maestro-lib/managed/tui-handshake.ts src/shared/maestro-lib/providers/definitions.ts src/shared/maestro-lib/run/start-turn.ts src/shared/managedSettingsLock.ts",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-21-16/eslint.log",
+				"sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+			}
+		},
+		{
+			"name": "extract-all",
+			"command": "st python3 .maestro/playbooks/Working/MCOMP-21-16/extract.py",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-21-16/extract-all.log",
+				"sha256": "80fb90e6bca9a093d2bcdeb66497b4a81fda2325f00a4b21709581788454853b"
+			}
+		},
+		{
+			"name": "format",
+			"command": "st node node_modules/prettier/bin/prettier.cjs --check Plans/integration-completion/contract-coverage.json docs/agent-guides/CANONICAL-UTILITIES.md docs/agent-guides/CLI-HEADLESS.md docs/mega-maestro.md src/__tests__/cli/commands/cue-engine-status-port.test.ts src/__tests__/cli/services/agent-spawner.test.ts src/__tests__/cli/services/cue-standalone-engine.test.ts src/__tests__/cli/services/host-managed.test.ts src/__tests__/cli/services/runtime-host.test.ts src/__tests__/main/agents/codex-auth.test.ts src/__tests__/main/autorun-ipc.test.ts src/__tests__/main/cue/cue-notify-webhook.test.ts src/__tests__/main/cue/cue-process-lifecycle.managed.test.ts src/__tests__/main/cue/cue-susfactor.test.ts src/__tests__/main/enterprise/egress-policy.test.ts src/__tests__/main/enterprise/listener-policy.test.ts src/__tests__/main/ipc/handlers/autorun.managed.test.ts src/__tests__/main/ipc/handlers/autorun.test.ts src/__tests__/main/ipc/handlers/filesystem.managed.test.ts src/__tests__/main/ipc/handlers/git.test.ts src/__tests__/main/ipc/handlers/git/worktree.managed.test.ts src/__tests__/main/ipc/handlers/persistence.locks.test.ts src/__tests__/main/lite/managed-effects.test.ts src/__tests__/main/lite/tailnet-relay.test.ts src/__tests__/main/plugins/authorization-ledger.test.ts src/__tests__/main/plugins/plugin-host-deps-wiring.test.ts src/__tests__/main/services/symphony-runner.test.ts src/__tests__/main/utils/symphony-fork.test.ts src/__tests__/main/web-server/web-link-custody.test.ts src/__tests__/shared/maestro-lib/managed/credentials.test.ts src/__tests__/shared/managedSettingsLock.test.ts src/cli/commands/cue-engine.ts src/cli/commands/host.ts src/cli/services/agent-spawner.ts src/cli/services/cue-standalone-engine.ts src/cli/services/host-managed.ts src/cli/services/runtime-host.ts src/main/agents/codex-auth.ts src/main/agents/codex-usage-sampler.ts src/main/cue/cue-notify-webhook.ts src/main/cue/cue-process-lifecycle.ts src/main/cue/cue-spawn-builder.ts src/main/cue/cue-status-server.ts src/main/cue/cue-susfactor.ts src/main/cue/cue-webhook-server.ts src/main/enterprise/commands.ts src/main/enterprise/credential-custody.ts src/main/enterprise/egress-policy.ts src/main/enterprise/listener-policy.ts src/main/enterprise/local-effects-policy.ts src/main/enterprise/settings-policy.ts src/main/index.ts src/main/ipc/bootstrap/index.ts src/main/ipc/handlers/autorun.ts src/main/ipc/handlers/filesystem.ts src/main/ipc/handlers/git/shared.ts src/main/ipc/handlers/git/worktree.ts src/main/ipc/handlers/persistence.ts src/main/ipc/handlers/symphony/contributionStart.ts src/main/ipc/handlers/symphony/index.ts src/main/ipc/handlers/symphony/lifecycle.ts src/main/ipc/handlers/symphony/shared.ts src/main/ipc/handlers/web.ts src/main/lite/pairing/transport.ts src/main/lite/tailnet-relay.ts src/main/plugins/authorization-ledger.ts src/main/plugins/consent-minter.ts src/main/plugins/permission-broker.ts src/main/plugins/plugin-host-handlers.ts src/main/plugins/plugin-media-tools.ts src/main/preload/symphony.ts src/main/services/symphony-runner.ts src/main/utils/remote-fs.ts src/main/utils/symphony-fork.ts src/main/web-server/web-server-factory.ts src/shared/maestro-lib/launch/agent-args.ts src/shared/maestro-lib/managed/tui-handshake.ts src/shared/maestro-lib/providers/definitions.ts src/shared/maestro-lib/run/start-turn.ts src/shared/managedSettingsLock.ts",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-21-16/format.log",
+				"sha256": "17aa973d3f004560237d9a95171210b0671deff23d61628eecf7322ff5938f20"
+			}
+		},
+		{
+			"name": "package",
+			"command": "st node .maestro/playbooks/Working/MCOMP-21-16/package.mjs",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-21-16/package.log",
+				"sha256": "a7dfd8c6e3b3604ca28e53f8b58d40502c431e572ea5987d7675c882ecdd728b"
+			}
+		},
+		{
+			"name": "package-desktop",
+			"command": "st node .maestro/playbooks/Working/MCOMP-21-16/package-desktop.mjs",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-21-16/package-desktop.log",
+				"sha256": "6026ef6ddb3a03b3677d8efbad57cc3617432c0a33f82db9e5056091da73def2"
+			}
+		},
+		{
+			"name": "plain-node-load",
+			"command": "st node .maestro/playbooks/Working/MCOMP-21-16/load.mjs",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-21-16/plain-node-load.log",
+				"sha256": "97e519105164d25b77df495bf5cfbcb6e5a3bbcf6c517b60ef66c41f00a7aa37"
+			}
+		},
+		{
+			"name": "public-types",
+			"command": "st node node_modules/typescript/bin/tsc --ignoreConfig --noEmit --strict --target es2022 --module esnext --moduleResolution bundler --skipLibCheck --esModuleInterop .maestro/playbooks/Working/MCOMP-21-16/consumer.ts",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-21-16/public-types.log",
+				"sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+			}
+		},
+		{
+			"name": "runtime-input",
+			"command": "st node .maestro/playbooks/Working/MCOMP-21-16/verify-runtime.mjs",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-21-16/runtime-input.log",
+				"sha256": "e484de55cc2c81fdea3925934f76536e7ed4250da69c78fc6d678f223e5bf767"
+			}
+		},
+		{
+			"name": "schemas",
+			"command": "st node .maestro/playbooks/Working/MCOMP-00-01/load-schemas.mjs",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-21-16/schemas.log",
+				"sha256": "b5948d1f375bddd6ecbf9e871653e313413adbb7b5a4d25b063d3f2e153a443d"
+			}
+		},
+		{
+			"name": "source-tests",
+			"command": "st node node_modules/vitest/vitest.mjs run src/__tests__/cli/commands/cue-engine-status-port.test.ts src/__tests__/cli/services/agent-spawner.test.ts src/__tests__/cli/services/cue-standalone-engine.test.ts src/__tests__/cli/services/host-managed.test.ts src/__tests__/cli/services/runtime-host.test.ts src/__tests__/integration/mega-maestro/conformance.test.ts src/__tests__/main/agents/codex-auth.test.ts src/__tests__/main/autorun-ipc.test.ts src/__tests__/main/cue/cue-notify-webhook.test.ts src/__tests__/main/cue/cue-process-lifecycle.managed.test.ts src/__tests__/main/cue/cue-susfactor.test.ts src/__tests__/main/enterprise/egress-policy.test.ts src/__tests__/main/enterprise/listener-policy.test.ts src/__tests__/main/ipc/handlers/autorun.managed.test.ts src/__tests__/main/ipc/handlers/autorun.test.ts src/__tests__/main/ipc/handlers/filesystem.managed.test.ts src/__tests__/main/ipc/handlers/git.test.ts src/__tests__/main/ipc/handlers/git/worktree.managed.test.ts src/__tests__/main/ipc/handlers/persistence.locks.test.ts src/__tests__/main/lite/managed-effects.test.ts src/__tests__/main/lite/tailnet-relay.test.ts src/__tests__/main/plugins/authorization-ledger.test.ts src/__tests__/main/plugins/plugin-host-deps-wiring.test.ts src/__tests__/main/services/symphony-runner.test.ts src/__tests__/main/utils/symphony-fork.test.ts src/__tests__/main/web-server/web-link-custody.test.ts src/__tests__/shared/maestro-lib/managed/credentials.test.ts src/__tests__/shared/managedSettingsLock.test.ts --reporter=default --reporter=json --outputFile=.maestro/playbooks/Working/MCOMP-21-16/source-tests.json",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-21-16/source-tests.log",
+				"sha256": "f6e9177f8a7094924c654a54e1cc81215e86ea54fa2dc320839daf50568a27f5"
+			}
+		},
+		{
+			"name": "typecheck",
+			"command": "st npm run lint",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-21-16/typecheck.log",
+				"sha256": "ed9e886b2a647f29f520344068302948b8558e4b83a448690f8259049c5af0b3"
+			}
+		}
+	],
+	"limitations": [
+		"This BUILD supplies local compiled inputs only; residual-gap-closure pair, provider and native outcomes remain in MCOMP-22 and later qualification tasks.",
+		"Renderer build exited zero; its warnings are retained in the log. Compilation is not GUI/runtime qualification.",
+		"Bounded standard-mode combinations were verified against the named local provider versions only (codex 0.167.0, gemini-cli 0.67.0, grok 1.0.77); no real-provider turn was qualified here.",
+		"The runtime library version string stays 0.36.0 although its bytes differ from earlier archives. A counterpart must pin this archive by digest and requalify before claiming compatibility.",
+		"Continuations MCOMP-21-01A..15B were reconciled into program.json in f82d25169 before this check (REPAIR continuations entered as TEST); the conformance suite that maps every coverage consumer to a manifest task passes on that manifest.",
+		"Archives and detailed evidence are workspace-local handoff artifacts. No remote artifact registry, native application archive, CI matrix qualification or production release is claimed."
+	],
+	"imagesAnalyzed": 0
+}
