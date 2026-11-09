@@ -51,7 +51,19 @@ import {
 	readDeferredContent,
 } from '../../stores/deferred-session-content';
 import type { SessionTranscriptPatch } from '../../../shared/sessionTranscript';
-import { mergeSessionPersistenceChanges } from '../../../shared/sessionPersistenceMerge';
+import {
+	applyAgentConfigEdit,
+	mergeSessionPersistenceChanges,
+	restoreGovernedAgentFields,
+} from '../../../shared/sessionPersistenceMerge';
+import {
+	authorizeManagedAgentCommand,
+	type ManagedAgentAuthorityDeps,
+	type ManagedAgentCommand,
+} from '../../agents/agent-config-writes';
+import type { ManagedAgentFieldRefusal } from '../../../shared/maestro-lib/managed/agent-policy';
+import type { DesktopAuthoringOperation } from '../../../shared/maestro-lib/managed/desktop-contract';
+import type { AgentRecord } from '../../../shared/maestro-lib/store/records';
 import {
 	holdAgentRecordWrite,
 	holdSettingWrite,
@@ -180,22 +192,61 @@ export interface HeldAgentRecordCorrection {
 }
 
 /**
- * Hold every record a renderer, bridge or plugin write touches to the managed
- * per-provider lock (MCOMP-21-08) before it reaches disk: `holdAgentRecordWrite()`
- * against the stored record, the same evaluation `agents:setConfig*` and
- * `update_session_config` meet, so a bulk flush is not a way around them. A
- * refused field is put back and logged; the rest of the write is kept.
+ * The host create/edit authority every whole-record write meets (MCOMP-23-02),
+ * the same `authorizeManagedAgentCommand()` the commit operation runs. Null (the
+ * default, and every test that installs none): standalone, nothing held.
+ */
+let agentMutationAuthority: ManagedAgentAuthorityDeps | null = null;
+
+/** Install (or clear) the host's agent mutation authority; composed once in index.ts. */
+export function setAgentMutationAuthority(authority: ManagedAgentAuthorityDeps | null): void {
+	agentMutationAuthority = authority;
+}
+
+const STANDALONE_AGENT_AUTHORITY: ManagedAgentAuthorityDeps = {
+	isManaged: () => false,
+	options: () => {
+		throw new Error('standalone');
+	},
+	resolver: null,
+};
+
+/** Run one command through the installed authority (standalone when none is installed). */
+function authorizeAgentRecord(command: ManagedAgentCommand) {
+	return authorizeManagedAgentCommand(
+		agentMutationAuthority ?? STANDALONE_AGENT_AUTHORITY,
+		command
+	);
+}
+
+/**
+ * Hold every record a renderer, bridge or plugin write touches before it
+ * reaches disk. First the managed per-provider lock (MCOMP-21-08):
+ * `holdAgentRecordWrite()` against the stored record, the same evaluation
+ * `agents:setConfig*` and `update_session_config` meet; a refused field is put
+ * back and the rest of the write kept. Then the host create/edit command
+ * (MCOMP-23-02), so a bulk flush cannot change a governed field around it: a
+ * refused edit has its governed fields put back (transcript and every other
+ * change kept); a refused new record is not persisted at all and is reported
+ * in `refusedIds`. Standalone, both admit everything.
  */
 export function holdTouchedAgentRecords(
 	sessions: StoredSession[],
 	touchedIds: ReadonlySet<string>,
 	previousMap: ReadonlyMap<string, StoredSession>
-): { sessions: StoredSession[]; corrections: HeldAgentRecordCorrection[] } {
+): { sessions: StoredSession[]; corrections: HeldAgentRecordCorrection[]; refusedIds: string[] } {
 	const corrections: HeldAgentRecordCorrection[] = [];
-	const next = sessions.map((session) => {
-		if (!touchedIds.has(session.id)) return session;
-		const { record, held } = holdAgentRecordWrite(previousMap.get(session.id), session);
-		if (held.length === 0) return session;
+	const refusedIds: string[] = [];
+	const next: StoredSession[] = [];
+	for (const session of sessions) {
+		if (!touchedIds.has(session.id)) {
+			next.push(session);
+			continue;
+		}
+		const previous = previousMap.get(session.id);
+		const lockHold = holdAgentRecordWrite(previous, session);
+		let record = lockHold.record;
+		const held = lockHold.held;
 		for (const hold of held)
 			logger.warn(`Agent record field held by the managed policy: ${hold.lockKey}`, 'Sessions', {
 				sessionId: hold.sessionId,
@@ -204,10 +255,127 @@ export function holdTouchedAgentRecords(
 				message: hold.message,
 				policyRevision: hold.policyRevision,
 			});
-		corrections.push({ sent: session, restored: record });
-		return record;
+		const outcome = authorizeAgentRecord({
+			operation: previous ? 'edit' : 'create',
+			expectedPolicyRevision: null,
+			before: (previous as AgentRecord | undefined) ?? null,
+			after: record as AgentRecord,
+		});
+		if (!outcome.allowed) {
+			logger.warn(
+				`Agent record write refused by the managed policy: ${outcome.reason}`,
+				'Sessions',
+				{
+					sessionId: session.id,
+					operation: previous ? 'edit' : 'create',
+					code: outcome.code,
+					fields: outcome.fields.map((field) => field.field),
+					policyRevision: outcome.policyRevision,
+				}
+			);
+			if (!previous) {
+				refusedIds.push(session.id);
+				continue;
+			}
+			record = restoreGovernedAgentFields(previous, record);
+		}
+		if (record !== session) corrections.push({ sent: session, restored: record });
+		next.push(record);
+	}
+	return { sessions: next, corrections, refusedIds };
+}
+
+/** One host create, clone, import or edit of an agent record (`sessions:commitAgent`). */
+export interface AgentCommitRequest {
+	operation: DesktopAuthoringOperation;
+	/** The whole new record (create, clone, import), or the edited configuration (edit; rows are ignored). */
+	record: StoredSession;
+	/** The policy revision the form was built from; null or absent when it carries none. */
+	expectedPolicyRevision?: number | null;
+	/** Selections the record does not carry: credential references, permission mode, transport. */
+	execution?: ManagedAgentCommand['execution'];
+}
+
+export type AgentCommitOutcome =
+	/** `record` is the canonical stored record: insert it, never the draft that was sent. */
+	| { ok: true; record: StoredSession; managed: boolean; policyRevision: number | null }
+	| {
+			ok: false;
+			code: 'invalid' | 'conflict' | 'locked' | 'unavailable' | 'stale' | 'operation' | 'field';
+			reason: string;
+			policyRevision: number | null;
+			fields: ManagedAgentFieldRefusal[];
+			/** `locked` only: the per-provider lock keys that refused. */
+			locked?: string[];
+	  };
+
+/**
+ * Decide one commit against the stored records (pure: the handler persists).
+ * The record is checked exactly as it will be committed: per-provider locks
+ * first, then the host create/edit command. A refusal changes nothing and
+ * names its fields, so the form keeps its draft.
+ */
+export function decideAgentCommit(
+	request: AgentCommitRequest,
+	stored: ReadonlyMap<string, StoredSession>,
+	tombstones: ReadonlySet<string> = new Set()
+):
+	| {
+			ok: true;
+			record: StoredSession;
+			previous: StoredSession | undefined;
+			outcome: AgentCommitOutcome;
+	  }
+	| { ok: false; outcome: AgentCommitOutcome } {
+	const refuse = (
+		code: Extract<AgentCommitOutcome, { ok: false }>['code'],
+		reason: string,
+		extra: Partial<Extract<AgentCommitOutcome, { ok: false }>> = {}
+	) => ({
+		ok: false as const,
+		outcome: { ok: false as const, code, reason, policyRevision: null, fields: [], ...extra },
 	});
-	return { sessions: next, corrections };
+	const draft = request?.record;
+	const operations: DesktopAuthoringOperation[] = ['create', 'edit', 'clone', 'import'];
+	if (!request || !operations.includes(request.operation))
+		return refuse('invalid', 'Unknown agent operation.');
+	if (!draft || typeof draft.id !== 'string' || !draft.id || typeof draft.toolType !== 'string')
+		return refuse('invalid', 'The agent record needs an id and a provider.');
+	const previous = stored.get(draft.id);
+	if (request.operation === 'edit' && !previous)
+		return refuse('conflict', 'The agent no longer exists. Reload before saving.');
+	if (request.operation !== 'edit' && (previous || tombstones.has(draft.id)))
+		return refuse('conflict', 'An agent with this id already exists or was just removed.');
+	const candidate = previous ? applyAgentConfigEdit(previous, draft) : draft;
+	const { held } = holdAgentRecordWrite(previous, candidate);
+	if (held.length > 0)
+		return refuse('locked', held[0].message, {
+			policyRevision: held[0].policyRevision,
+			locked: held.map((hold) => hold.lockKey),
+		});
+	const outcome = authorizeAgentRecord({
+		operation: request.operation,
+		expectedPolicyRevision: request.expectedPolicyRevision ?? null,
+		before: (previous as AgentRecord | undefined) ?? null,
+		after: candidate as AgentRecord,
+		...(request.execution ? { execution: request.execution } : {}),
+	});
+	if (!outcome.allowed)
+		return refuse(outcome.code, outcome.reason, {
+			policyRevision: outcome.policyRevision,
+			fields: outcome.fields,
+		});
+	return {
+		ok: true,
+		record: candidate,
+		previous,
+		outcome: {
+			ok: true,
+			record: candidate,
+			managed: outcome.managed,
+			policyRevision: outcome.managed ? outcome.policyRevision : null,
+		},
+	};
 }
 
 /**
@@ -217,16 +385,17 @@ export function holdTouchedAgentRecords(
  */
 function sendHeldAgentRecordCorrections(
 	event: unknown,
-	corrections: HeldAgentRecordCorrection[]
+	corrections: HeldAgentRecordCorrection[],
+	refusedIds: string[] = []
 ): void {
-	if (corrections.length === 0) return;
+	if (corrections.length === 0 && refusedIds.length === 0) return;
 	const updated = corrections.map((correction) => correction.restored);
 	const baselines = corrections.map((correction) => correction.sent);
 	if ((event as { type?: string })?.type === 'bridge') {
 		broadcastBridgeEvent(SESSION_LIFECYCLE_SYNC_CHANNEL, [
 			{
 				added: [],
-				removedIds: [],
+				removedIds: refusedIds,
 				updated: updated.map(projectWebSession),
 				baselines: baselines.map(projectWebSession),
 			},
@@ -237,7 +406,7 @@ function sendHeldAgentRecordCorrections(
 		?.sender;
 	sender?.send?.(SESSION_LIFECYCLE_SYNC_CHANNEL, {
 		added: [],
-		removedIds: [],
+		removedIds: refusedIds,
 		updated,
 		baselines,
 	} satisfies SessionLifecycleSyncPayload);
@@ -882,7 +1051,11 @@ export function registerPersistenceHandlers(
 				// Normalize after the merge, never before: a peer baseline can hold a
 				// stack in a form the stored side would not, and normalizing only one
 				// side would turn that into a conflict.
-				const { sessions: sessionsToPersist, corrections } = holdTouchedAgentRecords(
+				const {
+					sessions: sessionsToPersist,
+					corrections,
+					refusedIds,
+				} = holdTouchedAgentRecords(
 					merged.map((session) =>
 						touchedIds.has(session.id)
 							? compactSessionToolOutputs(normalizeStoredClosedTabs(session)).session
@@ -994,7 +1167,7 @@ export function registerPersistenceHandlers(
 					removedIds
 				);
 				rememberRemovedSessions(removedIds);
-				sendHeldAgentRecordCorrections(event, corrections);
+				sendHeldAgentRecordCorrections(event, corrections, refusedIds);
 				// A closed agent can never produce another turn, so drop whatever the
 				// spawn path noted about who was driving its tabs.
 				for (const id of removedIds) forgetAgentActors(id);
@@ -1027,6 +1200,64 @@ export function registerPersistenceHandlers(
 				return true;
 			}
 		)
+	);
+
+	/**
+	 * The one host create/edit operation (MCOMP-23-02): a form's new, edited,
+	 * cloned or imported agent is checked here, exactly as it will be stored,
+	 * and committed only when admitted. The answer carries the canonical record
+	 * the caller inserts, or a refusal by name with its fields (nothing written,
+	 * so the form keeps its draft). An edit moves configuration only; the
+	 * transcript and tabs persist through `sessions:setMany` as before.
+	 */
+	ipcMain.handle(
+		'sessions:commitAgent',
+		queueWrite(async (event, request: AgentCommitRequest): Promise<AgentCommitOutcome> => {
+			const previousSessions = sessionsStore.get('sessions', []);
+			const previousMap = new Map(previousSessions.map((s) => [s.id, s]));
+			let input = request;
+			if (request?.record && request.operation !== 'edit') {
+				const { sessions: relocated } = await relocateSessionImages([request.record]);
+				input = { ...request, record: relocated[0] };
+			}
+			const decision = decideAgentCommit(input, previousMap, removedSessionTombstones);
+			if (!decision.ok) {
+				logger.warn(
+					`Agent commit refused: ${decision.outcome.ok ? '' : decision.outcome.reason}`,
+					'Sessions',
+					{
+						sessionId: request?.record?.id,
+						operation: request?.operation,
+						code: decision.outcome.ok ? undefined : decision.outcome.code,
+					}
+				);
+				return decision.outcome;
+			}
+			const record = decision.previous
+				? decision.record
+				: compactSessionToolOutputs(normalizeStoredClosedTabs(decision.record)).session;
+			const sessionsToPersist = decision.previous
+				? previousSessions.map((session) => (session.id === record.id ? record : session))
+				: [...previousSessions, record];
+			await backupSessionsBeforeWipe(previousSessions, sessionsToPersist, sessionsStore.path);
+			sessionsStore.set('sessions', sessionsToPersist);
+			await flushSessionWrites();
+			if (!decision.previous) onSessionsPersisted?.([record], sessionsToPersist, []);
+			broadcastSessionLifecycle(senderWebContentsIdOf(event), {
+				added: decision.previous ? [] : [record],
+				removedIds: [],
+				...(decision.previous && {
+					updated: [record],
+					baselines: [decision.previous],
+				}),
+			});
+			if (emitPluginEvent) {
+				const at = new Date().toISOString();
+				for (const pluginEvent of buildSessionLifecycleEvents(previousMap, sessionsToPersist, at))
+					emitPluginEvent(pluginEvent);
+			}
+			return { ...decision.outcome, record } as AgentCommitOutcome;
+		})
 	);
 
 	ipcMain.handle(
@@ -1062,7 +1293,11 @@ export function registerPersistenceHandlers(
 					sessions.push(previousSession);
 				}
 			}
-			const { sessions: sessionsToPersist, corrections } = holdTouchedAgentRecords(
+			const {
+				sessions: sessionsToPersist,
+				corrections,
+				refusedIds,
+			} = holdTouchedAgentRecords(
 				sessions.map((session) =>
 					incomingIds.has(session.id)
 						? compactSessionToolOutputs(
@@ -1149,7 +1384,7 @@ export function registerPersistenceHandlers(
 				return false;
 			}
 
-			sendHeldAgentRecordCorrections(event, corrections);
+			sendHeldAgentRecordCorrections(event, corrections, refusedIds);
 			// Opening snapshots may add/update observed agents but never infer a
 			// deletion from an omitted id. Explicit removes arrive through setMany.
 			const updatedSessions = sessionsToPersist.filter(

@@ -155,3 +155,53 @@ export function mergeSessionPersistenceChanges<T extends RecordData>(
 	if (!stored || !baseline) return incoming;
 	return mergeRecord(incoming, stored, baseline, preserveClient, preserveLive) as T;
 }
+
+/**
+ * The stored record fields a governed agent value is read from (MCOMP-23-02):
+ * provider (`toolType`), model (`customModel`), working directory (`cwd`, with
+ * the `projectRoot` / `fullPath` it travels with) and the account the agent runs
+ * as (its env vars and SSH setting decide the account directory). A refused
+ * whole-record write puts exactly these back; every other change is kept.
+ */
+export const GOVERNED_AGENT_RECORD_FIELDS = [
+	'toolType',
+	'customModel',
+	'cwd',
+	'projectRoot',
+	'fullPath',
+	'customEnvVars',
+	'sessionSshRemoteConfig',
+] as const;
+
+/** `next` with every governed field put back to what `stored` holds (removed where it held none). */
+export function restoreGovernedAgentFields<T extends RecordData>(stored: T, next: T): T {
+	const result: RecordData = { ...next };
+	for (const field of GOVERNED_AGENT_RECORD_FIELDS) {
+		if (field in stored) result[field] = stored[field];
+		else delete result[field];
+	}
+	return result as T;
+}
+
+/**
+ * An edit command's record applied to the stored one (MCOMP-23-02): only the
+ * agent's configuration moves. Transcript, tab and queue rows, live process
+ * state and the per-client view stay as stored, so a form save never rewrites
+ * history a turn appended meanwhile; those persist through their own flush.
+ */
+export function applyAgentConfigEdit<T extends RecordData>(stored: T, edit: RecordData): T {
+	const result: RecordData = { ...stored };
+	for (const [field, value] of Object.entries(edit)) {
+		if (
+			field === 'id' ||
+			field === 'deferredContent' ||
+			rows[field] ||
+			liveFields[field] ||
+			clientFields[field]
+		)
+			continue;
+		if (value === undefined) delete result[field];
+		else result[field] = value;
+	}
+	return result as T;
+}

@@ -79,10 +79,14 @@ import { createBrowserPolicySource } from './enterprise/browser-policy';
 import { createShellPolicySource } from './enterprise/shell-policy';
 import {
 	createSettingsPolicySource,
-	holdAgentRecordWrite,
+	readManagedSettingLocks,
 	restoreManagedSettingPins,
 	setSettingsWriteAuthority,
 } from './enterprise/settings-policy';
+import { identityStandingOf } from './enterprise/identity-store';
+import { holdTouchedAgentRecords, setAgentMutationAuthority } from './ipc/handlers/persistence';
+import { resolveAgentAccountDir } from './agents/provider-account-dirs';
+import { managedAccountRef } from '../shared/maestro-lib/managed/credentials';
 import { effectiveTrustedKeys, encoreFlagPins } from '../shared/managedSettingsLock';
 import { createInstallPolicySource } from './enterprise/install-policy';
 import {
@@ -1121,6 +1125,27 @@ app
 			policy: () => enterpriseService?.policy.status() ?? null,
 		});
 		setSettingsWriteAuthority(settingsPolicy);
+		// The host create/edit authority (MCOMP-23-02): `sessions:commitAgent` and
+		// every whole-record write (setMany, setAll, a plugin's store write) meet
+		// `authorizeManagedAgentCommand()` with the options read at the commit.
+		// No published operation delivers a reference resolver yet
+		// (DESKTOP-LOCAL/1), so an enrolled host holds governed changes
+		// unavailable by name; standalone commits as before.
+		setAgentMutationAuthority({
+			isManaged: () =>
+				identityStandingOf(enterpriseService?.identity.read() ?? { status: 'none' }) === 'managed',
+			options: () => {
+				if (!enterpriseService) throw new Error('No enterprise service is composed.');
+				return enterpriseService.policy.agentOptions(readManagedSettingLocks());
+			},
+			resolver: null,
+			accountRefOf: (record) => {
+				const dir = resolveAgentAccountDir(record.id, {
+					sessions: [record as unknown as Record<string, unknown>],
+				});
+				return dir === undefined ? null : managedAccountRef(record.toolType, dir);
+			},
+		});
 		const restoreSettingsPins = () => {
 			const restored = restoreManagedSettingPins(store, settingsPolicy.pins());
 			if (restored.length > 0)
@@ -2471,24 +2496,17 @@ app
 			(sessionsStore.get('sessions', []) as Array<Record<string, unknown>>).filter(
 				(s) => typeof s?.id === 'string'
 			);
-		// A plugin's session write meets the same per-provider lock as a renderer
-		// flush (MCOMP-21-08): each record is held against the stored one, so this
-		// direct store path is not a way around `holdAgentRecordWrite()`.
+		// A plugin's session write meets the same per-provider lock (MCOMP-21-08)
+		// and host create/edit command (MCOMP-23-02) as a renderer flush: each
+		// record is held against the stored one, so this direct store path is not
+		// a way around `holdTouchedAgentRecords()`.
 		const setPluginSessionsRaw = (sessions: Array<Record<string, unknown>>): void => {
-			const stored = new Map(pluginSessionsRaw().map((s) => [s.id, s]));
-			const held = sessions.map((session) => {
-				const { record, held: fields } = holdAgentRecordWrite(stored.get(session.id), session);
-				for (const field of fields)
-					logger.warn(
-						`Plugin agent write held by the managed policy: ${field.lockKey}`,
-						'Plugins',
-						{
-							sessionId: field.sessionId,
-							code: field.code,
-						}
-					);
-				return record;
-			});
+			const stored = new Map(pluginSessionsRaw().map((s) => [s.id as string, s]));
+			const { sessions: held } = holdTouchedAgentRecords(
+				sessions as never,
+				new Set(sessions.map((s) => s.id as string)),
+				stored as never
+			);
 			sessionsStore.set('sessions', held as never);
 		};
 		const pluginTabsList = (sessionId?: string): PluginTabMetadata[] => {
