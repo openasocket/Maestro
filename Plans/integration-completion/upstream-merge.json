@@ -1530,6 +1530,21 @@
 				],
 				"notes": "Upstream's new Relay conversation verbs agents.restoreConversation and agents.completeConversation start no provider turn and launch nothing, so they carry no binding; they still consult the broker. The full type-check stops at the syntax phase while other files hold markers, so this file's types are checked by MCOMP-33-00C; the plugin host handlers suite is MCOMP-33-00R05.",
 				"unmergedAfter": 87
+			},
+			"MCOMP-33-00R05": {
+				"resolvedAt": "2026-11-09",
+				"resolvedBy": "Maestro-Claude",
+				"files": ["src/__tests__/main/plugins/plugin-host-handlers.test.ts"],
+				"method": "Two hunks resolved by a shape-asserting script (Working/mcomp-33-00r05/resolve.mjs, both sides read in full); staged through merge-tool.mjs stage (prettier exit 0, unchanged). 405 lines added, 6 removed against the integration side. Every test and describe title of both sides is present (173 titles); the one integration case changed is renamed for the slot move below. Suite run in the worktree: 193 of 193 pass.",
+				"hunks": {
+					"src/__tests__/main/plugins/plugin-host-handlers.test.ts": [
+						"Imports: both sides kept (integration delegation, managed spawn port, authorization ledger and plugin policy imports; upstream PluginMediaTools).",
+						"File tail: both sides were appended top-level describes sharing the one closing `});`. The integration blocks (managed act bindings MRC-09-02, admitPluginProcess, consent-bound headless turns MRC-09-02A, managed effects at the real sinks MRC-09-06, policy revoke) kept and closed, then upstream's Relay desktop transport authorization block (closed by the shared tail). Following the 00R04 resolution, the managed headless-send case now expects the binding at the runner's trailing slot 10 (length 11, slots 6-9 receipt tool id, required plugin tools, writer lease and turn settings all undefined) instead of slot 8 (length 9); its title names the writer-lease and turn slots. The standalone case still expects exactly six arguments."
+					]
+				},
+				"semanticConflictsForC": [],
+				"notes": "No new semantic conflict. The suite already exercises the R04 contract (binding at index 10), so it pins the shape R07 (HeadlessAgentRunner trailing binding), R06 (the desktop runner reads it there) and R09 (index.ts wiring) must match.",
+				"unmergedAfter": 86
 			}
 		}
 	}
