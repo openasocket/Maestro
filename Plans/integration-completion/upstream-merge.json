@@ -2219,6 +2219,43 @@
 				],
 				"notes": "No case, field or guard dropped. resolveTransportAdmission is not used in wsRoute on either side; the route's admission (host admission recheck, pairing admission field, Web Login recheck) is kept whole.",
 				"unmergedAfter": 29
+			},
+			"MCOMP-33-00R30": {
+				"resolvedAt": "2026-11-09",
+				"resolvedBy": "Maestro-Claude",
+				"files": [
+					"src/main/web-server/callbacks/browserTabCallbacks.ts",
+					"src/main/web-server/callbacks/commandCallbacks.ts",
+					"src/main/web-server/callbacks/queueCallbacks.ts"
+				],
+				"method": "Seven hunks resolved by a shape-asserting script (Working/mcomp-33-00r30/resolve.mjs, both sides read in full, every replacement computed before any write); staged through merge-tool.mjs stage (26 unmerged left; prettier left all three unchanged). Working/mcomp-33-00r30/check.mjs: 0 syntax diagnostics, no markers, no LOW seam. browser-tab-admission + tabCallbacks 17/17. No suite targets these files directly; persistence.test (registers them) cannot load in the worktree because the upstream-added dependency @agentclientprotocol/sdk is absent from the symlinked node_modules (AcpServerSpawner), an environment gap for 00C/00S, not a resolution failure.",
+				"positionalOrder": "R29 order applied to the callbacks: executeCommand (..., mentionRouting, requireDeliveryReceipt, pianolaDispatchId, delegation, dispatchTicket); newAITabWithPrompt (..., mentionRouting, control, delegation, dispatchTicket); enqueueCommand (..., mentionRouting, dispatchCallback, control, delegation, dispatchTicket).",
+				"ipcWire": "Main-to-renderer wire settled here for R34: upstream args keep their slots and upstream's omit-when-unset shape holds when no integration arg is set; when delegation or dispatchTicket is set, upstream's optional trailing arg is padded (undefined) and delegation, dispatchTicket follow. remote:executeCommand: sessionId, command, inputMode, tabId, force, images, background, mentionRouting, [pianolaDispatchId], [delegation, dispatchTicket], receiptChannel (always LAST, appended by requestFromRenderer). remote:newAITabWithPrompt: sessionId, prompt, responseChannel, background, hidden, mentionRouting, control, [delegation, dispatchTicket]. remote:enqueueCommand: sessionId, command, responseChannel, inputMode, tabId, images, background, held, mentionRouting, dispatchCallback, [control], [delegation, dispatchTicket].",
+				"hunks": {
+					"src/main/web-server/callbacks/browserTabCallbacks.ts": [
+						"Hunk 1 (newAITabWithPrompt params): upstream control, then HEAD delegation, dispatchTicket.",
+						"Hunk 2 (HEAD pre-restructure listener + send ahead of the timeout; upstream empty): took upstream's restructure (timeout first, ipcMain.on with owning-sender check, try/catch send resolving unknown) and carried delegation, dispatchTicket into upstream's send after control, spread only when set."
+					],
+					"src/main/web-server/callbacks/commandCallbacks.ts": [
+						"Hunk 1 (executeCommand params): upstream requireDeliveryReceipt, pianolaDispatchId, then HEAD delegation, dispatchTicket.",
+						"Hunk 2 (HEAD wire comment; upstream empty): comment rewritten to name the merged wire and the receipt channel appended last.",
+						"Hunk 3 (renderer args): pianolaDispatchId, delegation, dispatchTicket when an integration arg is set, else upstream's optional pianolaDispatchId."
+					],
+					"src/main/web-server/callbacks/queueCallbacks.ts": [
+						"Hunk 1 (enqueueCommand params): upstream dispatchCallback, control, then HEAD delegation, dispatchTicket.",
+						"Hunk 2 (send args): dispatchCallback always, then control, delegation, dispatchTicket when an integration arg is set, else upstream's optional control."
+					]
+				},
+				"outsideHunks": [
+					"Upstream auto-merged in queueCallbacks: setReleaseQueueItemCallback / setConfirmQueueItemCallback from new factory deps (main-only, not in CallbackRegistry). Upstream auto-merged in commandCallbacks: requireDeliveryReceipt throw on unknown delivery. Both kept."
+				],
+				"semanticConflictsForC": [
+					"Preload (00R34): commandRemote's upstream decoder takes the receipt channel from the last one or two args; the merged decoder must take the receipt channel as the LAST arg and read pianolaDispatchId, delegation, dispatchTicket positionally before it. queueRemote and browserTabRemote must read control (padded) before delegation, dispatchTicket.",
+					"releaseQueueItem (upstream, main-only) starts a queued item with no actor or dispatch ticket: same item as the R23 note (queue release start must forward actor), for 00C.",
+					"Environment for 00C/00S: @agentclientprotocol/sdk (upstream dependency) missing from the main checkout's node_modules, so suites importing ProcessManager cannot load in the worktree."
+				],
+				"notes": "No param, guard or upstream behavior dropped; the HEAD block removed in browserTab hunk 2 is the same listener/availability/send that upstream moved below the timeout.",
+				"unmergedAfter": 26
 			}
 		}
 	}
