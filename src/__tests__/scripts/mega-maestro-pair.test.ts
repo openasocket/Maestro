@@ -10,6 +10,7 @@ import {
 	endpointMatchesPair,
 	inspectArtifactDir,
 	inspectLinuxHost,
+	pairAcceptance,
 	pairRunStatus,
 	probeLinuxRuntime,
 } from '../../../scripts/mega-maestro-pair.mjs';
@@ -321,6 +322,42 @@ describe('mandatory acceptance rows (MCOMP-33-02)', () => {
 			endpoint: 'actual',
 			observations: {},
 		});
+	});
+
+	it('counts the pair journeys only from a certifiable run', () => {
+		const journeys = ['library.admit', 'headless.turn'].map((id) => ({
+			id,
+			surface: id.split('.')[0],
+			status: 'passed',
+			reason: null,
+			steps: [],
+			observations: id === 'headless.turn' ? { effect: seen } : undefined,
+		}));
+		const producers = ['CP-01', 'CP-02', 'CP-03', 'registration-approval'];
+		const report = {
+			runtime: { archiveSha256: 'a'.repeat(64) },
+			producers: Object.fromEntries(producers.map((id) => [id, { fresh: true, detail: '' }])),
+		};
+		const args = (certifiable: boolean) => ({
+			run: { certifiable, source: { revision: 'b'.repeat(40) } },
+			driverResult: { journeys: { journeys } },
+			report,
+			options: { acceptanceInputs: { 'MEGA-RUNTIME-ADAPTER-BUILD': true } },
+		});
+		const module = { assessAcceptance, pairCaseEvidence, presentAcceptanceInputs };
+		const certified = pairAcceptance(module, args(true));
+		expect(certified.rows.find((r) => r.id === 'headless-library')!.verdict).toBe('passed');
+		expect(certified.complete).toBe(false);
+		expect(certified.verdicts.passed).toBe(1);
+		const uncertified = pairAcceptance(module, args(false));
+		expect(uncertified.rows.find((r) => r.id === 'headless-library')!.verdict).toBe('not-counted');
+		expect(uncertified.verdicts.passed).toBe(0);
+		expect(certified.evidence[0].artifacts).toEqual({
+			runtimeSha256: 'a'.repeat(64),
+			endpointRevision: 'b'.repeat(40),
+		});
+		for (const e of uncertified.evidence)
+			expect(e.artifacts).toEqual({ runtimeSha256: null, endpointRevision: null });
 	});
 
 	it('observes the harness program effects off disk and a central receipt in the ledger', () => {

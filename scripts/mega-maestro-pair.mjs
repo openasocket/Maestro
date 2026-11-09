@@ -8,6 +8,7 @@
  *        [--library dist/maestro-lib | --runtime <packaged runtime dir>] [--image <ref>] [--json]
  *   node scripts/mega-maestro-pair.mjs run   [the same] [--surfaces library,headless,desktop]
  *        [--allow-dirty] [--allow-stale] [--approve-command <cmd>] [--timeout-ms <n>]
+ *        [--acceptance-inputs <inputs.json>] [--case-evidence <cases.json>]
  *        [--out <evidence.json>] [--keep]
  *
  * The journeys the driver runs live in
@@ -875,6 +876,9 @@ export const DRIVER_BUNDLE_ENTRIES = {
 		'runPairJourneys',
 		'assessJourney',
 		'PAIR_JOURNEYS',
+		'assessAcceptance',
+		'pairCaseEvidence',
+		'presentAcceptanceInputs',
 	],
 };
 
@@ -988,6 +992,35 @@ const readOut = (dir, name) => {
 		return text;
 	}
 };
+
+/**
+ * The 19 mandatory acceptance rows over this run's journeys and the other
+ * runners' case evidence (`--case-evidence`, the CLI and Electron cases),
+ * against the inputs present: the fresh producers and the declared receipts
+ * (`--acceptance-inputs`). A run that is not certifiable names no paired
+ * artifact, so none of its journeys can count.
+ */
+export function pairAcceptance(journeysModule, { run, driverResult, report, options }) {
+	const { assessAcceptance, pairCaseEvidence, presentAcceptanceInputs } = journeysModule;
+	const artifacts = {
+		runtimeSha256: run.certifiable ? (report.runtime?.archiveSha256 ?? null) : null,
+		endpointRevision: run.certifiable ? (run.source?.revision ?? null) : null,
+	};
+	const evidence = (driverResult?.journeys?.journeys ?? []).map((r) =>
+		pairCaseEvidence(r, artifacts)
+	);
+	const rows = assessAcceptance(
+		[...evidence, ...(options.caseEvidence ?? [])],
+		presentAcceptanceInputs(report.producers ?? {}, options.acceptanceInputs ?? {})
+	);
+	const verdicts = Object.fromEntries(
+		['passed', 'failed', 'pending', 'not-counted'].map((v) => [
+			v,
+			rows.filter((r) => r.verdict === v).length,
+		])
+	);
+	return { evidence, rows, verdicts, complete: rows.every((r) => r.verdict === 'passed') };
+}
 
 /** A successful shell exit alone cannot certify a failed or unobserved journey. */
 export function pairRunStatus(run) {
@@ -1126,7 +1159,8 @@ export async function runPair(options) {
 		);
 	}).finally(stopWatching);
 	const driverResult = readOut(outDir, 'driver.json');
-	const { assessJourney, PAIR_JOURNEYS } = createRequire(import.meta.url)(bundle.file);
+	const bundled = createRequire(import.meta.url)(bundle.file);
+	const { assessJourney, PAIR_JOURNEYS } = bundled;
 	const journeys = (driverResult?.journeys?.journeys ?? []).map((result) =>
 		assessJourney(result, report.producers)
 	);
@@ -1209,6 +1243,7 @@ export async function runPair(options) {
 		run.certifiable = false;
 		run.notCertifiableBecause.push(`observed run is ${run.status}`);
 	}
+	run.acceptance = pairAcceptance(bundled, { run, driverResult, report, options });
 	fs.rmSync(path.join(outDir, 'challenge.json'), { force: true });
 	if (!options.keep) {
 		fs.rmSync(endpointDir, { recursive: true, force: true });
@@ -1240,6 +1275,8 @@ export async function main(argv) {
 			out: { type: 'string' },
 			'allow-dirty': { type: 'boolean' },
 			'allow-stale': { type: 'boolean' },
+			'acceptance-inputs': { type: 'string' },
+			'case-evidence': { type: 'string' },
 			keep: { type: 'boolean' },
 			json: { type: 'boolean' },
 			help: { type: 'boolean' },
@@ -1248,7 +1285,7 @@ export async function main(argv) {
 	const command = positionals[0];
 	if (values.help || !['check', 'run'].includes(command)) {
 		process.stdout.write(
-			'usage: mega-maestro-pair.mjs check|run [--sibling DIR] [--artifact DIR] [--library DIR | --runtime DIR [--runtime-pin FILE]] [--surfaces library,headless,desktop] [--image REF] [--approve-command CMD] [--allow-dirty] [--allow-stale] [--timeout-ms N] [--out FILE] [--keep] [--json]\n'
+			'usage: mega-maestro-pair.mjs check|run [--sibling DIR] [--artifact DIR] [--library DIR | --runtime DIR [--runtime-pin FILE]] [--surfaces library,headless,desktop] [--image REF] [--approve-command CMD] [--allow-dirty] [--allow-stale] [--timeout-ms N] [--acceptance-inputs FILE] [--case-evidence FILE] [--out FILE] [--keep] [--json]\n'
 		);
 		return values.help ? 0 : 2;
 	}
@@ -1266,6 +1303,10 @@ export async function main(argv) {
 		allowDirty: values['allow-dirty'] === true,
 		allowStale: values['allow-stale'] === true,
 		keep: values.keep === true,
+		acceptanceInputs: values['acceptance-inputs']
+			? readJson(values['acceptance-inputs'])
+			: undefined,
+		caseEvidence: values['case-evidence'] ? readJson(values['case-evidence']) : undefined,
 	};
 	const report = command === 'check' ? await buildCheckReport(options) : await runPair(options);
 	const text = JSON.stringify(report, null, 2);
