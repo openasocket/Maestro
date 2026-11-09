@@ -1829,6 +1829,42 @@
 				],
 				"notes": "No case dropped; no hunk took one whole side.",
 				"unmergedAfter": 63
+			},
+			"MCOMP-33-00R17": {
+				"resolvedAt": "2026-11-09",
+				"resolvedBy": "Maestro-Claude",
+				"files": [
+					"src/cli/commands/ask.ts",
+					"src/cli/commands/host.ts",
+					"src/__tests__/cli/commands/update-ssh-remote.test.ts"
+				],
+				"method": "Ten hunks resolved by a shape-asserting script (Working/mcomp-33-00r17/resolve.mjs, both sides read in full, every replacement computed before the write of each file); staged through merge-tool.mjs stage (prettier left all three unchanged, 60 unmerged left). Working/mcomp-33-00r17/check.mjs: 0 syntax diagnostics on all three, every it/describe title of HEAD (36) and MERGE_HEAD (37) present in the suite (40 now), no markers, every seam count at least the larger side's. update-ssh-remote.test.ts runs: 33/33 pass. ask.test.ts and host.test.ts cannot load until launch/agent-args.ts (00R21) merges. git diff --cached HEAD / MERGE_HEAD: ask +108 -21 / +16 -1, host +145 -8 / +91 -10, suite +44 -0 / +111 -75.",
+				"hunks": {
+					"src/cli/commands/ask.ts": [
+						"Hunk 1 (imports): both: HEAD's isBlankEnvValue and CALLER_CREDENTIAL_ENV_VAR, upstream's peer-resolver imports and ExitCode.",
+						"Hunk 2: HEAD's caller-credential read (MCOMP-17-03AM, forwarded even beside an explicit --from) kept ahead of upstream's local `consult(...)` call, upstream's parseTimeoutMs, BridgeRunner and the shared consult() body; the local call's from fields now carry `callerCredential` beside fromSessionId/fromTabId. Upstream's peer path passes `{}` from fields, so the local host's credential never travels to a peer host.",
+						"Hunk 3: upstream's `...fromFields` (which now includes the credential on the local path)."
+					],
+					"src/cli/commands/host.ts": [
+						"Hunk 1 (imports): both: composeHostManaged/HostManagedComposition and upstream's host-linger imports.",
+						"Hunk 2 (detached start reply): HEAD's report/lines shape (cue, managed, managedUnavailable, the Managed line; the non-conflicting lines above already replaced upstream's cue/cueLine) plus upstream's `...(linger ?? {})`.",
+						"Hunk 3 (startRuntimeHost options): both: managedComposition: standing and preventSleep.",
+						"Hunk 4 (foreground start reply): HEAD's object (managedUnavailable when no standing composed) and Managed line plus upstream's `...(linger ?? {})`.",
+						"Hunk 5 (formatHostStatus): both: HEAD's Managed line, then upstream's caffeinate Sleep line."
+					],
+					"src/__tests__/cli/commands/update-ssh-remote.test.ts": [
+						"Hunk 1 (mocks): both: HEAD's managed-desktop-write mock (writeSettingThroughHost, reportDesktopWriteFailure) and upstream's encore-gate mock.",
+						"Hunk 2: upstream's four federation cases adapted to HEAD's async command and its host write boundary (async/await, writeSshRemotes.mockClear became writeSettingThroughHost.mockClear), then HEAD's async 'reports a failure as JSON when --json is set'."
+					]
+				},
+				"outsideHunks": [],
+				"semanticConflictsForC": [
+					"host.ts passes startRuntimeHost both managedComposition and preventSleep: runtime-host.ts (00R18) must keep both options.",
+					"host.ts reads HostStatusReport.managed, managedUnavailable and preventingSleep: client/types.ts and host-control.ts (00R20) must keep all three.",
+					"ask.test.ts and host.test.ts are unrun until 00R21; 00S runs them. No ask case covers the peer path dropping callerCredential; 00S or 00C may add one."
+				],
+				"notes": "No case dropped; no hunk took one whole side. ask stays a consult (cross_agent_ask), never a dispatch.",
+				"unmergedAfter": 60
 			}
 		}
 	}
