@@ -2077,6 +2077,28 @@
 				"semanticConflictsForC": [],
 				"notes": "No case, field or guard dropped. No semantic conflict left for 00C from these files.",
 				"unmergedAfter": 40
+			},
+			"MCOMP-33-00R25": {
+				"resolvedAt": "2026-11-09",
+				"resolvedBy": "Maestro-Claude",
+				"files": ["src/main/cue/cue-process-lifecycle.ts", "src/main/cue/cue-run-router.ts"],
+				"method": "Three hunks resolved by a shape-asserting script (Working/mcomp-33-00r25/resolve.mjs, both sides read in full, every replacement computed before any write); staged through merge-tool.mjs stage (prettier left both unchanged, 38 unmerged left). Working/mcomp-33-00r25/check.mjs: 0 syntax diagnostics, no markers, every seam count at least the larger side. Cue process-lifecycle, run-router and executor suites plus runtime-host and host-cue: 8 files, 364/364.",
+				"hunks": {
+					"src/main/cue/cue-process-lifecycle.ts": [
+						"Hunk 1 (start-turn imports): both. Upstream applyWindowsShellRules beside HEAD DispatchRefusedError and leaseAdmission.",
+						"Hunk 2 (startTurn call): HEAD startAttempted = true and startTurn(processSpec, ...) with the admission option kept. Upstream rebuilt processSpec here and applied applyWindowsShellRules at the call; that rule moved (outside the hunk) to where HEAD builds processSpec, BEFORE the managed admission: launchSpec keeps the HEAD shape (tuiLaunch env scrub, stdin), processSpec = sshRemoteEnabled ? launchSpec : applyWindowsShellRules(launchSpec). Applying it only at the call would have spawned a spec (shell flag, escaped args, quoted command) different from the admitted snapshot, so the lease gate in startTurn would refuse every managed Windows .cmd launch."
+					],
+					"src/main/cue/cue-run-router.ts": [
+						"Hunk 1: both. HEAD managedRefusalResult (a managed refusal answers status failed, executionStarted false, managed { state, code }) then upstream const ssh = storedSession.sessionSshRemoteConfig feeding the auto-merged projectRoot override and projectCueEventPaths."
+					]
+				},
+				"outsideHunks": [
+					"cue-process-lifecycle.ts: processSpec definition split into launchSpec + Windows shell rules ahead of admission (see hunk 2).",
+					"cue-run-router.ts: ProcessRunOptions.managed, cueRunLineage() and CueRunActionDeps.managed auto-merged and kept; upstream SSH working-dir override and remote event path projection auto-merged."
+				],
+				"semanticConflictsForC": [],
+				"notes": "No case, field or guard dropped. No semantic conflict left for 00C from these files.",
+				"unmergedAfter": 38
 			}
 		}
 	}
