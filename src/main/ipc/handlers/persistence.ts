@@ -52,7 +52,11 @@ import {
 } from '../../stores/deferred-session-content';
 import type { SessionTranscriptPatch } from '../../../shared/sessionTranscript';
 import { mergeSessionPersistenceChanges } from '../../../shared/sessionPersistenceMerge';
-import { holdSettingWrite, readManagedSettingLocks } from '../../enterprise/settings-policy';
+import {
+	holdAgentRecordWrite,
+	holdSettingWrite,
+	readManagedSettingLocks,
+} from '../../enterprise/settings-policy';
 
 /**
  * Shallow-compare cliActivity for the diff broadcast.
@@ -167,6 +171,76 @@ export function broadcastSessionLifecycle(
 			}),
 		},
 	]);
+}
+
+/** A touched record whose held provider fields were put back: what the writer sent, and what was persisted. */
+export interface HeldAgentRecordCorrection {
+	sent: StoredSession;
+	restored: StoredSession;
+}
+
+/**
+ * Hold every record a renderer, bridge or plugin write touches to the managed
+ * per-provider lock (MCOMP-21-08) before it reaches disk: `holdAgentRecordWrite()`
+ * against the stored record, the same evaluation `agents:setConfig*` and
+ * `update_session_config` meet, so a bulk flush is not a way around them. A
+ * refused field is put back and logged; the rest of the write is kept.
+ */
+export function holdTouchedAgentRecords(
+	sessions: StoredSession[],
+	touchedIds: ReadonlySet<string>,
+	previousMap: ReadonlyMap<string, StoredSession>
+): { sessions: StoredSession[]; corrections: HeldAgentRecordCorrection[] } {
+	const corrections: HeldAgentRecordCorrection[] = [];
+	const next = sessions.map((session) => {
+		if (!touchedIds.has(session.id)) return session;
+		const { record, held } = holdAgentRecordWrite(previousMap.get(session.id), session);
+		if (held.length === 0) return session;
+		for (const hold of held)
+			logger.warn(`Agent record field held by the managed policy: ${hold.lockKey}`, 'Sessions', {
+				sessionId: hold.sessionId,
+				field: hold.recordField,
+				code: hold.code,
+				message: hold.message,
+				policyRevision: hold.policyRevision,
+			});
+		corrections.push({ sent: session, restored: record });
+		return record;
+	});
+	return { sessions: next, corrections };
+}
+
+/**
+ * Tell the client that wrote a held field what was persisted instead, as a
+ * lifecycle update whose baseline is what it sent: its merge applies exactly
+ * the put-back fields, so its form stops showing a value the host refused.
+ */
+function sendHeldAgentRecordCorrections(
+	event: unknown,
+	corrections: HeldAgentRecordCorrection[]
+): void {
+	if (corrections.length === 0) return;
+	const updated = corrections.map((correction) => correction.restored);
+	const baselines = corrections.map((correction) => correction.sent);
+	if ((event as { type?: string })?.type === 'bridge') {
+		broadcastBridgeEvent(SESSION_LIFECYCLE_SYNC_CHANNEL, [
+			{
+				added: [],
+				removedIds: [],
+				updated: updated.map(projectWebSession),
+				baselines: baselines.map(projectWebSession),
+			},
+		]);
+		return;
+	}
+	const sender = (event as { sender?: { send?: (channel: string, payload: unknown) => void } })
+		?.sender;
+	sender?.send?.(SESSION_LIFECYCLE_SYNC_CHANNEL, {
+		added: [],
+		removedIds: [],
+		updated,
+		baselines,
+	} satisfies SessionLifecycleSyncPayload);
 }
 
 /**
@@ -808,10 +882,14 @@ export function registerPersistenceHandlers(
 				// Normalize after the merge, never before: a peer baseline can hold a
 				// stack in a form the stored side would not, and normalizing only one
 				// side would turn that into a conflict.
-				const sessionsToPersist = merged.map((session) =>
-					touchedIds.has(session.id)
-						? compactSessionToolOutputs(normalizeStoredClosedTabs(session)).session
-						: session
+				const { sessions: sessionsToPersist, corrections } = holdTouchedAgentRecords(
+					merged.map((session) =>
+						touchedIds.has(session.id)
+							? compactSessionToolOutputs(normalizeStoredClosedTabs(session)).session
+							: session
+					),
+					touchedIds,
+					previousMap
 				);
 
 				// Lifecycle logging (parallel to setAll's debug logs)
@@ -916,6 +994,7 @@ export function registerPersistenceHandlers(
 					removedIds
 				);
 				rememberRemovedSessions(removedIds);
+				sendHeldAgentRecordCorrections(event, corrections);
 				// A closed agent can never produce another turn, so drop whatever the
 				// spawn path noted about who was driving its tabs.
 				for (const id of removedIds) forgetAgentActors(id);
@@ -983,19 +1062,23 @@ export function registerPersistenceHandlers(
 					sessions.push(previousSession);
 				}
 			}
-			const sessionsToPersist = sessions.map((session) =>
-				incomingIds.has(session.id)
-					? compactSessionToolOutputs(
-							normalizeStoredClosedTabs(
-								mergeSessionPersistenceChanges(
-									mergeDeferredSessionContent(session, previousSessionMap.get(session.id)),
-									previousSessionMap.get(session.id),
-									baselineMap.get(session.id),
-									remote
+			const { sessions: sessionsToPersist, corrections } = holdTouchedAgentRecords(
+				sessions.map((session) =>
+					incomingIds.has(session.id)
+						? compactSessionToolOutputs(
+								normalizeStoredClosedTabs(
+									mergeSessionPersistenceChanges(
+										mergeDeferredSessionContent(session, previousSessionMap.get(session.id)),
+										previousSessionMap.get(session.id),
+										baselineMap.get(session.id),
+										remote
+									)
 								)
-							)
-						).session
-					: session
+							).session
+						: session
+				),
+				incomingIds,
+				previousSessionMap
 			);
 
 			// Log session lifecycle events at DEBUG level
@@ -1066,6 +1149,7 @@ export function registerPersistenceHandlers(
 				return false;
 			}
 
+			sendHeldAgentRecordCorrections(event, corrections);
 			// Opening snapshots may add/update observed agents but never infer a
 			// deletion from an omitted id. Explicit removes arrive through setMany.
 			const updatedSessions = sessionsToPersist.filter(

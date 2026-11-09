@@ -79,6 +79,7 @@ import { createBrowserPolicySource } from './enterprise/browser-policy';
 import { createShellPolicySource } from './enterprise/shell-policy';
 import {
 	createSettingsPolicySource,
+	holdAgentRecordWrite,
 	restoreManagedSettingPins,
 	setSettingsWriteAuthority,
 } from './enterprise/settings-policy';
@@ -2470,8 +2471,25 @@ app
 			(sessionsStore.get('sessions', []) as Array<Record<string, unknown>>).filter(
 				(s) => typeof s?.id === 'string'
 			);
+		// A plugin's session write meets the same per-provider lock as a renderer
+		// flush (MCOMP-21-08): each record is held against the stored one, so this
+		// direct store path is not a way around `holdAgentRecordWrite()`.
 		const setPluginSessionsRaw = (sessions: Array<Record<string, unknown>>): void => {
-			sessionsStore.set('sessions', sessions as never);
+			const stored = new Map(pluginSessionsRaw().map((s) => [s.id, s]));
+			const held = sessions.map((session) => {
+				const { record, held: fields } = holdAgentRecordWrite(stored.get(session.id), session);
+				for (const field of fields)
+					logger.warn(
+						`Plugin agent write held by the managed policy: ${field.lockKey}`,
+						'Plugins',
+						{
+							sessionId: field.sessionId,
+							code: field.code,
+						}
+					);
+				return record;
+			});
+			sessionsStore.set('sessions', held as never);
 		};
 		const pluginTabsList = (sessionId?: string): PluginTabMetadata[] => {
 			const out: PluginTabMetadata[] = [];

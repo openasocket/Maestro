@@ -33,6 +33,7 @@ import {
 	managedArgsProblems,
 	type ManagedRouteCeiling,
 } from '../../shared/maestro-lib/launch/env';
+import { canonicalJson } from '../../shared/canonicalJson';
 import { isWindows } from '../../shared/platformDetection';
 import {
 	ENCORE_LOCK_PREFIX,
@@ -42,6 +43,7 @@ import {
 	PLUGIN_SET_LOCK_KEY,
 	PLUGIN_TRUSTED_KEYS_LOCK_KEY,
 	PROMPT_SET_LOCK_KEY,
+	SESSION_CONFIG_LOCK_FIELDS,
 	agentConfigLockKey,
 	applyManagedPins,
 	encoreFeaturesWriteProblem,
@@ -359,6 +361,74 @@ export function holdAgentConfigWrite(
 	return writeAuthority
 		? writeAuthority.authorizeAgentConfig(providerId, field, value)
 		: { allowed: true };
+}
+
+/** One provider field of an agent record a write was refused, named by its record field and lock key. */
+export interface AgentRecordFieldHold {
+	sessionId: string;
+	/** The record's own field: `customPath`, `customArgs`, `customEnvVars`, `customModel`, `customEffort`. */
+	recordField: string;
+	/** The lock key the field is held by: `agentConfig.customPath` and so on. */
+	lockKey: string;
+	code: AgentConfigWriteDenial;
+	message: string;
+	policyRevision: number | null;
+}
+
+export interface AgentRecordWriteResult<T> {
+	/** The record to persist: the input itself when nothing was held, otherwise a copy with each held field put back. */
+	record: T;
+	held: AgentRecordFieldHold[];
+}
+
+/** A configured value that means "unset": absent, null, an empty string or an object with no keys. */
+const recordFieldValue = (value: unknown): unknown => {
+	if (value === undefined || value === null || value === '') return null;
+	if (typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length === 0)
+		return null;
+	return value;
+};
+
+/**
+ * Hold one agent record about to be persisted (create, edit, import, clone or a
+ * bulk flush) to the per-provider lock, through {@link holdAgentConfigWrite}:
+ * the one evaluation the `agents:setConfig*` handlers and `update_session_config`
+ * already meet. A field counts as written when its value differs from the
+ * stored record (a new record: when it is set at all); a provider change is
+ * reauthorized by `authorizeProviderSwap()`, not here. A refused field is put back to the
+ * stored value (removed on a new record); every other change, including an
+ * admitted held field, is kept. The verdict is the host's own: nothing on the
+ * record (a policy revision, a lock view) is read.
+ */
+export function holdAgentRecordWrite<T extends { id?: unknown; toolType?: unknown }>(
+	previous: T | undefined,
+	next: T
+): AgentRecordWriteResult<T> {
+	const before = (previous ?? {}) as Record<string, unknown>;
+	const after = next as Record<string, unknown>;
+	const providerId = typeof next.toolType === 'string' ? next.toolType : 'unknown';
+	let record: Record<string, unknown> | null = null;
+	const held: AgentRecordFieldHold[] = [];
+	for (const [recordField, field] of Object.entries(SESSION_CONFIG_LOCK_FIELDS)) {
+		const changed =
+			canonicalJson(recordFieldValue(before[recordField])) !==
+			canonicalJson(recordFieldValue(after[recordField]));
+		if (!changed) continue;
+		const hold = holdAgentConfigWrite(providerId, field, after[recordField]);
+		if (hold.allowed) continue;
+		record ??= { ...after };
+		if (previous && recordField in before) record[recordField] = before[recordField];
+		else delete record[recordField];
+		held.push({
+			sessionId: typeof next.id === 'string' ? next.id : '',
+			recordField,
+			lockKey: agentConfigLockKey(field)!,
+			code: hold.code,
+			message: hold.message,
+			policyRevision: hold.policyRevision,
+		});
+	}
+	return { record: (record ?? next) as T, held };
 }
 
 /** Hold a save or reset of a Maestro Prompts customization through the same authority. Standalone: allowed. */
