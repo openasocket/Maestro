@@ -1934,6 +1934,33 @@
 				],
 				"notes": "No case or guard dropped. Runtime turns still pass no route the managed launch did not approve: the minted/caller dispatch path in submitText is unchanged.",
 				"unmergedAfter": 54
+			},
+			"MCOMP-33-00R20": {
+				"resolvedAt": "2026-11-09",
+				"resolvedBy": "Maestro-Claude",
+				"files": [
+					"src/shared/maestro-lib/client/types.ts",
+					"src/shared/maestro-lib/client/host-control.ts",
+					"src/shared/maestro-lib/client/__tests__/ws-client.test.ts"
+				],
+				"method": "Three hunks resolved by a shape-asserting script (Working/mcomp-33-00r20/resolve.mjs, both sides read in full, every replacement computed before any write); staged through merge-tool.mjs stage (prettier left all three unchanged, 51 unmerged left). Working/mcomp-33-00r20/check.mjs: 0 syntax diagnostics, no markers, every seam count at least the larger side, no HEAD or MERGE_HEAD test title missing. ws-client suite 130/130 passes in the worktree.",
+				"hunks": {
+					"src/shared/maestro-lib/client/types.ts": [
+						"Hunk 1 (imports): both: HEAD managed contract imports (../managed/types, ManagedPolicyStatus from ../managed/host-adapter) and upstream ExplicitHostEndpointSource from ./discovery. createWsMaestroClient().managed and ManagedEventsQuery untouched."
+					],
+					"src/shared/maestro-lib/client/host-control.ts": [
+						"Hunk 1 (HostStatusReport fields): both: HEAD managed (SshRemoteEndpointIdentity) and managedUnavailable, then upstream preventingSleep in its own doc block. This closes the 00R17/00R19 semantic note: statusReport() emits all three and the report type now takes all three."
+					],
+					"src/shared/maestro-lib/client/__tests__/ws-client.test.ts": [
+						"Hunk 1 (imports): upstream type import (adds WsMaestroClientTransportOptions) plus the HEAD MANAGED_CONTRACT_VERSION/ManagedOperationContext import."
+					]
+				},
+				"outsideHunks": [],
+				"semanticConflictsForC": [
+					"None new. HostStatusReport now matches what runtime/server.ts statusReport() emits (managed, managedUnavailable, preventingSleep); 00C type-checks the pair."
+				],
+				"notes": "No case, field or guard dropped.",
+				"unmergedAfter": 51
 			}
 		}
 	}
