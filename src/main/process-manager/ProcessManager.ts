@@ -21,6 +21,7 @@ import type {
 import {
 	buildDispatchSnapshot,
 	dispatchSnapshotDigest,
+	sha256Hex,
 	type DispatchLease,
 	type DispatchSnapshot,
 	type LeaseRelease,
@@ -36,6 +37,7 @@ import {
 	TUI_HANDSHAKE_ENV_VAR,
 } from '../../shared/maestro-lib/managed/tui-handshake';
 import { generateUUID } from '../../shared/uuid';
+import { canonicalJson } from '../../shared/canonicalJson';
 import {
 	autoRunRunIdentity,
 	autoRunTraceId,
@@ -177,7 +179,10 @@ export function buildSpawnRequestSnapshot(config: ProcessConfig): DispatchSnapsh
 							: {}),
 					}
 				: { kind: 'local' },
-			resourceIds: config.images?.length ? [`images:${config.images.length}`] : [],
+			resourceIds: [
+				...(config.images?.length ? [`images:${config.images.length}`] : []),
+				...nativeLaunchResourceIds(config),
+			],
 			// The desktop sink classifies every spawn (MRC2-02-01): a config that
 			// says nothing is a person's conversation turn at Maestro's own UI.
 			// The handler that resolved the caller names the origin
@@ -186,6 +191,33 @@ export function buildSpawnRequestSnapshot(config: ProcessConfig): DispatchSnapsh
 			origin: config.origin ?? 'desktop',
 		}
 	);
+}
+
+/**
+ * The native harness launch a spawn runs instead of its argv, bound into the
+ * request snapshot (MCOMP-33-00F). A native transport (ACP, RPC, the SDK and
+ * API spawners) does not run `command` + `args`: it runs its own launch
+ * arguments and reads the mode, the system prompt, the permission mode, the
+ * model, the effort, the resumed session and the extra directories off the
+ * config. One resource id carries a digest over all of them, so a lease
+ * admitted for one native launch never covers another. Nothing for a spawn
+ * that is not native, which digests exactly what it digested before.
+ */
+export function nativeLaunchResourceIds(config: ProcessConfig): string[] {
+	if (config.harnessControlMode !== 'native') return [];
+	const launch = {
+		harnessControlMode: config.harnessControlMode,
+		nativeAcpArgs: config.nativeAcpArgs ?? null,
+		nativeRpcProtocol: config.nativeRpcProtocol ?? null,
+		nativeRpcArgs: config.nativeRpcArgs ?? null,
+		appendSystemPrompt: config.appendSystemPrompt ?? null,
+		permissionMode: config.permissionMode ?? null,
+		modelId: config.modelId ?? null,
+		effort: config.effort ?? null,
+		agentSessionId: config.agentSessionId ?? null,
+		sessionAdditionalDirectories: config.sessionAdditionalDirectories ?? null,
+	};
+	return [`native-launch:${sha256Hex(canonicalJson(launch))}`];
 }
 
 /**
@@ -932,35 +964,11 @@ export class ProcessManager extends EventEmitter {
 		// The Codex app-server child is spawned per turn (no shared server to
 		// fingerprint, unlike OpenCode serve), so it takes the coworking env like
 		// any CLI spawn and is routed after the injection.
-		// A managed lease never reaches a native transport (ACP, RPC, the SDK and
-		// API spawners): the request snapshot the lease digests binds the argv the
-		// child spawner runs, not the native launch arguments those transports run
-		// instead, so an admitted native route would start a launch the lease never
-		// covered. Refused by name before any side effect until the snapshot binds
-		// them (MCOMP-33-00C).
-		if (lease && configToSpawn.harnessControlMode === 'native') {
-			const message = `Managed execution of ${config.toolType} over the native harness transport is unavailable on this host: the admission does not bind its launch arguments. Nothing was started.`;
-			lease.release({ outcome: 'spawn-failed', message });
-			logger.error('[ProcessManager] Refusing to spawn: native transport', 'ProcessManager', {
-				sessionId: config.sessionId,
-				toolType: config.toolType,
-			});
-			this.emit('agent-error', config.sessionId, {
-				type: 'permission_denied',
-				message,
-				recoverable: false,
-				agentId: config.toolType,
-				sessionId: config.sessionId,
-				timestamp: Date.now(),
-			} satisfies AgentError);
-			return {
-				pid: -1,
-				success: false,
-				error: message,
-				managed: { state: 'unavailable', code: 'capability-unsupported' },
-			};
-		}
-
+		// A managed lease reaches a native transport (ACP, RPC, the SDK and API
+		// spawners) only because the request snapshot binds the native launch
+		// (`nativeLaunchResourceIds`, MCOMP-33-00F): the sink gate
+		// (`checkAdmissionAtSink`) digests this same config, so a native launch the
+		// lease did not cover is refused there like any other mismatch.
 		const result = this.withLease(config, lease, (): SpawnResult => {
 			if (configToSpawn.harnessControlMode === 'native') {
 				if (configToSpawn.toolType === 'hermes') {

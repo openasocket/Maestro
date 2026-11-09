@@ -2339,10 +2339,13 @@ async function spawnAgentOnce(
 		if (options.sshRemoteConfig?.enabled) {
 			return spawnFailureResult('Native CLI control is local-only; use the current SSH transport');
 		}
-		// A native SDK transport is not admitted by `admitCliLaunch` (the dispatch
-		// snapshot does not bind its native arguments), so a managed host refuses
-		// it rather than run it unadmitted (MCOMP-33-00R15; lifted by 00C only
-		// once the native launch is bound into the snapshot).
+		// A native SDK transport is not admitted by `admitCliLaunch`: `spawnNativeSdkAgent`
+		// runs in process with no launch spec, so no dispatch snapshot or lease
+		// gate covers it. The desktop sink binds the native launch into its own
+		// snapshot (MCOMP-33-00F), but this path never reaches that sink, so a
+		// managed host still refuses it rather than run it unadmitted
+		// (MCOMP-33-00R15). Lift only once this path is admitted through a
+		// snapshot that binds the native launch.
 		if ((options.managed ?? cliSpawnAuthority()).standing() !== 'standalone') {
 			return managedRefusal(
 				'denied',
