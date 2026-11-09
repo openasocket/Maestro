@@ -1,0 +1,427 @@
+{
+	"schemaVersion": 1,
+	"schema": "maestro-integration-build/1",
+	"artifactId": "MAESTRO-COLLECTION-CONSUMERS-BUILD",
+	"owner": "maestro",
+	"proofClass": "implementation-input",
+	"status": "complete-local-consumer-build",
+	"producerDocument": "MCOMP-27",
+	"task": "MCOMP-27-05",
+	"stage": "S12",
+	"backlog": [
+		"G-08"
+	],
+	"recordedAt": "2026-11-09T10:15:34.951Z",
+	"standing": "Compiled and locally tested inputs published at the content-addressed paths below. Grants no execution authority and proves no paired, native, GUI or real-provider support.",
+	"grants": {
+		"authority": "none",
+		"lease": "none",
+		"policy": "none"
+	},
+	"qualification": {
+		"paired": false,
+		"provider": false,
+		"native": false,
+		"desktopGui": false
+	},
+	"implementationRevision": "0fca50400beb0a397bb4055c6df2b69f48606a97",
+	"observedRevision": "0fca50400beb0a397bb4055c6df2b69f48606a97",
+	"inputDigest": "a88f503b5c1499879a7adeb6eec7d4c611580ead9fad4e467c5826dc555e1b76",
+	"snapshot": {
+		"implementationClean": true,
+		"checkoutClean": false,
+		"implementationDigest": "88edd037e45a7fcd488f5b0d8cca3090946cafe5ee84b86a321b067693b041a8",
+		"implementationFiles": 6947,
+		"inputMap": {
+			"path": ".maestro/playbooks/Working/MCOMP-27-05/input-map.json",
+			"sha256": "3bab81227da0d483122211f6c4772e04f024f62a579bb7b477e30db3b2c72f9c"
+		},
+		"inputDigestEncoding": "sha256(canonicalJson(inputMap.inputs))",
+		"implementationMap": "/Users/dr3/dev-shit/Maestro/dist/mega-maestro-runtime/0.36.0/057325170503765cbfb292cad428d29e5de7e6596400800253b8d1824cab8f73/runtime.tgz#package/source/implementation.json",
+		"libraryInputMap": "/Users/dr3/dev-shit/Maestro/dist/mega-maestro-runtime/0.36.0/057325170503765cbfb292cad428d29e5de7e6596400800253b8d1824cab8f73/runtime.tgz#package/source/library-inputs.json",
+		"changeRange": {
+			"from": "f7dcfcee4 (MCOMP-27-01, parent excluded)",
+			"to": "0fca50400 (MCOMP-27-04)",
+			"implementationRevision": "0fca50400beb0a397bb4055c6df2b69f48606a97",
+			"commits": [
+				"f7dcfcee4 (27-01 usage producer)",
+				"d65dad0fa (27-02 content delivery seam)",
+				"772b108e7 (27-03 VIBES publisher)",
+				"0fca50400 (27-04 tests)"
+			],
+			"manifestReconcile": "none: MCOMP-27 inserted no continuation, program.json task list unchanged",
+			"changedFiles": {
+				"path": ".maestro/playbooks/Working/MCOMP-27-05/checked-files.json",
+				"sha256": "ad0cb0940083170c19b7d5a8c0e295c2afcdb190acb06cf83a5d157ca7f95acf"
+			}
+		},
+		"inputs": "All tracked implementation source, prompts, templates and schemas; package and lockfiles; main/renderer/library/test/lint/format configuration; packaged README and SDK metadata; coverage and archive plans; imported contracts and exact dependencies; all installed dependency bytes including compiler/native tools; verification harnesses and Node executable. Build override variables and renderer .env inputs were absent.",
+		"installedDependencyFiles": 77914,
+		"importedContractFiles": 891,
+		"testCoordinationInput": {
+			"path": "Plans/integration-completion/program.json",
+			"sha256": "a08568257bdb3e6b6c0b15af009fdeced3c9f8987fab7fa74fca00835b377196",
+			"committedSha256": "0ca35260ac2001e3554bfb368d1b90ca3e565b86bce3e3c7a4a09fa179396aab",
+			"role": "Uncommitted coordination manifest read only to validate task IDs; excluded from production source cleanliness claim"
+		},
+		"preservedDiff": {
+			"path": ".maestro/playbooks/Working/MCOMP-27-05/initial-planning.patch",
+			"sha256": "8ae30a25692a6802fc95281c02cd18a6077190bee6edb2f71a7b797875d224b3"
+		},
+		"exclusions": "Existing planning amendments, checklist/coordination receipts, SlopTimize state and graph output are not application/build inputs. program.json is explicitly hashed as an uncommitted test coordination input. The full checkout and full test input set are not claimed committed. No private sibling implementation is loaded."
+	},
+	"dependencies": [
+		{
+			"artifactId": "MAESTRO-CONTRACT-INPUTS-BUILD",
+			"path": "Plans/integration-completion/evidence/contract-inputs-build.json",
+			"sha256": "206664f3ab7605927bbf9964597da12f4607da34bac5f601ce18e19fffca34c2",
+			"implementationRevision": "dc5938509be17742adcca713cca07c0176af6fe6",
+			"inputDigest": "115a3223b356e0975ca73b9a53c4b6e25031437915888b5534bcfd955f6116b5"
+		},
+		{
+			"artifactId": "MAESTRO-EFFECT-CONSUMERS-BUILD",
+			"path": "Plans/integration-completion/evidence/effect-build.json",
+			"sha256": "f5f81b81e3255ec225eb51d9e80c12f9c1a8ee921cc24aa7a13482cb29ae031e",
+			"implementationRevision": "4094931879e55287eec1a1306d857111293b7460",
+			"inputDigest": "901b2125ede561263fbe03428207fabb92c8ebc006d5b0410f038f48f0626b73"
+		},
+		{
+			"artifactId": "MAESTRO-POLICY-CONSUMERS-BUILD",
+			"path": "Plans/integration-completion/evidence/policy-build.json",
+			"sha256": "e253139055c3b804bbf2ff6e6f155d360e426c48132869d284c42c2a29232b09",
+			"implementationRevision": "d86ddb94c43360d46631a9f88e61f4a931435103",
+			"inputDigest": "9f5807ac2d21e92e9dd8952e3703e32ba4d90054bd8fa2ab432804cbe3ea6771"
+		},
+		{
+			"artifactId": "MAESTRO-WORKFLOW-CONSUMERS-BUILD",
+			"path": "Plans/integration-completion/evidence/workflow-build.json",
+			"sha256": "9f1105a55d036d31724b7e7960e4f77c56812ebce2bf3c3f23600bf332c08bec",
+			"implementationRevision": "59ea7a5309eecc8d7befafd56e6dd599b2fe3b11",
+			"inputDigest": "5b64f9ca421d985cb18538ffe720cccba91bbf18d46960bfe03876402b64ed2c"
+		}
+	],
+	"archives": {
+		"runtime": {
+			"path": "/Users/dr3/dev-shit/Maestro/dist/mega-maestro-runtime/0.36.0/057325170503765cbfb292cad428d29e5de7e6596400800253b8d1824cab8f73/runtime.tgz",
+			"sha256": "057325170503765cbfb292cad428d29e5de7e6596400800253b8d1824cab8f73",
+			"sha512": "21480c27e03786bc8f005f6627f54b64cf8660b7b97a88e0806ffd8753d9a340595529d8594f3e9adc77dae611dbd130e206e466ff7cfb4f59b8a8d9e04bed5b",
+			"bytes": 2655297,
+			"manifest": {
+				"path": "/Users/dr3/dev-shit/Maestro/dist/mega-maestro-runtime/0.36.0/057325170503765cbfb292cad428d29e5de7e6596400800253b8d1824cab8f73/artifact.json",
+				"sha256": "54643f2f398453ef38d12b6866031fda759adb81a2cd30e296696d19c32d2e77"
+			},
+			"sidecar": {
+				"path": "/Users/dr3/dev-shit/Maestro/dist/mega-maestro-runtime/0.36.0/057325170503765cbfb292cad428d29e5de7e6596400800253b8d1824cab8f73/runtime.tgz.sha256",
+				"sha256": "04bb06ad7600ced5ff71d920dc38059944e56c80c7c7eb2d72a5f1201582b6e6"
+			},
+			"payloadFiles": 309,
+			"payloadDigest": "f3ba538d89afe65b64bab4ba28037c3318dfc4b406f337946379f5d4ae9258f5",
+			"payloadMap": "/Users/dr3/dev-shit/Maestro/dist/mega-maestro-runtime/0.36.0/057325170503765cbfb292cad428d29e5de7e6596400800253b8d1824cab8f73/artifact.json#/payloadSha256"
+		},
+		"desktopCompiled": {
+			"path": "/Users/dr3/dev-shit/Maestro/dist/mega-maestro-collection-desktop/1/12e3c56309e610fc15642b40743fee95afc695277ce6aab169c7350a5ccdc647/desktop-compiled.tgz",
+			"sha256": "12e3c56309e610fc15642b40743fee95afc695277ce6aab169c7350a5ccdc647",
+			"sha512": "8c8e24f1e43f264a6df89f27b6f599e74800b1a1f307509c2e8899fa212dcb141618bd44e2c45f36a6b9b55e3181d3de3c8e46fe30db43130c75aab5fef1139d",
+			"bytes": 19889469,
+			"manifest": {
+				"path": "/Users/dr3/dev-shit/Maestro/dist/mega-maestro-collection-desktop/1/12e3c56309e610fc15642b40743fee95afc695277ce6aab169c7350a5ccdc647/artifact.json",
+				"sha256": "3235ea794345c20e08f8e64792cee0eef3af1e0ecd78db6ea1a79c6e299b6236"
+			},
+			"sidecar": {
+				"path": "/Users/dr3/dev-shit/Maestro/dist/mega-maestro-collection-desktop/1/12e3c56309e610fc15642b40743fee95afc695277ce6aab169c7350a5ccdc647/desktop-compiled.tgz.sha256",
+				"sha256": "36a015ca312b9f31b600f856db778a1445dfbd67b9669ea1e1b0f61961207c17"
+			},
+			"payloadFiles": 2142,
+			"payloadDigest": "d8cad8193f10e1dc3e3708d9cfb609368e86265b75993b106c445a72f95345d9",
+			"payloadMap": "/Users/dr3/dev-shit/Maestro/dist/mega-maestro-collection-desktop/1/12e3c56309e610fc15642b40743fee95afc695277ce6aab169c7350a5ccdc647/artifact.json#/payloadSha256"
+		},
+		"publicContracts": {
+			"name": "@mega-maestro/contracts",
+			"version": "0.1.0",
+			"path": "/Users/dr3/dev-shit/mega-maestro/artifacts/enterprise/0.1.0/c34e6cd0590fdce90cd2ace60f8f43ee278f6d24d62d4b6caab2bb4f720ab177/contracts.tgz",
+			"sha256": "c34e6cd0590fdce90cd2ace60f8f43ee278f6d24d62d4b6caab2bb4f720ab177",
+			"integrity": "sha512-MNZe6OgdHh5LwxRVY85zDkudqUFJjyQHdW/IgfuzH3S0cGnN1lKLaAV4dT1Z4hpyXzMbhIYiKQjpECt9RWNhTA==",
+			"manifest": {
+				"path": "/Users/dr3/dev-shit/mega-maestro/artifacts/enterprise/0.1.0/c34e6cd0590fdce90cd2ace60f8f43ee278f6d24d62d4b6caab2bb4f720ab177/artifact.json",
+				"sha256": "6c346c4fa4a7b7d4ec41b1624c7b155715128ec04c877bf0830910fd49aa127d"
+			},
+			"sidecar": {
+				"path": "/Users/dr3/dev-shit/mega-maestro/artifacts/enterprise/0.1.0/c34e6cd0590fdce90cd2ace60f8f43ee278f6d24d62d4b6caab2bb4f720ab177/contracts.tgz.sha256",
+				"sha256": "36b351059a4fc51fda3c278dc87d892fa098ac8ad8517972cec0f82f01a88fd6"
+			},
+			"payloadFiles": 46,
+			"payloadDigest": "12976943661224f30e6461430332d1fefb36f4133bd38e93cb02f006d52296fd"
+		}
+	},
+	"builds": {
+		"libraryProvenance": {
+			"path": ".maestro/playbooks/Working/MCOMP-27-05/library/provenance.json",
+			"sha256": "aac8b01121389ddbd9e9bd0183e4a1701f493d2f963f11557a0249a02cb27df9"
+		},
+		"desktopPayloadMap": {
+			"path": ".maestro/playbooks/Working/MCOMP-27-05/main-build-payload.json",
+			"sha256": "2c42f0af81a238096852ca2852e209696b240f15f0420ba9202a24c2d6e5b766"
+		},
+		"scope": "Runtime library, Electron main/shared/preload and renderer compiled locally. Desktop archive contains compiled inputs with external Electron/Node/native dependencies, not an installable native app. No GUI session was qualified."
+	},
+	"archiveValidation": {
+		"integrity": {
+			"path": ".maestro/playbooks/Working/MCOMP-27-05/archive-validation.json",
+			"sha256": "d156e2f3f498382a51d126ad25572803b779ed5853b714c7da8b3d77a77eaaf9"
+		},
+		"importTrace": {
+			"path": ".maestro/playbooks/Working/MCOMP-27-05/archive-redirects.log",
+			"sha256": "dd3e1bf9f925c583baa5b108b89ef29f6acf5e9e06510f16a57a29f38dac85b2"
+		},
+		"runtimeInput": {
+			"path": ".maestro/playbooks/Working/MCOMP-27-05/runtime-input-validation.json",
+			"sha256": "f1ba9cd9c26ae6b5d81dac6f349e3686fd36fff6839a59d3dfa560261283542c"
+		},
+		"desktopRedirects": 5,
+		"runtimeRedirects": 6,
+		"scope": "SHA-256/SHA-512, sidecars, manifests, member sets, safe paths and every payload hash verified before extraction. Every relative import of the usage producer (main/enterprise/usage: usageReportFromStats, observeStats, usageSettlingSink), the content collection source, capture and CONTENT-LOCAL/1 delivery (main/enterprise/content) and the VIBES publisher (main/enterprise/vibes) was redirected to the compiled desktop archive, and every import of the lifecycle projector, event journal and usage provenance tracker (shared/maestro-lib/managed/events, managed/event-journal, streaming/usage-accumulator) to the public runtime bundle; four suites (usage, content, vibes, telemetry incl. the usage family through the journal and client) ran on those bytes. Service, enterprise IPC and conformance suites stay source-only. Public declaration checks and a plain Node load of both archives (a filled-in zero never reported as a figure, a context replay a correction, metadata-only admits no role, VIBES only under full_vibes, an unknown ceiling key refuses the document, text is not a fact field, no injected port means no delivery, unobserved results are named gaps) passed. Temporary identity-only pin leaves the historical runtime pin unchanged."
+	},
+	"tests": {
+		"source": {
+			"files": 7,
+			"passed": 129,
+			"failed": 0,
+			"skipped": 0,
+			"results": {
+				"path": ".maestro/playbooks/Working/MCOMP-27-05/source-tests.json",
+				"sha256": "75a6bce8fda81fce7039129051798f04e5005a4f4cad356fb40d746c0da1c1d9"
+			}
+		},
+		"archived": {
+			"files": 4,
+			"passed": 80,
+			"failed": 0,
+			"skipped": 0,
+			"results": {
+				"path": ".maestro/playbooks/Working/MCOMP-27-05/archive-tests.json",
+				"sha256": "039681007c2810f0eacf7a78d1d352b0d7c229be749e5c2b0c38e192f90e1886"
+			}
+		},
+		"boundary": "Local typed-port and public-schema fixtures, a CONTENT-LOCAL/1 port double, temporary data directories and recording sinks only. No signed production delivery, real tenant, provider, native peer or live endpoint supplied authority."
+	},
+	"behavior": [
+		"Real process usage (the process manager usage event) streams into the managed usage producer; each terminal lifecycle fact of a non-shell run settles that run under its own provider, model, lineage and admission; a silent run is unavailable, never a zero; a replay adds only missingness; idempotency is the usage event id.",
+		"Desktop inventory reports the tracked usage count instead of null.",
+		"The content ceiling is read through an injected CONTENT-LOCAL/1 port only for the applied revision and profile; rollback, same-revision rewrite, a changed standing mid-read and malformed documents are refused and the previous ceiling kept.",
+		"Held content uploads oldest first in bounded passes of digest-named chunks; a record is uploaded only on an acceptance echoing the exact digest and length, a lost answer is resolved by status before any resend, a final denial releases the bytes, revoke asks the endpoint to delete what it accepted. Without a port (the production default) records stay pending_upload.",
+		"Each finished root run tree publishes its recorded VIBES graph through the same content capture (full_vibes and a granting ceiling only), naming trigger and source event ids, origins, revisions and digest, with unobserved tool and subagent results as named gaps."
+	],
+	"contractMappings": {
+		"pin": {
+			"path": "vendor/mega-maestro/contracts.pin.json",
+			"sha256": "8343292d926cf3ed7b67a3c6f34a88eecedf85045dddb187d0357deae3daf3f4"
+		},
+		"coverage": {
+			"path": "Plans/integration-completion/contract-coverage.json",
+			"sha256": "6b1d8a57c3864678df317d013b8a2d4663bf86d4fab885b7d8fdb0573e3bf0b2"
+		},
+		"endpointProtocolsAccepted": [
+			1
+		],
+		"liveNegotiationPerformed": false,
+		"extensions": [
+			{
+				"id": "CONTENT-LOCAL/1",
+				"status": "proposed-not-negotiated",
+				"productionProducer": false
+			}
+		],
+		"remaining": "No published endpoint operation carries content; delivery implements the already-recorded CONTENT-LOCAL/1 proposal behind an injected port and is not advertised. Usage and VIBES metadata travel the existing event journal and telemetry client. contract-coverage.json gained no entry in this phase. Production delivery still requires authenticated negotiated authority (CP-01)."
+	},
+	"checks": [
+		{
+			"name": "archive-tests",
+			"command": "st node node_modules/vitest/vitest.mjs run --config .maestro/playbooks/Working/MCOMP-27-05/vitest.archive.config.mts src/__tests__/main/enterprise/usage.test.ts src/__tests__/main/enterprise/content.test.ts src/__tests__/main/enterprise/vibes.test.ts src/__tests__/main/enterprise/telemetry.test.ts --reporter=default --reporter=json --outputFile=.maestro/playbooks/Working/MCOMP-27-05/archive-tests.json",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-27-05/archive-tests.log",
+				"sha256": "6e84ffa8dd0bfe210f1bac95a6c33c6b50458892f32ef38a92e8d0342929d99c"
+			}
+		},
+		{
+			"name": "build-library",
+			"command": "st node scripts/build-maestro-lib.mjs --out-dir .maestro/playbooks/Working/MCOMP-27-05/library",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-27-05/build-library.log",
+				"sha256": "ce21a35d8b6101b307b70ddfb82da46ae38a32f8f23413a5839e62ed19a650b5"
+			}
+		},
+		{
+			"name": "build-main",
+			"command": "st npm run build:main",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-27-05/build-main.log",
+				"sha256": "3214edb642e498efad378589718658eaa9e55d42027b21b49b3eee172568b8a8"
+			}
+		},
+		{
+			"name": "build-renderer",
+			"command": "st npm run build:renderer",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-27-05/build-renderer.log",
+				"sha256": "dd2fce45dd5dd6c22ca46f7d39b0f85f855e5b81597b48d2065d831239720329"
+			}
+		},
+		{
+			"name": "contract-vectors",
+			"command": "st node .maestro/playbooks/Working/MCOMP-00-03/exact-dependency-vectors.mjs",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-27-05/contract-vectors.log",
+				"sha256": "e15ef2fcaa677666d1461af0a5a760e956fee6ca69c90a14e15ea37d2443d295"
+			}
+		},
+		{
+			"name": "contracts",
+			"command": "st node .maestro/playbooks/Working/MCOMP-00-01/verify-inputs.mjs",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-27-05/contracts.log",
+				"sha256": "36eef50e024c7307bd9a3e4832a63c265dcb6df7b15878eb105b99f0b2f989a9"
+			}
+		},
+		{
+			"name": "dash-lint",
+			"command": "st node node_modules/eslint/bin/eslint.js -c eslint.dashes.config.mjs src/__tests__/main/enterprise/content.test.ts src/__tests__/main/enterprise/service.test.ts src/__tests__/main/enterprise/telemetry.test.ts src/__tests__/main/enterprise/usage.test.ts src/__tests__/main/enterprise/vibes.test.ts src/main/enterprise/content.ts src/main/enterprise/service.ts src/main/enterprise/usage.ts src/main/enterprise/vibes.ts src/main/index.ts",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-27-05/dash-lint.log",
+				"sha256": "4f4d7e6dde7c60d7dcb4992ec93d972def0229105a9b2d08a8e1327cfc3afc71"
+			}
+		},
+		{
+			"name": "dependencies",
+			"command": "st node .maestro/playbooks/Working/MCOMP-27-05/verify-dependencies.mjs",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-27-05/dependencies.log",
+				"sha256": "78309669c119d418a84d77168dc129f6c7b4019c358494ef185384ea3ec5a18d"
+			}
+		},
+		{
+			"name": "docs",
+			"command": "st npm run docs:verify",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-27-05/docs.log",
+				"sha256": "56683629ce6ed30d817e0a34bc4cde8c75211aade58d0b3584a9c459b85764b2"
+			}
+		},
+		{
+			"name": "eslint",
+			"command": "st node node_modules/eslint/bin/eslint.js src/main/enterprise/content.ts src/main/enterprise/service.ts src/main/enterprise/usage.ts src/main/enterprise/vibes.ts src/main/index.ts",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-27-05/eslint.log",
+				"sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+			}
+		},
+		{
+			"name": "extract-all",
+			"command": "st python3 .maestro/playbooks/Working/MCOMP-27-05/extract.py",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-27-05/extract-all.log",
+				"sha256": "d156e2f3f498382a51d126ad25572803b779ed5853b714c7da8b3d77a77eaaf9"
+			}
+		},
+		{
+			"name": "format",
+			"command": "st node node_modules/prettier/bin/prettier.cjs --check src/__tests__/main/enterprise/content.test.ts src/__tests__/main/enterprise/service.test.ts src/__tests__/main/enterprise/telemetry.test.ts src/__tests__/main/enterprise/usage.test.ts src/__tests__/main/enterprise/vibes.test.ts src/main/enterprise/content.ts src/main/enterprise/service.ts src/main/enterprise/usage.ts src/main/enterprise/vibes.ts src/main/index.ts",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-27-05/format.log",
+				"sha256": "17aa973d3f004560237d9a95171210b0671deff23d61628eecf7322ff5938f20"
+			}
+		},
+		{
+			"name": "package",
+			"command": "st node .maestro/playbooks/Working/MCOMP-27-05/package.mjs",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-27-05/package.log",
+				"sha256": "83630149999ee8d6039bf73ef646cfb050f1609866d8447eedcedf565fdb6bcd"
+			}
+		},
+		{
+			"name": "package-desktop",
+			"command": "st node .maestro/playbooks/Working/MCOMP-27-05/package-desktop.mjs",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-27-05/package-desktop.log",
+				"sha256": "153f76b24f38d8f9c0b8276082f056f8e8a0e2e6a20adc6599dfb81a218d4ba5"
+			}
+		},
+		{
+			"name": "plain-node-load",
+			"command": "st node .maestro/playbooks/Working/MCOMP-27-05/load.mjs",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-27-05/plain-node-load.log",
+				"sha256": "7a1bdd59454dacd791222f1de3c023678e75436b3d094a102f2195aed3552678"
+			}
+		},
+		{
+			"name": "public-types",
+			"command": "st node node_modules/typescript/bin/tsc --ignoreConfig --noEmit --strict --target es2022 --module esnext --moduleResolution bundler --skipLibCheck --esModuleInterop .maestro/playbooks/Working/MCOMP-27-05/consumer.ts",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-27-05/public-types.log",
+				"sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+			}
+		},
+		{
+			"name": "runtime-input",
+			"command": "st node .maestro/playbooks/Working/MCOMP-27-05/verify-runtime.mjs",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-27-05/runtime-input.log",
+				"sha256": "e484de55cc2c81fdea3925934f76536e7ed4250da69c78fc6d678f223e5bf767"
+			}
+		},
+		{
+			"name": "schemas",
+			"command": "st node .maestro/playbooks/Working/MCOMP-00-01/load-schemas.mjs",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-27-05/schemas.log",
+				"sha256": "b5948d1f375bddd6ecbf9e871653e313413adbb7b5a4d25b063d3f2e153a443d"
+			}
+		},
+		{
+			"name": "source-tests",
+			"command": "st node node_modules/vitest/vitest.mjs run src/__tests__/integration/mega-maestro/conformance.test.ts src/__tests__/main/enterprise/content.test.ts src/__tests__/main/enterprise/service.test.ts src/__tests__/main/enterprise/telemetry.test.ts src/__tests__/main/enterprise/usage.test.ts src/__tests__/main/enterprise/vibes.test.ts src/__tests__/main/ipc/handlers/enterprise.test.ts --reporter=default --reporter=json --outputFile=.maestro/playbooks/Working/MCOMP-27-05/source-tests.json",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-27-05/source-tests.log",
+				"sha256": "f344a33abebb8ac29ab3512e8d0c1a11c5d25f224f65992efc54ab5af055e67e"
+			}
+		},
+		{
+			"name": "typecheck",
+			"command": "st npm run lint",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-27-05/typecheck.log",
+				"sha256": "ed9e886b2a647f29f520344068302948b8558e4b83a448690f8259049c5af0b3"
+			}
+		}
+	],
+	"limitations": [
+		"This BUILD supplies local compiled inputs only; paired, provider and native outcomes remain in MCOMP-28 and later qualification tasks.",
+		"Renderer build exited zero; its warnings are retained in the log. Compilation is not GUI/runtime qualification.",
+		"No CONTENT-LOCAL/1 port is injected in production, so every content record stays pending_upload until a negotiated endpoint operation exists.",
+		"Pre-existing on HEAD and outside this change set: integration/mega-maestro full-pair cases fail while PREPARED/1 authority is absent; not part of these suites.",
+		"The runtime library version string is unchanged although its bytes differ from earlier archives. A counterpart must pin this archive by digest and requalify before claiming compatibility.",
+		"Archives and detailed evidence are workspace-local handoff artifacts. No remote artifact registry, native application archive, CI matrix qualification or production release is claimed."
+	],
+	"imagesAnalyzed": 0
+}
