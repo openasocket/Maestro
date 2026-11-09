@@ -1865,6 +1865,42 @@
 				],
 				"notes": "No case dropped; no hunk took one whole side. ask stays a consult (cross_agent_ask), never a dispatch.",
 				"unmergedAfter": 60
+			},
+			"MCOMP-33-00R18": {
+				"resolvedAt": "2026-11-09",
+				"resolvedBy": "Maestro-Claude",
+				"files": [
+					"src/cli/services/runtime-host.ts",
+					"src/__tests__/cli/services/runtime-host.test.ts",
+					"src/cli/services/host-cue.ts"
+				],
+				"method": "Nine hunks resolved by a shape-asserting script (Working/mcomp-33-00r18/resolve.mjs, both sides read in full, every replacement computed before the write of each file); staged through merge-tool.mjs stage (prettier reformatted host-cue.ts only, 57 unmerged left). Working/mcomp-33-00r18/check.mjs: 0 syntax diagnostics on all three, every it/describe title of HEAD (31) and MERGE_HEAD (20) present in the suite (38 unique now), no markers, every seam count at least the larger side's. runtime-host.test.ts and host-cue.test.ts cannot load until src/main/cue/cue-run-router.ts (00R25) merges. git diff --cached HEAD / MERGE_HEAD: runtime-host +44 -1 / +249 -1, suite +193 -1 / +580 -4, host-cue +390 -27 / +25 -3.",
+				"hunks": {
+					"src/cli/services/runtime-host.ts": [
+						"Hunk 1 (imports): both: HEAD's composeHostManaged/HostManagedComposition/HostManagedLifecycle and upstream's createHostSleepGuard/HostSleepGuard.",
+						"Hunk 2 (RuntimeHostOptions): both: HEAD's managed, managedUnavailable and managedLifecycle options, then upstream's preventSleep (its own doc block).",
+						"Hunk 3 (RuntimeHostDeps): both: HEAD's listenerAuthority(runtime) and upstream's createSleepGuard.",
+						"Hunk 4 (defaultDeps): both: listenerAuthority: runtimeHostListenerAuthority and createSleepGuard: createHostSleepGuard.",
+						"Hunk 5 (startServer options): both: HEAD's roundParents and communications ports, and upstream's answer: cue.answer (cue list/activity/enable/disable served by the host's engine)."
+					],
+					"src/__tests__/cli/services/runtime-host.test.ts": [
+						"Hunk 1 (imports): upstream's cue-engine-lock and startHostCue/HostCue/HostCueEngine imports (which already name HostCue) plus HEAD's composeHostManaged.",
+						"Hunk 2 (deps factory): both: HEAD's listenerAuthority: deliveredCeiling() and composeManaged over a fake anchor, and upstream's createSleepGuard: recordingGuard."
+					],
+					"src/cli/services/host-cue.ts": [
+						"Hunk 1 (HostCueDeps.createEngine options Pick): the union: onLog, runAutoRun, managedHost, workflowFence, onLockLost, onPreventSleep, onAllowSleep.",
+						"Hunk 2 (createEngine call): both: HEAD's managedHost (the runtime's attached authority, MRC-07-02A) and workflowFence (the runtime's ownership record, MRC-07-06A), then upstream's onLockLost and the sleep hooks driving host.onWorkChanged."
+					]
+				},
+				"outsideHunks": [],
+				"semanticConflictsForC": [
+					"R17's requirement holds: runtime-host.ts accepts both managedComposition and preventSleep (startRuntimeHost options).",
+					"describe() returns cue, cueRuns, preventingSleep, version and managedUnavailable; HostStatusReport (client/types.ts, 00R20) must keep managed, managedUnavailable and preventingSleep.",
+					"StandaloneCueEngineOptions (cue-standalone-engine.ts, already merged) carries managedHost, workflowFence, onLockLost, onPreventSleep and onAllowSleep; buildStandaloneCueSpawnPort() is untouched.",
+					"runtime-host.test.ts and host-cue.test.ts are unrun until cue-run-router.ts (00R25); 00S runs them."
+				],
+				"notes": "No case dropped; no hunk took one whole side. Every hunk was additive on both sides.",
+				"unmergedAfter": 57
 			}
 		}
 	}
