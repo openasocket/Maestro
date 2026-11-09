@@ -121,7 +121,12 @@ import {
 	pairedDeviceActorProblems,
 } from './spawn-authority';
 import { getActingTransport, transportSpawnActor } from '../web-server/auth/transport-actor';
-import { buildVibesRecordedGraph, type VibesRecordedGraph } from './vibes';
+import {
+	buildVibesRecordedGraph,
+	createVibesPublisher,
+	type VibesPublisher,
+	type VibesRecordedGraph,
+} from './vibes';
 import {
 	createTelemetryClient,
 	TELEMETRY_HOST_IDLE_POLL_MS,
@@ -522,6 +527,13 @@ export interface EnterpriseService {
 	readonly contentCapture: ContentCapture;
 	vibes(): VibesRecordedGraph;
 	/**
+	 * VIBES publication (MCOMP-27-03): from `start()` on, every finished root run's
+	 * recorded graph is captured by `contentCapture` as `vibes.annotations` (kept only
+	 * under `full_vibes` and a granting ceiling, delivered by the same CONTENT-LOCAL/1
+	 * pass), each publication naming the event ids, origins and revisions it came from.
+	 */
+	readonly vibesPublisher: VibesPublisher;
+	/**
 	 * What this installation is and can do (MRC-10-06B): `snapshot()` is the local
 	 * read every status surface answers from, `record()` projects the fleet-facing
 	 * fact as one `inventory` event per distinct inventory. Recorded once at the end
@@ -743,6 +755,8 @@ export function createEnterpriseService(deps: EnterpriseServiceDeps): Enterprise
 		delivery: () => (port && !closing ? (deps.contentDelivery?.(port) ?? null) : null),
 	});
 	const contentCapture = createContentCapture({ source: content, now });
+	const vibesPublisher = createVibesPublisher({ events, capture: contentCapture });
+	let stopVibes: (() => void) | null = null;
 	const usage = createUsageCapture({
 		events,
 		identity: () => lifecycle.status().identity,
@@ -861,6 +875,7 @@ export function createEnterpriseService(deps: EnterpriseServiceDeps): Enterprise
 		content,
 		contentCapture,
 		vibes: () => buildVibesRecordedGraph(events.recent(), { projectorGaps: events.gaps() }),
+		vibesPublisher,
 		inventory,
 		inbox,
 		commands,
@@ -896,6 +911,8 @@ export function createEnterpriseService(deps: EnterpriseServiceDeps): Enterprise
 				} else {
 					deps.onEventJournalUnavailable?.(loadedEvents);
 				}
+				// Every finished run tree from here on is offered to the content capture as VIBES evidence.
+				stopVibes ??= vibesPublisher.start();
 				// No sealed file, no custody read: an unenrolled desktop never touches the keyring here.
 				admissionReady = true;
 				if (identity.read().status === 'ok') await lifecycle.connect();
@@ -919,6 +936,8 @@ export function createEnterpriseService(deps: EnterpriseServiceDeps): Enterprise
 				admissionReady = false;
 				if (liveRunTimer) clearInterval(liveRunTimer);
 				liveRunTimer = null;
+				stopVibes?.();
+				stopVibes = null;
 				host.authority.revokeAll('The desktop authority is closing.');
 				// A failed start still needs cleanup; its caller receives the original rejection.
 				await starting?.catch(() => undefined);

@@ -30,8 +30,12 @@
 
 import { createHash } from 'node:crypto';
 import { canonicalJson } from '../../shared/canonicalJson';
-import type { ManagedLifecycleEvent } from '../../shared/maestro-lib/managed/events';
-import type { ManagedRunState } from '../../shared/maestro-lib/managed/types';
+import type {
+	LifecycleProjector,
+	ManagedLifecycleEvent,
+} from '../../shared/maestro-lib/managed/events';
+import type { ManagedOrigin, ManagedRunState } from '../../shared/maestro-lib/managed/types';
+import type { ContentCaptureInput, ContentCaptureOutcome } from './content';
 
 export const VIBES_RECORDED_PROFILE = 'mega-maestro.vibes-recorded.v1';
 const TERMINAL: readonly ManagedRunState[] = ['completed', 'failed', 'cancelled'];
@@ -89,6 +93,8 @@ export interface VibesRecordedGraph {
 export interface VibesBuildOptions {
 	/** What the projector's window no longer holds: reported as the caller's gap, never guessed around. */
 	projectorGaps?: { dropped: number; refused: number };
+	/** What the caller knows it never observed (`tool-results:...`): each a named caller gap, never a guessed record. */
+	unobserved?: readonly string[];
 }
 
 const withId = <T extends { annotation_id: string }>(record: Omit<T, 'annotation_id'>): T =>
@@ -172,6 +178,7 @@ export function buildVibesRecordedGraph(
 	}
 
 	gap('caller_reported_gap', 'decisions:not-recorded-by-this-host');
+	for (const reference of options.unobserved ?? []) gap('caller_reported_gap', reference);
 	if (truncated) gap('caller_reported_gap', `events:truncated-at-${VIBES_MAX_RECORDS}`);
 	const projector = options.projectorGaps;
 	if (projector && projector.dropped > 0)
@@ -248,3 +255,128 @@ export const VIBES_CAPABILITY = Object.freeze({
 		admittedBy: 'full_vibes' as const,
 	}),
 });
+
+// ---------------------------------------------------------------------------
+// Publication (MCOMP-27-03): one recorded graph per finished run tree, handed to
+// the content capture, never to a delivery engine of its own
+// ---------------------------------------------------------------------------
+
+/**
+ * What this host never observes of a run, named on every published graph: the
+ * provider's own tool results and its in-process subagents (a delegation is
+ * recorded only when Maestro itself ran the child), and any decision record.
+ */
+export const VIBES_UNOBSERVED: readonly string[] = [
+	'tool-results:not-recorded-by-this-host',
+	'subagent-results:provider-internal-not-observed',
+];
+
+/** The exact lineage of one published graph: the events it was built from, the surfaces that raised them, the revisions they ran under. */
+export interface VibesPublication {
+	rootRunId: string;
+	/** The terminal event that closed the tree: the publication's own idempotency key. */
+	triggerEventId: string;
+	sourceEventIds: readonly string[];
+	origins: readonly ManagedOrigin[];
+	policyRevisions: readonly (number | null)[];
+	sha256: string;
+	byteLength: number;
+	/** `recorded` when the capture kept it under the signed ceiling; else the capture's refusal, by name. */
+	outcome: ContentCaptureOutcome['outcome'];
+	referenceId: string | null;
+	/** The ceiling revision the content fact was recorded under; null when not collected. */
+	contentPolicyRevision: number | null;
+	reason: string | null;
+}
+
+export interface VibesPublisherDeps {
+	events: Pick<LifecycleProjector, 'subscribe' | 'recent' | 'gaps'>;
+	/** The one content capture this host composes (`content.ts`); delivery is its CONTENT-LOCAL/1 pass. */
+	capture: { capture(input: ContentCaptureInput): ContentCaptureOutcome };
+	/** How many publications are remembered (and deduplicated). Default 256. */
+	capacity?: number;
+}
+
+export interface VibesPublisher {
+	/** Publish on every root run's terminal event from now on; returns the unsubscribe. */
+	start(): () => void;
+	/** Build and capture the graph of one run tree now, from what the window holds. Null when the window holds none of it. */
+	publish(rootRunId: string, triggerEventId?: string): VibesPublication | null;
+	recent(): readonly VibesPublication[];
+	status(): { published: number; recorded: number; notCollected: number; duplicates: number };
+}
+
+const rootOf = (event: ManagedLifecycleEvent): string | null =>
+	event.run ? event.run.rootRunId : null;
+
+/** The recorded graph of each finished run tree, captured as `vibes.annotations` under the endpoint's signed profile. Never throws into the projector. */
+export function createVibesPublisher(deps: VibesPublisherDeps): VibesPublisher {
+	const capacity = Math.max(1, deps.capacity ?? 256);
+	const published: VibesPublication[] = [];
+	const seen = new Set<string>();
+	const counts = { published: 0, recorded: 0, notCollected: 0, duplicates: 0 };
+
+	function publish(rootRunId: string, triggerEventId?: string): VibesPublication | null {
+		const tree = deps.events.recent().filter((event) => rootOf(event) === rootRunId);
+		const states = tree.filter((event) => event.kind === 'run-state');
+		if (states.length === 0) return null;
+		const trigger = triggerEventId ?? states[states.length - 1].eventId;
+		if (seen.has(trigger)) {
+			counts.duplicates += 1;
+			return published.find((entry) => entry.triggerEventId === trigger) ?? null;
+		}
+		const graph = buildVibesRecordedGraph(tree, {
+			projectorGaps: deps.events.gaps(),
+			unobserved: VIBES_UNOBSERVED,
+		});
+		const evidence = vibesEvidenceOf(graph);
+		const root =
+			states.find((event) => event.run!.runId === rootRunId) ?? states[states.length - 1];
+		const outcome = deps.capture.capture({
+			role: evidence.role,
+			text: evidence.text,
+			sessionId: root.source.sessionId,
+			agentId: root.run!.agentId,
+			tabId: root.source.tabId,
+			provider: root.source.provider,
+			runId: rootRunId,
+			at: Date.parse(states[states.length - 1].occurredAt),
+		});
+		const distinct = <T>(values: T[]): T[] => [...new Set(values)];
+		const fact = outcome.outcome === 'recorded' ? outcome.fact : null;
+		const publication: VibesPublication = {
+			rootRunId,
+			triggerEventId: trigger,
+			sourceEventIds: tree.map((event) => event.eventId),
+			origins: distinct(tree.map((event) => event.context.origin)),
+			policyRevisions: distinct(tree.map((event) => event.context.policyRevision)),
+			sha256: evidence.sha256,
+			byteLength: evidence.byteLength,
+			outcome: outcome.outcome,
+			referenceId: fact ? fact.original.referenceId : null,
+			contentPolicyRevision: fact ? fact.policyRevision : null,
+			reason: outcome.outcome === 'not-collected' ? outcome.reason : null,
+		};
+		seen.add(trigger);
+		published.push(publication);
+		while (published.length > capacity) seen.delete(published.shift()!.triggerEventId);
+		counts.published += 1;
+		if (fact) counts.recorded += 1;
+		else counts.notCollected += 1;
+		return publication;
+	}
+
+	return {
+		start: () =>
+			deps.events.subscribe((event) => {
+				const run = event.run;
+				if (event.kind !== 'run-state' || !run || !TERMINAL.includes(run.state)) return;
+				// Only the root's end closes a tree; a child's end is part of it.
+				if (run.rootRunId !== run.runId) return;
+				publish(run.runId, event.eventId);
+			}),
+		publish,
+		recent: () => [...published],
+		status: () => ({ ...counts }),
+	};
+}

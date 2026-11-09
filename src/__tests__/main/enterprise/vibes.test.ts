@@ -14,10 +14,12 @@ import {
 } from '../../../main/enterprise/content';
 import {
 	buildVibesRecordedGraph,
+	createVibesPublisher,
 	VIBES_ATTESTATION,
 	VIBES_CAPABILITY,
 	VIBES_MAX_RECORDS,
 	VIBES_RECORDED_PROFILE,
+	VIBES_UNOBSERVED,
 	vibesAnnotationId,
 	vibesAnnotationsJsonl,
 	vibesEvidenceOf,
@@ -672,5 +674,100 @@ describe('bounded VIBES evidence (MRC-10-08)', () => {
 			expect.arrayContaining(['hidden_reasoning', 'private_recording_reuse', 'decision_records'])
 		);
 		expect(JSON.stringify(graph)).not.toContain('reasoning');
+	});
+	// MCOMP-27-03: a finished run tree is published once, through the one content capture, with its exact lineage.
+	it('publishes each finished root run once as vibes.annotations, with the source events, origins, revisions and digest it was built from', () => {
+		const p = projector();
+		const capture = under('full_vibes');
+		const publisher = createVibesPublisher({ events: p, capture });
+		const stop = publisher.start();
+		p.record(fact({ runId: 'run-a', lineage: lineage('run-a', null) }));
+		p.record(fact({ runId: 'run-z', sessionId: 'agent-9-ai-tab-1', agentId: 'agent-9' }));
+		const cueChild = { ...lineage('run-b', 'run-a'), origin: 'cue' as const };
+		p.record(fact({ runId: 'run-b', at: T0 + 1_000, agentId: 'agent-2', lineage: cueChild }));
+		p.record(
+			fact({
+				runId: 'run-b',
+				state: 'completed',
+				at: T0 + 2_000,
+				agentId: 'agent-2',
+				lineage: cueChild,
+			})
+		);
+		// A child's end closes nothing.
+		expect(publisher.recent()).toEqual([]);
+		const [rootEnd] = p.record(
+			fact({ runId: 'run-a', state: 'failed', at: T0 + 3_000, lineage: lineage('run-a', null) })
+		);
+		const [publication] = publisher.recent();
+		const tree = p.recent().filter((e) => e.run?.rootRunId === 'run-a');
+		expect(publication).toMatchObject({
+			rootRunId: 'run-a',
+			triggerEventId: rootEnd.eventId,
+			sourceEventIds: tree.map((e) => e.eventId),
+			origins: ['desktop', 'cue'],
+			policyRevisions: [3],
+			outcome: 'recorded',
+			referenceId: 'ref-1',
+			contentPolicyRevision: 3,
+			reason: null,
+		});
+		// The other tree is not in it; the kept bytes are the exact graph the digest names.
+		const bytes = capture.take('ref-1')!.bytes;
+		expect(createHash('sha256').update(bytes).digest('hex')).toBe(publication.sha256);
+		expect(bytes.byteLength).toBe(publication.byteLength);
+		expect(bytes.toString('utf8')).not.toContain('run-z');
+		expect(capture.take('ref-1')!.fact).toMatchObject({ runId: 'run-a', agentId: 'agent-1' });
+		const graph = buildVibesRecordedGraph(tree, {
+			projectorGaps: p.gaps(),
+			unobserved: VIBES_UNOBSERVED,
+		});
+		expect(bytes.toString('utf8')).toBe(vibesAnnotationsJsonl(graph));
+		for (const reference of VIBES_UNOBSERVED)
+			expect(graph.gaps).toContainEqual({ kind: 'caller_reported_gap', reference });
+		// The same trigger again is the same publication, not a second capture.
+		expect(publisher.publish('run-a', rootEnd.eventId)).toBe(publication);
+		expect(publisher.status()).toEqual({
+			published: 1,
+			recorded: 1,
+			notCollected: 0,
+			duplicates: 1,
+		});
+		stop();
+		p.record(fact({ runId: 'run-z', state: 'completed', at: T0 + 4_000, agentId: 'agent-9' }));
+		expect(publisher.recent()).toHaveLength(1);
+	});
+
+	it('keeps nothing where the profile or the ceiling does not admit it, says why, and never disturbs the projector', () => {
+		for (const [profile, roles, reason] of [
+			['full', undefined, 'profile full admits no vibes.annotations'],
+			['full_vibes', ['user.prompt'], 'the ceiling grants no vibes.annotations'],
+		] as const) {
+			const p = projector();
+			const publisher = createVibesPublisher({
+				events: p,
+				capture: under(profile, roles && [...roles]),
+			});
+			publisher.start();
+			p.record(fact());
+			p.record(fact({ state: 'completed', at: T0 + 1_000 }));
+			expect(publisher.recent()).toMatchObject([
+				{ rootRunId: 'run-a', outcome: 'not-collected', referenceId: null, reason },
+			]);
+		}
+		const p = projector();
+		createVibesPublisher({
+			events: p,
+			capture: {
+				capture: () => {
+					throw new Error('capture failed');
+				},
+			},
+		}).start();
+		p.record(fact());
+		expect(p.record(fact({ state: 'completed', at: T0 + 1_000 }))).toHaveLength(1);
+		expect(
+			createVibesPublisher({ events: p, capture: under('full_vibes') }).publish('none')
+		).toBeNull();
 	});
 });
