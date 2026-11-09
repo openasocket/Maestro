@@ -12,6 +12,7 @@ import {
 import { normalizeWorktreePath } from '../../../../shared/worktreePaths';
 import {
 	execGit,
+	isGitRefusal,
 	worktreeInfoRemote,
 	worktreeSetupRemote,
 	worktreeCheckoutRemote,
@@ -523,15 +524,18 @@ export function registerWorktreeHandlers(deps: GitHandlerDependencies): void {
 				);
 				const branchExists = branchExistsResult.exitCode === 0;
 
+				// The checkout is a local write, so it runs through the shared
+				// executor and is held to the managed repository ceiling at the
+				// worktree, after its argv is final and before the process starts
+				// (MCOMP-19-02), exactly as the SSH branch above already is through
+				// execGitRemote. A refusal is an `EMANAGED` result whose stderr
+				// names the reason; the reads above stay direct. Standalone the
+				// executor spawns the same `git` as before.
 				let checkoutResult;
 				if (branchExists) {
-					checkoutResult = await execFileNoThrow('git', ['checkout', branchName], worktreePath);
+					checkoutResult = await execGit(['checkout', branchName], worktreePath);
 				} else if (createIfMissing) {
-					checkoutResult = await execFileNoThrow(
-						'git',
-						['checkout', '-b', branchName],
-						worktreePath
-					);
+					checkoutResult = await execGit(['checkout', '-b', branchName], worktreePath);
 				} else {
 					return {
 						success: false,
@@ -713,7 +717,15 @@ export function registerWorktreeHandlers(deps: GitHandlerDependencies): void {
 					const args = force
 						? ['worktree', 'remove', '--force', worktreePath]
 						: ['worktree', 'remove', worktreePath];
-					const gitResult = await execFileNoThrow('git', args, worktreePath);
+					// `worktree remove` is a local write held to the managed
+					// repository ceiling through the shared executor before git
+					// starts (MCOMP-19-02). A refusal ends the removal: the
+					// recursive-delete fallback below would perform the very effect
+					// the ceiling refused, so it is never reached on a hold.
+					const gitResult = await execGit(args, worktreePath);
+					if (isGitRefusal(gitResult)) {
+						return { success: false, error: gitResult.stderr };
+					}
 
 					if (gitResult.exitCode === 0) {
 						logger.info(`${LOG_CONTEXT} Removed worktree via git: ${worktreePath}`);

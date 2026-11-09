@@ -117,6 +117,7 @@ vi.mock('../../../../main/utils/remote-git', () => ({
 	holdGitCommand: vi.fn(async () => null),
 	holdGitForgeEffect: vi.fn(async () => null),
 	isGitTimeout: (result: { exitCode: number | string }) => result.exitCode === 'ETIMEDOUT',
+	isGitRefusal: (result: { exitCode: number | string }) => result.exitCode === 'EMANAGED',
 	listWorktreesRemote: vi.fn(),
 	resolveWorktreePathsRemote: vi.fn(),
 	resolveWorktreeAliasesRemote: vi.fn(),

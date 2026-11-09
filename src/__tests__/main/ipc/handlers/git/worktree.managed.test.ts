@@ -257,6 +257,103 @@ describe('worktrees and the setup script under the repository ceiling (MRC2-04-0
 		});
 	});
 
+	describe('git:worktreeCheckout (MCOMP-19-02)', () => {
+		const clean = { 'git status --porcelain': '', 'git rev-parse --verify feature': 'abc' };
+
+		it('standalone: spawns the same checkout as before, with no extra git call', async () => {
+			answer({ ...clean, 'git checkout feature': '' });
+			const result = await run('git:worktreeCheckout', '/wt', 'feature', false);
+			expect(result).toEqual({ success: true, hasUncommittedChanges: false });
+			expect(ran()).toEqual([
+				'git status --porcelain',
+				'git rev-parse --verify feature',
+				'git checkout feature',
+			]);
+		});
+
+		it('managed with no ceiling: refuses the checkout with no process and names the reason', async () => {
+			manage();
+			answer(clean);
+			const result = await run('git:worktreeCheckout', '/wt', 'feature', false);
+			expect(result.success).toBe(false);
+			expect(result.error).toMatch(/^\[managed-unavailable\] the managed repository ceiling/);
+			expect(ran()).not.toContainEqual(expect.stringContaining('git checkout'));
+		});
+
+		it('managed: admits a new branch on an admitted repository after reading its origin, then spawns it', async () => {
+			manage(ceiling);
+			answer({
+				'git status --porcelain': '',
+				'git remote get-url origin': ORIGIN,
+				'git checkout -b feature': '',
+			});
+			const result = await run('git:worktreeCheckout', '/wt', 'feature', true);
+			expect(result).toEqual({ success: true, hasUncommittedChanges: false });
+			expect(ran()).toEqual([
+				'git status --porcelain',
+				'git rev-parse --verify feature',
+				'git remote get-url origin',
+				'git checkout -b feature',
+			]);
+			expect(execFile.execFileNoThrow).toHaveBeenLastCalledWith(
+				'git',
+				['checkout', '-b', 'feature'],
+				'/wt'
+			);
+		});
+
+		it('managed: refuses the checkout on a repository the ceiling does not admit, with no process', async () => {
+			manage(ceiling);
+			answer({ ...clean, 'git remote get-url origin': 'https://github.com/other/thing.git' });
+			const result = await run('git:worktreeCheckout', '/wt', 'feature', false);
+			expect(result.success).toBe(false);
+			expect(result.error).toMatch(/^\[managed-repository-denied\]/);
+			expect(ran()).not.toContainEqual(expect.stringContaining('git checkout'));
+		});
+	});
+
+	describe('git:removeWorktree (MCOMP-19-02)', () => {
+		beforeEach(() => {
+			mockFs.access.mockResolvedValue(undefined);
+			mockFs.rm.mockResolvedValue(undefined);
+		});
+
+		it('standalone: spawns the same worktree remove as before', async () => {
+			answer({ 'git worktree remove /wt': '' });
+			const result = await run('git:removeWorktree', '/wt');
+			expect(result).toEqual({ success: true });
+			expect(ran()).toEqual(['git worktree remove /wt']);
+			expect(mockFs.rm).not.toHaveBeenCalled();
+		});
+
+		it('managed with no ceiling: refuses with no process and never falls back to deleting the directory', async () => {
+			manage();
+			const result = await run('git:removeWorktree', '/wt', true);
+			expect(result.success).toBe(false);
+			expect(result.error).toMatch(/^\[managed-unavailable\]/);
+			expect(ran()).toEqual([]);
+			expect(mockFs.rm).not.toHaveBeenCalled();
+		});
+
+		it('managed: a repository outside the ceiling is refused by name and the directory survives', async () => {
+			manage(ceiling);
+			answer({ 'git remote get-url origin': 'https://github.com/other/thing.git' });
+			const result = await run('git:removeWorktree', '/wt', true);
+			expect(result.success).toBe(false);
+			expect(result.error).toMatch(/^\[managed-repository-denied\]/);
+			expect(ran()).not.toContainEqual(expect.stringContaining('worktree remove'));
+			expect(mockFs.rm).not.toHaveBeenCalled();
+		});
+
+		it('managed: an admitted repository spawns the remove after reading its origin', async () => {
+			manage(ceiling);
+			answer({ 'git remote get-url origin': ORIGIN, 'git worktree remove --force /wt': '' });
+			const result = await run('git:removeWorktree', '/wt', true);
+			expect(result).toEqual({ success: true });
+			expect(ran()).toEqual(['git remote get-url origin', 'git worktree remove --force /wt']);
+		});
+	});
+
 	describe('git:worktreeRunSetup', () => {
 		it('standalone: runs the script in the worktree shell with no hold and no git call', async () => {
 			answer({ [`${shell} -c ./setup.sh`]: 'installed' });
