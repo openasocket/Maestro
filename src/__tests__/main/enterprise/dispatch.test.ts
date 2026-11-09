@@ -22,9 +22,17 @@ import {
 	managedRunViewOfReceipt,
 	admitCueShell,
 	cueShellAttribution,
+	cueShellRouteProblems,
 	cueShellRouteSupport,
+	type CueShellRouteQualification,
 	type CueShellSpawnPlan,
 } from '../../../main/enterprise/dispatch';
+import {
+	PROVIDER_ROUTE_ALLOW_CASES,
+	PROVIDER_ROUTE_DENY_CASES,
+	type ProviderRouteCandidate,
+	type SignedProviderRouteQualification,
+} from '../../../shared/maestro-lib/managed/provider-route';
 import { createLocalEndpointClient } from '../../../main/enterprise/endpoint-client';
 import {
 	buildDispatchSnapshot,
@@ -645,6 +653,236 @@ describe('the Cue shell boundary', () => {
 		expect(await admitCueShell(denied, sshPlan, { routeSupport })).toMatchObject({
 			state: 'denied',
 			code: 'policy-denied',
+		});
+	});
+	describe('signed route evidence (MCOMP-31-03)', () => {
+		// Contract-shaped fixtures and a declared verifier double: nothing here
+		// qualifies a real shell route. Actual shell/PTY/SSH confinement is MCOMP-32.
+		const d = (c: string) => c.repeat(64);
+		const DAY = 24 * 60 * 60 * 1000;
+		const ENDPOINT = {
+			installationId: 'remote-inst',
+			runtimeId: 'remote-rt',
+			processEpoch: 'remote-epoch',
+			authorityId: 'remote-authority',
+			policyRevision: 3,
+		};
+		const candidate = (transport: 'cli-process' | 'ssh'): ProviderRouteCandidate => ({
+			provider: 'cue-shell',
+			adapterId: 'cue-shell-v1',
+			transport,
+			binary: { digest: d('a'), version: '5.2', identity: 'bash' },
+			os: { platform: 'linux', release: '6.8.0', arch: 'x64' },
+			backend: { id: 'bwrap-v1', evidenceDigest: d('b') },
+			inputDigest: d('c'),
+		});
+		const evidence = (
+			c: ProviderRouteCandidate,
+			tweak: (p: SignedProviderRouteQualification['payload']) => void = () => {}
+		): SignedProviderRouteQualification => {
+			const payload: SignedProviderRouteQualification['payload'] = {
+				version: 1,
+				receiptId: 'shell-receipt-1',
+				producer: {
+					owner: 'mega-maestro',
+					implementationRevision: 'e'.repeat(40),
+					observedRevision: 'e'.repeat(40),
+				},
+				tier: 'real-cli-fixture-model',
+				modelTransport: 'deterministic-fixture',
+				route: { provider: c.provider, adapterId: c.adapterId, transport: c.transport },
+				binary: { ...c.binary },
+				os: { platform: 'linux', release: c.os.release, arch: 'x64' },
+				backend: { ...c.backend },
+				inputSnapshot: { inputDigest: c.inputDigest, inputs: [['a/bin', d('1')]] },
+				observations: [
+					...PROVIDER_ROUTE_ALLOW_CASES.map((name) => ({
+						case: name,
+						expected: 'allowed' as const,
+						observed: 'allowed' as const,
+						observer: 'receipt' as const,
+						evidenceDigest: d('3'),
+					})),
+					...PROVIDER_ROUTE_DENY_CASES.map((name) => ({
+						case: name,
+						expected: 'denied' as const,
+						observed: 'denied' as const,
+						observer: 'process' as const,
+						evidenceDigest: d('4'),
+					})),
+				],
+				observedAt: new Date(T0 - DAY).toISOString(),
+			};
+			tweak(payload);
+			return {
+				payload,
+				payloadDigest: d('5'),
+				keyId: 'route-key-1',
+				algorithm: 'Ed25519',
+				signature: `${'A'.repeat(86)}==`,
+			};
+		};
+		const verifier = (verdict: 'verified' | 'invalid' | 'unavailable' = 'verified') => {
+			const v = {
+				version: 1 as const,
+				calls: 0,
+				async verify() {
+					v.calls += 1;
+					return verdict;
+				},
+			};
+			return v;
+		};
+		const qualification = (
+			plan: CueShellSpawnPlan,
+			overrides: Partial<CueShellRouteQualification> = {}
+		): CueShellRouteQualification & { verifier: ReturnType<typeof verifier> } => {
+			const c = candidate(plan.route === 'ssh-shell' ? 'ssh' : 'cli-process');
+			return {
+				evidence: evidence(c),
+				candidate: c,
+				verifier: verifier(),
+				maxAgeMs: 30 * DAY,
+				now: () => T0,
+				remote: plan.remoteId ? { remoteId: plan.remoteId, endpoint: ENDPOINT } : null,
+				...overrides,
+			} as CueShellRouteQualification & { verifier: ReturnType<typeof verifier> };
+		};
+		const allow = () => ({ decision: 'allow' as const, policyRevision: 3 });
+
+		it('admits a local action on verified evidence and reports the route it ran on', async () => {
+			const shell = shellAdmission(allow);
+			const routeQualification = qualification(localPlan);
+			const outcome = await admitCueShell(shell, localPlan, { routeQualification });
+			if (outcome.state !== 'admitted') throw new Error(outcome.message);
+			expect(routeQualification.verifier.calls).toBe(1);
+			expect(shell.decisions).toHaveLength(1);
+			expect(outcome.snapshot.target).toEqual({ kind: 'local' });
+			expect(outcome.route).toEqual({
+				receiptId: 'shell-receipt-1',
+				payloadDigest: d('5'),
+				tier: 'real-cli-fixture-model',
+				transport: 'cli-process',
+				sandboxBackendId: 'bwrap-v1',
+				endpoint: null,
+			});
+		});
+
+		it('binds an SSH action to the enrolled endpoint of the very remote it runs on', async () => {
+			const shell = shellAdmission(allow);
+			const outcome = await admitCueShell(shell, sshPlan, {
+				routeQualification: qualification(sshPlan),
+			});
+			if (outcome.state !== 'admitted') throw new Error(outcome.message);
+			expect(outcome.route).toMatchObject({ transport: 'ssh', endpoint: ENDPOINT });
+			expect(outcome.attribution.target).toEqual({
+				kind: 'ssh',
+				remoteId: 'remote-1',
+				endpoint: ENDPOINT,
+			});
+			expect(outcome.snapshot.target).toEqual(outcome.attribution.target);
+			// The sink rebuilds the snapshot under the admitted attribution; the gate holds it there.
+			expect(outcome.gate.admit(buildDispatchSnapshot(sshPlan, outcome.attribution))).toEqual({
+				ok: true,
+			});
+			expect(
+				outcome.gate.admit(buildDispatchSnapshot(sshPlan, cueShellAttribution(sshPlan, 'acct-ref')))
+			).toMatchObject({ ok: false, code: 'lease-invalid' });
+		});
+
+		it('refuses evidence that does not describe the plan by name, before verifying or leasing', async () => {
+			const cases: Array<[CueShellSpawnPlan, Partial<CueShellRouteQualification>, RegExp]> = [
+				[sshPlan, { remote: null }, /attested no enrolled endpoint/],
+				[sshPlan, { remote: { remoteId: 'remote-2', endpoint: ENDPOINT } }, /another remote/],
+				[sshPlan, { candidate: candidate('cli-process') }, /transport is not ssh/],
+				[localPlan, { candidate: candidate('ssh') }, /transport is not cli-process/],
+				[localPlan, { remote: { remoteId: 'remote-1', endpoint: ENDPOINT } }, /names a remote/],
+				[
+					localPlan,
+					{ candidate: { ...candidate('cli-process'), provider: 'claude-code' } },
+					/not the cue-shell provider/,
+				],
+				[
+					localPlan,
+					{
+						candidate: { ...candidate('cli-process'), backend: { id: '', evidenceDigest: d('b') } },
+					},
+					/no sandbox backend/,
+				],
+			];
+			for (const [plan, overrides, reason] of cases) {
+				const shell = shellAdmission(allow);
+				const routeQualification = qualification(plan, overrides);
+				const outcome = await admitCueShell(shell, plan, { routeQualification });
+				expect(outcome).toMatchObject({ state: 'denied', code: 'context-mismatch' });
+				if (outcome.state === 'admitted') throw new Error('admitted');
+				expect(outcome.message).toMatch(reason);
+				expect(routeQualification.verifier.calls).toBe(0);
+				expect(shell.decisions).toHaveLength(0);
+			}
+			expect(
+				cueShellRouteProblems(qualification(sshPlan), { route: 'ssh-shell', remoteId: null })
+			).toContain('the SSH action names no resolved remote');
+		});
+
+		it('stays unavailable without qualified evidence: no verifier, a refused signature, stale, harness tier, cancelled', async () => {
+			const stale = candidate('cli-process');
+			const harness = { ...candidate('cli-process'), provider: 'cue-shell' };
+			const aborted = new AbortController();
+			aborted.abort();
+			const cases: Array<[Partial<CueShellRouteQualification>, AbortSignal | undefined, RegExp]> = [
+				[{ verifier: undefined }, undefined, /no trusted route evidence verifier/],
+				[{ verifier: verifier('invalid') }, undefined, /signature invalid/],
+				[{ verifier: verifier('unavailable') }, undefined, /signature unavailable/],
+				[
+					{
+						evidence: evidence(
+							stale,
+							(p) => (p.observedAt = new Date(T0 - 60 * DAY).toISOString())
+						),
+					},
+					undefined,
+					/stale/,
+				],
+				[
+					{
+						evidence: evidence(harness, (p) => {
+							p.tier = 'node-harness';
+							p.modelTransport = 'none';
+						}),
+					},
+					undefined,
+					/tier does not match provider/,
+				],
+				[{}, aborted.signal, /cancelled/],
+			];
+			for (const [overrides, signal, reason] of cases) {
+				const shell = shellAdmission(allow);
+				const outcome = await admitCueShell(shell, localPlan, {
+					routeQualification: qualification(localPlan, overrides),
+					...(signal ? { signal } : {}),
+				});
+				expect(outcome).toMatchObject({ state: 'unavailable', code: 'capability-unsupported' });
+				if (outcome.state === 'admitted') throw new Error('admitted');
+				expect(outcome.message).toMatch(reason);
+				expect(shell.decisions).toHaveLength(0);
+				expect(shell.authority.live()).toHaveLength(0);
+			}
+		});
+
+		it('still asks the authority on qualified evidence: a policy denial runs nothing', async () => {
+			const shell = shellAdmission(() => ({
+				decision: 'deny',
+				reason: 'no shell',
+				policyRevision: 3,
+				code: 'policy-denied',
+			}));
+			const outcome = await admitCueShell(shell, sshPlan, {
+				routeQualification: qualification(sshPlan),
+			});
+			expect(outcome).toMatchObject({ state: 'denied', code: 'policy-denied' });
+			expect(shell.decisions).toHaveLength(1);
+			expect(shell.authority.live()).toHaveLength(0);
 		});
 	});
 });

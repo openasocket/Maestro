@@ -38,6 +38,7 @@ import { QUERY_SOURCE_ENV_VAR } from '../../shared/querySource';
 import {
 	admitCueShell,
 	type CueShellRoute,
+	type CueShellRouteQualification,
 	type CueShellRouteSupport,
 	type CueShellSpawnPlan,
 } from '../enterprise/dispatch';
@@ -84,6 +85,12 @@ export interface CueShellExecutionConfig {
 	 * one. A test injects a declared double to drive the sink past the refusal.
 	 */
 	routeSupport?: (route: CueShellRoute) => CueShellRouteSupport;
+	/**
+	 * Signed confinement evidence for the shell route (MCOMP-31-03), with the
+	 * host-injected verifier and, for SSH, the enrolled endpoint the remote
+	 * attested. Absent (every runner today): the route table decides alone.
+	 */
+	shellRoute?: CueShellRouteQualification;
 }
 
 /**
@@ -108,6 +115,7 @@ export async function executeCueShell(config: CueShellExecutionConfig): Promise<
 		signal,
 		admission,
 		routeSupport,
+		shellRoute,
 	} = config;
 
 	const startedAt = new Date().toISOString();
@@ -264,7 +272,11 @@ export async function executeCueShell(config: CueShellExecutionConfig): Promise<
 			// the run. Keep the helper's original producer lease and canonical gate.
 			{ ...admission, onLease: undefined },
 			plan,
-			routeSupport ? { routeSupport } : undefined
+			{
+				...(routeSupport ? { routeSupport } : {}),
+				...(shellRoute ? { routeQualification: shellRoute } : {}),
+				...(signal ? { signal } : {}),
+			}
 		);
 		if (outcome.state !== 'admitted') {
 			onLog(

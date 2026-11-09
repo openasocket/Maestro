@@ -50,17 +50,23 @@ import {
 import type { SupportStatus } from '../../shared/maestro-lib/managed/compatibility';
 import type { ManagedHostAdapter } from '../../shared/maestro-lib/managed/host-adapter';
 import {
+	approveProviderRoute,
 	buildHarnessLaunchSpec,
 	harnessRouteProblems,
 	SYNTHETIC_HARNESS_MODEL,
 	SYNTHETIC_HARNESS_PROVIDER,
 	syntheticHarnessRouteSupport,
 	type HarnessRouteRequest,
+	type ProviderEvidenceTransport,
+	type ProviderQualificationTier,
+	type ProviderRouteCandidate,
+	type ProviderRouteEvidenceVerifier,
 } from '../../shared/maestro-lib/managed/provider-route';
 import type {
 	ManagedAuthenticatedContext,
 	ManagedDenialCode,
 	ManagedPrincipalRef,
+	ManagedSshEndpointRef,
 } from '../../shared/maestro-lib/managed/types';
 import {
 	DispatchRefusedError,
@@ -761,6 +767,72 @@ export function cueShellAttribution(
 	};
 }
 
+/**
+ * The signed confinement evidence a managed host offers for one Cue shell
+ * route (MCOMP-31-03), in place of the route table it cannot flip: the
+ * published route qualification receipt, the exact candidate the host
+ * resolved (provider `cue-shell`, the shell's transport, binary, OS, sandbox
+ * backend, input digest) and the host-injected verifier. An SSH action also
+ * names the enrolled remote endpoint the remote qualified as at runtime
+ * (`qualifySshLaunchTarget`); without it the remote proves nothing.
+ */
+export interface CueShellRouteQualification {
+	evidence: unknown;
+	candidate: ProviderRouteCandidate;
+	verifier?: ProviderRouteEvidenceVerifier;
+	/** Oldest acceptable observation, in ms (bounded by `PROVIDER_ROUTE_EVIDENCE_AGE_MS`). */
+	maxAgeMs: number;
+	now?: () => number;
+	/** The remote the SSH wrap resolved and the endpoint it attested; null for a local action. */
+	remote: { remoteId: string; endpoint: ManagedSshEndpointRef } | null;
+}
+
+/** The route a qualified shell action ran on: identifiers only, for the run's journal. */
+export interface ApprovedCueShellRoute {
+	receiptId: string;
+	payloadDigest: string;
+	tier: Exclude<ProviderQualificationTier, 'node-harness'>;
+	transport: ProviderEvidenceTransport;
+	/** The qualified sandbox backend the command is confined by. */
+	sandboxBackendId: string;
+	/** The enrolled endpoint of an SSH action; null for a local one. */
+	endpoint: ManagedSshEndpointRef | null;
+}
+
+/** The transport a shell route runs on, as route evidence names it. */
+export function cueShellRouteTransport(route: CueShellRoute): ProviderEvidenceTransport {
+	return route === 'ssh-shell' ? 'ssh' : 'cli-process';
+}
+
+/**
+ * Why a shell route qualification does not describe this plan. Names only.
+ * The candidate must be the `cue-shell` provider on the plan's own transport
+ * with a sandbox backend, and an SSH action must carry the enrolled endpoint
+ * of the very remote the wrap resolved (a local action carries none).
+ */
+export function cueShellRouteProblems(
+	input: CueShellRouteQualification,
+	plan: Pick<CueShellSpawnPlan, 'route' | 'remoteId'>
+): string[] {
+	const problems: string[] = [];
+	if (input.candidate.provider !== CUE_SHELL_PROVIDER)
+		problems.push(`the candidate is not the ${CUE_SHELL_PROVIDER} provider`);
+	const transport = cueShellRouteTransport(plan.route);
+	if (input.candidate.transport !== transport)
+		problems.push(`the candidate transport is not ${transport}`);
+	if (typeof input.candidate.backend?.id !== 'string' || input.candidate.backend.id.length === 0)
+		problems.push('the candidate names no sandbox backend');
+	if (plan.route === 'ssh-shell') {
+		if (!plan.remoteId) problems.push('the SSH action names no resolved remote');
+		else if (!input.remote) problems.push('the remote attested no enrolled endpoint');
+		else if (input.remote.remoteId !== plan.remoteId)
+			problems.push('the attested endpoint belongs to another remote');
+	} else if (input.remote || plan.remoteId) {
+		problems.push('a local shell action names a remote');
+	}
+	return problems;
+}
+
 export type CueShellAdmissionOutcome =
 	| {
 			state: 'admitted';
@@ -769,12 +841,18 @@ export type CueShellAdmissionOutcome =
 			gate: DispatchAdmission;
 			attribution: DispatchAttribution;
 			snapshot: DispatchSnapshot;
+			/** The signed route the action was approved on; null when the route table qualified it. */
+			route: ApprovedCueShellRoute | null;
 	  }
 	| { state: 'denied' | 'unavailable' | 'unknown'; code: ManagedDenialCode; message: string };
 
 export interface CueShellAdmissionDeps {
 	/** The route table. Default {@link cueShellRouteSupport}; a test injects a declared double to reach the sink past the refusal. */
 	routeSupport?: (route: CueShellRoute) => CueShellRouteSupport;
+	/** Signed confinement evidence for a route the table does not qualify (MCOMP-31-03); no production host installs a verifier yet. */
+	routeQualification?: CueShellRouteQualification;
+	/** Aborts the evidence verification with the run. */
+	signal?: AbortSignal;
 }
 
 /**
@@ -795,14 +873,58 @@ export async function admitCueShell(
 	deps: CueShellAdmissionDeps = {}
 ): Promise<CueShellAdmissionOutcome> {
 	const support = (deps.routeSupport ?? cueShellRouteSupport)(plan.route);
+	let route: ApprovedCueShellRoute | null = null;
 	if (support.managed !== 'implemented') {
-		return {
-			state: 'unavailable',
-			code: 'capability-unsupported',
-			message: `A Cue shell action over the ${plan.route} route is unavailable under management on this host: ${support.note}. Nothing was started.`,
+		const offered = deps.routeQualification;
+		if (!offered) {
+			return {
+				state: 'unavailable',
+				code: 'capability-unsupported',
+				message: `A Cue shell action over the ${plan.route} route is unavailable under management on this host: ${support.note}. Nothing was started.`,
+			};
+		}
+		// A plan the evidence does not describe is refused by name, without
+		// asking the verifier; nothing falls back to another route or to local.
+		const problems = cueShellRouteProblems(offered, plan);
+		if (problems.length > 0) {
+			return {
+				state: 'denied',
+				code: 'context-mismatch',
+				message: `The confinement evidence offered for this Cue shell action over the ${plan.route} route does not describe it: ${problems.join('; ')}. Nothing was started.`,
+			};
+		}
+		const approval = await approveProviderRoute(
+			offered.evidence,
+			offered.candidate,
+			offered.verifier,
+			{
+				maxAgeMs: offered.maxAgeMs,
+				now: offered.now,
+				signal: deps.signal ?? new AbortController().signal,
+			}
+		);
+		if (approval.state !== 'qualified') {
+			return {
+				state: 'unavailable',
+				code: 'capability-unsupported',
+				message: `A Cue shell action over the ${plan.route} route is unavailable under management on this host: its confinement evidence is not qualified (${approval.reasons.join('; ')}). Nothing was started.`,
+			};
+		}
+		route = {
+			receiptId: approval.receiptId,
+			payloadDigest: approval.payloadDigest,
+			tier: approval.tier,
+			transport: offered.candidate.transport,
+			sandboxBackendId: offered.candidate.backend.id,
+			endpoint: offered.remote ? { ...offered.remote.endpoint } : null,
 		};
 	}
-	const attribution = cueShellAttribution(plan, admission.account ?? null);
+	const base = cueShellAttribution(plan, admission.account ?? null);
+	// The lease names the remote installation it was admitted for, as a desktop launch's does.
+	const attribution: DispatchAttribution =
+		route?.endpoint && plan.remoteId
+			? { ...base, target: { kind: 'ssh', remoteId: plan.remoteId, endpoint: route.endpoint } }
+			: base;
 	const snapshot = buildDispatchSnapshot(
 		{ command: plan.command, args: plan.args, cwd: plan.cwd, env: plan.env, shell: plan.shell },
 		attribution
@@ -822,5 +944,6 @@ export async function admitCueShell(
 		gate: leaseAdmission(admission.authority, admitted.lease),
 		attribution,
 		snapshot,
+		route,
 	};
 }
