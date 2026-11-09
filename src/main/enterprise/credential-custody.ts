@@ -16,6 +16,11 @@
  * support package, is refused. The feature that needs the value is then off on
  * that host, by name, and the value is never persisted around the refusal.
  *
+ * A command-line value is refused the same way (MCOMP-21-02A): the user info
+ * of `cue engine start --notify-webhook https://user:pass@host/` is visible in
+ * the process list and the shell history, so a managed host sends no
+ * notification carrying it (the credential is never stripped to send anyway).
+ *
  * One authority, read at the sink. The desktop composes a source over its
  * enrollment standing (`identityStandingOf()`, the one rule of MRC2-05-10A)
  * and sets it as the module authority every `holdCredentialCustody()` reads;
@@ -32,11 +37,15 @@ import {
 	type IdentityStanding,
 } from './identity-store';
 
-/** What is held: the turn log state, the WakaTime API key, Cue's 0DIN token. */
+/**
+ * What is held: the turn log state, the WakaTime API key, Cue's 0DIN token and
+ * the credential in the user info of Cue's notify webhook URL.
+ */
 export const MANAGED_CREDENTIALS = [
 	'cot-export.state',
 	'wakatime.apiKey',
 	'cue.odinToken',
+	'cue.notifyWebhookCredential',
 ] as const;
 export type ManagedCredential = (typeof MANAGED_CREDENTIALS)[number];
 
@@ -44,13 +53,15 @@ const CREDENTIAL_LABELS: Record<ManagedCredential, string> = {
 	'cot-export.state': 'the turn log state',
 	'wakatime.apiKey': 'the WakaTime API key',
 	'cue.odinToken': 'the 0DIN API token',
+	'cue.notifyWebhookCredential': 'the notify webhook URL credential',
 };
 
 /** Where a value would be kept, as the sink about to keep or read it knows. */
 export type CredentialCustody =
 	| { kind: 'sealed'; seal: SealProvider; anchor: AnchorStore }
 	| { kind: 'plain-file'; file: string }
-	| { kind: 'environment'; name: string };
+	| { kind: 'environment'; name: string }
+	| { kind: 'command-line'; flag: string };
 
 /** The settings keys that are a credential in the plain settings file, by the credential they hold. */
 export const PLAIN_SETTINGS_CREDENTIAL_KEYS: Readonly<Record<string, ManagedCredential>> =
@@ -61,7 +72,7 @@ export const SETTINGS_FILE_CUSTODY: CredentialCustody = Object.freeze({
 	file: 'maestro-settings.json',
 });
 
-export type CredentialCustodyDenial = 'unprotected' | 'plain-file' | 'environment';
+export type CredentialCustodyDenial = 'unprotected' | 'plain-file' | 'environment' | 'command-line';
 export type CredentialCustodyDecision =
 	| { allowed: true }
 	| { allowed: false; code: CredentialCustodyDenial; message: string };
@@ -104,6 +115,11 @@ export function credentialCustodyVerdict(
 			return deny(
 				'environment',
 				`the ${custody.name} environment variable is inherited by every child process and collected by a support package, and a managed host keeps a credential only under the OS key store.`
+			);
+		case 'command-line':
+			return deny(
+				'command-line',
+				`the ${custody.flag} value is visible in the process list and the shell history, and a managed host keeps a credential only under the OS key store.`
 			);
 	}
 }

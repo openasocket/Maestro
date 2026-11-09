@@ -1021,24 +1021,34 @@ describe('managed admission (MRC-07-02A)', () => {
 			const { createCueNotifyWebhook, parseNotifyWebhookUrl } =
 				await import('../../../main/cue/cue-notify-webhook');
 			const webhookLog = vi.fn();
-			const webhook = createCueNotifyWebhook({
-				target: parseNotifyWebhookUrl('https://u:p@hooks.example.com/in?token=t0k'),
-				onLog: webhookLog,
-			});
-			webhook.send({
-				type: 'cue.notify',
-				agent: { id: 'a', name: 'A', toolType: 'claude-code' },
-				subscription: 's',
-				pipeline: null,
-				runId: 'r',
-				title: 't',
-				message: 'm',
-				sticky: false,
-			});
-			await webhook.flush(1000);
-			expect(webhookLog.mock.calls.map((c) => c[1]).join('\n')).toContain(
+			const sendOne = async (url: string) => {
+				const webhook = createCueNotifyWebhook({
+					target: parseNotifyWebhookUrl(url),
+					onLog: webhookLog,
+				});
+				webhook.send({
+					type: 'cue.notify',
+					agent: { id: 'a', name: 'A', toolType: 'claude-code' },
+					subscription: 's',
+					pipeline: null,
+					runId: 'r',
+					title: 't',
+					message: 'm',
+					sticky: false,
+				});
+				await webhook.flush(1000);
+				return webhookLog.mock.calls.map((c) => c[1]).join('\n');
+			};
+			expect(await sendOne('https://hooks.example.com/in?token=t0k')).toContain(
 				'held by the managed egress ceiling: [managed-unavailable]'
 			);
+			// A URL credential is held to custody first (MCOMP-21-02A): never queued.
+			webhookLog.mockClear();
+			const custodyLines = await sendOne('https://u:p@hooks.example.com/in?token=t0k');
+			expect(custodyLines).toContain(
+				'held by the managed credential custody ceiling: [managed-command-line]'
+			);
+			expect(custodyLines).not.toContain('egress');
 
 			process.env.ODIN_API_TOKEN = 'odin-secret';
 			const { guardScoredText, wouldScoreText } = await susfactor();

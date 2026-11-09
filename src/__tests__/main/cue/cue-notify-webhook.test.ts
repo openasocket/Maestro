@@ -7,7 +7,14 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
+	credentialCustodyVerdict,
+	headlessCredentialAuthority,
+	setCredentialCustodyAuthority,
+} from '../../../main/enterprise/credential-custody';
+import type { IdentityStanding } from '../../../main/enterprise/identity-store';
+import {
 	buildNotifyWebhookBody,
+	NOTIFY_WEBHOOK_CREDENTIAL_CUSTODY,
 	createCueNotifyWebhook,
 	parseNotifyWebhookUrl,
 	WEBHOOK_MAX_IN_FLIGHT,
@@ -278,6 +285,90 @@ describe('createCueNotifyWebhook', () => {
 			expect(logged()).not.toContain('s3cr3t-token');
 			expect(logged()).not.toContain('hook-pass');
 			network.mockRestore();
+		});
+	});
+
+	/** The custody ceiling (MCOMP-21-02A): a URL credential lives on the command line. */
+	describe('managed credential custody (MCOMP-21-02A)', () => {
+		let standing: IdentityStanding = 'managed';
+		beforeEach(() => {
+			standing = 'managed';
+			setCredentialCustodyAuthority(headlessCredentialAuthority({ standing: () => standing }));
+		});
+		afterEach(() => setCredentialCustodyAuthority(null));
+
+		it('the command line is refused by name under management and admitted standalone', () => {
+			expect(
+				credentialCustodyVerdict(
+					'managed',
+					'cue.notifyWebhookCredential',
+					NOTIFY_WEBHOOK_CREDENTIAL_CUSTODY
+				)
+			).toEqual({
+				allowed: false,
+				code: 'command-line',
+				message:
+					'the notify webhook URL credential is not kept on this managed host: the --notify-webhook value is visible in the process list and the shell history, and a managed host keeps a credential only under the OS key store.',
+			});
+			expect(
+				credentialCustodyVerdict(
+					'standalone',
+					'cue.notifyWebhookCredential',
+					NOTIFY_WEBHOOK_CREDENTIAL_CUSTODY
+				)
+			).toEqual({ allowed: true });
+		});
+
+		it('sends no notification carrying a refused credential, never strips it, and says so once', async () => {
+			const fetchImpl = vi.fn(async () => new Response(null, { status: 204 }));
+			const webhook = createCueNotifyWebhook({
+				target: parseNotifyWebhookUrl(SECRET_URL),
+				onLog,
+				fetchImpl,
+			});
+			webhook.send(notification);
+			webhook.send(notification);
+			webhook.send(notification);
+			await webhook.flush(1000);
+			expect(fetchImpl).not.toHaveBeenCalled();
+			expect(onLog).toHaveBeenCalledTimes(1);
+			expect(onLog.mock.calls[0]?.[0]).toBe('warn');
+			expect(logged()).toContain(
+				'held by the managed credential custody ceiling: [managed-command-line] the notify webhook URL credential is not kept on this managed host'
+			);
+			expect(logged()).not.toContain('hook-pass');
+			expect(logged()).not.toContain('hook-user');
+			expect(logged()).not.toContain('s3cr3t-token');
+		});
+
+		it('a URL with no credential is not held by custody, and the standing is re-read per send', async () => {
+			const fetchImpl = vi.fn(async () => new Response(null, { status: 204 }));
+			const plain = createCueNotifyWebhook({
+				target: parseNotifyWebhookUrl('https://hooks.example.com/in'),
+				onLog,
+				fetchImpl,
+			});
+			plain.send(notification);
+			await plain.flush(1000);
+			expect(fetchImpl).toHaveBeenCalledTimes(1);
+			expect(onLog).not.toHaveBeenCalled();
+
+			const secret = createCueNotifyWebhook({
+				target: parseNotifyWebhookUrl(SECRET_URL),
+				onLog,
+				fetchImpl,
+			});
+			secret.send(notification);
+			secret.send(notification);
+			standing = 'standalone';
+			secret.send(notification);
+			await secret.flush(1000);
+			expect(fetchImpl).toHaveBeenCalledTimes(2);
+			const headers = (fetchImpl.mock.calls[1] as unknown[])[1] as RequestInit;
+			expect((headers.headers as Record<string, string>).Authorization).toBe(
+				`Basic ${Buffer.from('hook-user:hook-pass').toString('base64')}`
+			);
+			expect(logged()).toContain('the credential is admitted again after 2 held notification(s)');
 		});
 	});
 });

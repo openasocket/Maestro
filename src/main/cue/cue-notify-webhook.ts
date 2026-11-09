@@ -24,10 +24,21 @@
  *   ceiling lists for that class. A refusal opens no socket (nothing of the
  *   body or the credential leaves) and is reported by its managed code, never
  *   as a network failure. Standalone, nothing is consulted.
+ * - A credential in the URL's user info is held to the custody ceiling
+ *   (MCOMP-21-02A) before a notification is queued: it came from the command
+ *   line, which a managed host never keeps a credential on. Refused, no
+ *   notification carrying it is sent (the credential is never stripped to
+ *   send anyway); the refusal is logged once by its managed code and every
+ *   held notification is counted. Read per send, like every other ceiling.
  *
  * No Electron imports.
  */
 
+import {
+	formatCredentialRefusal,
+	holdCredentialCustody,
+	type CredentialCustody,
+} from '../enterprise/credential-custody';
 import type { EgressClass } from '../enterprise/egress-policy';
 import { fetchWithTimeout, isEgressDeniedError } from '../utils/fetchWithTimeout';
 
@@ -36,6 +47,11 @@ export const WEBHOOK_MAX_QUEUED = 100;
 export const WEBHOOK_TIMEOUT_MS = 5_000;
 /** The egress class every notification names: a URL the person configured to be called. */
 export const NOTIFY_WEBHOOK_EGRESS_CLASS: EgressClass = 'user-webhook';
+/** Where the URL's user-info credential is kept: on the command line. */
+export const NOTIFY_WEBHOOK_CREDENTIAL_CUSTODY: CredentialCustody = Object.freeze({
+	kind: 'command-line',
+	flag: '--notify-webhook',
+});
 
 /** What the standalone runner reports. Everything here ends up in the body. */
 export interface CueExternalNotification {
@@ -146,6 +162,37 @@ export function createCueNotifyWebhook(options: {
 	let troubled = false;
 	let missed = 0;
 	let idleWaiters: Array<() => void> = [];
+	let custodyHeld = false;
+	let custodyHeldCount = 0;
+
+	/** Whether the URL's credential may be sent now. No credential: always. */
+	function credentialAdmitted(): boolean {
+		if (!target.authorization) return true;
+		const decision = holdCredentialCustody(
+			'cue.notifyWebhookCredential',
+			NOTIFY_WEBHOOK_CREDENTIAL_CUSTODY
+		);
+		if (decision.allowed) {
+			if (custodyHeld) {
+				onLog(
+					'info',
+					`Notify webhook ${target.display}: the credential is admitted again after ${custodyHeldCount} held notification(s)`
+				);
+			}
+			custodyHeld = false;
+			custodyHeldCount = 0;
+			return true;
+		}
+		custodyHeldCount++;
+		if (!custodyHeld) {
+			custodyHeld = true;
+			onLog(
+				'warn',
+				`Notify webhook ${target.display}: held by the managed credential custody ceiling: ${formatCredentialRefusal(decision)} No notification carrying it is sent; held notifications are counted, not logged.`
+			);
+		}
+		return false;
+	}
 
 	function problem(reason: string): void {
 		missed++;
@@ -230,6 +277,7 @@ export function createCueNotifyWebhook(options: {
 		display: target.display,
 		send(notification) {
 			try {
+				if (!credentialAdmitted()) return;
 				if (queue.length >= WEBHOOK_MAX_QUEUED) {
 					problem(`queue full (${WEBHOOK_MAX_QUEUED}), dropping notifications`);
 					return;
