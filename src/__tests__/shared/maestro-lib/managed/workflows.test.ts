@@ -244,6 +244,233 @@ describe('workflow ownership', () => {
 			expect((await store.claim({ workflow: WORKFLOW, ...RUN })).state).toBe('unknown');
 			expect(store.fence(WORKFLOW)).toBeNull();
 		});
+
+		describe('workflow and delegation recovery (MCOMP-17-04)', () => {
+			it('a scoped delegated claim hands the producer the whole input and holds only what it answered', async () => {
+				const { invoke, port, store } = producer();
+				const lifetime = await claim(store);
+				expect(invoke).toHaveBeenCalledTimes(1);
+				const [action, input, prior, owner] = invoke.mock.calls[0];
+				expect(action).toBe('claim');
+				expect(input).toEqual({ workflow: WORKFLOW, ...RUN, offlineEnabled: true });
+				expect(prior).toBeNull();
+				expect(owner).toEqual(STANDING);
+				expect(store.held()).toHaveLength(1);
+				expect(store.held()[0]).toMatchObject({
+					endpointWorkflowId: workflowEndpointId(WORKFLOW.workflowId),
+					ownerId: STANDING.ownerId,
+					authorityId: STANDING.authorityId,
+					ownerEpoch: 'opaque-epoch',
+					fencingToken: 'server-fence',
+					lastRunId: RUN.runId,
+					lastAttemptId: RUN.attemptId,
+					lifecycleVersion: 1,
+					offlineEnabled: false,
+					state: 'held',
+				});
+				expect(store.held()[0].pending).toBeUndefined();
+				expect(store.fence(WORKFLOW)).toEqual({
+					ownerEpoch: 'opaque-epoch',
+					fencingToken: 'server-fence',
+				});
+				expect(store.fence(OTHER)).toBeNull();
+				expect(lifetime.current()).toBe(true);
+				expect(port.requests).toHaveLength(0);
+			});
+
+			it('a replayed attempt confirms the issued fence on the same live signal and keeps one record', async () => {
+				const { invoke, store } = producer();
+				const first = await claim(store);
+				const replay = await store.claim({ workflow: WORKFLOW, ...RUN, offlineEnabled: true });
+				expect(replay).toMatchObject({ state: 'owned', disposition: 'confirmed' });
+				if (replay.state !== 'owned') throw new Error('replay not owned');
+				expect(replay.fence.lifetime?.signal).toBe(first.signal);
+				expect(invoke.mock.calls[1][2]).toMatchObject({
+					ownerEpoch: 'opaque-epoch',
+					fencingToken: 'server-fence',
+				});
+				expect(first.signal.aborted).toBe(false);
+				expect(store.held()).toHaveLength(1);
+			});
+
+			it('a stale grant on renewal (a rotated fence) stops the live signal and keeps the held values for reconciliation', async () => {
+				vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+				const { invoke, store } = producer();
+				const lifetime = await claim(store);
+				invoke.mockImplementation(async (_action, input, _prior, owner) => ({
+					status: 'ok',
+					payload: {
+						outcome: 'renewed',
+						workflowId: workflowEndpointId(input.workflow.workflowId),
+						ownerId: owner.ownerId,
+						ownerEpoch: 'opaque-epoch',
+						fencingToken: 'rotated-fence',
+						expiresAt: new Date(now + 10_000).toISOString(),
+					},
+				}));
+				now += 5000;
+				await vi.advanceTimersByTimeAsync(5000);
+				await vi.waitFor(() => expect(lifetime.signal.aborted).toBe(true));
+				expect(invoke.mock.calls[1][0]).toBe('renew');
+				expect(store.fence(WORKFLOW)).toBeNull();
+				expect(store.held()[0]).toMatchObject({
+					state: 'unknown',
+					pending: 'renew',
+					fencingToken: 'server-fence',
+				});
+			});
+
+			it.each([
+				['already expired', -1],
+				['beyond the renewal window', 300_001],
+			] as const)('a receipt %s issues no fence', async (_label, offset) => {
+				const { invoke, store } = producer();
+				invoke.mockImplementation(async (_action, input, _prior, owner) => ({
+					status: 'ok',
+					payload: {
+						outcome: 'owned',
+						workflowId: workflowEndpointId(input.workflow.workflowId),
+						ownerId: owner.ownerId,
+						ownerEpoch: 'opaque-epoch',
+						fencingToken: 'server-fence',
+						expiresAt: new Date(now + offset).toISOString(),
+					},
+				}));
+				const result = await store.claim({ workflow: WORKFLOW, ...RUN, offlineEnabled: true });
+				expect(result).toMatchObject({ state: 'unknown', code: 'outcome-unknown' });
+				expect(store.fence(WORKFLOW)).toBeNull();
+				expect(store.held()[0]).toMatchObject({ state: 'unknown', pending: 'claim' });
+			});
+
+			it('two installations contend: the producer fences the second, which holds nothing until the first releases', async () => {
+				let holder: string | null = null;
+				let epoch = 0;
+				const registry = vi.fn<WorkflowOwnerLifecyclePort['invoke']>(
+					async (action, input, prior, owner) => {
+						if (action === 'release') {
+							if (holder === owner.ownerId) holder = null;
+						} else if (holder && holder !== owner.ownerId) {
+							return { status: 'denied', reason: 'owner_unfenced' };
+						} else if (!holder) {
+							holder = owner.ownerId;
+							epoch += 1;
+						}
+						return {
+							status: 'ok',
+							payload: {
+								outcome: { claim: 'owned', renew: 'renewed', release: 'released' }[action],
+								workflowId: workflowEndpointId(input.workflow.workflowId),
+								ownerId: owner.ownerId,
+								ownerEpoch: action === 'release' ? prior?.ownerEpoch : `epoch-${epoch}`,
+								fencingToken: action === 'release' ? prior?.fencingToken : `fence-${epoch}`,
+								expiresAt: new Date(now + 10_000).toISOString(),
+							},
+						};
+					}
+				);
+				const installation = (ownerId: string, at: string) => {
+					const signal = new AbortController();
+					signals.push(signal);
+					const port = fakePort(owned(1, 'legacy'));
+					port.lifecycle = {
+						version: 1,
+						signal: signal.signal,
+						current: () => true,
+						invoke: registry,
+					};
+					return createWorkflowOwnership({
+						file: path.join(dir, at),
+						port: () => port,
+						owner: () => ({ ...STANDING, ownerId }),
+						now: () => now,
+						newId: () => `${ownerId}-nonce`,
+					});
+				};
+				const first = installation('inst-1', 'first.json');
+				const second = installation('inst-2', 'second.json');
+				const held = await claim(first);
+				const contended = await second.claim({ workflow: WORKFLOW, ...RUN, offlineEnabled: true });
+				expect(contended).toMatchObject({ state: 'denied', fenced: true });
+				expect(second.fence(WORKFLOW)).toBeNull();
+				expect(second.held()[0].state).toBe('fenced');
+				expect(held.current()).toBe(true);
+				expect(first.fence(WORKFLOW)).toEqual({ ownerEpoch: 'epoch-1', fencingToken: 'fence-1' });
+
+				await held.finish('applied');
+				expect(first.fence(WORKFLOW)).toBeNull();
+				expect(first.held()[0].state).toBe('released');
+				const taken = await second.claim({ workflow: WORKFLOW, ...RETRY, offlineEnabled: true });
+				expect(taken).toMatchObject({ state: 'owned', disposition: 'claimed' });
+				expect(second.fence(WORKFLOW)).toEqual({ ownerEpoch: 'epoch-2', fencingToken: 'fence-2' });
+				expect(holder).toBe('inst-2');
+			});
+
+			it('an offline-enabled holder keeps nothing once the lifecycle authority is gone, and asks the producer nothing', async () => {
+				const { invoke, port, store } = producer();
+				const lifetime = await claim(store);
+				expect(store.held()[0].offlineEnabled).toBe(false);
+				port.lifecycle!.current = () => false;
+				expect(lifetime.current()).toBe(false);
+				expect(store.fence(WORKFLOW)).toBeNull();
+				const result = await store.claim({ workflow: WORKFLOW, ...RETRY, offlineEnabled: true });
+				expect(result).toMatchObject({ state: 'unavailable', code: 'runtime-unavailable' });
+				expect(lifetime.signal.aborted).toBe(true);
+				await lifetime.finish('uncertain');
+				expect(invoke).toHaveBeenCalledTimes(1);
+				expect(store.held()[0]).toMatchObject({ state: 'held', ownerEpoch: 'opaque-epoch' });
+				expect(port.requests).toHaveLength(0);
+			});
+
+			it('a lost renewal acknowledgment stops the signal; a restarted host reclaims the same fence', async () => {
+				vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+				const { invoke, port, store } = producer();
+				const original = invoke.getMockImplementation()!;
+				const lifetime = await claim(store);
+				invoke.mockResolvedValue({ status: 'unknown', message: 'lost' });
+				now += 5000;
+				await vi.advanceTimersByTimeAsync(5000);
+				await vi.waitFor(() => expect(lifetime.signal.aborted).toBe(true));
+				expect(store.fence(WORKFLOW)).toBeNull();
+				expect(store.held()[0]).toMatchObject({ state: 'unknown', pending: 'renew' });
+
+				invoke.mockImplementation(original);
+				const restarted = ownership(port);
+				await restarted.load();
+				expect(restarted.fence(WORKFLOW)).toBeNull();
+				const reclaimed = await restarted.claim({
+					workflow: WORKFLOW,
+					...RETRY,
+					offlineEnabled: true,
+				});
+				expect(reclaimed).toMatchObject({ state: 'owned', disposition: 'confirmed' });
+				expect(invoke.mock.calls.at(-1)?.[0]).toBe('claim');
+				expect(invoke.mock.calls.at(-1)?.[2]).toMatchObject({
+					pending: 'renew',
+					ownerEpoch: 'opaque-epoch',
+					fencingToken: 'server-fence',
+				});
+				expect(restarted.fence(WORKFLOW)).toEqual({
+					ownerEpoch: 'opaque-epoch',
+					fencingToken: 'server-fence',
+				});
+			});
+
+			it.each(['withdrawn standing', 'another actor'] as const)(
+				'a revoked actor (%s) stops the live fence and the producer is never asked for a child',
+				async (revocation) => {
+					const { invoke, store } = producer();
+					const lifetime = await claim(store);
+					standing =
+						revocation === 'withdrawn standing' ? null : { ...STANDING, ownerId: 'inst-x' };
+					expect(lifetime.current()).toBe(false);
+					const child = await store.claim({ workflow: WORKFLOW, ...RETRY, offlineEnabled: true });
+					expect(child).toMatchObject({ state: 'unavailable', code: 'runtime-unavailable' });
+					expect(lifetime.signal.aborted).toBe(true);
+					expect(store.fence(WORKFLOW)).toBeNull();
+					expect(invoke).toHaveBeenCalledTimes(1);
+				}
+			);
+		});
 	});
 
 	it('a first claim proposes epoch 0 and a nonce, holds what the registry answered, and persists it', async () => {
