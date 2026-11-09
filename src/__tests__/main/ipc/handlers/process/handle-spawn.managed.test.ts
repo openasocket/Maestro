@@ -216,6 +216,63 @@ describe('process:spawn under management: admission and classification', () => {
 		expect('dispatchTicket' in admitted).toBe(false);
 	});
 
+	it('returns the run the send started to the composer: the bound admission as identifiers, never the snapshot (MCOMP-25-01)', async () => {
+		const port = fakeSpawnPort();
+		const h = harness(port);
+		// The spy stands in for the spawner; the manager reports the admission
+		// the sink was handed as bound to the session, as `withLease` does.
+		vi.spyOn(h.processManager, 'admissionOf').mockImplementation((sessionId: string) =>
+			sessionId === PROCESS ? (spawned(h).admission ?? null) : null
+		);
+		const result = (await handleProcessSpawn(payload(), h.deps)) as {
+			success: boolean;
+			managedRun?: Record<string, unknown>;
+		};
+		expect(result.success).toBe(true);
+		const admitted = spawned(h).admission;
+		expect(admitted).toBeDefined();
+		expect(result.managedRun).toEqual({
+			leaseId: admitted?.leaseId,
+			authorityId: admitted?.authorityId,
+			requestId: admitted?.requestId,
+			attemptId: admitted?.attemptId,
+			runId: null,
+			requestDigest: admitted?.requestDigest,
+			provider: 'codex',
+			operation: 'start',
+			actor: admitted?.actor,
+			policyRevision: 1,
+			decision: null,
+			effect: { state: 'bound', release: null, reason: null },
+		});
+		expect(JSON.stringify(result.managedRun)).not.toContain('List the files.');
+	});
+
+	it('a second send is admitted again under the policy current then, with its own request and lease', async () => {
+		let revision = 1;
+		const port = fakeSpawnPort({
+			decide: () => ({ decision: 'allow', policyRevision: revision }),
+		});
+		const h = harness(port);
+		const first = await handleProcessSpawn(payload(), h.deps);
+		expect(first.success).toBe(true);
+		revision = 2;
+		const second = await handleProcessSpawn(payload(), h.deps);
+		expect(second.success).toBe(true);
+		expect(port.asked).toHaveLength(2);
+		const [a, b] = h.spawn.mock.calls.map((call) => (call[0] as SpawnedConfig).admission);
+		expect(a?.policyRevision).toBe(1);
+		expect(b?.policyRevision).toBe(2);
+		expect(b?.leaseId).not.toBe(a?.leaseId);
+		expect(b?.requestId).not.toBe(a?.requestId);
+	});
+
+	it('returns no managed run on a standalone host, which binds no admission', async () => {
+		const h = harness(fakeSpawnPort({ standing: 'standalone' }));
+		const result = (await handleProcessSpawn(payload(), h.deps)) as { managedRun?: unknown };
+		expect(result.managedRun).toBeUndefined();
+	});
+
 	it('admits a ticketed maestro-cli dispatch with origin cli, host-authoritative, and strips the ticket from the process', async () => {
 		const port = fakeSpawnPort();
 		const h = harness(port);

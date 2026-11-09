@@ -369,6 +369,88 @@ export function createBrokerDispatch(deps: BrokerDispatchDeps): BrokerDispatch {
 }
 
 // ---------------------------------------------------------------------------
+// The run identity a composer turn carries back (MCOMP-25-01)
+// ---------------------------------------------------------------------------
+
+/**
+ * What the GUI composer is told about the managed run its send started: the
+ * identifiers that join the turn to the admission the sink bound, the
+ * broker's decision when the ledger holds one, and how the effect stands.
+ * Identifiers only: no snapshot, no credential reference, no prompt. It is
+ * a record the renderer shows and journals, never a permit: a retry or a
+ * resume asks for a new admission under the policy current at that moment,
+ * and a stop goes to the process the lease is bound to, which releases the
+ * lease as `stopped` by the caller in the manager.
+ */
+export interface ManagedRunView {
+	leaseId: string;
+	authorityId: string;
+	requestId: string;
+	attemptId: string;
+	/** The run the ledger recorded the lease under; null until a receipt says so. */
+	runId: string | null;
+	/** Digest of the spawn request the lease covers. */
+	requestDigest: string;
+	provider: string;
+	operation: string;
+	actor: ManagedPrincipalRef;
+	policyRevision: number | null;
+	/** The broker's decision, joined from the ledger; null when none is recorded. */
+	decision: { decisionId: string; brokerId: string; policyRevision: number } | null;
+	effect: {
+		state: DispatchEffectState;
+		release: LeaseRelease | null;
+		reason: string | null;
+	};
+}
+
+/**
+ * Project a spawn's admission, joined to its ledger receipt when one is
+ * given, into the view the composer carries. A receipt for another lease is
+ * never joined: the view then says only what the admission says, so a
+ * stale or mismatched record cannot lend a turn a decision it was not
+ * admitted under. Without a receipt the effect is `bound`: the view is
+ * built right after the sink bound the lease to the process.
+ */
+export function managedRunViewOf(
+	admission: ProcessSpawnAdmission,
+	receipt: DispatchReceiptRecord | null = null
+): ManagedRunView {
+	const joined =
+		receipt &&
+		receipt.leaseId === admission.leaseId &&
+		receipt.authorityId === admission.authorityId
+			? receipt
+			: null;
+	return {
+		leaseId: admission.leaseId,
+		authorityId: admission.authorityId,
+		requestId: admission.requestId,
+		attemptId: admission.attemptId,
+		runId: joined?.runId ?? null,
+		requestDigest: admission.requestDigest,
+		provider: admission.provider,
+		operation: admission.operation,
+		actor: { ...admission.actor },
+		policyRevision: admission.policyRevision,
+		decision: joined?.decision
+			? {
+					decisionId: joined.decision.decisionId,
+					brokerId: joined.decision.brokerId,
+					policyRevision: joined.decision.policyRevision,
+				}
+			: null,
+		effect: joined
+			? {
+					state: joined.effect.state,
+					release: joined.effect.release,
+					reason: joined.effect.reason,
+				}
+			: { state: 'bound', release: null, reason: null },
+	};
+}
+
+// ---------------------------------------------------------------------------
 // The synthetic harness route through the protected dispatch
 // ---------------------------------------------------------------------------
 

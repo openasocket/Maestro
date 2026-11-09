@@ -3,6 +3,7 @@ import { ipcRenderer } from 'electron';
 import type { CallUsage, UsageStats } from '../../../shared/types';
 import type { ParsedQuestion } from '../../permission-relay/types';
 import type { SteeringResultFrame } from '../../../shared/chatSteering';
+import type { ManagedRunView } from '../../enterprise/dispatch';
 
 /**
  * Configuration for spawning a process
@@ -39,6 +40,8 @@ export interface ProcessSpawnResponse {
 	pid: number;
 	success: boolean;
 	sshRemote?: { id: string; name: string; host: string };
+	/** The managed run this spawn started (identifiers only); absent on a standalone host. */
+	managedRun?: ManagedRunView;
 }
 
 /**

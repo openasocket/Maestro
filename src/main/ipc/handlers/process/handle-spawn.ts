@@ -104,6 +104,7 @@ import {
 	buildOmpPrimeEnv,
 } from '../../../agents/omp-model-catalog';
 import type { SpawnProcessConfig } from './spawn-types';
+import { managedRunViewOf } from '../../../enterprise/dispatch';
 
 const LOG_CONTEXT = '[ProcessManager]';
 
@@ -1446,9 +1447,17 @@ async function handleProcessSpawnImpl(
 		}
 	}
 
+	// The managed run this send started, as identifiers (MCOMP-25-01): the
+	// admission the sink bound to the process, so the composer can show and
+	// journal the turn's lease, request, attempt and policy revision. Absent on
+	// a standalone host, which binds none. Not a permit: a retry or resume
+	// spawns again and is admitted again under the policy current then.
+	const admission = processManager.admissionOf(config.sessionId);
+
 	// Return spawn result with SSH remote info if used
 	return {
 		...result,
+		...(admission ? { managedRun: managedRunViewOf(admission) } : {}),
 		sshRemote: sshRemoteUsed
 			? {
 					id: sshRemoteUsed.id,

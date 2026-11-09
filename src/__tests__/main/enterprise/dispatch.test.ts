@@ -18,6 +18,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
 	createBrokerDispatch,
 	DISPATCH_RECEIPTS_FILE_NAME,
+	managedRunViewOf,
 	admitCueShell,
 	cueShellAttribution,
 	cueShellRouteSupport,
@@ -42,6 +43,7 @@ import {
 } from '../../../shared/maestro-lib/managed/host-adapter';
 import { inProcessContext } from '../../../shared/maestro-lib/managed/operations';
 import { startFakeEndpoint, type FakeEndpoint } from './fakeEndpoint';
+import { fakeAdmission } from '../../helpers/managedSpawnPort';
 
 const T0 = Date.parse('2026-10-21T12:00:00Z');
 const INSTALLATION = {
@@ -223,6 +225,82 @@ describe('broker dispatch bridge', () => {
 		const dispatch = createBrokerDispatch({ host, file, now: () => clock });
 		return { dispatch, host, file, tick: (ms: number) => (clock += ms) };
 	}
+
+	it('projects the run a composer send started from the admission and its own ledger receipt, the effect as it stands (MCOMP-25-01)', async () => {
+		const { dispatch } = bridge();
+		await dispatch.load();
+		const outcome = await dispatch.authority.admit(admission('req-9', 'att-9'));
+		expect(outcome.state).toBe('admitted');
+		if (outcome.state !== 'admitted') return;
+		const lease = outcome.lease;
+		const spawnAdmission = fakeAdmission({
+			leaseId: lease.leaseId,
+			authorityId: lease.authorityId,
+			requestId: 'req-9',
+			attemptId: 'att-9',
+			policyRevision: 3,
+			provider: 'claude-code',
+		});
+		lease.bind(4242);
+		const bound = managedRunViewOf(spawnAdmission, dispatch.receipt(lease.leaseId));
+		expect(bound).toMatchObject({
+			leaseId: lease.leaseId,
+			requestId: 'req-9',
+			attemptId: 'att-9',
+			runId: 'run-1',
+			policyRevision: 3,
+			decision: { decisionId: expect.stringMatching(/^decision-/), brokerId: 'broker-1' },
+			effect: { state: 'bound', release: null },
+		});
+		// Identifiers only: the projection carries no snapshot, env or prompt.
+		expect(Object.keys(bound).sort()).toEqual(
+			[
+				'actor',
+				'attemptId',
+				'authorityId',
+				'decision',
+				'effect',
+				'leaseId',
+				'operation',
+				'policyRevision',
+				'provider',
+				'requestDigest',
+				'requestId',
+				'runId',
+			].sort()
+		);
+
+		// A stop releases the lease as stopped by the caller; the view reads it back.
+		lease.release({ outcome: 'stopped', by: 'caller' });
+		expect(managedRunViewOf(spawnAdmission, dispatch.receipt(lease.leaseId)).effect).toEqual({
+			state: 'released',
+			release: { outcome: 'stopped', by: 'caller' },
+			reason: null,
+		});
+	});
+
+	it('never joins a receipt for another lease into the run view, and says only what the admission says without one', async () => {
+		const { dispatch } = bridge();
+		await dispatch.load();
+		const first = await dispatch.authority.admit(admission('req-a', 'att-a'));
+		expect(first.state).toBe('admitted');
+		if (first.state !== 'admitted') return;
+		const other = fakeAdmission({ leaseId: 'lease-other', authorityId: first.lease.authorityId });
+		const mismatched = managedRunViewOf(other, dispatch.receipt(first.lease.leaseId));
+		expect(mismatched.decision).toBeNull();
+		expect(mismatched.runId).toBeNull();
+		expect(mismatched.effect).toEqual({ state: 'bound', release: null, reason: null });
+		expect(mismatched.leaseId).toBe('lease-other');
+
+		const foreignAuthority = fakeAdmission({
+			leaseId: first.lease.leaseId,
+			authorityId: 'another-authority',
+		});
+		expect(
+			managedRunViewOf(foreignAuthority, dispatch.receipt(first.lease.leaseId)).decision
+		).toBeNull();
+		expect(managedRunViewOf(other).decision).toBeNull();
+	});
 
 	it('records an admitted dispatch with the broker decision, the registration and the effect as it unfolds', async () => {
 		const { dispatch, file, tick } = bridge();
