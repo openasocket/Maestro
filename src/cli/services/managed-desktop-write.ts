@@ -7,7 +7,8 @@
 import { withMaestroClient, type MaestroClient } from './maestro-client';
 import { MaestroNotRunningError } from './maestro-not-running';
 import { errorFrameMessage, exitIfMaestroNotRunning } from './session-command';
-import { dataDirHasManagedBinding } from './storage';
+import { dataDirHasManagedBinding, writeSettingValue } from './storage';
+import { LOCKABLE_SETTING_KEYS } from '../../shared/managedSettingsLock';
 import { formatError, formatWarning } from '../output/formatter';
 
 export const ENROLLED_DESKTOP_ONLY = 'Enrolled with a management peer: desktop only.';
@@ -59,6 +60,29 @@ export async function setSettingThroughDesktop(
 	if (refusal) throw Object.assign(new Error(refusal), { managed: reply.managed });
 	if (!reply.success) throw new Error('The desktop could not persist the setting');
 	return true;
+}
+
+/** Where a {@link writeSettingThroughHost} write landed. */
+export type HostSettingWrite = 'desktop' | 'file';
+
+/**
+ * The one CLI write of a whole top-level setting (MCOMP-19-05). A key the
+ * managed settings authority can hold goes to the running desktop's
+ * `set_setting`, the same bridge `settings set` and the GUI's own write reach;
+ * the file only when no desktop runs and the data dir is standalone. An
+ * enrolled data dir with no desktop throws {@link MaestroNotRunningError}
+ * (exit 3) and a refusal throws the policy's line, both before the file is
+ * touched. A key no policy can hold is written to the file, as before.
+ */
+export async function writeSettingThroughHost(
+	key: string,
+	value: unknown,
+	json?: boolean
+): Promise<HostSettingWrite> {
+	if (LOCKABLE_SETTING_KEYS.includes(key) && (await setSettingThroughDesktop(key, value, json)))
+		return 'desktop';
+	if (!writeSettingValue(key, value)) throw new Error(`Could not persist "${key}"`);
+	return 'file';
 }
 
 /** Report a failed write: the not-running outcome first, then the message (its managed state in JSON). Never returns. */

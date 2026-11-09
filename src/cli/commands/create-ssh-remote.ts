@@ -1,7 +1,11 @@
 // Create SSH remote command - add a new SSH remote configuration
 
 import * as crypto from 'crypto';
-import { readSshRemotes, writeSshRemotes, writeSettingValue } from '../services/storage';
+import { readSshRemotes } from '../services/storage';
+import {
+	reportDesktopWriteFailure,
+	writeSettingThroughHost,
+} from '../services/managed-desktop-write';
 import { formatError, formatSuccess } from '../output/formatter';
 import type { SshRemoteConfig } from '../../shared/types';
 import { parseSshOptionAssignments } from '../../shared/sshOptions';
@@ -19,7 +23,10 @@ interface CreateSshRemoteOptions {
 	json?: boolean;
 }
 
-export function createSshRemote(name: string, options: CreateSshRemoteOptions): void {
+export async function createSshRemote(
+	name: string,
+	options: CreateSshRemoteOptions
+): Promise<void> {
 	// Validate host
 	if (!options.host) {
 		const msg = 'Missing required --host';
@@ -112,14 +119,18 @@ export function createSshRemote(name: string, options: CreateSshRemoteOptions): 
 		process.exit(1);
 	}
 
-	// Read, append, write
-	const remotes = readSshRemotes();
-	remotes.push(config);
-	writeSshRemotes(remotes);
-
-	// Set as default if requested
-	if (options.setDefault) {
-		writeSettingValue('defaultSshRemoteId', config.id);
+	// Read, append, write. Both keys are ones a managed policy can hold, so the
+	// write goes through the running desktop (the same hold the Settings pane
+	// meets); the file only when the data dir is standalone with no desktop.
+	try {
+		const remotes = readSshRemotes();
+		remotes.push(config);
+		await writeSettingThroughHost('sshRemotes', remotes, options.json);
+		if (options.setDefault) {
+			await writeSettingThroughHost('defaultSshRemoteId', config.id, options.json);
+		}
+	} catch (error) {
+		return reportDesktopWriteFailure(error, options.json, `create SSH remote "${name}"`);
 	}
 
 	if (options.json) {
