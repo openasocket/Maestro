@@ -11,7 +11,7 @@
  * file's invitation and proof are relayed and never printed; a missing field
  * is named, its value never), the exit codes of an absent or older desktop and
  * of one with no service, `open managed-status` and its aliases resolving the
- * registered surface, and exactly the ten managed message types on the wire.
+ * registered surface, and exactly the twelve managed message types on the wire.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -71,6 +71,7 @@ import {
 	managedCommandStatus,
 	managedInboxAct,
 	managedInboxList,
+	managedInboxRecover,
 	managedRun,
 } from '../../../cli/commands/managed-inbox';
 import { openModal } from '../../../cli/commands/open-modal';
@@ -639,7 +640,22 @@ describe('maestro-cli managed over the real bridge and facade (MRC2-07-08)', () 
 		expect(resume.err).not.toContain(COOPERATIVE_PAUSE_LABEL);
 	});
 
-	it('spoke every one of the eleven managed message types and nothing else', () => {
+	it('recover asks the real inbox client and prints its summary; unsupported is a failure with the reason (MCOMP-29-03C)', async () => {
+		const json1 = await run(() => managedInboxRecover({ json: true }));
+		expect(json1.code).toBe(1);
+		expect(json(json1.out)).toMatchObject({
+			success: false,
+			recovery: { outcome: 'unsupported' },
+		});
+		expect(sent.map((m) => m.type)).toEqual(['managed_inbox_recover']);
+		const human = await run(() => managedInboxRecover({}));
+		expect(human.code).toBe(1);
+		expect(human.err).toContain('Receipt recovery unsupported (0 uncertain receipt(s) held)');
+		// Nothing was resent to the endpoint.
+		expect(inbox.d.acts).toEqual([]);
+	});
+
+	it('spoke every one of the twelve managed message types and nothing else', () => {
 		expect([...spoken].sort()).toEqual([...MANAGED_MESSAGE_TYPES].sort());
 	});
 });

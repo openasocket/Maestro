@@ -90,6 +90,7 @@ import {
 	MANAGED_INBOX_RECEIPTS_FILE_NAME,
 	type InboxActionOutcome,
 	type InboxClient,
+	type InboxRecovery,
 	type InboxRefresh,
 	type ManagedInboxView,
 } from './inbox';
@@ -305,6 +306,12 @@ export interface ManagedOperations {
 	inboxList(options?: { refresh?: boolean }): Promise<ManagedInboxListing | null>;
 	/** Record one receipt (read, acknowledged, reply) on a held notice; the campaign is resolved from the held set. */
 	inboxAct(input: ManagedInboxActInput): Promise<InboxActionOutcome>;
+	/**
+	 * Ask the endpoint's receipt custody about every `uncertain` receipt this host holds
+	 * (MCOMP-29-03C, `InboxClient.recover()`): never resends. `unsupported` where no recovery
+	 * operation is composed; null when no inbox is composed.
+	 */
+	inboxRecover(): Promise<InboxRecovery | null>;
 	/** A local operator's typed command (`commands.ts` `issueLocal`): unavailable, with the standing, on an unmanaged host. */
 	command(action: LocalCommandAction): Promise<CommandExecution>;
 	/** What this desktop executes and refuses by name, the ledger's counts and the standing; null when no service is composed. */
@@ -322,7 +329,7 @@ export interface ManagedOperations {
 /** The inbox and command half of the facade: what a detached host serves over its bridge too (MCOMP-29-03). */
 export type ManagedCommunications = Pick<
 	ManagedOperations,
-	'inboxList' | 'inboxAct' | 'command' | 'commandStatus'
+	'inboxList' | 'inboxAct' | 'inboxRecover' | 'command' | 'commandStatus'
 >;
 
 export interface ManagedCommunicationsDeps {
@@ -392,6 +399,10 @@ export function createManagedCommunications(
 				return denied(`message ${messageId} is held under ${held.length} campaigns; name one`);
 			}
 			return inbox.act({ campaignId: held[0].campaignId, messageId, action });
+		},
+		async inboxRecover() {
+			const inbox = deps.inbox();
+			return inbox ? inbox.recover() : null;
 		},
 		command: (action) => {
 			const commands = deps.commands();
@@ -499,6 +510,11 @@ export async function answerManagedCommunication(
 				...(options.actor ? { actor: spawnActor } : {}),
 			});
 			return { outcome, actor, user };
+		}
+		case 'managed_inbox_recover': {
+			const recovery = await communications.inboxRecover();
+			if (!recovery) throw new Error(`No notice inbox is composed ${place}.`);
+			return { recovery };
 		}
 		case 'managed_command':
 			return { execution: await communications.command(validateLocalCommand(message.action)) };

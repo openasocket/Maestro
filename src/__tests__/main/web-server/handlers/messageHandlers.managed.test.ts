@@ -106,6 +106,7 @@ function facadeDouble(overrides: Partial<ManagedOperations> = {}): ManagedOperat
 		locks: vi.fn(() => LOCKS as never),
 		inboxList: vi.fn(async () => ({ refresh: null, view: { notices: [] } }) as never),
 		inboxAct: vi.fn(async () => ({ status: 'recorded', duplicate: false, record: {} }) as never),
+		inboxRecover: vi.fn(async () => ({ outcome: 'unsupported', uncertain: 0 }) as never),
 		command: vi.fn(async () => ({ status: 'completed', commandId: 'local-1' }) as never),
 		commandStatus: vi.fn(() => ({ standing: { ok: true } }) as never),
 		run: vi.fn((leaseId: string) =>
@@ -159,8 +160,18 @@ describe('managed bridge handlers (MRC2-07-03)', () => {
 		expect(MANAGED_CLI_ONLY_TYPES).toEqual([
 			'managed_enroll_request',
 			'managed_policy_refresh',
+			'managed_inbox_recover',
 			'managed_command',
 		]);
+		const recover = await ask(handler, createClient({ cli: true }), {
+			type: 'managed_inbox_recover',
+		});
+		expect(recover).toMatchObject({
+			type: 'managed_inbox_recover_result',
+			success: true,
+			recovery: { outcome: 'unsupported', uncertain: 0 },
+		});
+		expect(managed.inboxRecover).toHaveBeenCalledTimes(1);
 		const refresh = await ask(handler, createClient({ cli: true }), {
 			type: 'managed_policy_refresh',
 		});
@@ -189,6 +200,7 @@ describe('managed bridge handlers (MRC2-07-03)', () => {
 		expect(managed.requestEnrollment).toHaveBeenCalledTimes(1);
 		expect(managed.refreshPolicy).toHaveBeenCalledTimes(1);
 		expect(managed.command).toHaveBeenCalledTimes(1);
+		expect(managed.inboxRecover).toHaveBeenCalledTimes(1);
 	});
 
 	it('names a refused input and never its value: a short enrollment request, a bad command, a bad act', async () => {
@@ -252,6 +264,7 @@ describe('managed bridge handlers (MRC2-07-03)', () => {
 			getManaged: () =>
 				facadeDouble({
 					inboxList: vi.fn(async () => null),
+					inboxRecover: vi.fn(async () => null),
 					commandStatus: vi.fn(() => null),
 					status: vi.fn(() => {
 						throw new Error('the lifecycle is closed');
@@ -266,6 +279,9 @@ describe('managed bridge handlers (MRC2-07-03)', () => {
 			success: false,
 			error: 'No command service is composed in this desktop.',
 		});
+		expect(
+			await ask(handler, createClient({ cli: true }), { type: 'managed_inbox_recover' })
+		).toMatchObject({ success: false, error: 'No notice inbox is composed in this desktop.' });
 		expect(await ask(handler, createClient(), { type: 'managed_status' })).toMatchObject({
 			success: false,
 			error: 'the lifecycle is closed',
@@ -563,7 +579,7 @@ describe('managed bridge handlers (MRC2-07-03)', () => {
 		}
 	});
 
-	it('routes exactly the eleven managed message types and admits exactly the intended remote methods', () => {
+	it('routes exactly the twelve managed message types and admits exactly the intended remote methods', () => {
 		expect([...MANAGED_MESSAGE_TYPES].sort()).toEqual(
 			[
 				'managed_command',
@@ -571,6 +587,7 @@ describe('managed bridge handlers (MRC2-07-03)', () => {
 				'managed_enroll_request',
 				'managed_inbox_act',
 				'managed_inbox_list',
+				'managed_inbox_recover',
 				'managed_inventory',
 				'managed_locks',
 				'managed_policy_refresh',

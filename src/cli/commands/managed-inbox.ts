@@ -9,10 +9,11 @@
 // Wire contract (the bridge handlers of MRC2-07-03 answer these; each
 // `<type>_result` carries `success` and the named field):
 //   managed_inbox_list (listing), managed_inbox_act (outcome),
+//   managed_inbox_recover (recovery; CLI clients only, MCOMP-29-03C),
 //   managed_command (execution), managed_command_status (status),
 //   managed_run (run; refused by name for a lease this host never admitted)
 //
-// A detached host (`maestro-cli host start`) answers the first four too
+// A detached host (`maestro-cli host start`) answers the first five too
 // (MCOMP-29-03A): `answerManagedCommunication()` in
 // `src/main/enterprise/service.ts` is the one answer both bridges give, over
 // the host's own inbox and command service, so these verbs read the same reply
@@ -32,7 +33,7 @@
 
 import type { CommandServiceStatus, LocalCommandAction } from '../../main/enterprise/commands';
 import type { ManagedRunView } from '../../main/enterprise/dispatch';
-import type { InboxActionOutcome, NoticeView } from '../../main/enterprise/inbox';
+import type { InboxActionOutcome, InboxRecovery, NoticeView } from '../../main/enterprise/inbox';
 import type { ManagedInboxListing } from '../../main/enterprise/service';
 import type { CommandExecution } from '../../shared/maestro-lib/managed/commands';
 import type { EndpointInboxAction } from '../../shared/maestro-lib/managed/host-adapter';
@@ -117,6 +118,16 @@ export function formatInboxReceipt(outcome: InboxActionOutcome): string {
 		case 'unavailable':
 			return outcome.detail;
 	}
+}
+
+/** One `recover()` pass: how many uncertain receipts were asked about and what each became. */
+export function formatInboxRecovery(recovery: InboxRecovery): string {
+	const head =
+		recovery.outcome === 'checked'
+			? `Receipt recovery checked ${recovery.uncertain} uncertain receipt(s)`
+			: `Receipt recovery ${recovery.outcome} (${recovery.uncertain} uncertain receipt(s) held): ${recovery.reason ?? 'no reason given'}`;
+	if (recovery.outcome !== 'checked') return head;
+	return `${head}: recovered ${recovery.recovered}, missing ${recovery.missing}, mismatched ${recovery.mismatched}, unbound ${recovery.unbound}, unavailable ${recovery.unavailable}; nothing was resent`;
 }
 
 export function formatCommandReceipt(execution: CommandExecution): string {
@@ -227,6 +238,31 @@ export async function managedInboxAct(
 		return;
 	}
 	failCommand(formatInboxReceipt(outcome), options.json);
+}
+
+/**
+ * `managed inbox recover`: ask the endpoint's receipt custody about every `uncertain` receipt
+ * this host holds (MCOMP-29-03C). Never resends; a host with no recovery operation composed
+ * answers `unsupported` with its reason, which this verb reports as a failure.
+ */
+export async function managedInboxRecover(options: ManagedOptions): Promise<void> {
+	const recovery = await askDesktop<InboxRecovery>(
+		{ type: 'managed_inbox_recover' },
+		'managed_inbox_recover_result',
+		'recovery',
+		options.json
+	);
+	const ok = recovery.outcome === 'checked';
+	if (options.json) {
+		console.log(JSON.stringify({ success: ok, recovery }));
+		if (!ok) exitWith(ExitCode.GeneralError);
+		return;
+	}
+	if (ok) {
+		if (!isQuiet()) console.log(formatSuccess(formatInboxRecovery(recovery)));
+		return;
+	}
+	failCommand(formatInboxRecovery(recovery), options.json);
 }
 
 /** `managed command cancel-run|pause-run|resume-run|report-status|refresh-policy`: a local operator's typed command through the real executor and ledger. */

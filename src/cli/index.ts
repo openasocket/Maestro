@@ -217,6 +217,7 @@ import {
 import {
 	managedInboxList,
 	managedInboxAct,
+	managedInboxRecover,
 	managedCommand,
 	managedCommandStatus,
 	managedRun,
@@ -2719,6 +2720,14 @@ managedInbox
 	.option('--campaign <id>', 'The campaign, when the message id is held under more than one')
 	.option('--json', 'Output as JSON (for scripting)')
 	.action((messageId, options) => managedInboxAct('reply', messageId, options));
+
+managedInbox
+	.command('recover')
+	.description(
+		"Ask the endpoint's receipt custody about every receipt this host recorded as uncertain; never resends"
+	)
+	.option('--json', 'Output as JSON (for scripting)')
+	.action((options) => managedInboxRecover(options));
 
 const managedCommandGroup = managed
 	.command('command')

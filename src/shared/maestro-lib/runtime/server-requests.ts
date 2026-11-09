@@ -618,6 +618,7 @@ async function answerManaged(
 export const MANAGED_COMMUNICATION_TYPES = [
 	'managed_inbox_list',
 	'managed_inbox_act',
+	'managed_inbox_recover',
 	'managed_command',
 	'managed_command_status',
 ] as const;
@@ -930,7 +931,7 @@ export interface RequestHandlerOptions {
 	 */
 	roundParents?: Pick<RoundParentCustody, 'run'>;
 	/**
-	 * The endpoint inbox and command service a host composed (MCOMP-29-03): the four
+	 * The endpoint inbox and command service a host composed (MCOMP-29-03): the five
 	 * `MANAGED_COMMUNICATION_TYPES` are answered from it. Absent: each is refused with
 	 * `NO_MANAGED_COMMUNICATIONS_MESSAGE`, never answered from the ledgers on disk.
 	 */
@@ -958,6 +959,7 @@ export function createRequestHandler(
 			// -- endpoint communications (MCOMP-29-03) ----------------------
 			case 'managed_inbox_list':
 			case 'managed_inbox_act':
+			case 'managed_inbox_recover':
 			case 'managed_command':
 			case 'managed_command_status':
 				return answerCommunication(

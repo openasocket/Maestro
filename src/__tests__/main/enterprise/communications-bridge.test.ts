@@ -1,7 +1,7 @@
 /**
  * The inbox and command verbs over a detached host's bridge (MCOMP-29-03): the shared request
  * handler (`createRequestHandler`) answers `managed_inbox_list`, `managed_inbox_act`,
- * `managed_command` and `managed_command_status` from a composed communications port, spelled and
+ * `managed_inbox_recover` (MCOMP-29-03C), `managed_command` and `managed_command_status` from a composed communications port, spelled and
  * shaped the way the desktop bridge answers them, and refuses each by name with no port (no
  * direct-store fallback). The port here is the real extracted facade
  * (`createManagedCommunications`, the same code the desktop's `createManagedOperations` spreads)
@@ -18,11 +18,16 @@ vi.mock('../../../main/utils/logger', () => ({
 	logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 
-import { createInboxClient, createInboxReceiptLedger } from '../../../main/enterprise/inbox';
+import {
+	createInboxClient,
+	createInboxReceiptLedger,
+	type InboxRecoveryPort,
+} from '../../../main/enterprise/inbox';
 import type { CommandService, LocalCommandAction } from '../../../main/enterprise/commands';
 import {
 	NO_INBOX_OUTCOME,
 	createManagedCommunications,
+	createManagedCommunicationsPort,
 	type ManagedCommunications,
 } from '../../../main/enterprise/service';
 import type { MaestroClient } from '../../../shared/maestro-lib/client/types';
@@ -67,7 +72,7 @@ const REGISTERED: InboxStanding = {
 	},
 };
 
-function inboxDouble() {
+function inboxDouble(options: { actsLost?: boolean; recovery?: InboxRecoveryPort | null } = {}) {
 	const acts: EndpointInboxRequest[] = [];
 	const port: InboxPort = {
 		list: async () => ({
@@ -76,6 +81,9 @@ function inboxDouble() {
 		}),
 		act: async (request) => {
 			acts.push(request);
+			if (options.actsLost && request.action.kind !== 'delivered') {
+				return { status: 'unavailable', reason: 'endpoint-unreachable', detail: 'lost' } as never;
+			}
 			return {
 				status: 'ok',
 				payload: {
@@ -91,6 +99,7 @@ function inboxDouble() {
 		host: { inboxStanding: () => REGISTERED, inbox: port },
 		ledger: createInboxReceiptLedger({ now: () => NOW }),
 		now: () => NOW,
+		...(options.recovery === undefined ? {} : { recovery: () => options.recovery ?? null }),
 	});
 	return { client, acts };
 }
@@ -141,6 +150,11 @@ function portOver(facade: ManagedCommunications): ManagedCommunicationsPort {
 							actor: { kind: 'cli' } as never,
 						}),
 					};
+				case 'managed_inbox_recover': {
+					const recovery = await facade.inboxRecover();
+					if (!recovery) throw new Error('No notice inbox is composed on this host.');
+					return { recovery };
+				}
 				case 'managed_command':
 					return { execution: await facade.command(message.action as LocalCommandAction) };
 				case 'managed_command_status': {
@@ -156,10 +170,11 @@ function portOver(facade: ManagedCommunications): ManagedCommunicationsPort {
 const noClient = {} as MaestroClient;
 
 describe('endpoint communications over the host bridge (MCOMP-29-03)', () => {
-	it('names exactly the four verbs the desktop bridge spells, and nothing else', () => {
+	it('names exactly the five verbs the desktop bridge spells, and nothing else', () => {
 		expect([...MANAGED_COMMUNICATION_TYPES]).toEqual([
 			'managed_inbox_list',
 			'managed_inbox_act',
+			'managed_inbox_recover',
 			'managed_command',
 			'managed_command_status',
 		]);
@@ -265,6 +280,7 @@ describe('endpoint communications over the host bridge (MCOMP-29-03)', () => {
 			place: 'on this host',
 		});
 		expect(await host.inboxList()).toBeNull();
+		expect(await host.inboxRecover()).toBeNull();
 		expect(host.commandStatus()).toBeNull();
 		expect(await host.inboxAct({ messageId: MESSAGE, action: { kind: 'read' } })).toEqual({
 			status: 'unavailable',
@@ -290,5 +306,80 @@ describe('endpoint communications over the host bridge (MCOMP-29-03)', () => {
 		expect(await desktop.inboxAct({ messageId: MESSAGE, action: { kind: 'read' } })).toBe(
 			NO_INBOX_OUTCOME
 		);
+	});
+
+	it('recovers uncertain receipts through the real facade and port: unsupported until a recovery operation is composed, never resent (MCOMP-29-03C)', async () => {
+		const asked: unknown[] = [];
+		const recovery: InboxRecoveryPort = {
+			recover: async (request) => {
+				asked.push(request);
+				return {
+					status: 'ok',
+					payload: { version: 1, outcome: 'unavailable', reason: 'receipt_missing_or_unbound' },
+				};
+			},
+		};
+		const serve = (inbox: ReturnType<typeof inboxDouble>) =>
+			createRequestHandler(noClient, {
+				communications: createManagedCommunicationsPort(
+					createManagedCommunications({
+						identity: { read: () => ({ status: 'none' }) } as never,
+						inbox: () => inbox.client,
+						commands: () => null,
+						place: 'on this host',
+					}),
+					{ place: 'on this host', actor: () => ({ kind: 'cli' }) as never }
+				),
+			});
+
+		// No recovery operation composed: the summary says so by name and asks nothing.
+		const bare = inboxDouble({ actsLost: true });
+		await bare.client.load();
+		await serve(bare)({ type: 'managed_inbox_list' });
+		await serve(bare)({ type: 'managed_inbox_act', messageId: MESSAGE, action: { kind: 'read' } });
+		const unsupported = (await serve(bare)({ type: 'managed_inbox_recover' }))!;
+		expect(unsupported).toMatchObject({
+			type: 'managed_inbox_recover_result',
+			success: true,
+			recovery: {
+				outcome: 'unsupported',
+				reason: 'No receipt recovery operation is negotiated with the endpoint.',
+			},
+		});
+
+		// Composed: every uncertain receipt is asked about once; a missing one stays uncertain, unsent.
+		const composed = inboxDouble({ actsLost: true, recovery });
+		await composed.client.load();
+		const handle = serve(composed);
+		await handle({ type: 'managed_inbox_list' });
+		await handle({ type: 'managed_inbox_act', messageId: MESSAGE, action: { kind: 'read' } });
+		const actsBefore = composed.acts.length;
+		const checked = (await handle({ type: 'managed_inbox_recover' }))!;
+		expect(checked).toMatchObject({
+			type: 'managed_inbox_recover_result',
+			success: true,
+			recovery: { outcome: 'checked', missing: asked.length, recovered: 0 },
+		});
+		expect(asked.length).toBeGreaterThan(0);
+		expect((checked.recovery as { uncertain: number }).uncertain).toBe(asked.length);
+		expect(composed.acts.length).toBe(actsBefore);
+
+		// No inbox composed at all: a refusal by name, not an empty summary.
+		const none = createRequestHandler(noClient, {
+			communications: createManagedCommunicationsPort(
+				createManagedCommunications({
+					identity: { read: () => ({ status: 'none' }) } as never,
+					inbox: () => null,
+					commands: () => null,
+					place: 'on this host',
+				}),
+				{ place: 'on this host' }
+			),
+		});
+		expect(await none({ type: 'managed_inbox_recover' })).toEqual({
+			type: 'managed_inbox_recover_result',
+			success: false,
+			error: 'No notice inbox is composed on this host.',
+		});
 	});
 });

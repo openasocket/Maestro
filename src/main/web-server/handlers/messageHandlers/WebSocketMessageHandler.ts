@@ -31,7 +31,8 @@
  * - live_command: Read or switch Live mode and Remote Control, CLI clients only (CLI: `live`)
  * - managed_status / managed_inventory / managed_support_matrix / managed_locks / managed_inbox_list /
  *   managed_inbox_act / managed_command_status: the managed standing and inbox (CLI: `managed ...`)
- * - managed_enroll_request / managed_policy_refresh / managed_command: the managed writes, CLI clients only
+ * - managed_enroll_request / managed_policy_refresh / managed_inbox_recover / managed_command: the managed
+ *   writes, CLI clients only
  *
  * Auto Run message types (refresh_auto_run_docs, configure_auto_run, get_auto_run_docs,
  * get_auto_run_state, get_auto_run_document, save_auto_run_document, stop_auto_run, etc.)
@@ -858,6 +859,7 @@ export class WebSocketMessageHandler {
 			case 'managed_enroll_request':
 			case 'managed_inbox_list':
 			case 'managed_inbox_act':
+			case 'managed_inbox_recover':
 			case 'managed_command':
 			case 'managed_command_status':
 			case 'managed_run':

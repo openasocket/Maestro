@@ -3,7 +3,7 @@
  *
  * Handles: managed_status, managed_inventory, managed_support_matrix,
  * managed_locks, managed_policy_refresh, managed_enroll_request,
- * managed_inbox_list, managed_inbox_act, managed_command,
+ * managed_inbox_list, managed_inbox_act, managed_inbox_recover, managed_command,
  * managed_command_status, managed_run. Every one is answered from the one facade the
  * Settings > Environment pane and the `enterprise:*` IPC handlers read as
  * well, `EnterpriseService.managed` (`createManagedOperations()` in
@@ -47,16 +47,21 @@ export const MANAGED_MESSAGE_TYPES = [
 	'managed_enroll_request',
 	'managed_inbox_list',
 	'managed_inbox_act',
+	'managed_inbox_recover',
 	'managed_command',
 	'managed_command_status',
 	'managed_run',
 ] as const;
 export type ManagedMessageType = (typeof MANAGED_MESSAGE_TYPES)[number];
 
-/** The writes a browser never sends: enrollment, the lifecycle's policy refresh and a runtime command. */
+/**
+ * The writes a browser never sends: enrollment, the lifecycle's policy refresh, a runtime command
+ * and an inbox receipt recovery (MCOMP-29-03C), which asks the endpoint's custody on the host's behalf.
+ */
 export const MANAGED_CLI_ONLY_TYPES: readonly ManagedMessageType[] = [
 	'managed_enroll_request',
 	'managed_policy_refresh',
+	'managed_inbox_recover',
 	'managed_command',
 ];
 

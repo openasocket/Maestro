@@ -1,6 +1,7 @@
 /**
  * The inbox and command verbs against a detached host (MCOMP-29-03A): the real `maestro-cli`
- * verbs (`managedInboxList`, `managedInboxAct`, `managedCommand`, `managedCommandStatus`) over the
+ * verbs (`managedInboxList`, `managedInboxAct`, `managedInboxRecover`, `managedCommand`,
+ * `managedCommandStatus`) over the
  * real bridge connection to a real `startRuntimeHost` (its `startRuntimeServer` and handler), found
  * through the real discovery file. A composed host answers from its own inbox and command service
  * with the desktop's reply shapes; an uncomposed one refuses every verb by name.
@@ -15,6 +16,7 @@ import {
 	managedCommandStatus,
 	managedInboxAct,
 	managedInboxList,
+	managedInboxRecover,
 } from '../../../cli/commands/managed-inbox';
 import type { HostCue } from '../../../cli/services/host-cue';
 import { composeHostManaged } from '../../../cli/services/host-managed';
@@ -159,6 +161,14 @@ describe('managed inbox and command verbs on a detached host', () => {
 		});
 		expect(lines).toContain('managed_inbox_act acknowledged on m-1 by maestro-cli');
 
+		// Receipt recovery (MCOMP-29-03C): the host's own inbox answers; no recovery operation is
+		// composed in production, so it says so by name and asks nothing.
+		const recover = await cli(() => managedInboxRecover({ json: true }));
+		expect(recover.code).toBe(1);
+		expect(recover.out.success).toBe(false);
+		expect(recover.out.recovery).toMatchObject({ uncertain: 0, recovered: 0 });
+		expect(recover.out.recovery.outcome).toBe('unsupported');
+
 		// A command reaches the host's executor: it is recorded or refused by the service, never
 		// the "nothing composed" sentence.
 		const before = commands!.status().commands.total;
@@ -187,6 +197,7 @@ describe('managed inbox and command verbs on a detached host', () => {
 			() => managedCommandStatus({ json: true }),
 			() => managedInboxList({ json: true, held: true }),
 			() => managedInboxAct('read', 'm-1', { json: true }),
+			() => managedInboxRecover({ json: true }),
 			() => managedCommand({ kind: 'report-status' }, { json: true }),
 		]) {
 			const answer = await cli(verb);
