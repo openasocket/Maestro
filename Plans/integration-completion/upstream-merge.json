@@ -1470,6 +1470,25 @@
 				"verification": "merge-tool stage refused no markers, prettier clean, 94 files left unmerged; node scripts/verify-docs-paths.mjs in the worktree: 1556 asserted paths, 464 index entries against 464 full entries, 0 findings.",
 				"semanticConflicts": "none",
 				"tool": ".maestro/playbooks/Working/mcomp-33-00r01/ (norm-merge.mjs, resolve.mjs, check.mjs)"
+			},
+			"MCOMP-33-00R02": {
+				"resolvedAt": "2026-11-09",
+				"resolvedBy": "Maestro-Claude",
+				"files": ["CLAUDE-CUE.md", "CLAUDE-IPC.md", "CLAUDE-SETTINGS.md"],
+				"method": "One hunk per file, resolved by a shape-asserting script (both sides read in full); staged through merge-tool.mjs stage (prettier unchanged). docs:verify in the worktree: 1555 paths, 464/464 index entries, 0 findings.",
+				"hunks": {
+					"CLAUDE-CUE.md": [
+						"Process lifecycle bullet: upstream line taken (SIGKILL constant defined once, shell and CLI executors call the shared killCueProcess(); the integration line listed three copies of the constant, which upstream consolidated and the merged tree confirms) and the integration four managed bullets (admission MRC-07-02, shell boundary MRC-07-03, nested dispatch MRC-07-04, workflow ownership MRC-07-06) kept after it unchanged."
+					],
+					"CLAUDE-IPC.md": [
+						"Web & Live namespace list: both sides appended after `tunnel`; the integration `enterprise` line then upstream `webLogin` and `federation` lines kept."
+					],
+					"CLAUDE-SETTINGS.md": [
+						"Registration checklist steps 4-5: upstream wording taken (default from the metadata file; searchable registry split into per-tab searchableSettings*.ts files composed by searchableSettings.ts) and the integration lockable rule (settingKeys plus <ManagedSettingSection settingId>, MRC2-06-05) re-applied at the end of step 5."
+					]
+				},
+				"semanticConflictsForC": [],
+				"unmergedAfter": 91
 			}
 		}
 	}
