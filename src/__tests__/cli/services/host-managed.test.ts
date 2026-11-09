@@ -421,6 +421,46 @@ describe('composeHostManaged', () => {
 		expect(JSON.parse(fs.readFileSync(ledgerFile, 'utf8'))).toBeTruthy();
 	});
 
+	it('composes the cooperative pause and hands its gate to the runtime only while the host holds the adapter (MCOMP-29-01B)', async () => {
+		await enroll(path.join(dir, 'never-dialed.sock'));
+		const composed = composeHostManaged({
+			userDataDir: dir,
+			version: '1.1.0',
+			custody: custody(),
+			now: () => NOW,
+		});
+		if (!composed.composed) throw new Error(composed.reason);
+		const runControl = composed.managed.runControl;
+		if (!runControl) throw new Error('No run control was handed to the runtime');
+		// Nothing tracks a run before the runtime acquires the adapter.
+		expect(runControl()).toBeNull();
+
+		composed.managed.host!(installation);
+		const commands = composed.communications.commands();
+		if (!commands) throw new Error('No command service was composed');
+		const gate = runControl();
+		expect(gate).not.toBeNull();
+		expect(gate).toBe(commands.runControl);
+		// Pause and resume are composed on this host, as the cooperative task-boundary pause.
+		expect(commands.capabilities()).toEqual(
+			expect.arrayContaining(['command-pause_run', 'command-resume_run'])
+		);
+		expect(commands.unsupported().map((entry) => entry.kind)).not.toEqual(
+			expect.arrayContaining(['pause-run'])
+		);
+		expect(commands.unsupported().map((entry) => entry.kind)).not.toEqual(
+			expect.arrayContaining(['resume-run'])
+		);
+		const run = gate!.track('run-1');
+		expect(gate!.state('run-1')).toBe('running');
+		await run.end();
+		expect(gate!.state('run-1')).toBeNull();
+
+		// Closed: the runtime is handed no gate, so a launch after close tracks nothing.
+		await composed.lifecycle.close();
+		expect(runControl()).toBeNull();
+	});
+
 	it('composes no inbox and names no command service without protected custody (MCOMP-21-03A)', async () => {
 		await enroll('/tmp/unused.sock');
 		const held = composeHostManaged({ userDataDir: dir, version: '1' });

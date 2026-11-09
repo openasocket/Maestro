@@ -39,6 +39,12 @@ import {
 import type { ManagedAuthenticatedContext } from '../../managed/types';
 import { CALLER_CREDENTIAL_ENV_VAR } from '../../launch/env';
 import { createManagedBinding } from '../../managed/binding';
+import {
+	COOPERATIVE_PAUSE_MODE,
+	createCooperativePauseGate,
+	type CommandEffect,
+	type ManagedRuntimeCommand,
+} from '../../managed/commands';
 import type { WorkflowFenceAnswer, WorkflowFenceLifetime } from '../../managed/workflows';
 import { readHistory } from '../../store/read-history';
 import { AUTO_RUN_SESSION_COLUMNS, AUTO_RUN_TASK_COLUMNS } from '../../stats/auto-run-insert';
@@ -127,14 +133,17 @@ describe('runtime Auto Run', () => {
 	let runLaunches: Array<{ prompt: string; args: string[] }>;
 	/** The SQL the fake stats connection was asked to run, with its bind values. */
 	let statsWrites: Array<{ sql: string; params: unknown[] }>;
+	/** Awaited before each Auto Run turn starts, with how many have launched (this one counted). */
+	let beforeRunTurn: ((launched: number) => Promise<void> | void) | undefined;
 
 	const watchDirectory: WatchDirectory = () => ({ close: () => undefined });
 
-	const fakeProvider: RuntimeDeps['turns']['runAgentTurn'] = (turn, options) => {
+	const fakeProvider: RuntimeDeps['turns']['runAgentTurn'] = async (turn, options) => {
 		const isRun = turn.launch.querySource === 'auto';
 		const step = isRun ? script.shift() : undefined;
 		if (isRun && !step) throw new Error('The script has no step left for this Auto Run turn.');
 		if (isRun) runLaunches.push({ prompt: turn.launch.prompt ?? '', args: [...turn.launch.args] });
+		if (isRun) await beforeRunTurn?.(runLaunches.length);
 		const recording = step
 			? writeFakeTurn(work, claudeTurn(step.text, `provider-${envFiles.length + 1}`, step.failure))
 			: chatRecording;
@@ -321,6 +330,7 @@ describe('runtime Auto Run', () => {
 		envFiles = [];
 		runLaunches = [];
 		statsWrites = [];
+		beforeRunTurn = undefined;
 		chatRecording = writeFakeTurn(
 			work,
 			fakeTurnFromRecording(CAPTURED_RECORDINGS['captured-claude-code-normal'])
@@ -1774,6 +1784,124 @@ describe('runtime Auto Run', () => {
 			expect(new Set(contexts.map((context) => context.identity.requestId)).size).toBe(2);
 			expect(new Set(contexts.map((context) => context.identity.runId)).size).toBe(2);
 			expect(asked.map((request) => request.snapshot.operation)).toEqual(['start', 'start']);
+		});
+	});
+
+	describe('under a cooperative pause (MCOMP-29-01B)', () => {
+		/** The gate reads only the command id; the executor has already checked the rest. */
+		const command = (commandId: string) => ({ commandId }) as unknown as ManagedRuntimeCommand;
+
+		/** The real gate a host's command service composes, handed in through `managed.runControl`. */
+		function gateHarness() {
+			const settled: Array<{ commandId: string; effect: CommandEffect }> = [];
+			const gate = createCooperativePauseGate({
+				settle: async (commandId, effect) => void settled.push({ commandId, effect }),
+				now: () => T0,
+			});
+			const tracked: string[] = [];
+			const runControl = () => ({
+				track: (runId: string) => {
+					tracked.push(runId);
+					return gate.track(runId);
+				},
+				stop: (runId: string) => gate.stop(runId),
+			});
+			const parked = async (runId: string) => {
+				for (let i = 0; i < 2_000 && gate.state(runId) !== 'paused'; i++) {
+					await new Promise((resolve) => setTimeout(resolve, 5));
+				}
+				expect(gate.state(runId)).toBe('paused');
+			};
+			return { gate, settled, tracked, runControl, parked };
+		}
+
+		it('parks a launched playbook between two tasks on a pause, and runs on after resume', async () => {
+			const file = doc('tasks', tasks(2));
+			script = [
+				{ text: 'Finished task one. Done.', tick: file },
+				{ text: 'Finished task two. Done.', tick: file },
+			];
+			const { gate, settled, tracked, runControl, parked } = gateHarness();
+			const runtime = await start(seedAgent(), { runControl });
+			const run = watchRun(runtime);
+			let accepted: unknown;
+			// The pause lands while the first task runs: that task still finishes first.
+			beforeRunTurn = async (launched) => {
+				if (launched === 1) accepted = await gate.pause(tracked[0], command('p-1'));
+			};
+
+			value(await runtime.autoRun.launch('a1', { documents: [{ file }] }));
+			expect(tracked).toHaveLength(1);
+			await parked(tracked[0]);
+
+			expect(accepted).toMatchObject({
+				outcome: 'accepted',
+				facts: { mode: COOPERATIVE_PAUSE_MODE, osSuspension: false },
+			});
+			expect(runLaunches).toHaveLength(1);
+			expect(read(file)).toBe(tasks(2, 1));
+			expect(settled).toEqual([
+				{ commandId: 'p-1', effect: expect.objectContaining({ outcome: 'completed' }) },
+			]);
+
+			expect(await gate.resume(tracked[0], command('r-1'))).toMatchObject({ outcome: 'completed' });
+			await run.ended();
+
+			expect(run.outcome()).toEqual({ status: 'completed' });
+			expect(runLaunches).toHaveLength(2);
+			expect(read(file)).toBe(tasks(2, 2));
+			// The run ended, so the gate no longer tracks it.
+			expect(gate.state(tracked[0])).toBeNull();
+		});
+
+		it('stops a run parked at a boundary on autoRun.stop, and starts no further task', async () => {
+			const file = doc('tasks', tasks(2));
+			script = [{ text: 'Finished task one. Done.', tick: file }];
+			const { gate, tracked, runControl, parked } = gateHarness();
+			const runtime = await start(seedAgent(), { runControl });
+			const run = watchRun(runtime);
+			beforeRunTurn = async (launched) => {
+				if (launched === 1) await gate.pause(tracked[0], command('p-1'));
+			};
+
+			value(await runtime.autoRun.launch('a1', { documents: [{ file }] }));
+			await parked(tracked[0]);
+			value(await runtime.autoRun.stop('a1'));
+			await run.ended();
+
+			expect(run.outcome()).toEqual({ status: 'stopped' });
+			expect(runLaunches).toHaveLength(1);
+			expect(read(file)).toBe(tasks(2, 1));
+			expect(gate.state(tracked[0])).toBeNull();
+		});
+
+		it('settles a pause still pending when the run ends as no-effect', async () => {
+			const file = doc('tasks', tasks(1));
+			script = [{ text: 'Finished the only task. Done.', tick: file }];
+			const { gate, settled, tracked, runControl } = gateHarness();
+			const runtime = await start(seedAgent(), { runControl });
+			const run = watchRun(runtime);
+			beforeRunTurn = async () => void (await gate.pause(tracked[0], command('p-1')));
+
+			value(await runtime.autoRun.launch('a1', { documents: [{ file }] }));
+			await run.ended();
+
+			expect(run.outcome()).toEqual({ status: 'completed' });
+			expect(read(file)).toBe(tasks(1, 1));
+			expect(settled).toEqual([
+				{ commandId: 'p-1', effect: expect.objectContaining({ outcome: 'no-effect' }) },
+			]);
+		});
+
+		it('tracks nothing when the host hands no gate', async () => {
+			const file = doc('tasks', tasks(1));
+			script = [{ text: 'Finished the only task. Done.', tick: file }];
+			const runtime = await start(seedAgent(), { runControl: () => null });
+			const run = watchRun(runtime);
+
+			value(await runtime.autoRun.launch('a1', { documents: [{ file }] }));
+			await run.ended();
+			expect(run.outcome()).toEqual({ status: 'completed' });
 		});
 	});
 

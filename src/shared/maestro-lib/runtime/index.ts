@@ -63,6 +63,7 @@ import {
 	managedEventJournalPath,
 	type EventJournal,
 } from '../managed/event-journal';
+import type { CooperativePauseGate } from '../managed/commands';
 import { createLifecycleProjector, type LifecycleProjector } from '../managed/events';
 import { delegationContextOf } from '../managed/delegation';
 import {
@@ -215,6 +216,14 @@ export interface MaestroRuntimeOptions {
 			workflow: WorkflowIdentityLike,
 			run: { runId: string; attemptId: string }
 		): WorkflowFenceAnswer | Promise<WorkflowFenceAnswer>;
+		/**
+		 * The cooperative pause gate of the host's command service (MCOMP-29-01B), read at each
+		 * Auto Run launch: a playbook run is tracked under its workflow run id, parks at its next
+		 * task boundary on a management pause and stops there on a cancel. Never a process
+		 * suspension; a task in flight finishes first. Absent or null: nothing is tracked, and a
+		 * pause answers that nothing here can pause.
+		 */
+		runControl?(): Pick<CooperativePauseGate, 'track' | 'stop'> | null;
 	};
 	deps?: Partial<RuntimeDeps>;
 }
@@ -687,6 +696,7 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 			binding,
 			host: autoRunHost,
 			workflowFence: claimWorkflowFence,
+			...(options.managed?.runControl ? { runControl: options.managed.runControl } : {}),
 		},
 		...(deps.rules?.newId ? { newId: deps.rules.newId } : {}),
 	});

@@ -659,6 +659,9 @@ export function composeHostManaged(deps: HostManagedDeps): HostManagedCompositio
 			dispatch: { authority: current.authority },
 			inventory: { snapshot: () => reportInventory(enrollment, current) },
 			file: path.join(deps.userDataDir, MANAGED_COMMAND_LEDGER_FILE_NAME),
+			// The runtime's Auto Run checks in between tasks here, so pause/resume are composed as the
+			// cooperative task-boundary pause, never a process suspension.
+			cooperativePause: true,
 			now,
 		});
 		const track = <T>(work: Promise<T>): Promise<T> => {
@@ -676,7 +679,10 @@ export function composeHostManaged(deps: HostManagedDeps): HostManagedCompositio
 	return {
 		composed: true,
 		// The adapter, and the standing the binding is held to (MCOMP-09-04B).
-		managed: { host, standing },
+		// The cooperative pause gate (MCOMP-29-01B): the runtime tracks each playbook run in it, so a
+		// management pause parks the run at its next task boundary. Null until the runtime acquires
+		// the adapter and after close, so nothing is tracked by a host that cannot answer.
+		managed: { host, standing, runControl: () => (closed ? null : (commands?.runControl ?? null)) },
 		identity,
 		standing,
 		control,
