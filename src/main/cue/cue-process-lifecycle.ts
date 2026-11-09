@@ -50,6 +50,13 @@ import type {
 	ManagedAuthenticatedContext,
 	ManagedDenialCode,
 } from '../../shared/maestro-lib/managed/types';
+import { isMaestroPBinaryPath } from '../../shared/maestro-lib/launch/interactive-mode';
+import {
+	stampTuiAdmission,
+	tuiLaunchOf,
+	withoutInheritedTuiAdmission,
+} from '../../shared/maestro-lib/managed/tui-handshake';
+import { resolveUserDataDir } from '../../shared/userDataDir';
 import { isLaunchCancelled } from './cue-launch-cancel';
 import {
 	newRemotePidFilePath,
@@ -536,11 +543,18 @@ export async function runProcess(
 				? withRemotePidRecord(sshStdinScript, sshRemotePidFile)
 				: sshStdinScript
 			: stdinPrompt;
+	// A local maestro-p run (MCOMP-21-04A) acts only on the admission this run
+	// stamps after its gate below, or, standalone, on none: a handshake or a
+	// steering token inherited from the engine's own environment is dropped
+	// before the authority sees the spec, so it can never be replayed here.
+	const tuiLaunch = spec.sshRemoteUsed
+		? null
+		: tuiLaunchOf(spec.command, spec.args, spec.env, isMaestroPBinaryPath);
 	const processSpec = {
 		command: spec.command,
 		args: spec.args,
 		cwd: spec.cwd,
-		env: spec.env,
+		env: tuiLaunch ? (withoutInheritedTuiAdmission(spec.env) as Record<string, string>) : spec.env,
 		stdin,
 	};
 
@@ -592,6 +606,30 @@ export async function runProcess(
 			gate: leaseAdmission(managed.authority, admitted.lease),
 			attribution: managed.attribution,
 		};
+		// A managed maestro-p run carries the handshake this host signs for the
+		// lease just granted, with the key in the data directory the engine
+		// already uses (desktop or standalone), and a fresh steering token, added
+		// by `startTurn` after its gate. One it cannot sign is refused: a TUI
+		// handed no handshake would run as an unmanaged host.
+		if (tuiLaunch) {
+			const stamp = stampTuiAdmission({
+				dataDir: resolveUserDataDir(),
+				lease: admitted.lease,
+				requestId: managed.context.identity.requestId,
+				launch: tuiLaunch,
+				permissionMode: spec.permissionCeiling ?? null,
+				surface: 'cue',
+			});
+			if (!stamp.ok) {
+				admitted.lease.release({ outcome: 'spawn-failed', message: stamp.reason });
+				return managedRefusal(
+					'denied',
+					'policy-denied',
+					`This host runs under management and the maestro-p admission handshake could not be built: ${stamp.reason}. Nothing was started.`
+				);
+			}
+			admission = { ...admission, hostEnv: stamp.env };
+		}
 	}
 
 	let turn: TurnHandle;

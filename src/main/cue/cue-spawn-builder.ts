@@ -19,6 +19,7 @@ import {
 	buildAgentLaunchPlan,
 	describeUndeliveredSecrets,
 } from '../../shared/maestro-lib/launch/launch-plan';
+import type { LaunchPermissionMode } from '../../shared/maestro-lib/launch/env';
 import { buildSpawnPath } from '../utils/spawnPath';
 import { QUERY_SOURCE_ENV_VAR } from '../../shared/querySource';
 import {
@@ -70,6 +71,11 @@ export interface SpawnSpec {
 	stdinPrompt?: string;
 	/** Whether SSH remote execution was actually used */
 	sshRemoteUsed?: { name?: string; host: string };
+	/**
+	 * The launch plan's permission ceiling (MCOMP-21-04A): signed into a
+	 * managed maestro-p run's admission handshake. Null when no route pins one.
+	 */
+	permissionCeiling?: LaunchPermissionMode | null;
 	/** Main-process proof to revoke after this Cue run. Never logged. */
 	pluginRunToken?: string;
 	pluginRunProofFile?: string;
@@ -432,6 +438,7 @@ export async function buildSpawnSpec(
 			sshRemoteCommand,
 			stdinPrompt,
 			sshRemoteUsed,
+			permissionCeiling: plan.permission.ceiling,
 			pluginRunToken,
 			pluginRunProofFile,
 		},
