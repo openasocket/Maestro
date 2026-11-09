@@ -5284,6 +5284,34 @@
 					"id": "MCOMP-21-01"
 				},
 				{
+					"label": "Report a held Cue status listener from `cue engine start`",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"docs/agent-guides/CLI-HEADLESS.md",
+						"src/__tests__/cli/commands/cue-engine-status-port.test.ts",
+						"src/cli/commands/cue-engine.ts"
+					],
+					"outcome": "Inserted during execution after MCOMP-21-01; landed as 6ad1efbbd. Continuation of MCOMP-21-01. Read `Plans/integration-completion/EXECUTION-RULES.md`. Authored target: `src/cli/commands/cue-engine.ts` (plus at most one focused test file). Since MCOMP-21-01 `startCueStatusServer()` rejects with the listener gate's `ListenerDeniedError` on a managed standing, but the start action only handles `CueStatusPortInUseError` and rethrows everything else after `health.dispose()`, so a managed `--status-port` start dies on an uncaught error. Handle `isListenerDeniedError()` the way the port-in-use case is handled: nothing armed (no lock, trigger or inbox), one log line with the gate's `[managed-<code>]` message, `--json` prints `{ started: false, code: \"LISTENER_HELD\", managed: <code>, error }`, exit 1. Never fall back to starting without the status server and never retry. Also report a held webhook listener (`getCueWebhookListenerHold()`) once after `engine.start()` so an enrolled engine says why `webhook.received` subscriptions receive nothing. Required inputs: `MAESTRO-CONTRACT-INPUTS-BUILD`. Fewer than 500 changed lines. Backlog: M-01, M-05.",
+					"backlog": ["M-05"],
+					"requires": ["MAESTRO-CONTRACT-INPUTS-BUILD"],
+					"produces": [],
+					"id": "MCOMP-21-01A"
+				},
+				{
+					"label": "Hold the headless GitHub poller at the repository gate",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"Plans/integration-completion/contract-coverage.json",
+						"src/__tests__/cli/services/cue-standalone-engine.test.ts",
+						"src/cli/services/cue-standalone-engine.ts"
+					],
+					"outcome": "Inserted during execution after MCOMP-21-01A; landed as 960e38c6f. Continuation of MCOMP-21-01. Read `Plans/integration-completion/EXECUTION-RULES.md`. Authored targets: `src/cli/services/cue-standalone-engine.ts`, `src/main/enterprise/repository-policy.ts` only if a standing adapter is needed (plus at most one focused test file). `cue-github-poller.ts` holds each poll at `holdGitForgeEffect('poll', ...)`, which answers null with no `setGitExecutionGate()` installed; only `src/main/index.ts` installs one, so an enrolled machine's headless engine polls GitHub with the account token unheld. Compose `createGitExecutionGate()` over the same installation standing the listener authority reads (`readStandaloneCueStanding`), install it before the engine arms triggers, and keep the desktop's verdicts: standalone unchanged, managed with no delivered repository ceiling refused by name and reported as the poller's managed refusal, never as a `gh` login failure. Check the static import closure of whatever is loaded stays Electron-free and load it on demand. Required inputs: `MAESTRO-CONTRACT-INPUTS-BUILD`. Fewer than 500 changed lines. Backlog: M-05.",
+					"backlog": ["M-05"],
+					"requires": ["MAESTRO-CONTRACT-INPUTS-BUILD"],
+					"produces": [],
+					"id": "MCOMP-21-01B"
+				},
+				{
 					"label": "Constrain headless Cue outbound integrations",
 					"kind": "IMPLEMENT",
 					"targets": [
@@ -5296,6 +5324,34 @@
 					"requires": ["MEGA-DESKTOP-POLICY-BUILD"],
 					"produces": [],
 					"id": "MCOMP-21-02"
+				},
+				{
+					"label": "Hold the notify webhook URL credential to the custody ceiling",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"Plans/integration-completion/contract-coverage.json",
+						"src/__tests__/cli/services/cue-standalone-engine.test.ts",
+						"src/__tests__/main/cue/cue-notify-webhook.test.ts",
+						"src/main/cue/cue-notify-webhook.ts",
+						"src/main/enterprise/credential-custody.ts"
+					],
+					"outcome": "Inserted during execution after MCOMP-21-02; landed as f89f7a0d2. Continuation of MCOMP-21-02. Read `Plans/integration-completion/EXECUTION-RULES.md`. Authored targets: `src/main/enterprise/credential-custody.ts`, `src/main/cue/cue-notify-webhook.ts` (plus at most one focused test file). `parseNotifyWebhookUrl()` turns `--notify-webhook` user info into a Basic `Authorization` header; that credential is kept on the command line (visible in the process list and shell history), which no custody kind names, and `MANAGED_CREDENTIALS` has no entry for it. Add the credential (and, if needed, a command-line custody kind refused under management by the existing verdict rule), hold it before the first POST, and under a managed standing send no notification carrying it: refuse by name once, never strip the credential and send anyway. Standalone unchanged. Required inputs: `MAESTRO-CONTRACT-INPUTS-BUILD`. Fewer than 500 changed lines. Backlog: M-05.",
+					"backlog": ["M-05"],
+					"requires": ["MAESTRO-CONTRACT-INPUTS-BUILD"],
+					"produces": [],
+					"id": "MCOMP-21-02A"
+				},
+				{
+					"label": "Reclassify the Cue status listener in the listener sink test",
+					"kind": "TEST",
+					"targets": [
+						"src/__tests__/main/enterprise/listener-policy.test.ts"
+					],
+					"outcome": "Inserted during execution after MCOMP-21-02A; landed as 8d11e62fe. Continuation of MCOMP-21-02 (regression of MCOMP-21-01). Authored target: `src/__tests__/main/enterprise/listener-policy.test.ts` only. Since MCOMP-21-01 `cue-status-server.ts` holds `cue-status` at the listener gate, but the \"sink classification by source\" case still lists it as the one kind no sink holds and asserts the file imports no gate, so it fails. Move `cue-status` from the unheld record to the held sinks (with its gate call), keep the loopback-only and `CUE_STATUS_HOST` assertions, and keep the case failing for any kind that is really unheld. Never weaken the classification to make it pass. Required inputs: `MAESTRO-CONTRACT-INPUTS-BUILD`. Fewer than 200 changed lines. Backlog: M-05.",
+					"backlog": ["M-05"],
+					"requires": ["MAESTRO-CONTRACT-INPUTS-BUILD"],
+					"produces": [],
+					"id": "MCOMP-21-02B"
 				},
 				{
 					"label": "Complete managed host listener and runtime communication ports",
@@ -5312,6 +5368,36 @@
 					"id": "MCOMP-21-03"
 				},
 				{
+					"label": "Compose the endpoint command and inbox clients into the detached host",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/__tests__/cli/services/host-managed.test.ts",
+						"src/cli/services/host-managed.ts",
+						"src/cli/services/runtime-host.ts"
+					],
+					"outcome": "Inserted during execution after MCOMP-21-03; landed as cc702f860. Continuation of MCOMP-21-03. Read `Plans/integration-completion/EXECUTION-RULES.md`. Authored targets: `src/cli/services/host-managed.ts`, `src/cli/services/runtime-host.ts` (plus at most one focused test file). When `composeHostManaged()` composes a standing (protected custody), compose `createCommandService()` and `createInboxClient()` (`src/main/enterprise/commands.ts`, `inbox.ts`) over that same host adapter and enrollment lifecycle, with their ledgers in the data directory, so typed endpoint commands and notices reach the headless host the way they reach the desktop (`src/main/enterprise/service.ts`). Consume commands only while the lifecycle reports `registered`; an unregistered or foreign peer's command is refused by name before it is consumed. A cancel acts only on work this runtime owns and goes through its existing stop/drain; command and inbox receipts recover from their ledgers after a restart. Stop both before the standing closes. With no composed standing (every plain Node host today) compose neither and report none, never a stand-in. If the desktop dependencies of the command service (policy status, broker dispatch, inventory) cannot be composed headless within this bound, insert a further bounded continuation and keep commands refused by name. Required inputs: `MAESTRO-CONTRACT-INPUTS-BUILD`. Fewer than 500 changed lines. Backlog: G-07, M-02, M-05.",
+					"backlog": ["M-05"],
+					"requires": ["MAESTRO-CONTRACT-INPUTS-BUILD"],
+					"produces": [],
+					"id": "MCOMP-21-03A"
+				},
+				{
+					"label": "Compose the command service over the detached runtime's own work",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"Plans/integration-completion/contract-coverage.json",
+						"src/__tests__/cli/services/host-managed.test.ts",
+						"src/cli/services/host-managed.ts",
+						"src/cli/services/runtime-host.ts",
+						"src/main/enterprise/commands.ts"
+					],
+					"outcome": "Inserted during execution after MCOMP-21-03A; landed as 20eb95d47. Continuation of MCOMP-21-03A. Read `Plans/integration-completion/EXECUTION-RULES.md`. Authored targets: `src/cli/services/host-managed.ts`, `src/main/enterprise/commands.ts` (only to accept narrower ports), `src/cli/services/runtime-host.ts` (plus at most one focused test file). `createCommandService()` needs `dispatch` (live leases and receipts), `policy` (re-attach) and `inventory` (status facts); the headless runtime admits through its own host authority and composes none of them, so MCOMP-21-03A left `communications.commands` refused by name (`HOST_COMMANDS_UNCOMPOSED_REASON`). Compose the service with: cancel over the leases the runtime itself admitted and its existing stop/drain (never a second authority nothing admitted with), refresh over the same enrollment lifecycle's re-attach (`createPolicyStatusService({ lifecycle })`), and report from facts this host really holds (installation, versions, standing, policy, its own runs), naming each inventory gap instead of a zero. Ledger at `MANAGED_COMMAND_LEDGER_FILE_NAME` in the data directory, loaded before the attach; consume only while the lifecycle reports `registered`, and an unregistered or foreign recipient is refused by name before the ledger records an acceptance. Stop it before the standing closes. If the runtime exposes no lease view to cancel through within this bound, insert a further bounded continuation and keep commands refused by name. Required inputs: `MAESTRO-CONTRACT-INPUTS-BUILD`. Fewer than 500 changed lines. Backlog: G-07, M-02, M-05.",
+					"backlog": ["M-05"],
+					"requires": ["MAESTRO-CONTRACT-INPUTS-BUILD"],
+					"produces": [],
+					"id": "MCOMP-21-03B"
+				},
+				{
 					"label": "Compose CLI and Cue terminal handshake authority",
 					"kind": "IMPLEMENT",
 					"targets": [
@@ -5324,6 +5410,20 @@
 					"requires": ["MEGA-DESKTOP-POLICY-BUILD"],
 					"produces": [],
 					"id": "MCOMP-21-04"
+				},
+				{
+					"label": "Stamp the maestro-p admission on standalone and desktop Cue prompt runs",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"Plans/integration-completion/contract-coverage.json",
+						"src/main/cue/cue-process-lifecycle.ts",
+						"src/main/cue/cue-spawn-builder.ts"
+					],
+					"outcome": "Inserted during execution after MCOMP-21-04; landed as 609d26416. Read `Plans/integration-completion/EXECUTION-RULES.md`; work only in this repository. In `src/main/cue/cue-process-lifecycle.ts` (and `src/main/cue/cue-spawn-builder.ts` only if the lifecycle cannot see the launch), apply `withoutInheritedTuiAdmission()` to every local maestro-p spec, and after the managed admission (`options.managed`, where the lease is already in hand) build `stampTuiAdmission({ surface: 'cue', lease, requestId, launch: tuiLaunchOf(...), permissionMode, dataDir })` and pass `hostEnv` on the `startTurn` admission; a managed launch that cannot be signed is the run's managed refusal (`policy-denied`, lease released), never an unmanaged spawn. Resolve the data directory the standalone engine already uses (no desktop key). Locally test against existing typed ports; contract fixtures only in tests. Required inputs: `MAESTRO-CONTRACT-INPUTS-BUILD`. Limit 1-3 authored files and fewer than 500 changed lines. Backlog: M-01, M-04, M-05, QUAL-03.",
+					"backlog": ["M-05"],
+					"requires": ["MAESTRO-CONTRACT-INPUTS-BUILD"],
+					"produces": [],
+					"id": "MCOMP-21-04A"
 				},
 				{
 					"label": "Move persistent web authentication into protected custody",
@@ -5366,6 +5466,20 @@
 					"requires": ["MEGA-DESKTOP-POLICY-BUILD"],
 					"produces": [],
 					"id": "MCOMP-21-07"
+				},
+				{
+					"label": "Compose the managed plugin standing and trusted-key pin into the desktop plugin host",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/main/enterprise/settings-policy.ts",
+						"src/main/index.ts",
+						"src/main/plugins/consent-minter.ts"
+					],
+					"outcome": "Inserted during execution after MCOMP-21-07; landed as b5ab9fa88. Continuation of MCOMP-21-07. Read `Plans/integration-completion/EXECUTION-RULES.md`. Authored targets: `src/main/index.ts`, `src/main/enterprise/settings-policy.ts`, `src/main/plugins/consent-minter.ts` (plus at most one focused test file). Call `authStore.setManagedStanding()` with the same `pluginPolicy.standing()` source the broker's `managed` reads, before the first plugin refresh or first-party mint; make `trustedKeysFor` read `effectiveTrustedKeys(userKeys, writeAuthority pins)` so a pinned list replaces the user keys; refresh the plugin registry when the settings or plugin policy changes so a dropped key or a newly refused load takes effect without a restart; make `guardSettingsStore` `clear()` hold `pluginTrustedKeys` too (it holds `LOCKABLE_SETTING_KEYS` only); map `ManagedPluginAuthorizationError` in the consent minter to a named refusal result rather than an unhandled throw, and decide (fail closed, named) what a first-party mint does under a refusing ceiling without breaking startup. Standalone behavior unchanged. Required inputs: `MAESTRO-CONTRACT-INPUTS-BUILD`. Fewer than 500 changed lines. Backlog: M-05.",
+					"backlog": ["M-05"],
+					"requires": ["MAESTRO-CONTRACT-INPUTS-BUILD"],
+					"produces": [],
+					"id": "MCOMP-21-07A"
 				},
 				{
 					"label": "Route renderer agent mutations through host-owned lock validation",
@@ -5424,6 +5538,19 @@
 					"id": "MCOMP-21-11"
 				},
 				{
+					"label": "Hold remote move overwrite and remote import overwrite as deletes",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/main/ipc/handlers/filesystem.ts",
+						"src/main/utils/remote-fs.ts"
+					],
+					"outcome": "Inserted during execution after MCOMP-21-11; landed as 92d0db09d. Read `Plans/integration-completion/EXECUTION-RULES.md` and this document's stage in `Plans/integration-completion/program.json`; work only in the owning repository and preserve existing work. Target: `src/main/ipc/handlers/filesystem.ts` (and `src/main/utils/remote-fs.ts` only if a helper is needed). Today a remote `fs:rename` (`renameRemote`, `mv`) onto a taken name replaces it held only as a `remote-write` on the remote identity, and `fs:copyPath` with `overwrite` + `sshRemoteId` runs `deleteRemote` on the destination inside `uploadLocalPathToRemote` with no `holdDeleteEffect` (the local paths already use `holdReplacementEffect`). Under a local-effects ceiling, immediately before each effect, check whether the remote destination exists and hold its replacement as the destructive `delete` (once, by `holdDeleteEffect`, naming the destination) in addition to the source/destination remote access the remote-fs call already holds; a refusal removes and moves nothing and is thrown by code outside the handler's catch. Standalone stays byte-for-byte (no extra SSH call). An `overwrite` option never widens the import grant. Locally test with a throwaway spec plus mutation checks; permanent tests belong to 21-15. Required inputs: `MAESTRO-CONTRACT-INPUTS-BUILD`. Limit 1-3 authored files and fewer than 500 changed lines. Backlog: M-05.",
+					"backlog": ["M-05"],
+					"requires": ["MAESTRO-CONTRACT-INPUTS-BUILD"],
+					"produces": [],
+					"id": "MCOMP-21-11A"
+				},
+				{
 					"label": "Classify all egress callers and Lite peer transports",
 					"kind": "IMPLEMENT",
 					"targets": [
@@ -5436,6 +5563,34 @@
 					"requires": ["MEGA-DESKTOP-POLICY-BUILD"],
 					"produces": [],
 					"id": "MCOMP-21-12"
+				},
+				{
+					"label": "Hold the Lite pairing transport at the egress boundary",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"Plans/integration-completion/contract-coverage.json",
+						"src/__tests__/main/enterprise/egress-policy.test.ts",
+						"src/main/enterprise/egress-policy.ts",
+						"src/main/lite/pairing/transport.ts"
+					],
+					"outcome": "Inserted during execution after MCOMP-21-12; landed as 24d9607e3. Add one closed egress class for Lite peer traffic (for example `lite-peer`) to `EGRESS_CLASSES` in `src/main/enterprise/egress-policy.ts` (update its header and the class-list case in `src/__tests__/main/enterprise/egress-policy.test.ts`), and in `src/main/lite/pairing/transport.ts` `call()` hold the pairing origin with `holdEgress()` from `src/main/utils/fetchWithTimeout.ts` before `lanDestination`/`tailnetDestination` and again after that await, before `request()` opens a socket; a refusal rejects with the stable `[managed-...]` code, never a transport error. Record the class as a versioned Maestro-local extension in `Plans/integration-completion/contract-coverage.json` (no published ceiling names it). Standalone unchanged. Verify with a throwaway spec plus mutation check. Required inputs: `MAESTRO-CONTRACT-INPUTS-BUILD`. Limit 1-3 authored files, under 500 changed lines.",
+					"backlog": ["M-05"],
+					"requires": ["MAESTRO-CONTRACT-INPUTS-BUILD"],
+					"produces": [],
+					"id": "MCOMP-21-12A"
+				},
+				{
+					"label": "Hold paired relay HTTP, WebSocket upgrades and reconnects",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"Plans/integration-completion/contract-coverage.json",
+						"src/main/lite/tailnet-relay.ts"
+					],
+					"outcome": "Inserted during execution after MCOMP-21-12A; landed as f5fb42841. In `src/main/lite/tailnet-relay.ts` `openPairedRelay()`, hold the paired upstream origin with the 21-12A class before the initial destination read, and on every relayed request and every `upgrade` after `await destination()` and before `request()` opens the upstream socket (so a revocation between admission and a reconnect or a later WebSocket sends nothing and closes the tracked sockets). Deny any upstream other than the selected paired origin (no alternate peer route) and keep the existing `ssh-tunnel` listener hold. Standalone unchanged. Verify with a throwaway spec plus mutation check; permanent cases belong to 21-15. Required inputs: `MAESTRO-CONTRACT-INPUTS-BUILD`. Limit 1-3 authored files, under 500 changed lines.",
+					"backlog": ["M-05"],
+					"requires": ["MAESTRO-CONTRACT-INPUTS-BUILD"],
+					"produces": [],
+					"id": "MCOMP-21-12B"
 				},
 				{
 					"label": "Correct real standard provider permission arguments",
@@ -5466,6 +5621,31 @@
 					"id": "MCOMP-21-14"
 				},
 				{
+					"label": "Test the maestro-p admission stamp at the Cue and CLI spawn sinks",
+					"kind": "TEST",
+					"targets": [
+						"src/__tests__/cli/services/agent-spawner.test.ts",
+						"src/__tests__/main/cue/cue-process-lifecycle.managed.test.ts"
+					],
+					"outcome": "Inserted during execution after MCOMP-21-14; landed as edb001fca. Continuation of MCOMP-21-14 (permanent cases for MCOMP-21-04/21-04A, whose throwaway specs were deleted). Read `Plans/integration-completion/EXECUTION-RULES.md`. Authored targets: `src/__tests__/main/cue/cue-process-lifecycle.managed.test.ts`, `src/__tests__/cli/services/agent-spawner.test.ts`. Cue: a local maestro-p spec run with an admission strips an inherited handshake and steering token, stamps after the gate (surface `cue`, requestId from `managed.context.identity`, the spec `permissionCeiling`, `MAESTRO_USER_DATA` = the resolved data dir) and the stamp verifies with `verifyTuiHandshake` + `readTuiHandshakeKey`; an unsignable launch (no `MAESTRO_CLAUDE_BIN`, unreadable key) is denied `policy-denied` with no child spawned and the lease released; without an admission the env is unchanged apart from the inherited-token strip. CLI: `withCliTuiStamp` stamps an admitted maestro-p launch (surface `cli`), refuses with a corrupt key file and spawns nothing; a non-maestro-p launch is untouched. Use the patterns in the MCOMP-21 state notes (tmp `MAESTRO_USER_DATA`, a real tmp file as `MAESTRO_CLAUDE_BIN`, the claude path cache across agent-spawner cases). Required inputs: `MAESTRO-CONTRACT-INPUTS-BUILD`. Fewer than 500 changed lines. Backlog: M-05.",
+					"backlog": ["M-05"],
+					"requires": ["MAESTRO-CONTRACT-INPUTS-BUILD"],
+					"produces": [],
+					"id": "MCOMP-21-14A"
+				},
+				{
+					"label": "Repair the Symphony bootstrap wiring assertion broken by MCOMP-21-11",
+					"kind": "TEST",
+					"targets": [
+						"src/__tests__/main/plugins/plugin-host-deps-wiring.test.ts"
+					],
+					"outcome": "Inserted during execution after MCOMP-21-14A; landed as c0611c5f9. Continuation of MCOMP-21-14. Authored target: `src/__tests__/main/plugins/plugin-host-deps-wiring.test.ts` only. The case \"the IPC bootstrap is handed that source and passes it to the Symphony handlers\" regex-asserts `getRepositoryAuthority: deps.getRepositoryAuthority,` immediately before the closing `});` of `registerSymphonyHandlers({` in `src/main/ipc/bootstrap/index.ts`; MCOMP-21-11 added `getLocalEffectAuthority` after it. Assert both deps are handed through (order-independent within the call), keep the assertion that the repository source reaches the Symphony handlers, and add the same check for the local-effect authority. Do not edit the bootstrap. Required inputs: `MAESTRO-CONTRACT-INPUTS-BUILD`. Fewer than 100 changed lines. Backlog: M-05.",
+					"backlog": ["M-05"],
+					"requires": ["MAESTRO-CONTRACT-INPUTS-BUILD"],
+					"produces": [],
+					"id": "MCOMP-21-14B"
+				},
+				{
 					"label": "Test asynchronous cleanup locks and peer effects",
 					"kind": "TEST",
 					"targets": [
@@ -5478,6 +5658,32 @@
 					"requires": ["MEGA-DESKTOP-POLICY-BUILD"],
 					"produces": [],
 					"id": "MCOMP-21-15"
+				},
+				{
+					"label": "Test remote replacement holds and the paired Lite relay per request",
+					"kind": "TEST",
+					"targets": [
+						"src/__tests__/main/ipc/handlers/filesystem.managed.test.ts",
+						"src/__tests__/main/lite/tailnet-relay.test.ts"
+					],
+					"outcome": "Inserted during execution after MCOMP-21-15; landed as c6bb2e7ec. Continuation of MCOMP-21-15. Authored targets: `src/__tests__/main/ipc/handlers/filesystem.managed.test.ts` and `src/__tests__/main/lite/tailnet-relay.test.ts` only. Add `remotePathWouldBeReplaced` to the remote-fs mock in filesystem.managed.test.ts; assert a remote `fs:rename` onto a taken name and an overwriting remote `fs:copyPath` hold a `delete` before any remote mv/cp runs, a refusal runs nothing on the remote, a probe failure counts as replaced, the same-entry (`-ef`) and free-name cases run unheld, and standalone (no authority) runs as before. In tailnet-relay.test.ts assert the paired relay holds `lite-peer` egress before the first destination read and after `await destination()` on each request and each upgrade: a ceiling revoked between them answers 403 (request) or destroys the socket (upgrade) and stops the relay with nothing forwarded upstream; a non-paired origin is refused; the allowed equivalent forwards. Do not edit sources. Required inputs: `MAESTRO-CONTRACT-INPUTS-BUILD`. Fewer than 400 changed lines. Backlog: M-05.",
+					"backlog": ["M-05"],
+					"requires": ["MAESTRO-CONTRACT-INPUTS-BUILD"],
+					"produces": [],
+					"id": "MCOMP-21-15A"
+				},
+				{
+					"label": "Test web token custody, migration and redaction, and renderer persistence against host locks",
+					"kind": "TEST",
+					"targets": [
+						"src/__tests__/main/ipc/handlers/persistence.locks.test.ts",
+						"src/__tests__/main/web-server/web-link-custody.test.ts"
+					],
+					"outcome": "Inserted during execution after MCOMP-21-15A; landed as de90dfe6a. Continuation of MCOMP-21-15. Authored targets: one new `src/__tests__/main/web-server/web-link-custody.test.ts` and `src/__tests__/main/ipc/handlers/persistence.locks.test.ts` only. For `resolvePersistentWebAuthToken`/`persistWebAuthToken`/`clearPersistedWebAuthToken` (web-server-factory.ts, slot `maestro-web-link.json` via `createCustodyCredentialSlot()`): under management a legacy plaintext token in settings is migrated into the sealed slot and removed from settings, the token never appears in the slot file text, logs or settings afterwards, a slot sealed for another tenant/installation or an older anchored epoch is refused (no token served), a custody refusal writes nothing, and standalone keeps the settings path unchanged. In persistence.locks.test.ts assert `sessions:setMany`/`setAll` from the renderer cannot change a locked provider field (path, args, env, model, effort) of an agent record: the held field is put back, the rest is kept, a lifecycleSync correction is sent, and an unlocked write passes through. Mock `relocateSessionImages` and `backupSessionsBeforeWipe`. Do not edit sources. Required inputs: `MAESTRO-CONTRACT-INPUTS-BUILD`. Fewer than 450 changed lines. Backlog: M-05.",
+					"backlog": ["M-05"],
+					"requires": ["MAESTRO-CONTRACT-INPUTS-BUILD"],
+					"produces": [],
+					"id": "MCOMP-21-15B"
 				},
 				{
 					"label": "Verify and publish implementation inputs",
@@ -5494,7 +5700,7 @@
 			"produces": ["MAESTRO-RESIDUAL-GAP-CLOSURE-BUILD"],
 			"id": "MCOMP-21",
 			"path": ".maestro/playbooks/2026-10-29-Maestro-Integration-Completion/MCOMP-21.md",
-			"taskCount": 16,
+			"taskCount": 31,
 			"stage": "S12"
 		},
 		{
@@ -6871,7 +7077,7 @@
 				"PAIR-DIRECT-EVIDENCE"
 			],
 			"nativeInputs": false,
-			"taskCount": 55
+			"taskCount": 70
 		},
 		{
 			"id": "S13",
@@ -7028,8 +7234,8 @@
 			"taskCount": 1
 		}
 	],
-	"taskCount": 417,
-	"taskCounts": { "IMPLEMENT": 307, "TEST": 50, "VERIFY": 60 },
+	"taskCount": 432,
+	"taskCounts": { "IMPLEMENT": 317, "TEST": 55, "VERIFY": 60 },
 	"artifacts": {
 		"MEGA-CONTRACTS-FOUNDATION-BUILD": {
 			"producerDocument": "GCOMP-01",
@@ -7921,20 +8127,35 @@
 			"MCOMP-19-07",
 			"MCOMP-20-01",
 			"MCOMP-21-01",
+			"MCOMP-21-01A",
+			"MCOMP-21-01B",
 			"MCOMP-21-02",
+			"MCOMP-21-02A",
+			"MCOMP-21-02B",
 			"MCOMP-21-03",
+			"MCOMP-21-03A",
+			"MCOMP-21-03B",
 			"MCOMP-21-04",
+			"MCOMP-21-04A",
 			"MCOMP-21-05",
 			"MCOMP-21-06",
 			"MCOMP-21-07",
+			"MCOMP-21-07A",
 			"MCOMP-21-08",
 			"MCOMP-21-09",
 			"MCOMP-21-10",
 			"MCOMP-21-11",
+			"MCOMP-21-11A",
 			"MCOMP-21-12",
+			"MCOMP-21-12A",
+			"MCOMP-21-12B",
 			"MCOMP-21-13",
 			"MCOMP-21-14",
+			"MCOMP-21-14A",
+			"MCOMP-21-14B",
 			"MCOMP-21-15",
+			"MCOMP-21-15A",
+			"MCOMP-21-15B",
 			"MCOMP-21-16",
 			"MCOMP-22-01",
 			"MCOMP-29-03",
