@@ -1,20 +1,20 @@
 {
-	"formatVersion": 1,
+	"formatVersion": 2,
 	"integrationId": "mega-maestro-v1",
 	"producer": "maestro",
 	"stage": "full",
-	"agreementDigest": "d9b80b9222e2f31a83192ba62cbbd2ca9f6827ed3737f6c4f6ef0fc7163bdef3",
-	"enforceabilityDigest": "6e85fe9b3d5e9c068fee1839779d7ca935777e2bdbbe66af13e03542acf3a9e0",
+	"agreementDigest": null,
+	"enforceabilityDigest": null,
 	"documentDigestRule": "sha256 of the raw bytes of each named Mega-Maestro design document; null if none",
-	"repositoryRevision": "d43b4f5f69c2963c1bae7b49088b5f94286dd648",
+	"repositoryRevision": "70b17bb4cbe03c94f10fbf71b1aae62eec016eec",
 	"repository": {
 		"branch": "feature/mega-maestro-v1.1.0-rc",
 		"baseRevision": "6400a6da0cfbae97bd90c4b361eea163fc3a1223",
-		"headCommittedAt": "2026-10-28T23:10:53-04:00",
+		"headCommittedAt": "2026-11-09T12:55:54-05:00",
 		"includedTreeDirty": false,
 		"dirtyIncludedFiles": 0
 	},
-	"sourceTreeDigest": "fbb2199b5f170debeacbb175207e91915a700b477d67f2023eaa93fa42d5bdd6",
+	"sourceTreeDigest": "adde773f62c5302692c051147c3e15d29c141ceb58e364e9550c7a425bfdf620",
 	"sourceTree": {
 		"rules": {
 			"id": "maestro-implementation-tree/1",
@@ -33,7 +33,7 @@
 			],
 			"method": "sha256 of canonicalJson({ rules, files }): files maps each included git-tracked path (POSIX separators, sorted) to the sha256 of its working-tree bytes, or \"deleted\" when the tracked file is absent"
 		},
-		"files": 6585,
+		"files": 7361,
 		"deleted": 0
 	},
 	"artifacts": [
@@ -41,26 +41,88 @@
 			"kind": "maestro-lib",
 			"path": "dist/maestro-lib",
 			"buildCommand": "npm run build:maestro-lib",
-			"version": "0.32.0",
+			"version": "0.37.0",
 			"managedContract": "maestro-managed/1",
-			"appVersion": "1.1.0-RC",
+			"appVersion": "1.1.1-RC",
 			"status": "ready",
-			"sourceRevision": "d43b4f5f69c2963c1bae7b49088b5f94286dd648",
+			"sourceRevision": "a45414969f0c429e76c3ec064610271507a15060",
 			"sourceDirty": false,
-			"inputSha256": "5e73adab2a013f9103b2ebbb11486acb6f71ed3bc32118a5df72c1b2d6aae9f2",
+			"inputSha256": "594b78b81e3b2e3f32df92b6654661e28ae4403a3ef73b177a88c1a77259bc7a",
 			"entry": {
 				"path": "dist/maestro-lib/index.js",
-				"sha256": "133436f732906317e828db99104aa602a8d7a41ef01e61f8379ba6eecccd8682"
+				"sha256": "0da112ad1128d9342edc41317a33017ec9e8bed0cadf47d56a943ce4fb3445c2"
 			},
-			"payloadFiles": 294,
-			"payloadDigest": "3631814197d7e0ea76504f93663cf897f4acea33393b02ead51f14f37d3f3283",
-			"builtWithNode": "26.12.1"
+			"payloadFiles": 332,
+			"payloadDigest": "f0d2b772babcdfa995f7250a34d8034325c11256f01ea01dd0599b4185e2bb9a",
+			"builtWithNode": "26.13.0"
+		}
+	],
+	"runtime": {
+		"status": "present",
+		"pinFile": "Plans/integration-completion/runtime-conformance.json",
+		"pinCommitted": true,
+		"artifactId": "MAESTRO-M0-RUNTIME",
+		"archive": {
+			"file": "dist/mega-maestro-runtime/0.37.0/55d02328bd6f879e8538456832e886a19a41bf9bb6202f8a9333fe9e2a0abacc/runtime.tgz",
+			"sha256": "55d02328bd6f879e8538456832e886a19a41bf9bb6202f8a9333fe9e2a0abacc",
+			"sha512": "f995d54ba3246aae5f7326038683f80c7973661569d079dd048181a4b283b9f1df098e05994fc0dd12142f8cc6e3f3b24a05c67167031ccf4eae0bd71a29c0fd",
+			"bytes": 2796765
+		},
+		"payloadDigest": "ed169bcfeeaab0e1aa2815ec7bac359fc957bc9556afefb6d5fd45337bbdea8a",
+		"versions": {
+			"app": "1.1.1-RC",
+			"library": "0.37.0",
+			"managedContract": "maestro-managed/1",
+			"endpointProtocol": 1
+		},
+		"implementation": {
+			"digest": "adde773f62c5302692c051147c3e15d29c141ceb58e364e9550c7a425bfdf620",
+			"commit": "a45414969f0c429e76c3ec064610271507a15060",
+			"current": true
+		},
+		"library": {
+			"sourceRevision": "a45414969f0c429e76c3ec064610271507a15060",
+			"inputSha256": "594b78b81e3b2e3f32df92b6654661e28ae4403a3ef73b177a88c1a77259bc7a",
+			"inputFiles": 353,
+			"entrySha256": "0da112ad1128d9342edc41317a33017ec9e8bed0cadf47d56a943ce4fb3445c2"
+		}
+	},
+	"nativeArtifacts": [
+		{
+			"platform": "darwin",
+			"artifactId": "MAESTRO-APP-MACOS-BUILD",
+			"producer": "MCOMP-35",
+			"status": "pending",
+			"receipt": null,
+			"receiptSha256": null
+		},
+		{
+			"platform": "win32",
+			"artifactId": "MAESTRO-APP-WINDOWS-BUILD",
+			"producer": "MCOMP-36",
+			"status": "pending",
+			"receipt": null,
+			"receiptSha256": null
+		}
+	],
+	"fixtures": [
+		{
+			"id": "contract-vectors",
+			"file": "src/__tests__/fixtures/mega-maestro/contract-vectors.json",
+			"formatVersion": 1,
+			"sha256": "4a9f98c7abf864c43d39cbed99b88d3f3da4b92b5878d1dc23f4c2869c32f8e3"
+		},
+		{
+			"id": "MAESTRO-M0-ADAPTER-CONFORMANCE",
+			"file": "Plans/integration-completion/runtime-conformance.json#conformance",
+			"formatVersion": 1,
+			"sha256": "2a6ab8382b30537b7dd177d29514662b74bb267fbec6c0cd47d17bb9cea58326"
 		}
 	],
 	"contracts": {
-		"status": "absent",
-		"dependency": "CP-01",
-		"owner": "mega-maestro"
+		"status": "pinned",
+		"sha256": "c34e6cd0590fdce90cd2ace60f8f43ee278f6d24d62d4b6caab2bb4f720ab177",
+		"sourceRevision": "3ce62fe784079d513c6f3daa0b3225aa7f788f64"
 	},
 	"capabilities": {
 		"managedContract": "maestro-managed/1",
@@ -76,7 +138,7 @@
 		"readOn": {
 			"platform": "darwin",
 			"arch": "arm64",
-			"node": "v26.12.1"
+			"node": "v26.13.0"
 		},
 		"legend": "route=standalone/managed, in the words of Plans/mega-maestro-rc/support-matrix.json",
 		"platforms": {
@@ -104,7 +166,7 @@
 			"step": "build the library",
 			"command": "npm run build:maestro-lib",
 			"exit": 0,
-			"result": "maestro-lib 0.32.0 from d43b4f5f69c2963c1bae7b49088b5f94286dd648 (ready against HEAD)"
+			"result": "maestro-lib 0.37.0 from a45414969f0c429e76c3ec064610271507a15060 (ready against HEAD)"
 		},
 		{
 			"step": "pair check",
