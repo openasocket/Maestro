@@ -7,6 +7,8 @@ import { createIpcMethod } from './ipcWrapper';
 import { resolveLiveAiTurns, type LiveAiTurn } from '../utils/liveTurnReattach';
 import { logger } from '../utils/logger';
 import type { ProcessConfig } from '../types';
+import type { ManagedRunView } from '../../main/enterprise/dispatch';
+import { updateAiTab, useSessionStore } from '../stores/sessionStore';
 
 export type { ProcessConfig } from '../types';
 
@@ -34,6 +36,28 @@ export interface ProcessSpawnResult {
 		name: string;
 		host: string;
 	};
+	/** The managed run this spawn started (identifiers only); absent on a standalone host. */
+	managedRun?: ManagedRunView;
+}
+
+/**
+ * Record on an AI tab the managed run its send started. Call it with no run
+ * before the spawn (a new send clears the previous turn's run, so a retry or a
+ * refused spawn never shows a lease it was not admitted under) and with the
+ * spawn's `managedRun` after it. Writes nothing when the tab already says so.
+ */
+export function noteTurnManagedRun(
+	sessionId: string,
+	tabId: string,
+	managedRun?: ManagedRunView
+): void {
+	const tab = useSessionStore
+		.getState()
+		.sessions.find((s) => s.id === sessionId)
+		?.aiTabs.find((t) => t.id === tabId);
+	if (!tab || tab.managedRun === managedRun) return;
+	if (!tab.managedRun && !managedRun) return;
+	updateAiTab(sessionId, tabId, (t) => ({ ...t, managedRun }));
 }
 
 export const processService = {

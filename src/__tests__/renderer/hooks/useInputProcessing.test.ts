@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { renderHook, act } from '@testing-library/react';
+import { renderHook, act, waitFor } from '@testing-library/react';
 
 // Mock hasCapabilityCached - batch mode agents should return true for supportsBatchMode
 vi.mock('../../../renderer/hooks/agent/useAgentCapabilities', async () => {
@@ -57,6 +57,7 @@ import type {
 	BatchRunState,
 	QueuedItem,
 } from '../../../renderer/types';
+import type { ManagedRunView } from '../../../main/enterprise/dispatch';
 import { createMockAITab } from '../../helpers/mockTab';
 import { createMockSession as baseCreateMockSession } from '../../helpers/mockSession';
 
@@ -3576,6 +3577,82 @@ describe('useInputProcessing', () => {
 			);
 
 			cancelRetry(session.id, tab.id);
+		});
+	});
+	describe('managed run of the direct send (MCOMP-25-01A)', () => {
+		// Identifiers only, as process:spawn returns them on a managed host.
+		const managedRun = (leaseId: string): ManagedRunView => ({
+			leaseId,
+			authorityId: 'auth-1',
+			requestId: `req-${leaseId}`,
+			attemptId: `att-${leaseId}`,
+			runId: null,
+			requestDigest: 'sha256:abc',
+			provider: 'claude-code',
+			operation: 'conversation',
+			actor: { kind: 'user', id: 'user-1' },
+			policyRevision: 3,
+			decision: null,
+			effect: { state: 'bound', release: null, reason: null },
+		});
+
+		async function send(previous: ManagedRunView | undefined, tabId: string) {
+			const tab = createMockTab({ id: tabId, state: 'idle', managedRun: previous });
+			const session = createMockSession({ state: 'idle', aiTabs: [tab], activeTabId: tab.id });
+			useSessionStore.setState({ sessions: [session] });
+			const deps = createDeps({
+				activeSession: session,
+				sessionsRef: { current: [session] },
+				inputValue: 'List the files.',
+			});
+			const { result } = renderHook(() => useInputProcessing(deps));
+			await act(async () => {
+				await result.current.processInput();
+			});
+			await waitFor(() => expect(window.maestro.process.spawn).toHaveBeenCalledTimes(1));
+			return () =>
+				useSessionStore.getState().sessions[0].aiTabs.find((t) => t.id === tabId)?.managedRun;
+		}
+
+		it('keeps the run the send started on its tab, replacing the previous turn', async () => {
+			vi.mocked(window.maestro.process.spawn).mockResolvedValueOnce({
+				pid: 1,
+				success: true,
+				managedRun: managedRun('lease-new'),
+			});
+			const tabRun = await send(managedRun('lease-old'), 'tab-managed-1');
+			await waitFor(() => expect(tabRun()?.leaseId).toBe('lease-new'));
+			expect(tabRun()).toEqual(managedRun('lease-new'));
+		});
+
+		it('clears the previous run when the send starts, before the spawn settles', async () => {
+			let seenDuringSpawn: ManagedRunView | undefined | null = null;
+			vi.mocked(window.maestro.process.spawn).mockImplementationOnce(async () => {
+				seenDuringSpawn = useSessionStore
+					.getState()
+					.sessions[0].aiTabs.find((t) => t.id === 'tab-managed-2')?.managedRun;
+				return { pid: 1, success: true };
+			});
+			const tabRun = await send(managedRun('lease-old'), 'tab-managed-2');
+			expect(seenDuringSpawn).toBeUndefined();
+			expect(tabRun()).toBeUndefined();
+		});
+
+		it('a managed refusal keeps the error path: no run shown, nothing requeued', async () => {
+			vi.mocked(window.maestro.process.spawn).mockRejectedValueOnce(
+				new Error('managed spawn refused: policy denies conversation')
+			);
+			const tabRun = await send(managedRun('lease-old'), 'tab-managed-3');
+			await waitFor(() =>
+				expect(
+					useSessionStore
+						.getState()
+						.sessions[0].aiTabs[0].logs.some((l) => l.text.includes('managed spawn refused'))
+				).toBe(true)
+			);
+			expect(tabRun()).toBeUndefined();
+			expect(useSessionStore.getState().sessions[0].executionQueue ?? []).toHaveLength(0);
+			expect(window.maestro.process.spawn).toHaveBeenCalledTimes(1);
 		});
 	});
 });

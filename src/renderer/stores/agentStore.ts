@@ -45,7 +45,7 @@ import {
 	takePendingMergedContext,
 	updateSessionWith,
 } from './sessionStore';
-import { probeSessionAiProcesses } from '../services/process';
+import { noteTurnManagedRun, probeSessionAiProcesses } from '../services/process';
 // Agent Resilience: snapshot dispatched prompts for auto-retry. Import cycle
 // with retryStore is safe - both sides only touch each other inside runtime
 // callbacks, never at module-eval time.
@@ -580,7 +580,9 @@ export const useAgentStore = create<AgentStore>()((set, get) => ({
 					updateSessionWith(sessionId, (s) => applyQueuedItemRelease(s, targetTab.id));
 					return false;
 				}
-				await window.maestro.process.spawn({
+				// A new send starts a new managed run (see noteTurnManagedRun).
+				noteTurnManagedRun(sessionId, targetTab.id);
+				const spawned = await window.maestro.process.spawn({
 					sessionId: targetSessionId,
 					toolType: session.toolType,
 					cwd: session.cwd,
@@ -608,6 +610,7 @@ export const useAgentStore = create<AgentStore>()((set, get) => ({
 					// The host's dispatch ticket waits with the item for the same reason.
 					dispatchTicket: item.dispatchTicket,
 				});
+				noteTurnManagedRun(sessionId, targetTab.id, spawned?.managedRun);
 			} else if (item.type === 'command' && item.command) {
 				// Process a slash command - find matching command
 				// Check user-defined commands first, then agent-discovered commands with prompts
@@ -685,7 +688,8 @@ export const useAgentStore = create<AgentStore>()((set, get) => ({
 						updateSessionWith(sessionId, (s) => applyQueuedItemRelease(s, targetTab.id));
 						return false;
 					}
-					await window.maestro.process.spawn({
+					noteTurnManagedRun(sessionId, targetTab.id);
+					const spawned = await window.maestro.process.spawn({
 						sessionId: targetSessionId,
 						toolType: session.toolType,
 						cwd: session.cwd,
@@ -713,6 +717,7 @@ export const useAgentStore = create<AgentStore>()((set, get) => ({
 						delegation: item.delegation,
 						dispatchTicket: item.dispatchTicket,
 					});
+					noteTurnManagedRun(sessionId, targetTab.id, spawned?.managedRun);
 				} else {
 					// Unknown command - add error log and reset to idle
 					useSessionStore.getState().addLogToTab(

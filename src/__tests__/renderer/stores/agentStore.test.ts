@@ -12,6 +12,7 @@ import { useAgentStore } from '../../../renderer/stores/agentStore';
 import type { ProcessQueuedItemDeps } from '../../../renderer/stores/agentStore';
 import { useSessionStore } from '../../../renderer/stores/sessionStore';
 import type { Session, AgentConfig, QueuedItem } from '../../../renderer/types';
+import type { ManagedRunView } from '../../../main/enterprise/dispatch';
 import { createMockSession as baseCreateMockSession } from '../../helpers/mockSession';
 import { dispatchCrossAgentMentionsForMessage } from '../../../renderer/services/crossAgentMentions';
 import { resetStores } from '../../helpers';
@@ -1296,6 +1297,119 @@ describe('agentStore', () => {
 					agentSessionId: 'existing-conv-id',
 				})
 			);
+		});
+
+		describe('managed run of the turn (MCOMP-25-01A)', () => {
+			// Identifiers only, as process:spawn returns them on a managed host.
+			function managedRun(leaseId: string): ManagedRunView {
+				return {
+					leaseId,
+					authorityId: 'auth-1',
+					requestId: `req-${leaseId}`,
+					attemptId: `att-${leaseId}`,
+					runId: null,
+					requestDigest: 'sha256:abc',
+					provider: 'claude-code',
+					operation: 'conversation',
+					actor: { kind: 'user', id: 'user-1' },
+					policyRevision: 7,
+					decision: null,
+					effect: { state: 'bound', release: null, reason: null },
+				};
+			}
+
+			function sessionWithTab(previous?: ManagedRunView): Session {
+				return createMockSession({
+					id: 'session-1',
+					toolType: 'claude-code',
+					aiTabs: [
+						{
+							id: 'tab-1',
+							agentSessionId: 'conv-1',
+							name: null,
+							starred: false,
+							logs: [],
+							inputValue: '',
+							stagedImages: [],
+							createdAt: Date.now(),
+							state: 'idle',
+							...(previous && { managedRun: previous }),
+						},
+					],
+					activeTabId: 'tab-1',
+				});
+			}
+
+			const tabRun = () => useSessionStore.getState().sessions[0].aiTabs[0].managedRun;
+
+			it('keeps the run a queued message started on its tab, replacing the previous turn', async () => {
+				useSessionStore.getState().setSessions([sessionWithTab(managedRun('lease-old'))]);
+				mockSpawn.mockResolvedValueOnce({
+					pid: 1,
+					success: true,
+					managedRun: managedRun('lease-new'),
+				});
+
+				await useAgentStore
+					.getState()
+					.processQueuedItem('session-1', createQueuedItem({ tabId: 'tab-1' }), defaultDeps);
+
+				expect(tabRun()).toEqual(managedRun('lease-new'));
+			});
+
+			it('keeps the run a queued slash command started', async () => {
+				useSessionStore.getState().setSessions([sessionWithTab()]);
+				mockSpawn.mockResolvedValueOnce({
+					pid: 1,
+					success: true,
+					managedRun: managedRun('lease-cmd'),
+				});
+
+				await useAgentStore.getState().processQueuedItem(
+					'session-1',
+					createQueuedItem({
+						tabId: 'tab-1',
+						type: 'command',
+						command: '/review',
+						text: undefined,
+					}),
+					{
+						...defaultDeps,
+						customAICommands: [{ id: 'c', command: '/review', description: 'r', prompt: 'Review' }],
+					} as ProcessQueuedItemDeps
+				);
+
+				expect(tabRun()?.leaseId).toBe('lease-cmd');
+			});
+
+			it('clears the previous run on a standalone host, which returns none', async () => {
+				useSessionStore.getState().setSessions([sessionWithTab(managedRun('lease-old'))]);
+				mockSpawn.mockResolvedValueOnce({ pid: 1, success: true });
+
+				await useAgentStore
+					.getState()
+					.processQueuedItem('session-1', createQueuedItem({ tabId: 'tab-1' }), defaultDeps);
+
+				expect(tabRun()).toBeUndefined();
+			});
+
+			it('a managed refusal keeps the error path and never shows the previous lease', async () => {
+				useSessionStore.getState().setSessions([sessionWithTab(managedRun('lease-old'))]);
+				mockSpawn.mockRejectedValueOnce(
+					new Error('managed spawn refused: policy denies conversation')
+				);
+				const consoleSpy = vi.spyOn(logger, 'error').mockImplementation(() => {});
+
+				await expect(
+					useAgentStore
+						.getState()
+						.processQueuedItem('session-1', createQueuedItem({ tabId: 'tab-1' }), defaultDeps)
+				).rejects.toThrow('managed spawn refused');
+
+				expect(mockSpawn).toHaveBeenCalledTimes(1);
+				expect(tabRun()).toBeUndefined();
+				consoleSpy.mockRestore();
+			});
 		});
 
 		describe('dispatched item (delegation context, MRC-07-04D)', () => {

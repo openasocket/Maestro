@@ -4,6 +4,7 @@ import type {
 } from '../../shared/maestro-lib/translation/types';
 // Type definitions for Maestro renderer
 import type { BrowserTab } from '../../shared/browserPage';
+import type { ManagedRunView } from '../../main/enterprise/dispatch';
 
 // Re-export context merge types
 export * from './contextMerge';
@@ -813,6 +814,14 @@ export interface AITab {
 	starred: boolean; // Whether session is starred (for pill display)
 	logs: LogEntry[]; // Conversation history
 	agentError?: AgentError; // Tab-specific agent error (shown in banner)
+	/**
+	 * The managed run the tab's latest send started (identifiers only), as
+	 * `process:spawn` returned it on a managed host. Cleared when the next send
+	 * starts and never carried to a retry or resume: each is admitted again
+	 * under the policy current at that moment. Absent on a standalone host and
+	 * after a refused or failed spawn.
+	 */
+	managedRun?: ManagedRunView;
 	inputValue: string; // Pending input text for this tab
 	/**
 	 * Which rung of the bang ladder this tab's composer is on: `'shell'` means

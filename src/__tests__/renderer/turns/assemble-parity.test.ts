@@ -340,6 +340,8 @@ describe('assembleTurn parity with the desktop', () => {
 			// admitted path is the plain spawn, which is what the parity reads.
 			managedPort: vi.fn(() => null),
 			spawnAdmitted: vi.fn(async (config: unknown) => processManager.spawn(config)),
+			// The managed run a spawn started (MCOMP-25-01): none on a standalone port.
+			admissionOf: vi.fn(() => null),
 			get: vi.fn(),
 			// The synopsis-writer gate scans running processes before every spawn.
 			getAll: vi.fn(() => []),

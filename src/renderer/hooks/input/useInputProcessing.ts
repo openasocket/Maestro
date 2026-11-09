@@ -44,7 +44,7 @@ import {
 	hasRunnableQueueItem,
 	hasWorkAheadOfNewMessage,
 } from '../../utils/executionQueue';
-import { probeSessionAiProcesses } from '../../services/process';
+import { noteTurnManagedRun, probeSessionAiProcesses } from '../../services/process';
 import { isAgentAlreadyRunningError } from '../../../shared/processErrors';
 import { hasPendingRetry, noteDirectDispatch } from '../../stores/retryStore';
 import { resolveForceParallel } from '../../stores/settingsStore';
@@ -1660,9 +1660,13 @@ export function useInputProcessing(deps: UseInputProcessingDeps): UseInputProces
 							buildComposerQueuedItem(freshActiveTab.id, freshActiveTab, freshSession)
 						);
 
+						// A new send starts a new managed run: drop the previous turn's
+						// before the spawn, so a refused or failed spawn shows none.
+						noteTurnManagedRun(resolvedSessionId, freshActiveTab.id);
+
 						// Spawn agent with generic config - the main process will use agent-specific
 						// argument builders (resumeArgs, readOnlyArgs, etc.) to construct the final args
-						await window.maestro.process.spawn({
+						const spawned = await window.maestro.process.spawn({
 							sessionId: targetSessionId,
 							toolType: freshSession.toolType,
 							cwd: freshSession.cwd,
@@ -1686,6 +1690,7 @@ export function useInputProcessing(deps: UseInputProcessingDeps): UseInputProces
 							// Per-session SSH remote config (takes precedence over agent-level SSH config)
 							sessionSshRemoteConfig: freshSession.sessionSshRemoteConfig,
 						});
+						noteTurnManagedRun(resolvedSessionId, freshActiveTab.id, spawned?.managedRun);
 					} catch (error) {
 						logger.error('Failed to spawn agent batch process:', undefined, error);
 						// "Agent process already running" is a COLLISION, not an outcome:

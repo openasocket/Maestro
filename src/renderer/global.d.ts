@@ -235,6 +235,7 @@ import type {
 	PianolaSuggestionsFile,
 } from '../shared/pianola/storage';
 import type { PianolaSupervisorSnapshot } from '../main/ipc/handlers/pianola';
+import type { ManagedRunView } from '../main/enterprise/dispatch';
 import type {
 	PluginListSnapshot,
 	PluginGrantsSnapshot,
@@ -425,7 +426,13 @@ interface MaestroAPI {
 			responseChannel: string,
 			result: import('../shared/autoRunRemote').AutoRunRemoteResult
 		) => void;
-		spawn: (config: ProcessConfig) => Promise<{ pid: number; success: boolean }>;
+		spawn: (config: ProcessConfig) => Promise<{
+			pid: number;
+			success: boolean;
+			sshRemote?: { id: string; name: string; host: string };
+			/** The managed run this spawn started (identifiers only); absent on a standalone host. */
+			managedRun?: ManagedRunView;
+		}>;
 		spawnTerminalTab: (config: {
 			sessionId: string;
 			cwd: string;
