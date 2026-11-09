@@ -9,6 +9,7 @@
  *   node scripts/write-mega-maestro-handoff.mjs [--out Plans/mega-maestro/evidence/handoff.json]
  *     [--library dist/maestro-lib] [--pin vendor/mega-maestro/contracts.pin.json]
  *     [--joint Plans/mega-maestro-rc/joint-integration.json] [--stage early|full]
+ *     [--runtime-pin Plans/integration-completion/runtime-conformance.json]
  *     [--agreement <MEGA-MAESTRO-INTEGRATION.md>] [--enforceability <MEGA-MAESTRO-ENFORCEABILITY.md>]
  *     [--check] [--json]
  *
@@ -30,16 +31,33 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 
 import { DEFAULT_LIBRARY_DIR, DEFAULT_PIN_FILE, inspectLibrary } from './mega-maestro-pair.mjs';
-import { capabilityMatrix, findCanaries } from './package-mega-maestro-runtime.mjs';
+import {
+	ARCHIVE_NAME,
+	RUNTIME_PIN_FILE,
+	capabilityMatrix,
+	findCanaries,
+	readRuntimePin,
+} from './package-mega-maestro-runtime.mjs';
 
 export const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-export const HANDOFF_FORMAT_VERSION = 1;
+export const HANDOFF_FORMAT_VERSION = 2;
 export const INTEGRATION_ID = 'mega-maestro-v1';
 export const DEFAULT_OUT_FILE = 'Plans/mega-maestro/evidence/handoff.json';
 export const DEFAULT_JOINT_FILE = 'Plans/mega-maestro-rc/joint-integration.json';
 export const PLAN_FILE = 'Plans/mega-maestro-rc/execution-plan.json';
 export const SUPPORT_MATRIX_FILE = 'Plans/mega-maestro-rc/support-matrix.json';
 export const CONTRACT_VECTORS_FILE = 'src/__tests__/fixtures/mega-maestro/contract-vectors.json';
+export const PROGRAM_FILE = 'Plans/integration-completion/program.json';
+export const EVIDENCE_DIR = 'Plans/integration-completion/evidence';
+/**
+ * The native application archives a final handoff names. Each is built by its own
+ * program document (MCOMP-35, MCOMP-36), never by this script: a platform is
+ * `pending` until a receipt naming its artifact id exists under EVIDENCE_DIR.
+ */
+export const NATIVE_ARTIFACTS = Object.freeze([
+	Object.freeze({ platform: 'darwin', artifactId: 'MAESTRO-APP-MACOS-BUILD' }),
+	Object.freeze({ platform: 'win32', artifactId: 'MAESTRO-APP-WINDOWS-BUILD' }),
+]);
 export const STAGES = Object.freeze(['early', 'full']);
 
 /**
@@ -168,6 +186,105 @@ function libraryArtifact(libraryDir, head) {
 	};
 }
 
+/**
+ * The pinned public runtime (MAESTRO-M0-RUNTIME) as the packager landed it: the pin's
+ * identity, and whether the archive bytes on disk are those bytes. `implementationCurrent`
+ * says whether the archive was cut from the implementation tree this handoff names;
+ * false means the source moved and the runtime needs a new archive and requalification.
+ */
+export function runtimeArtifact(tree, pinFile = RUNTIME_PIN_FILE) {
+	const pin = readRuntimePin(path.resolve(REPO_ROOT, pinFile));
+	const r = pin.record;
+	if (pin.status !== 'pinned' || !r?.archive?.sha256 || !r.location?.directory) {
+		return { status: 'unpinned', pinFile: pin.file, pinCommitted: pin.committed };
+	}
+	const archiveFile = path.resolve(REPO_ROOT, r.location.directory, ARCHIVE_NAME);
+	const bytes = fs.existsSync(archiveFile) ? fs.readFileSync(archiveFile) : null;
+	const same =
+		bytes !== null &&
+		bytes.length === r.archive.bytes &&
+		sha256(bytes) === r.archive.sha256 &&
+		createHash('sha512').update(bytes).digest('hex') === r.archive.sha512;
+	return {
+		status: bytes === null ? 'archive-missing' : same ? 'present' : 'archive-mismatch',
+		pinFile: pin.file,
+		pinCommitted: pin.committed,
+		artifactId: r.artifactId,
+		archive: { ...r.archive, file: `${r.location.directory}/${ARCHIVE_NAME}` },
+		payloadDigest: r.payloadDigest,
+		versions: r.versions,
+		implementation: {
+			digest: r.implementation.digest,
+			commit: r.implementation.commit,
+			current: r.implementation.digest === tree.digest,
+		},
+		library: r.library,
+	};
+}
+
+/** Every receipt under EVIDENCE_DIR by the artifact id(s) it names, with its digest. */
+function evidenceReceipts(evidenceDir) {
+	const dir = path.resolve(REPO_ROOT, evidenceDir);
+	const byId = {};
+	const files = fs.existsSync(dir) ? fs.readdirSync(dir).filter((f) => f.endsWith('.json')) : [];
+	for (const name of files.sort()) {
+		const file = path.join(dir, name);
+		if (!fs.statSync(file).isFile()) continue;
+		let receipt;
+		try {
+			receipt = readJson(file);
+		} catch {
+			continue;
+		}
+		for (const id of [receipt?.artifactId, ...(receipt?.artifactIds ?? [])]) {
+			if (typeof id === 'string')
+				byId[id] ??= { file: posix(path.relative(REPO_ROOT, file)), sha256: fileDigest(file) };
+		}
+	}
+	return byId;
+}
+
+/** The native application archives, each pending until its own build document leaves a receipt. */
+export function nativeArtifacts(
+	program = readJsonIf(path.resolve(REPO_ROOT, PROGRAM_FILE)),
+	evidenceDir = EVIDENCE_DIR
+) {
+	const receipts = evidenceReceipts(evidenceDir);
+	return NATIVE_ARTIFACTS.map(({ platform, artifactId }) => {
+		const receipt = receipts[artifactId] ?? null;
+		return {
+			platform,
+			artifactId,
+			producer: program?.artifacts?.[artifactId]?.producerDocument ?? null,
+			status: receipt ? 'receipt' : 'pending',
+			receipt: receipt?.file ?? null,
+			receiptSha256: receipt?.sha256 ?? null,
+		};
+	});
+}
+
+/** The versioned fixtures and contract descriptions a counterpart reads beside the archive. */
+function fixtureVersions(vectors) {
+	const runtimePin = readJsonIf(path.resolve(REPO_ROOT, RUNTIME_PIN_FILE));
+	const rows = [
+		{
+			id: 'contract-vectors',
+			file: CONTRACT_VECTORS_FILE,
+			formatVersion: vectors?.formatVersion ?? null,
+			sha256: vectors ? fileDigest(CONTRACT_VECTORS_FILE) : null,
+		},
+	];
+	if (runtimePin?.conformance) {
+		rows.push({
+			id: runtimePin.conformance.artifactId ?? 'conformance',
+			file: `${RUNTIME_PIN_FILE}#conformance`,
+			formatVersion: runtimePin.conformance.formatVersion ?? null,
+			sha256: digestOf(runtimePin.conformance),
+		});
+	}
+	return rows;
+}
+
 /** CP-01 through CP-06 and the approval producer, each with owner and status; none is inferred present. */
 function pendingPrerequisites(plan, joint, supportMatrix) {
 	const producers = joint?.producers ?? {};
@@ -250,6 +367,9 @@ export function buildHandoff(options = {}) {
 		sourceTreeDigest: tree.digest,
 		sourceTree: { rules: SOURCE_TREE_RULES, files: tree.fileCount, deleted: tree.deleted },
 		artifacts: [artifact],
+		runtime: runtimeArtifact(tree, options.runtimePin),
+		nativeArtifacts: nativeArtifacts(),
+		fixtures: fixtureVersions(vectors),
 		contracts: pin
 			? { status: 'pinned', sha256: pin.sha256, sourceRevision: pin.sourceRevision ?? null }
 			: { status: 'absent', dependency: 'CP-01', owner: 'mega-maestro' },
@@ -320,7 +440,7 @@ const list = (items, minItems = 0) => ({ type: 'array', items, minItems });
 /** What a handoff.json must look like; `validateHandoff()` is its reader here. */
 export const HANDOFF_SCHEMA = {
 	$schema: 'https://json-schema.org/draft/2020-12/schema',
-	$id: 'https://maestro.sh/schemas/mega-maestro-handoff-1.json',
+	$id: 'https://maestro.sh/schemas/mega-maestro-handoff-2.json',
 	...obj({
 		formatVersion: { const: HANDOFF_FORMAT_VERSION },
 		integrationId: { const: INTEGRATION_ID },
@@ -350,6 +470,32 @@ export const HANDOFF_SCHEMA = {
 				entry: obj({ path: str, sha256: hex }),
 				payloadFiles: int(1),
 				payloadDigest: hex,
+			}),
+			1
+		),
+		runtime: {
+			type: 'object',
+			properties: {
+				status: { enum: ['present', 'archive-missing', 'archive-mismatch', 'unpinned'] },
+				pinFile: str,
+				pinCommitted: { type: 'boolean' },
+			},
+			required: ['status', 'pinFile', 'pinCommitted'],
+		},
+		nativeArtifacts: list(
+			obj({
+				...of(['platform', 'artifactId'], str),
+				status: { enum: ['pending', 'receipt'] },
+				...of(['producer', 'receipt'], nstr),
+				receiptSha256: nhex,
+			}),
+			NATIVE_ARTIFACTS.length
+		),
+		fixtures: list(
+			obj({
+				...of(['id', 'file'], str),
+				formatVersion: { type: ['integer', 'null'] },
+				sha256: nhex,
 			}),
 			1
 		),
@@ -451,6 +597,7 @@ export function main(argv = process.argv.slice(2)) {
 	try {
 		const options = {
 			...of(['library', 'pin', 'joint', 'agreement', 'enforceability'], str),
+			'runtime-pin': str,
 			...of(['check', 'json'], { type: 'boolean', default: false }),
 			out: { ...str, default: DEFAULT_OUT_FILE },
 			stage: { ...str, default: 'full' },
@@ -459,7 +606,9 @@ export function main(argv = process.argv.slice(2)) {
 	} catch (error) {
 		refuse('usage', error.message);
 	}
-	const manifest = assertPublishable(buildHandoff(values));
+	const manifest = assertPublishable(
+		buildHandoff({ ...values, runtimePin: values['runtime-pin'] })
+	);
 	const text = serializeHandoff(manifest);
 	const outFile = path.resolve(REPO_ROOT, values.out);
 	const relative = posix(path.relative(REPO_ROOT, outFile));

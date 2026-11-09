@@ -21,12 +21,15 @@ import path from 'node:path';
 import {
 	HandoffRefusal,
 	INTEGRATION_ID,
+	NATIVE_ARTIFACTS,
 	assertPublishable,
 	buildHandoff,
 	digestOf,
 	findAbsolutePaths,
 	includedInSourceTree,
+	nativeArtifacts,
 	redactSecrets,
+	runtimeArtifact,
 	serializeHandoff,
 	sourceTreeDigest,
 	validateHandoff,
@@ -186,6 +189,88 @@ describe('write-mega-maestro-handoff', () => {
 		expect(refusal(['--library', path.join(scratch, 'nowhere')])).toMatch(
 			/refused \(library-missing\)/
 		);
+	}, 120_000);
+
+	it('names the pinned runtime archive only when its bytes are on disk, and every native archive as pending until its own receipt exists', () => {
+		const rel = (p: string) => path.relative(REPO_ROOT, p).split(path.sep).join('/');
+		const dir = path.join(scratch, 'runtime');
+		fs.mkdirSync(dir);
+		const bytes = Buffer.from('a runtime archive');
+		fs.writeFileSync(path.join(dir, 'runtime.tgz'), bytes);
+		const tree = sourceTreeDigest();
+		const pinFile = file('pin.json');
+		const record = {
+			artifactId: 'MAESTRO-M0-RUNTIME',
+			archive: {
+				file: 'runtime.tgz',
+				sha256: sha256(bytes),
+				sha512: createHash('sha512').update(bytes).digest('hex'),
+				bytes: bytes.length,
+			},
+			payloadDigest: 'b'.repeat(64),
+			versions: { library: '0.0.0' },
+			implementation: { digest: tree.digest, commit: null },
+			library: { inputSha256: 'c'.repeat(64) },
+			location: { directory: rel(dir) },
+		};
+		fs.writeFileSync(pinFile, JSON.stringify({ runtime: record }));
+		const present = runtimeArtifact(tree, rel(pinFile));
+		expect(present).toMatchObject({
+			status: 'present',
+			pinFile: rel(pinFile),
+			pinCommitted: false,
+			archive: { ...record.archive, file: `${rel(dir)}/runtime.tgz` },
+			implementation: { digest: tree.digest, current: true },
+		});
+		expect(runtimeArtifact({ digest: 'd'.repeat(64) }, rel(pinFile)).implementation.current).toBe(
+			false
+		);
+		const manifest = buildHandoff({ library: lib, runtimePin: rel(pinFile) });
+		expect(manifest.runtime).toEqual(present);
+		expect(assertPublishable(manifest)).toBe(manifest);
+		fs.writeFileSync(path.join(dir, 'runtime.tgz'), 'another archive');
+		expect(runtimeArtifact(tree, rel(pinFile)).status).toBe('archive-mismatch');
+		fs.rmSync(path.join(dir, 'runtime.tgz'));
+		expect(runtimeArtifact(tree, rel(pinFile)).status).toBe('archive-missing');
+		expect(runtimeArtifact(tree, rel(file('absent.json')))).toEqual({
+			status: 'unpinned',
+			pinFile: expect.any(String),
+			pinCommitted: false,
+		});
+
+		const program = { artifacts: { 'MAESTRO-APP-MACOS-BUILD': { producerDocument: 'MCOMP-35' } } };
+		const evidence = path.join(scratch, 'evidence');
+		fs.mkdirSync(evidence);
+		fs.writeFileSync(path.join(evidence, 'noise.json'), '{ not json');
+		expect(nativeArtifacts(program, rel(evidence))).toEqual(
+			NATIVE_ARTIFACTS.map(({ platform, artifactId }) => ({
+				platform,
+				artifactId,
+				producer: artifactId === 'MAESTRO-APP-MACOS-BUILD' ? 'MCOMP-35' : null,
+				status: 'pending',
+				receipt: null,
+				receiptSha256: null,
+			}))
+		);
+		const receipt = path.join(evidence, 'app-macos-build.json');
+		fs.writeFileSync(receipt, JSON.stringify({ artifactId: 'MAESTRO-APP-MACOS-BUILD' }));
+		const [macos, windows] = nativeArtifacts(program, rel(evidence));
+		expect(macos).toMatchObject({
+			status: 'receipt',
+			receipt: rel(receipt),
+			receiptSha256: sha256(fs.readFileSync(receipt)),
+		});
+		expect(windows.status).toBe('pending');
+		const built = { ...manifest.nativeArtifacts[0], status: 'built' };
+		expect(validateHandoff({ ...manifest, nativeArtifacts: [built] })).toEqual([
+			'$.nativeArtifacts: fewer than 2 items',
+			'$.nativeArtifacts[0].status: not one of pending, receipt',
+		]);
+		expect(manifest.fixtures[0]).toMatchObject({
+			id: 'contract-vectors',
+			formatVersion: 1,
+			sha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+		});
 	}, 120_000);
 
 	it('never carries an env value: a fake sk- token in the environment appears in neither the manifest nor the output', () => {
