@@ -5764,6 +5764,110 @@
 					"id": "MCOMP-23-02"
 				},
 				{
+					"label": "Renderer create/edit through the host commit",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/__tests__/renderer/hooks/session/useSessionLifecycleSync.test.tsx",
+						"src/__tests__/renderer/hooks/useSessionCrud.test.ts",
+						"src/__tests__/renderer/hooks/useSessionLifecycle.test.ts",
+						"src/main/preload/settings.ts",
+						"src/main/web-server/handlers/bridgeDenyList.ts",
+						"src/renderer/global.d.ts",
+						"src/renderer/hooks/session/useSessionCrud.ts",
+						"src/renderer/hooks/session/useSessionLifecycle.ts",
+						"src/renderer/services/agentCommit.ts",
+						"src/renderer/services/providerTranslation.ts"
+					],
+					"outcome": "Inserted during execution after MCOMP-23-02; landed as 28f3b30e7. Read `Plans/integration-completion/EXECUTION-RULES.md`; work only in the owning repository. Expose `sessions:commitAgent` in the preload sessions API (`src/main/preload/settings.ts`) and its renderer type, and route `createNewSession` and the edit save in `src/renderer/hooks/session/useSessionCrud.ts` through it: await the host, insert the returned canonical record (never the draft), keep the draft and surface the typed refusal (fields, stale) to the caller on deny. Apply the host's lifecycle `removedIds` / `updated` correction for a refused flushed record. Standalone behavior unchanged. Test with explicit doubles in the existing useSessionCrud tests. Required inputs: `MAESTRO-CONTRACT-INPUTS-BUILD`. Limit to 1-3 authored files and fewer than 500 changed lines; never a stub, skipped test or fabricated success. Backlog: M-06.",
+					"backlog": ["M-06"],
+					"requires": ["MAESTRO-CONTRACT-INPUTS-BUILD"],
+					"produces": [],
+					"id": "MCOMP-23-02A"
+				},
+				{
+					"label": "Clone, wizard and worktree creation converge on the host commit",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/__tests__/renderer/components/NewInstanceModal.test.tsx",
+						"src/__tests__/renderer/hooks/useSessionCrud.test.ts",
+						"src/__tests__/renderer/hooks/useWizardHandlers.test.ts",
+						"src/__tests__/renderer/hooks/useWorktreeHandlers.test.ts",
+						"src/__tests__/renderer/utils/worktreeSpawn.test.ts",
+						"src/__tests__/setup.ts",
+						"src/renderer/components/NewInstanceModal/NewInstanceModal.tsx",
+						"src/renderer/components/NewInstanceModal/types.ts",
+						"src/renderer/hooks/session/useSessionCrud.ts",
+						"src/renderer/hooks/wizard/useWizardHandlers.ts",
+						"src/renderer/hooks/worktree/useWorktreeHandlers.ts",
+						"src/renderer/services/agentCommit.ts",
+						"src/renderer/utils/worktreeSpawn.ts"
+					],
+					"outcome": "Inserted during execution after MCOMP-23-02A; landed as 3cadb6a7c. Read `Plans/integration-completion/EXECUTION-RULES.md`; work only in the owning repository. Find every remaining renderer path that inserts a new agent record directly (duplicate/clone via `buildDuplicateAgentInput`, the onboarding and inline wizard creation, worktree agent creation including `create-worktree` and its CLI/bridge handler) and route each through `sessions:commitAgent` with its operation (`clone` for a duplicate, `create` otherwise), inserting the canonical record and surfacing refusals. Retained Electron compatibility paths must not bypass the rule. Test each adapter. Required inputs: `MAESTRO-CONTRACT-INPUTS-BUILD`. Limit to 1-3 authored files and fewer than 500 changed lines; add a further bounded continuation if more adapters remain. Backlog: M-06.",
+					"backlog": ["M-06"],
+					"requires": ["MAESTRO-CONTRACT-INPUTS-BUILD"],
+					"produces": [],
+					"id": "MCOMP-23-02B"
+				},
+				{
+					"label": "Remaining renderer creators converge on the host commit",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/__tests__/cli/commands/duplicate-agent.test.ts",
+						"src/__tests__/main/web-server/handlers/createSessionBackground.test.ts",
+						"src/__tests__/renderer/hooks/remote/useAppRemoteEventListenersCreateSession.test.ts",
+						"src/__tests__/renderer/hooks/useMergeSession.test.ts",
+						"src/__tests__/renderer/hooks/useSendToAgent.test.ts",
+						"src/__tests__/renderer/hooks/useSymphonyContribution.test.ts",
+						"src/cli/commands/duplicate-agent.ts",
+						"src/main/preload/process/sessionCrudRemote.ts",
+						"src/main/web-server/handlers/messageHandlers/sessions.ts",
+						"src/main/web-server/handlers/messageHandlers/types.ts",
+						"src/main/web-server/managers/CallbackRegistry.ts",
+						"src/main/web-server/types.ts",
+						"src/renderer/global.d.ts",
+						"src/renderer/hooks/agent/useMergeSession.ts",
+						"src/renderer/hooks/agent/useSendToAgent.ts",
+						"src/renderer/hooks/remote/useAppRemoteEventListeners.ts",
+						"src/renderer/hooks/symphony/useSymphonyContribution.ts",
+						"src/renderer/services/agentCommit.ts"
+					],
+					"outcome": "Inserted during execution after MCOMP-23-02B; landed as 23d2575e8. Read `Plans/integration-completion/EXECUTION-RULES.md`; work only in the owning repository. Route every remaining renderer path that inserts a NEW agent record directly through `commitNewAgent()` in `src/renderer/services/agentCommit.ts`, inserting the canonical record and surfacing the refusal to the caller: remote/CLI create (`maestro:remoteCreateSession` in `src/renderer/hooks/remote/useAppRemoteEventListeners.ts`, which serves `maestro-cli create-agent` AND `duplicate-agent`; carry the operation so a duplicate is a `clone`, and reply to the CLI with the refusal text instead of null), the new-agent targets of Merge and Send to Agent (`useMergeSession.ts`, `useSendToAgent.ts`), Symphony contribution agents (`useSymphonyContribution.ts`), and the worktree discovery paths in `useWorktreeHandlers.ts` (config-save scan, watcher, visibility scan; a refused discovered worktree is skipped, not retried in a loop). Test each adapter. Required inputs: `MAESTRO-CONTRACT-INPUTS-BUILD`. Limit to 1-3 authored files and fewer than 500 changed lines; add a further bounded continuation if more adapters remain. Backlog: M-06.",
+					"backlog": ["M-06"],
+					"requires": ["MAESTRO-CONTRACT-INPUTS-BUILD"],
+					"produces": [],
+					"id": "MCOMP-23-02C"
+				},
+				{
+					"label": "Cue bundle import commits through the host mutation policy",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/__tests__/main/cue-bundle-service.test.ts",
+						"src/__tests__/main/cue/bundle/cue-bundle-importer.test.ts",
+						"src/main/cue-bundle-service.ts",
+						"src/main/cue/bundle/cue-bundle-importer.ts",
+						"src/main/ipc/handlers/cue-bundle.ts",
+						"src/main/ipc/handlers/persistence.ts"
+					],
+					"outcome": "Inserted during execution after MCOMP-23-02C; landed as 61531da27. Read `Plans/integration-completion/EXECUTION-RULES.md`; work only in the owning repository. `importCueBundle()` (`src/main/cue/bundle/cue-bundle-importer.ts`) builds new agents with `buildNewAgentRecord` and writes them with `writeSessionsStoreFile`, outside `sessions:commitAgent`. Check each imported agent with the same host decision (`decideAgentCommit` / `authorizeManagedAgentCommand`, operation `import`) before the write, refusing the whole import (dry run included) with the per-field reasons when any agent is refused; standalone behavior unchanged. Test with explicit doubles. Required inputs: `MAESTRO-CONTRACT-INPUTS-BUILD`. Limit to 1-3 authored files and fewer than 500 changed lines. Backlog: M-06.",
+					"backlog": ["M-06"],
+					"requires": ["MAESTRO-CONTRACT-INPUTS-BUILD"],
+					"produces": [],
+					"id": "MCOMP-23-02D"
+				},
+				{
+					"label": "Worktree discovery commits through the host mutation policy",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/__tests__/renderer/hooks/useWorktreeHandlers.test.ts",
+						"src/renderer/hooks/worktree/useWorktreeHandlers.ts"
+					],
+					"outcome": "Inserted during execution after MCOMP-23-02D; landed as 53a5555f4. Read `Plans/integration-completion/EXECUTION-RULES.md`; work only in the owning repository. The three discovery paths in `src/renderer/hooks/worktree/useWorktreeHandlers.ts` (the config-save scan that builds `buildWorktreeSession` children and inserts `unmarkedSessions`, the worktree watcher that inserts a newly seen worktree, and the visibility/startup scan that inserts `trulyNew`) still add new agent records directly. Route each discovered child through `commitNewAgent('create', ...)` with `notify: false` (one summary toast per scan, naming the refused worktrees and fields), insert only the canonical records, and remember a refused worktree path for the session so the watcher and the next scan skip it instead of retrying in a loop (cleared when the parent's worktree config changes). Test each path with explicit doubles in the existing useWorktreeHandlers tests. Required inputs: `MAESTRO-CONTRACT-INPUTS-BUILD`. Limit to 1-3 authored files and fewer than 500 changed lines; never a stub, skipped test or fabricated success. Backlog: M-06.",
+					"backlog": ["M-06"],
+					"requires": ["MAESTRO-CONTRACT-INPUTS-BUILD"],
+					"produces": [],
+					"id": "MCOMP-23-02E"
+				},
+				{
 					"label": "Adapt New Agent form to approved choices",
 					"kind": "IMPLEMENT",
 					"targets": [
@@ -5778,6 +5882,21 @@
 					"id": "MCOMP-23-03"
 				},
 				{
+					"label": "Commit the New Agent form's policy revision",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/__tests__/renderer/hooks/useSessionCrud.test.ts",
+						"src/renderer/components/AppModals/AppModals.tsx",
+						"src/renderer/components/AppModals/AppSessionModals.tsx",
+						"src/renderer/hooks/session/useSessionCrud.ts"
+					],
+					"outcome": "Inserted during execution after MCOMP-23-03; landed as 13bdd5ee5. Read `Plans/integration-completion/EXECUTION-RULES.md`; work only in the owning repository. The New Agent form now passes a trailing `policy: { expectedPolicyRevision }` argument to `onCreate`, but `createNewSession` in `src/renderer/hooks/session/useSessionCrud.ts` (and the `onCreateSession` prop types in `AppSessionModals.tsx` / `AppModals.tsx`) ignore it, so the host never sees the revision the form showed and cannot answer `stale`. Accept the trailing argument in `createNewSession`, pass `expectedPolicyRevision` to `commitNewAgent`, and pass `notify: false` when the caller is the form (it shows the refusal inline; other callers keep the toast). Test in `useSessionCrud.test.ts` with an explicit `sessions.commitAgent` double that refuses a mismatched revision as `stale`. Required inputs: `MAESTRO-CONTRACT-INPUTS-BUILD`. Limit to 1-3 authored files and fewer than 500 changed lines; never a stub, skipped test or fabricated success. Backlog: G-09, M-06.",
+					"backlog": ["M-06"],
+					"requires": ["MAESTRO-CONTRACT-INPUTS-BUILD"],
+					"produces": [],
+					"id": "MCOMP-23-03A"
+				},
+				{
 					"label": "Adapt Edit Agent and specialized creation flows",
 					"kind": "IMPLEMENT",
 					"targets": [
@@ -5790,6 +5909,82 @@
 					"requires": [],
 					"produces": [],
 					"id": "MCOMP-23-04"
+				},
+				{
+					"label": "Commit the Edit Agent form's policy revision",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/__tests__/renderer/components/NewInstanceModal/EditAgentModal.test.tsx",
+						"src/__tests__/renderer/hooks/useSessionLifecycle.test.ts",
+						"src/renderer/components/NewInstanceModal/EditAgentModal.tsx",
+						"src/renderer/components/NewInstanceModal/types.ts",
+						"src/renderer/hooks/session/useSessionLifecycle.ts"
+					],
+					"outcome": "Inserted during execution after MCOMP-23-04; landed as 916d97c75. Read `Plans/integration-completion/EXECUTION-RULES.md`; work only in the owning repository. Edit Agent shows the policy revision its approved choices were read from, but `onSave` (`EditAgentModalProps` in `src/renderer/components/NewInstanceModal/types.ts`) has no slot for it and `handleSaveEditAgent` in `src/renderer/hooks/session/useSessionLifecycle.ts` calls `commitAgentRecord('edit', sent)` without `expectedPolicyRevision`, so the host cannot answer `stale` for an edit built from an older policy. Add a trailing `policy?: { expectedPolicyRevision: number | null }` to `onSave`, send it from `EditAgentModal.tsx` (null when standalone), and pass `expectedPolicyRevision` to the edit commit; a caller that passes none sends none. The dialog already shows the refusal inline, so keep the \"Agent settings not saved\" toast only when no policy argument was passed. Test in the useSessionLifecycle tests with an explicit `sessions.commitAgent` host double that refuses a mismatched revision as `stale` (nothing changes in the store) and admits the current one, plus an EditAgentModal assertion that the revision is sent. Required inputs: `MAESTRO-CONTRACT-INPUTS-BUILD`. Limit to 1-3 authored files and fewer than 500 changed lines; never a stub, skipped test or fabricated success. Backlog: G-09, M-06.",
+					"backlog": ["M-06"],
+					"requires": ["MAESTRO-CONTRACT-INPUTS-BUILD"],
+					"produces": [],
+					"id": "MCOMP-23-04A"
+				},
+				{
+					"label": "Symphony agent creation through the approved-choice model",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"Plans/integration-completion/contract-coverage.json",
+						"src/__tests__/renderer/components/AgentCreationDialog.test.tsx",
+						"src/__tests__/renderer/components/SymphonyModal.test.tsx",
+						"src/renderer/components/AgentCreationDialog.tsx",
+						"src/renderer/components/SymphonyModal/SymphonyModal.tsx",
+						"src/renderer/components/SymphonyModal/types.ts"
+					],
+					"outcome": "Inserted during execution after MCOMP-23-04A; landed as 6bf24c787. Read `Plans/integration-completion/EXECUTION-RULES.md`; work only in the owning repository. `src/renderer/components/AgentCreationDialog.tsx` (Start Symphony) shows no approved choices and its agent is committed only after the dialog closes (`SymphonyModal.handleCreateAgent` starts the contribution, then the App's `onStartContribution` handler commits the agent through `commitNewAgent`), so a host refusal arrives as a toast after the draft is gone. Show `ManagedChoicesNotice` in the dialog (nothing new standalone), carry the dialog's `expectedPolicyRevision` through `AgentCreationConfig` and the contribution start into `commitNewAgent` (with `notify: false` there), and return a refusal to the dialog as `{ success: false, error, refusal }` so it keeps its draft, lists the reasons by field and refreshes after `stale`. Search the existing contribution start path first; if the commit cannot move ahead of the contribution start within budget, record why in the run note and insert a further bounded continuation rather than faking an awaited result. Test in the AgentCreationDialog and SymphonyModal tests with an explicit host double. Required inputs: `MAESTRO-CONTRACT-INPUTS-BUILD`. Limit to 1-3 authored files and fewer than 500 changed lines; never a stub, skipped test or fabricated success. Backlog: G-09, M-06.",
+					"backlog": ["M-06"],
+					"requires": ["MAESTRO-CONTRACT-INPUTS-BUILD"],
+					"produces": [],
+					"id": "MCOMP-23-04B"
+				},
+				{
+					"label": "The Symphony contribution handler answers the dialog, and a refused agent leaves no clone",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"Plans/integration-completion/contract-coverage.json",
+						"src/__tests__/renderer/hooks/useSymphonyContribution.test.ts",
+						"src/renderer/components/AppStandaloneModals.tsx",
+						"src/renderer/hooks/symphony/useSymphonyContribution.ts"
+					],
+					"outcome": "Inserted during execution after MCOMP-23-04B; landed as 64a3cfbb6. Read `Plans/integration-completion/EXECUTION-RULES.md`; work only in the owning repository. `SymphonyModal` now awaits `onStartContribution` and returns an `{ ok: false, error, refusal }` outcome (`SymphonyContributionOutcome` in `src/renderer/components/SymphonyModal/types.ts`) to the dialog, but the App's handler `handleStartContribution` in `src/renderer/hooks/symphony/useSymphonyContribution.ts` still calls `commitNewAgent('create', ...)` without `expectedPolicyRevision`, toasts the refusal itself and resolves `void`, and its prop type in `src/renderer/components/AppStandaloneModals.tsx` is `Promise<void>`. Make the handler return `SymphonyContributionOutcome` (`{ ok: true }` after the agent is committed; `{ ok: false, error }` for a missing agent definition or a duplicate; `{ ok: false, error: message, refusal }` for a host refusal), pass `data.expectedPolicyRevision` to `commitNewAgent` with `notify: false` when it is present (a caller without one keeps today's toast), and type the AppStandaloneModals prop with it. Then decide the clone: `useSymphony.startContribution` clones, branches and may fork BEFORE the agent commit, and `symphony:startContribution` registers nothing active, so a refused agent leaves that clone behind with nothing `symphony:cancel` can find. Either commit the agent before the clone (the record needs `contributionId` and `autoRunFolderPath`, which the renderer can supply or an edit commit can fill in afterwards) or remove the clone through an existing held delete; search the Symphony handlers first (`src/main/ipc/handlers/symphony/`), and if neither fits this budget record why and insert a further bounded continuation rather than leaving a silent orphan. Test in the useSymphonyContribution tests with an explicit `sessions.commitAgent` host double (refusal: no agent in the store, no `registerActive`, no batch run, the outcome carries the refusal; a mismatched revision answers `stale`; admit: `{ ok: true }`). Required inputs: `MAESTRO-CONTRACT-INPUTS-BUILD`. Limit to 1-3 authored files and fewer than 500 changed lines; never a stub, skipped test or fabricated success. Backlog: G-09, M-06.",
+					"backlog": ["M-06"],
+					"requires": ["MAESTRO-CONTRACT-INPUTS-BUILD"],
+					"produces": [],
+					"id": "MCOMP-23-04C"
+				},
+				{
+					"label": "Commit the Symphony agent before any repository effect",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/__tests__/renderer/components/SymphonyModal.test.tsx",
+						"src/renderer/components/SymphonyModal/SymphonyModal.tsx",
+						"src/renderer/components/SymphonyModal/types.ts",
+						"src/renderer/hooks/symphony/useSymphonyContribution.ts"
+					],
+					"outcome": "Inserted during execution after MCOMP-23-04C; landed as b6b9e400b. Read `Plans/integration-completion/EXECUTION-RULES.md`; work only in the owning repository. Today `SymphonyModal.handleCreateAgent` (`src/renderer/components/SymphonyModal/SymphonyModal.tsx`) calls `useSymphony.startContribution` (clone, branch, possible fork, documents, possible draft PR) and only then `onStartContribution`, so a refused agent leaves remote and local effects behind. Reorder it: generate the `contributionId` and clone path in the modal (or let the hook accept them), ask the parent to ADMIT the agent first (split `handleStartContribution` in `src/renderer/hooks/symphony/useSymphonyContribution.ts` into an admit step that commits the record with `contributionId`, `cwd` and the policy revision, and a finish step that, after the contribution started, fills `autoRunFolderPath` and the draft PR fields through an `edit` commit (`commitAgentRecord('edit', ...)` / `applyCommittedEdit`), registers the active contribution and starts the run); a refusal returns to the dialog before `startContribution` is ever called. When the start fails after the admit, withdraw the agent through the ordinary agent removal path (check first that a removal is not itself a governed host operation; if it is, use that path) and return the start error. Extend `SymphonyContributionOutcome` / the prop type in `src/renderer/components/SymphonyModal/types.ts` only as needed. Keep the existing toasts for a caller without a revision. Required inputs: `MAESTRO-CONTRACT-INPUTS-BUILD`. Limit to these 3 authored files and fewer than 500 changed lines; tests follow in 23-04E; never a stub, skipped test or fabricated success. Backlog: G-09, M-06.",
+					"backlog": ["M-06"],
+					"requires": ["MAESTRO-CONTRACT-INPUTS-BUILD"],
+					"produces": [],
+					"id": "MCOMP-23-04D"
+				},
+				{
+					"label": "A refused Symphony agent starts no contribution",
+					"kind": "TEST",
+					"targets": [
+						"src/__tests__/renderer/components/SymphonyModal.test.tsx",
+						"src/__tests__/renderer/hooks/useSymphonyContribution.test.ts"
+					],
+					"outcome": "Inserted during execution after MCOMP-23-04D; landed as bbd309515. Read `Plans/integration-completion/EXECUTION-RULES.md`; work only in the owning repository. Extend `src/__tests__/renderer/hooks/useSymphonyContribution.test.ts` and `src/__tests__/renderer/components/SymphonyModal.test.tsx` with explicit `sessions.commitAgent` and `symphony.cloneRepo` / `symphony.startContribution` doubles: a field refusal and a `stale` answer reach the dialog with NO `cloneRepo`, `startContribution`, `registerActive` or batch run; an admit followed by a successful start leaves one agent whose `autoRunFolderPath` and draft PR fields come from the edit commit, registered and running; an admit followed by a failed clone or start leaves no agent and returns the start error to the dialog; a refused finishing edit is reported, not swallowed. Mutation-check the order. Required inputs: `MAESTRO-CONTRACT-INPUTS-BUILD`. Limit to these 1-2 authored files and fewer than 500 changed lines; never a stub, skipped test or fabricated success. Backlog: G-09, M-06.",
+					"backlog": ["M-06"],
+					"requires": ["MAESTRO-CONTRACT-INPUTS-BUILD"],
+					"produces": [],
+					"id": "MCOMP-23-04E"
 				},
 				{
 					"label": "Test native create edit and persistence races",
@@ -5830,7 +6025,7 @@
 			"produces": ["MAESTRO-AGENT-AUTHORING-BUILD"],
 			"id": "MCOMP-23",
 			"path": ".maestro/playbooks/2026-10-29-Maestro-Integration-Completion/MCOMP-23.md",
-			"taskCount": 7,
+			"taskCount": 18,
 			"stage": "S12"
 		},
 		{
@@ -7077,7 +7272,7 @@
 				"PAIR-DIRECT-EVIDENCE"
 			],
 			"nativeInputs": false,
-			"taskCount": 70
+			"taskCount": 81
 		},
 		{
 			"id": "S13",
@@ -7234,8 +7429,8 @@
 			"taskCount": 1
 		}
 	],
-	"taskCount": 432,
-	"taskCounts": { "IMPLEMENT": 317, "TEST": 55, "VERIFY": 60 },
+	"taskCount": 443,
+	"taskCounts": { "IMPLEMENT": 327, "TEST": 56, "VERIFY": 60 },
 	"artifacts": {
 		"MEGA-CONTRACTS-FOUNDATION-BUILD": {
 			"producerDocument": "GCOMP-01",
@@ -8396,8 +8591,19 @@
 			"MCOMP-21-16",
 			"MCOMP-23-01",
 			"MCOMP-23-02",
+			"MCOMP-23-02A",
+			"MCOMP-23-02B",
+			"MCOMP-23-02C",
+			"MCOMP-23-02D",
+			"MCOMP-23-02E",
 			"MCOMP-23-03",
+			"MCOMP-23-03A",
 			"MCOMP-23-04",
+			"MCOMP-23-04A",
+			"MCOMP-23-04B",
+			"MCOMP-23-04C",
+			"MCOMP-23-04D",
+			"MCOMP-23-04E",
 			"MCOMP-23-05",
 			"MCOMP-23-06",
 			"MCOMP-23-07",
