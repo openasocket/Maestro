@@ -1442,8 +1442,8 @@
 		"rules": "the rules of the first selection apply unchanged (no forced reset, checkout loss, history rewrite or signing change; landing only on feature/mega-maestro-v1.1.0-rc by a merge commit; enterprise guards and standalone semantics survive; the desktop host stays Electron)",
 		"tool": ".maestro/playbooks/Working/mcomp-33-00/merge-tool.mjs (the MCOMP-01-03 driver with the second worktree and selection; not in git)",
 		"status": {
-			"state": "landed on the feature branch at 58bad53dc and pushed; MCOMP-33-00L1 and 00L2 done (b8e291c01); continuation MCOMP-33-00L3 open ahead of the re-pin MCOMP-33-00P",
-			"updatedBy": "MCOMP-33-00L2"
+			"state": "landed on the feature branch at 58bad53dc and pushed; MCOMP-33-00L1, 00L2 and 00L3 done (89ffc1280); the re-pin MCOMP-33-00P is next, in the main checkout",
+			"updatedBy": "MCOMP-33-00L3"
 		},
 		"progress": {
 			"MCOMP-33-00R01": {
@@ -3286,6 +3286,30 @@
 				},
 				"notCovered": "A redirect of a hosted request: requestJson uses a bare fetch that follows redirects without a hold (fetchWithTimeout holds each hop). Recorded in contract-coverage.json; candidate for MCOMP-33-03.",
 				"tools": "Working/mcomp-33-00l2: edit.mjs + block.ts, apply-test.mjs + cases.ts, mutate.mjs (mutate.json), dashes.mjs, commit.mjs, record.mjs"
+			},
+			"MCOMP-33-00L3": {
+				"completedAt": "2026-11-09",
+				"completedBy": "Maestro-Claude",
+				"commit": "89ffc1280",
+				"authoredFiles": [
+					"src/cli/commands/pianola-orchestrate.ts",
+					"src/__tests__/cli/commands/pianola-orchestrate.test.ts",
+					"Plans/integration-completion/contract-coverage.json (extensionProposals[4].pianolaSandboxRoute)"
+				],
+				"holds": {
+					"runner": "runSandbox first asks pianolaSandboxManagedRefusal(): on a managed data dir (dataDirHasManagedBinding()) it returns an unobserved observation with error [managed-unavailable] before sandboxRunnerPrefix() is spawned, so validatePianolaVerdict reads unknown (check status error, exit 3) and nothing starts. Covers pianola validate and the orchestrate loop (both reach validateTask). Standalone unchanged.",
+					"route": "Refused, not admitted: the contract names no confined shell-command route (cueShellRouteSupport() reads managed unsupported for the same reason) and maestro-cli holds no authority to admit it; the missing route is recorded in contract-coverage.json, none invented."
+				},
+				"tests": {
+					"suites": [
+						"src/__tests__/cli/commands/pianola-orchestrate.test.ts: refuses the sandbox runner by name on a managed data dir and starts nothing (a real runner that writes a marker: managed = unknown, [managed-unavailable], no marker; standalone = verified, marker written)"
+					],
+					"related": "app-not-running, pianola-orchestrate, pianola-orchestrate-adapter: 3 files 274 passed, 5 skipped",
+					"mutation": "gate removed -> killed (Tests  1 failed | 37 passed | 5 skipped (43))",
+					"typecheck": "tsc -p tsconfig.cli.json and tsconfig.lint.json: 0 errors",
+					"lint": "eslint 0 errors on the source (suite is eslint-ignored); prettier clean"
+				},
+				"tools": "Working/mcomp-33-00l3: edit.mjs, edit-test.mjs, mutate.mjs (mutate.json), commit.mjs, record.mjs"
 			}
 		}
 	}
