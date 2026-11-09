@@ -125,6 +125,46 @@ export function codexRequestIds(request: CodexAppServerRequest): {
 	};
 }
 
+/** The Codex thread and turn a managed spawn is running, as the client itself observed them. */
+export interface CodexManagedSession {
+	threadId: string | null;
+	turnId: string | null;
+}
+
+/**
+ * The session identity a managed server request is decided under, or why it
+ * cannot be decided under this turn at all. A lease covers ONE thread and its
+ * one turn; a request is joined to them, never to identifiers it merely
+ * claims:
+ *
+ * - No thread observed yet: nothing to bind the effect to, refused.
+ * - A request naming a different thread, or a turn other than the one this
+ *   client started, is refused without asking the authority (it would be a
+ *   decision under this lease for someone else's effect).
+ * - A request that names no thread or turn takes the observed ones; a turn
+ *   the request names before the client saw `turn/start` answered is taken
+ *   as stated (it is the only turn of this thread) and still bound exactly.
+ *
+ * Pure; the request id is always the server's own id for this request.
+ */
+export function codexManagedRequestSession(
+	request: CodexAppServerRequest,
+	session: CodexManagedSession
+): { threadId: string; turnId: string | null; requestId: string } | { problem: string } {
+	const ids = codexRequestIds(request);
+	if (!session.threadId)
+		return { problem: 'The managed turn has no Codex thread to bind this request to.' };
+	if (ids.threadId !== null && ids.threadId !== session.threadId)
+		return { problem: 'The request names a Codex thread this managed turn does not own.' };
+	if (ids.turnId !== null && session.turnId !== null && ids.turnId !== session.turnId)
+		return { problem: 'The request names a Codex turn this managed turn did not start.' };
+	return {
+		threadId: session.threadId,
+		turnId: session.turnId ?? ids.turnId,
+		requestId: String(request.id),
+	};
+}
+
 export function answerCodexServerRequest(
 	request: CodexAppServerRequest,
 	policy: CodexServerRequestPolicy

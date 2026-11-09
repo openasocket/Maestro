@@ -60,6 +60,7 @@ import {
 	codexRequestEffect,
 	codexRequestGranted,
 	codexRequestIds,
+	codexManagedRequestSession,
 } from '../../../main/codex-app-server/server-requests';
 import { fakeAdmission, tableEffects } from '../../helpers/managedSpawnPort';
 import type { ManagedEffectDecision } from '../../../shared/maestro-lib/managed/effects';
@@ -1146,7 +1147,9 @@ describe('CodexAppServerSpawner managed server requests', () => {
 	};
 
 	/** A server that starts a turn, asks one command approval, and completes once answered. */
-	function approvalServer(options: { completeOnAnswer?: boolean } = {}) {
+	function approvalServer(
+		options: { completeOnAnswer?: boolean; request?: Record<string, unknown> } = {}
+	) {
 		return new FakeAppServer((msg, s) => {
 			if (msg.method === 'initialize') s.send({ id: msg.id, result: {} });
 			if (msg.method === 'thread/start')
@@ -1154,7 +1157,11 @@ describe('CodexAppServerSpawner managed server requests', () => {
 			if (msg.method === 'turn/start') {
 				s.send({ id: msg.id, result: { turn: { id: turnId, status: 'inProgress' } } });
 				s.send({ method: 'turn/started', params: { threadId, turn: { id: turnId } } });
-				s.send({ id: 0, method: 'item/commandExecution/requestApproval', params: COMMAND_REQUEST });
+				s.send({
+					id: 0,
+					method: 'item/commandExecution/requestApproval',
+					params: options.request ?? COMMAND_REQUEST,
+				});
 			}
 			if (msg.method === 'turn/interrupt') {
 				s.send({ id: msg.id, result: {} });
@@ -1221,6 +1228,38 @@ describe('CodexAppServerSpawner managed server requests', () => {
 			expect(server.responseTo(0)).toMatchObject({ result: { decision: 'decline' } });
 		}
 	);
+
+	it.each([
+		['another thread', { ...COMMAND_REQUEST, threadId: 'thread-other' }],
+		['another turn of the thread', { ...COMMAND_REQUEST, turnId: 'turn-other' }],
+	])(
+		'declines a request naming %s without asking the authority, even when it would allow',
+		async (_name, request) => {
+			const effects = tableEffects(() => ({ decision: 'allow' }));
+			const server = approvalServer({ request });
+			const h = createHarness(server, { effects: () => effects });
+
+			h.spawner.spawn(h.config({ args: BYPASS_ARGS, admission: fakeAdmission() }));
+			expect(await h.exited).toBe(0);
+
+			expect(server.responseTo(0)).toMatchObject({ result: { decision: 'decline' } });
+			expect(effects.asked).toHaveLength(0);
+			expect(h.fallbackToCli).not.toHaveBeenCalled();
+		}
+	);
+
+	it('binds a request that names no thread or turn to the ones this client observed', async () => {
+		const effects = tableEffects(() => ({ decision: 'allow' }));
+		const { threadId: _t, turnId: _u, ...anonymous } = COMMAND_REQUEST;
+		const server = approvalServer({ request: anonymous });
+		const h = createHarness(server, { effects: () => effects });
+
+		h.spawner.spawn(h.config({ admission: fakeAdmission() }));
+		expect(await h.exited).toBe(0);
+
+		expect(server.responseTo(0)).toMatchObject({ result: { decision: 'accept' } });
+		expect(effects.asked[0].binding).toMatchObject({ threadId, turnId, requestId: '0' });
+	});
 
 	it('declines every managed approval when the host has no effect authority at all', async () => {
 		const server = approvalServer();
@@ -1349,6 +1388,33 @@ describe('Codex server request effects (pure)', () => {
 			params.changes[0].patch = '+second';
 			params.network.body = 'two';
 			expect(effect.request).not.toEqual(codexRequestEffect(request(method, params)).request);
+		}
+	});
+
+	it('joins a managed request to the observed thread and turn, never to ids it only claims', () => {
+		const session = { threadId: 't', turnId: 'u' };
+		expect(
+			codexManagedRequestSession(request('m', { threadId: 't', turnId: 'u' }), session)
+		).toEqual({ threadId: 't', turnId: 'u', requestId: '3' });
+		expect(codexManagedRequestSession(request('m', {}), session)).toEqual({
+			threadId: 't',
+			turnId: 'u',
+			requestId: '3',
+		});
+		// turn/start not answered yet: the request's turn is the thread's only one.
+		expect(
+			codexManagedRequestSession(request('m', { threadId: 't', turnId: 'v' }), {
+				threadId: 't',
+				turnId: null,
+			})
+		).toEqual({ threadId: 't', turnId: 'v', requestId: '3' });
+		for (const [params, current] of [
+			[{ threadId: 'x' }, session],
+			[{ threadId: 't', turnId: 'x' }, session],
+			[{}, { threadId: null, turnId: null }],
+			[{ threadId: 't' }, { threadId: null, turnId: null }],
+		] as const) {
+			expect(codexManagedRequestSession(request('m', params), current)).toHaveProperty('problem');
 		}
 	});
 

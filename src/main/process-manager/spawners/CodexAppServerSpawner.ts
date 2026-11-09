@@ -81,8 +81,8 @@ import {
 import { CodexAppServerRpc, CodexRpcRequestError } from '../../codex-app-server/rpc-client';
 import {
 	answerCodexServerRequest,
+	codexManagedRequestSession,
 	codexRequestEffect,
-	codexRequestIds,
 } from '../../codex-app-server/server-requests';
 import {
 	EFFECT_REVOKED,
@@ -579,15 +579,36 @@ class CodexAppServerTurn {
 		// request, decided live. Full access grants nothing here; only `allow`
 		// does, and the request stays pending (never silently granted) until the
 		// authority answers or the turn ends and revokes it.
+		// The request is joined to the thread and turn THIS client observed;
+		// one naming another thread or turn is refused without asking.
+		const session = codexManagedRequestSession(request, {
+			threadId: this.translator.threadId,
+			turnId: this.translator.activeTurnId,
+		});
+		if ('problem' in session) {
+			logger.info(
+				'[CodexAppServerSpawner] Managed request refused: session mismatch',
+				LOG_CONTEXT,
+				{
+					sessionId: this.config.sessionId,
+					method: request.method,
+					leaseId: admission.leaseId,
+					requestId: String(request.id),
+					reason: session.problem,
+				}
+			);
+			this.respondToServerRequest(request, {
+				grantApprovals: false,
+				managed: { decision: 'deny', reason: session.problem },
+			});
+			return;
+		}
 		const effect = codexRequestEffect(request);
-		const ids = codexRequestIds(request);
 		const binding: ManagedEffectBinding = {
 			leaseId: admission.leaseId,
 			actor: admission.actor,
 			provider: this.config.toolType,
-			threadId: ids.threadId ?? this.translator.threadId,
-			turnId: ids.turnId ?? this.translator.activeTurnId,
-			requestId: String(request.id),
+			...session,
 		};
 		const authority =
 			this.ctx.effects() ??
