@@ -2918,6 +2918,35 @@
 					"MCOMP-33-00S10"
 				],
 				"tools": "Working/mcomp-33-00s: static.mjs, suites.mjs (targeted | full | list <cwd> <tag> <list.json>), record.mjs; results *.summary.json"
+			},
+			"MCOMP-33-00S1": {
+				"completedAt": "2026-11-09",
+				"completedBy": "Maestro-Claude",
+				"worktreeCommit": "d7e65cc6f",
+				"worktreeParent": "5db2b18ee",
+				"carries": ["00R31", "00R33"],
+				"verdict": "Suite side wrong, source right. The merged CallbackRegistry.executeCommand and WebServer wiring keep the upstream conditional trailing spread (no trailing slots when nothing trails) and append the HEAD delegation and ticket after the upstream requireDeliveryReceipt and pianolaDispatchId; the WS handlers pass undefined for the upstream-only slots (executeCommand receipt 8 and dispatchId 9, enqueueCommand dispatchCallback 8 and control 9, newAITabWithPrompt control 5, 0-based) and then delegation and dispatchTicket. No HEAD slot was dropped, so no source repair.",
+				"mergedWire": {
+					"executeCommand": "ticket index 11 (was 9), delegation 10 (was 8)",
+					"enqueueCommand": "ticket index 11 (was 9), delegation 10 (was 8)",
+					"newAITabWithPrompt": "ticket index 7 (was 6), delegation 6 (was 5)"
+				},
+				"change": {
+					"src/__tests__/main/web-server/handlers/messageHandlers.test.ts": "22 expectations re-slotted (11 executeCommand 10 to 12 slots, 4 enqueueCommand 10 to 12, 6 newAITabWithPrompt 7 to 8, 1 upstream busy-guard case 8 to 12 now also asserting the minted ticket) and 4 ticket index reads moved.",
+					"src/__tests__/main/web-server/managers/CallbackRegistry.test.ts": "6 bare executeCommand cases assert the 8 upstream slots; 3 new cases pin the receipt and dispatch id pair, the delegation and ticket in slots 11 and 12, and a lone ticket in slot 12."
+				},
+				"test": "Working/mcomp-33-00e/mutate.mjs replacing the delegation/ticket branch of the CallbackRegistry spread with [delegation, dispatchTicket] fails the 2 new slot cases (94 of 96 pass); restored after.",
+				"typeCheck": {
+					"tsconfig.lint.json": {
+						"exit": 0,
+						"errors": 0
+					}
+				},
+				"suites": {
+					"run": "src/__tests__/main/web-server/{managers/CallbackRegistry,handlers/messageHandlers}.test.ts",
+					"result": "590 passed, 0 failed (was 40 failed: 6 + 34)"
+				},
+				"tools": "Working/mcomp-33-00s1 (show.mjs, survey.mjs, reslot.mjs, fix-cr.mjs, commit-wt.mjs, record.mjs)"
 			}
 		}
 	}
