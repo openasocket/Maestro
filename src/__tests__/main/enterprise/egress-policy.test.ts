@@ -87,6 +87,7 @@ describe('EGRESS_CLASSES', () => {
 			'plugin',
 			'user-webhook',
 			'enterprise-endpoint',
+			'lite-peer',
 		]);
 		expect(DEFAULT_EGRESS_CLASS).toBe('content');
 		expect(isEgressClass('github')).toBe(true);

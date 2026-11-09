@@ -4,6 +4,10 @@ import { tailnetDestination } from '../tailnet';
 import { lanDestination } from '../lan';
 import { connectionOrigin } from '../discovery/types';
 import { PAIR_PATH, type PairingTransport, type Route } from './protocol';
+import { holdEgress } from '../../utils/fetchWithTimeout';
+
+/** The egress class a pairing request to a Lite host is held as on a managed host (MCOMP-21-12A). */
+export const LITE_PEER_EGRESS_CLASS = 'lite-peer' as const;
 /** Fixed routes, no redirects or ambient proxy. Direct mode binds its verified private interface. */
 export function pairingTransport(route: Route, send?: typeof request): PairingTransport {
 	const origin = connectionOrigin(route.endpoint);
@@ -16,6 +20,10 @@ export function pairingTransport(route: Route, send?: typeof request): PairingTr
 			if (!/^[a-z]+$/.test(operation)) return Promise.reject(new Error('invalid-operation'));
 			const data = JSON.stringify({ route, payload });
 			if (Buffer.byteLength(data) > 16384) return Promise.reject(new Error('request-too-large'));
+			// Held before the destination is resolved and again after that await, right
+			// before the socket: a revocation in between sends nothing. A refusal
+			// rejects as the [managed-...] EgressDeniedError, never a transport error.
+			holdEgress(origin, LITE_PEER_EGRESS_CLASS);
 			const bound = direct
 				? route.source === 'lan'
 					? await lanDestination(origin, signal).catch(() => {
@@ -29,6 +37,7 @@ export function pairingTransport(route: Route, send?: typeof request): PairingTr
 				(!('peerId' in bound) || bound.peerId !== route.peerId)
 			)
 				throw new Error('Tailscale node identity changed. Refresh and verify the host.');
+			holdEgress(origin, LITE_PEER_EGRESS_CLASS);
 			return new Promise((resolve, reject) => {
 				const req = (send ?? (direct ? httpRequest : request))(
 					origin + PAIR_PATH + '/' + operation,

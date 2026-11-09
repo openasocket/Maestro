@@ -10,8 +10,12 @@
  * reads), `github` (the GitHub API outside `gh`), `plugin` (a plugin's own
  * fetch), `user-webhook` (a URL the person configured to be called) and
  * `enterprise-endpoint` (the management endpoint, which this build reaches
- * over a Unix socket and never through here). A caller that names no class is
- * `content`. Standalone nothing here is consulted and a request leaves as it
+ * over a Unix socket and never through here) and `lite-peer` (a paired Lite
+ * host reached directly over the LAN, the tailnet or a relay: the pairing
+ * transport and the paired relay, whose bytes leave through `node:http` /
+ * `node:https` and are held here with `holdEgress()` before each socket, a
+ * Maestro-local class no published ceiling names yet, MCOMP-21-12A). A caller
+ * that names no class is `content`. Standalone nothing here is consulted and a request leaves as it
  * always has. Under management the request is held, BEFORE any socket opens,
  * against the signed ceiling of the policy revision the host is under: the
  * ceiling admits classes, each to a bounded list of destination patterns (the
@@ -65,6 +69,7 @@ export const EGRESS_CLASSES = [
 	'plugin',
 	'user-webhook',
 	'enterprise-endpoint',
+	'lite-peer',
 ] as const;
 export type EgressClass = (typeof EGRESS_CLASSES)[number];
 
