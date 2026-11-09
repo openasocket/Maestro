@@ -515,15 +515,33 @@ describe("process:spawn under management: the plan's permission decision rides t
 		expect(config.admission).toBeDefined();
 	});
 
-	it("refuses a standard Codex request under a standard ceiling by the bypass flag the desktop's batch arguments carry, naming the flag", async () => {
-		// Codex's batch arguments add `--dangerously-bypass-approvals-and-sandbox`
-		// in every mode but read-only, so on the desktop a "standard" Codex turn
-		// asks for full access on its command line; the plan's flag check holds
-		// it to the ceiling by name rather than trusting the mode's label.
+	it("runs a standard Codex request under a standard ceiling with the provider's bounded sandbox in place of the batch bypass flag", async () => {
+		// Codex's batch arguments carry `--dangerously-bypass-approvals-and-sandbox`;
+		// a standard turn swaps it for the verified bounded combination
+		// (`--sandbox workspace-write`) instead of asking for full access.
 		const port = fakeSpawnPort();
 		port.routeCeiling = () => route('standard');
 		const h = harness(port);
 		const result = await handleProcessSpawn(payload({ permissionMode: 'standard' }), h.deps);
+		expect(result).toEqual({ pid: 4242, success: true });
+		expect(port.asked).toHaveLength(1);
+		const config = spawned(h);
+		expect(config.permission).toEqual({ requested: 'standard', ceiling: 'standard' });
+		expect(config.args).toEqual(expect.arrayContaining(['--sandbox', 'workspace-write']));
+		expect(config.args).not.toContain('--dangerously-bypass-approvals-and-sandbox');
+	});
+
+	it('refuses a standard Codex request under a standard ceiling whose own arguments carry the bypass flag, naming the flag', async () => {
+		// The bounded swap only removes the bypass default the batch arguments
+		// add; a caller's own full-access flag is kept, so the plan's flag check
+		// holds it to the ceiling by name rather than trusting the mode's label.
+		const port = fakeSpawnPort();
+		port.routeCeiling = () => route('standard');
+		const h = harness(port);
+		const result = await handleProcessSpawn(
+			payload({ permissionMode: 'standard', args: ['--dangerously-bypass-approvals-and-sandbox'] }),
+			h.deps
+		);
 		expect(result).toEqual({ success: false, pid: 0 });
 		expect(port.asked).toHaveLength(0);
 		expect(h.spawn).not.toHaveBeenCalled();
