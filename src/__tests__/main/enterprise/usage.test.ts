@@ -738,3 +738,95 @@ describe('actual process usage stream and run settlement (MCOMP-27-01)', () => {
 		expect(sink.record(lifecycleFact())).not.toHaveLength(0);
 	});
 });
+
+// MCOMP-27-04: the actual process stream, settled by the run capture, kept by the real journal.
+describe('actual process usage into the journal (MCOMP-27-04)', () => {
+	const terminal = (overrides: Partial<LifecycleFact>): LifecycleFact => ({
+		surface: 'agent',
+		state: 'completed',
+		at: T0,
+		sessionId: 'agent-1-ai-tab-1',
+		agentId: 'agent-1',
+		tabId: 'tab-1',
+		provider: 'codex',
+		model: 'gpt-5-codex',
+		providerSessionId: null,
+		runId: 'run-a',
+		record: 'ledger',
+		ledgerStatus: 'completed',
+		exitCode: 0,
+		durationMs: 1_000,
+		detail: null,
+		admission: null,
+		...overrides,
+	});
+
+	it('keeps concurrent processes apart, settles each run under its own provider and account, and a replayed exit never adds spend', async () => {
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'maestro-usage-'));
+		dirs.push(dir);
+		let ids = 0;
+		const journal = createEventJournal({
+			file: path.join(dir, 'maestro-managed-events.json'),
+			now: () => T0,
+			newId: () => `j-${++ids}`,
+		});
+		const loaded = await journal.load();
+		if (!loaded.ok) throw new Error(loaded.message);
+		const p = projector();
+		journal.attach(p);
+		const capture = createUsageCapture({
+			events: p,
+			identity: () => enrolled(),
+			accountRef: ({ provider }) => (provider === 'codex' ? 'a'.repeat(64) : null),
+			now: () => T0,
+		});
+		const sink = usageSettlingSink(p, capture);
+		const codexStep = (input: number, output: number) =>
+			total({ inputTokens: input, outputTokens: output, cacheReadInputTokens: 0 });
+		capture.observeStats('agent-1-ai-tab-1', 'codex', codexStep(1_000, 10));
+		capture.observeStats(
+			'agent-2-ai-tab-9',
+			'claude-code',
+			total({ inputTokens: 50, outputTokens: 5, cacheReadInputTokens: 0, totalCostUsd: 0.004 })
+		);
+		capture.observeStats('agent-1-ai-tab-1', 'codex', codexStep(500, 5));
+		expect(capture.size()).toBe(2);
+		sink.record(
+			terminal({
+				sessionId: 'agent-2-ai-tab-9',
+				agentId: 'agent-2',
+				tabId: 'tab-9',
+				provider: 'claude-code',
+				model: 'claude-sonnet-4-5',
+				runId: 'run-b',
+			})
+		);
+		sink.record(terminal({}));
+		sink.record(terminal({}));
+		expect(capture.size()).toBe(0);
+
+		const usage = journal
+			.page({ cursor: null, limit: 50 })
+			.items.filter((e) => e.kind === 'usage') as unknown as ManagedUsageEvent[];
+		const withFigures = usage.filter((e) => e.usage.counts !== null);
+		expect(withFigures.map((e) => e.run.runId)).toEqual(['run-b', 'run-a']);
+		const [claude, codex] = withFigures;
+		expect(claude.usage).toMatchObject({
+			cost: 'reported',
+			costUsd: 0.004,
+			counts: { inputTokens: 50, outputTokens: 5 },
+		});
+		expect(claude.usage.accountRef).toBeNull();
+		expect(codex.usage).toMatchObject({
+			cost: 'priced',
+			counts: { inputTokens: 1_500, outputTokens: 15 },
+			accountRef: 'a'.repeat(64),
+		});
+		expect(codex.usage.costUsd).toBeGreaterThan(0);
+		// Whatever the replay records, it is missingness, never a figure or a zero.
+		for (const replay of usage.filter((e) => e.usage.counts === null))
+			expect(replay.usage).toMatchObject({ provenance: 'unavailable', costUsd: null });
+		expect(new Set(usage.map((e) => e.eventId)).size).toBe(usage.length);
+		await journal.flush();
+	});
+});

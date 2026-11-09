@@ -816,4 +816,155 @@ describe('ceiling refresh and upload through the CONTENT-LOCAL/1 port (MCOMP-27-
 		});
 		expect(ok.capture.facts()[0].upload?.revocation).toBe('confirmed');
 	});
+
+	// MCOMP-27-04: collection privacy over the actual delivery seam.
+	describe('collection privacy, backpressure and retry over the port (MCOMP-27-04)', () => {
+		const withUpload = (upload: boolean, overrides: Partial<ContentCollectionCeiling> = {}) =>
+			ceiling({ ...overrides, permissions: { ...ceiling().permissions, upload } });
+
+		it('metadata-only uploads nothing whatever the ceiling grants; each role is its own grant; without the upload permission nothing leaves', async () => {
+			const meta = port();
+			meta.doc = ceiling({ profile: 'metadata', roles: [...CONTENT_ROLES] });
+			const m = wired(meta, 'metadata');
+			// Under the metadata profile there is no content binding, so no ceiling is even read.
+			expect(await m.source.refresh()).toEqual({ installed: false, reason: 'unavailable' });
+			for (const role of CONTENT_ROLES)
+				expect(m.capture.capture(input({ role }))).toMatchObject({ outcome: 'not-collected' });
+			expect(await m.capture.deliver()).toMatchObject({ uploaded: 0, stopped: null });
+			expect(meta.uploads).toEqual([]);
+
+			// Only the granted role is captured and uploaded; the other is refused before any byte is held.
+			const one = port();
+			one.doc = ceiling({ roles: ['user.prompt'] });
+			const r = wired(one);
+			await r.source.refresh();
+			expect(r.capture.capture(input({ role: 'assistant.output' }))).toMatchObject({
+				outcome: 'not-collected',
+			});
+			r.capture.capture(input());
+			await r.capture.deliver();
+			expect(one.uploads.map((u) => u.role)).toEqual(['user.prompt']);
+			expect(r.capture.status()).toMatchObject({ uploaded: 1, notCollected: 1 });
+
+			// Capture granted, upload not: the record waits, held, and no pass reaches the port.
+			const held = port();
+			held.doc = withUpload(false);
+			const h = wired(held);
+			await h.source.refresh();
+			const out = h.capture.capture(input());
+			expect(out).toMatchObject({ outcome: 'recorded', fact: { completeness: 'pending_upload' } });
+			expect(await h.capture.deliver()).toMatchObject({
+				uploaded: 0,
+				stopped: 'no delivery target',
+			});
+			expect(h.capture.status()).toMatchObject({
+				held: { count: 1 },
+				delivery: { available: false },
+			});
+			expect(held.uploads).toEqual([]);
+		});
+
+		it('bounded backpressure: a pass takes at most its bound oldest first, concurrent calls share it, and the backlog drains pass by pass', async () => {
+			const p = port();
+			p.doc = withUpload(false);
+			const { source, capture: cap, state } = wired(p);
+			await source.refresh();
+			for (let i = 0; i < 5; i++) cap.capture(input({ text: `line ${i}` }));
+			expect(cap.status().held.count).toBe(5);
+			state.revision = 4;
+			p.doc = withUpload(true, { policyRevision: 4 });
+			expect(await source.refresh()).toEqual({ installed: true, policyRevision: 4 });
+			const a = cap.deliver(2);
+			expect(cap.deliver(2)).toBe(a);
+			expect(await a).toMatchObject({ uploaded: 2, stopped: null });
+			expect(p.uploads.map((u) => u.reference.referenceId)).toEqual(['ref-1', 'ref-2']);
+			expect(cap.status().held.count).toBe(3);
+			expect(await cap.deliver(2)).toMatchObject({ uploaded: 2 });
+			expect(await cap.deliver(2)).toMatchObject({ uploaded: 1 });
+			expect(await cap.deliver(2)).toEqual({ uploaded: 0, denied: 0, unsettled: 0, stopped: null });
+			expect(p.uploads.map((u) => Buffer.concat(u.chunks.map((c) => c.bytes)).toString())).toEqual(
+				[0, 1, 2, 3, 4].map((i) => `line ${i}`)
+			);
+			expect(cap.status()).toMatchObject({ uploaded: 5, held: { count: 0, bytes: 0 } });
+		});
+
+		it('retry dedup: a lost answer the endpoint did take settles from status with no resend; a throwing transport is a lost answer; a length mismatch is integrity', async () => {
+			const statuses: string[] = [];
+			let late: (id: string) => Record<string, unknown> = () => ({ outcome: 'absent' });
+			let throwing = true;
+			const p = port({
+				upload: async () => {
+					if (throwing) throw new Error('socket closed');
+					return { outcome: 'unknown' };
+				},
+				status: async (_b, id) => {
+					statuses.push(id);
+					return late(id) as never;
+				},
+			});
+			const { source, capture: cap } = wired(p);
+			await source.refresh();
+			const first = cap.capture(input());
+			expect(await cap.deliver()).toMatchObject({ uploaded: 0, unsettled: 1 });
+			const bytes = Buffer.from(input().text, 'utf8');
+			late = () => ({
+				outcome: 'accepted',
+				uploadReference: 'up-late',
+				acceptedAt: '2026-10-22T12:00:02.000Z',
+				sha256: sha(input().text),
+				byteLength: bytes.byteLength,
+			});
+			expect(await cap.deliver()).toMatchObject({ uploaded: 1, unsettled: 0 });
+			expect(p.uploads).toHaveLength(1);
+			expect(statuses).toEqual(['ref-1']);
+			if (first.outcome !== 'recorded') throw new Error('no');
+			expect(first.fact).toMatchObject({ completeness: 'uploaded', gap: null });
+			expect(first.fact.upload?.uploadReference).toBe('up-late');
+
+			throwing = false;
+			late = () => ({ outcome: 'absent' });
+			const second = cap.capture(input({ text: 'two' }));
+			expect(await cap.deliver()).toMatchObject({ unsettled: 1 });
+			late = () => ({
+				outcome: 'accepted',
+				uploadReference: 'up-short',
+				acceptedAt: '2026-10-22T12:00:03.000Z',
+				sha256: sha('two'),
+				byteLength: 2,
+			});
+			expect(await cap.deliver()).toMatchObject({ uploaded: 0, unsettled: 0 });
+			if (second.outcome !== 'recorded') throw new Error('no');
+			expect(second.fact).toMatchObject({
+				completeness: 'unavailable',
+				gap: 'integrity',
+				upload: null,
+			});
+			expect(p.uploads).toHaveLength(2);
+			expect(cap.status()).toMatchObject({ uploaded: 1, held: { count: 0 } });
+		});
+
+		it('secret canaries: the inventory payload (standing and status), every fact and the redacted upload carry no secret', async () => {
+			const p = port();
+			p.doc = ceiling({ profile: 'redacted' });
+			const { source, capture: cap } = wired(p, 'redacted');
+			await source.refresh();
+			const secret = 'sk-ant-api03-CANARYabcdefghijklmnopqrstuvwxyz0123456789ABCDEFGH';
+			cap.capture(input({ text: `deploy with ${secret} from /Users/canary/project` }));
+			cap.capture(input({ role: 'tool.input', text: `{"token":"${secret}"}`, toolName: 'Bash' }));
+			expect(await cap.deliver()).toMatchObject({ uploaded: 2 });
+			// What `enterprise:inventory` carries for collection, byte for byte.
+			const ipc = JSON.stringify({ standing: source.standing(), capture: cap.status() });
+			const facts = JSON.stringify(cap.facts());
+			for (const leak of [ipc, facts])
+				for (const canary of [secret, 'CANARY', '/Users/canary', 'deploy with', 'token'])
+					expect(leak).not.toContain(canary);
+			const sent = p.uploads.map((u) =>
+				Buffer.concat(u.chunks.map((c) => c.bytes)).toString('utf8')
+			);
+			for (const text of sent) expect(text).not.toContain(secret);
+			const envelopes = JSON.stringify(p.uploads.map(({ chunks: _c, ...rest }) => rest));
+			expect(envelopes).not.toContain('CANARY');
+			expect(envelopes).not.toContain('/Users/canary');
+		});
+	});
 });

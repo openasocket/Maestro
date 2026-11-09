@@ -21,6 +21,8 @@ import {
 	type TelemetryClient,
 	type TelemetryPass,
 } from '../../../main/enterprise/telemetry';
+import { createUsageCapture, usageSettlingSink } from '../../../main/enterprise/usage';
+import { isForbiddenBundleEntry } from '../../../main/cue/bundle/cue-bundle-exporter';
 import type {
 	EndpointInvokeOutcome,
 	LocalEndpointDenialReason,
@@ -524,8 +526,9 @@ describe('telemetry client', () => {
 		const fire = async () => {
 			const next = scheduled.shift();
 			next?.fire();
-			// The pass is asynchronous; let it settle and reschedule.
-			await new Promise((resolve) => setTimeout(resolve, 20));
+			// The pass is asynchronous; wait until it settled and rescheduled (a fixed wait flaked under load).
+			for (let waited = 0; scheduled.length === 0 && waited < 5_000; waited += 5)
+				await new Promise((resolve) => setTimeout(resolve, 5));
 		};
 		await fire();
 		expect(passes.at(-1)).toMatchObject({ outcome: 'sent', taken: 2 });
@@ -984,5 +987,59 @@ describe('telemetry client: backpressure, restart and canaries (MRC-10-07)', () 
 		expect(kept).toContain('room-CANARY');
 		expect(kept).toContain('org-CANARY');
 		expect(j.status()).toMatchObject({ entries: 5, delivery: { received: 5 } });
+	});
+});
+
+// MCOMP-27-04: a streamed process's usage, from the run capture to the wire, once.
+describe('actual process usage on the wire (MCOMP-27-04)', () => {
+	it('a streamed run goes once as the usage family, a lost answer is resent under the same id, and the figures stay in a journal no bundle carries', async () => {
+		const j = await journal();
+		const p = projector();
+		j.attach(p);
+		const usage = createUsageCapture({
+			events: p,
+			identity: () => null,
+			accountRef: () => 'e'.repeat(64),
+			now: () => T0,
+		});
+		const sink = usageSettlingSink(p, usage);
+		const run = { runId: 'run-live', provider: 'codex', model: 'gpt-5-codex' };
+		sink.record(fact(run));
+		usage.observeStats('agent-1-ai-tab-1', 'codex', {
+			inputTokens: 4_321,
+			outputTokens: 12,
+			cacheReadInputTokens: 0,
+			cacheCreationInputTokens: 0,
+			totalCostUsd: 0,
+			contextWindow: 272_000,
+		});
+		sink.record(
+			fact({ ...run, state: 'completed', ledgerStatus: 'completed', exitCode: 0, durationMs: 900 })
+		);
+		const kinds = p.recent().map((e) => e.kind);
+		expect(kinds.filter((k) => k === 'usage')).toHaveLength(1);
+		const settled = p.recent().find((e) => e.kind === 'usage')!;
+
+		const h = hostDouble();
+		h.answers.push((report) => {
+			h.seen.add(report.eventId);
+			return { status: 'unknown', message: 'lost' };
+		});
+		const c = client(j, h.host);
+		expect(await c.pump()).toMatchObject({ outcome: 'interrupted', uncertain: 1 });
+		expect(await c.pump()).toMatchObject({ outcome: 'sent', duplicates: 1 });
+		expect(await c.pump()).toMatchObject({ outcome: 'idle', taken: 0 });
+		const usageReports = h.reports.filter((r) => r.family === 'usage');
+		expect(new Set(usageReports.map((r) => r.eventId))).toEqual(new Set([settled.eventId]));
+		expect(j.status()).toMatchObject({ entries: 3, delivery: { pending: 0, received: 3 } });
+		const wire = JSON.stringify(h.reports);
+		for (const canary of ['4321', 'e'.repeat(64), 'run-live', 'gpt-5-codex', 'agent-1'])
+			expect(wire).not.toContain(canary);
+
+		// The figures and the account stay in the journal file, which a Cue bundle refuses by name.
+		await j.flush();
+		const kept = fs.readFileSync(j.file, 'utf8');
+		expect(kept).toContain('e'.repeat(64));
+		expect(isForbiddenBundleEntry(`data/${path.basename(j.file)}`)).toBe(true);
 	});
 });
