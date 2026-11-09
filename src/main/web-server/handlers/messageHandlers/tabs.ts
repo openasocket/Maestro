@@ -55,14 +55,38 @@ import type { ManagedDelegationContext } from '../../../../shared/maestro-lib/ma
 
 const newTabAdmissions = new WeakMap<MessageHandlerContext['callbacks'], PianolaNewTabDispatch>();
 /**
- * The dispatching transport of a supervised new-tab dispatch, by dispatch id, for the
- * life of its run: the release-phase renderer call carries the ticket and delegation
- * the unmanaged path passes directly (MRC-08-02).
+ * The dispatching transport of a supervised dispatch (new tab or existing tab), by
+ * dispatch id, for the life of its run: the release-phase renderer call carries the
+ * ticket and delegation the unmanaged path passes directly (MRC-08-02, MCOMP-33-00S6).
+ * `released` records that a release handed the ticket on, so an owner whose run never
+ * released (a repeat reading a recorded receipt) withdraws its unused ticket.
  */
 const newTabDispatchBindings = new Map<
 	string,
-	{ delegation: ManagedDelegationContext | undefined; dispatchTicket: string }
+	{ delegation: ManagedDelegationContext | undefined; dispatchTicket: string; released?: boolean }
 >();
+
+/**
+ * Bind a supervised existing-tab dispatch's delegation and ticket for its release
+ * (MCOMP-33-00S6). Returns the settle function the owner calls once the run ends, or
+ * undefined when another message already holds this dispatch id; the caller then
+ * withdraws its own ticket. Settling withdraws the ticket unless a release handed it
+ * on and the run may have started.
+ */
+export function bindSupervisedDispatch(
+	dispatchId: string,
+	delegation: ManagedDelegationContext | undefined,
+	dispatchTicket: string
+): ((started: boolean) => void) | undefined {
+	if (newTabDispatchBindings.has(dispatchId)) return undefined;
+	const binding = { delegation, dispatchTicket, released: false };
+	newTabDispatchBindings.set(dispatchId, binding);
+	return (started) => {
+		if (newTabDispatchBindings.get(dispatchId) === binding)
+			newTabDispatchBindings.delete(dispatchId);
+		if (!started || !binding.released) withdrawDispatchTicket(dispatchTicket);
+	};
+}
 /**
  * Reuse one native admission adapter per callback set. Wire current desktop/store state and
  * main-process queue release; renderer transport responses alone do not establish a durable
@@ -85,7 +109,29 @@ export function newTabAdmission(ctx: MessageHandlerContext): PianolaNewTabDispat
 				if (result.malformed) throw new Error('PianolaRulesUnavailable');
 				return createHash('sha256').update(canonicalJson(result.rules)).digest('hex');
 			},
-			executeCommand: (...args) => ctx.callbacks.executeCommand!(...args),
+			executeCommand: (...args) => {
+				// The existing-tab release names its dispatch id at slot 9; a bound one carries
+				// the delegation and ticket of the transport that asked (MCOMP-33-00S6).
+				const bound = typeof args[9] === 'string' ? newTabDispatchBindings.get(args[9]) : undefined;
+				if (!bound) return ctx.callbacks.executeCommand!(...args);
+				bound.released = true;
+				const [sessionId, command, inputMode, tabId, force, images, background, routing, receipt] =
+					args;
+				return ctx.callbacks.executeCommand!(
+					sessionId,
+					command,
+					inputMode,
+					tabId,
+					force,
+					images,
+					background,
+					routing,
+					receipt,
+					args[9],
+					bound.delegation,
+					bound.dispatchTicket
+				);
+			},
 			enqueueCommand: (...args) => ctx.callbacks.enqueueCommand!(...args),
 			releaseQueueItem: (...args) => {
 				if (!ctx.callbacks.releaseQueueItem)

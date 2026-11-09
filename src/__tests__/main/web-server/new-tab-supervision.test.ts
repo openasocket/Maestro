@@ -14,6 +14,8 @@ import { hostCallerRuns } from '../../../main/agent-run/caller-identity';
 import { pianolaNewTabSpawns } from '../../../main/pianola/pianola-new-tab-dispatch';
 import * as store from '../../../main/pianola/pianola-store-main';
 import { generateUUID } from '../../../shared/uuid';
+import { delegationContextOf } from '../../../shared/maestro-lib/managed/delegation';
+import { claimDispatchTicket } from '../../../main/web-server/auth/transport-actor';
 import type {
 	MessageHandlerContext,
 	WebClient,
@@ -480,7 +482,16 @@ describe('production new-tab handler supervision wiring', () => {
 			dispatchId: generateUUID(),
 		});
 		await vi.waitFor(() => expect(f.send).toHaveBeenCalledOnce());
-		expect(f.newTab.mock.calls[0]).toHaveLength(5);
+		// Merged wire (MCOMP-33-00S6): upstream's five slots, the control slot left
+		// empty, then the integration's delegation and ticket. The forged fields reach
+		// neither control nor delegation; the ticket is the unmanaged path's own,
+		// bound to the target agent and to the transport that sent the message.
+		const call = f.newTab.mock.calls[0] as unknown[];
+		expect(call).toHaveLength(8);
+		expect(call.slice(0, 5)).toEqual(['worker', 'Hello', false, false, undefined]);
+		expect(call[5]).toBeUndefined();
+		expect(call[6]).toBeUndefined();
+		expect(typeof call[7]).toBe('string');
 		expect(f.send.mock.calls[0][1].admission).toBeUndefined();
 	});
 });
@@ -524,6 +535,80 @@ describe('existing-tab production dispatch admission', () => {
 		await vi.waitFor(() => expect(f.send).toHaveBeenCalled());
 		return f.send.mock.calls[0][1];
 	}
+	it('hands the existing-tab release the ticket and delegation its dispatch was admitted with (MCOMP-33-00S6)', async () => {
+		const f = await existingFixture();
+		const native = f.executeCommand.getMockImplementation()!;
+		const tails: unknown[][] = [];
+		f.executeCommand.mockImplementation(async (...args: unknown[]) => {
+			tails.push(args.slice(10));
+			return native(...args);
+		});
+		const delegation = delegationContextOf({
+			identity: {
+				requestId: 'req-s6',
+				idempotencyKey: 'req-s6',
+				attemptId: 'att-s6',
+				runId: 'run-s6',
+				rootRunId: 'run-root',
+				parentRunId: null,
+			},
+			traceId: 'cue:run-root:req-s6:att-s6',
+			workflow: null,
+			delegation: { chain: [{ kind: 'agent', id: 'manager' }], grantRef: null },
+			policyRevision: null,
+		});
+		f.send.mockClear();
+		handleSendCommand(f.ctx, f.client, {
+			type: 'send_command',
+			sessionId: 'worker',
+			command: 'work',
+			inputMode: 'ai',
+			dispatchId: generateUUID(),
+			tabId: 'tab',
+			background: true,
+			delegation,
+		});
+		await vi.waitFor(() => expect(f.send).toHaveBeenCalled());
+		expect(f.send.mock.calls[0][1]).toMatchObject({ success: true, tabId: 'tab' });
+		expect(tails).toHaveLength(1);
+		const [boundDelegation, ticket] = tails[0];
+		expect(boundDelegation).toEqual(delegation);
+		expect(typeof ticket).toBe('string');
+		// Kept for the spawn that claims it, for this tab, once.
+		expect(
+			claimDispatchTicket(ticket as string, { agentId: 'worker', tabId: 'tab' })
+		).toBeDefined();
+		expect(
+			claimDispatchTicket(ticket as string, { agentId: 'worker', tabId: 'tab' })
+		).toBeUndefined();
+	});
+
+	it('releases a repeated existing-tab dispatch once and refuses a malformed delegation before admission (MCOMP-33-00S6)', async () => {
+		const f = await existingFixture();
+		const id = generateUUID();
+		expect(await send(f, id, 'tab')).toMatchObject({ success: true });
+		const first = f.executeCommand.mock.calls[0] as unknown[];
+		expect(first).toHaveLength(12);
+		f.executeCommand.mockClear();
+		// A repeat reads the recorded receipt: no second release, no ticket left behind.
+		expect(await send(f, id, 'tab')).toMatchObject({ success: true });
+		expect(f.executeCommand).not.toHaveBeenCalled();
+		f.send.mockClear();
+		handleSendCommand(f.ctx, f.client, {
+			type: 'send_command',
+			sessionId: 'worker',
+			command: 'work',
+			inputMode: 'ai',
+			dispatchId: generateUUID(),
+			tabId: 'tab',
+			background: true,
+			delegation: { not: 'a context' },
+		});
+		await vi.waitFor(() => expect(f.send).toHaveBeenCalled());
+		expect(f.send.mock.calls[0][1]).toMatchObject({ success: false, code: 'INVALID_OPTIONS' });
+		expect(f.executeCommand).not.toHaveBeenCalled();
+	});
+
 	it.each([undefined, 'tab'])(
 		'binds %s once and captures fast starts after enrollment',
 		async (tab) => {

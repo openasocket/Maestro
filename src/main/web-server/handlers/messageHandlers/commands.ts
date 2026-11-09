@@ -32,7 +32,7 @@ import { updatePianolaDecision } from '../../../../shared/pianola/pianola-decisi
 import { readCallerMessageFields } from '../../../../shared/agentDelegation';
 import { dispatchSupervision } from './dispatchSupervision';
 import { isPianolaScopeId } from '../../../../shared/pianola/pianola-scope';
-import { newTabAdmission } from './tabs';
+import { bindSupervisedDispatch, newTabAdmission } from './tabs';
 import { generateUUID } from '../../../../shared/uuid';
 
 /** Scope delivery never falls back to unguarded send_command on older hosts. */
@@ -299,6 +299,24 @@ export function handleSendCommand(
 			});
 			return;
 		}
+		// The release reaches the renderer over IPC, outside this client's context: bind
+		// the dispatching operation and a ticket for the target tab the way the unmanaged
+		// send does, refusing an invalid context before anything is enrolled (MCOMP-33-00S6).
+		const supervisedDelegation = readDispatchDelegation(message);
+		if (!supervisedDelegation.ok) {
+			reject(supervisedDelegation.error, 'INVALID_OPTIONS');
+			return;
+		}
+		const supervisedTicket = issueDispatchTicket(admission, {
+			agentId: sessionId,
+			tabId: targetTabId,
+		});
+		const settleBinding = bindSupervisedDispatch(
+			dispatchId,
+			supervisedDelegation.delegation,
+			supervisedTicket
+		);
+		if (!settleBinding) withdrawDispatchTicket(supervisedTicket);
 		void newTabAdmission(ctx)
 			.runExisting(
 				client,
@@ -324,6 +342,7 @@ export function handleSendCommand(
 				}
 			)
 			.then(({ receipt, callbackId }) => {
+				settleBinding?.(receipt.outcome === 'accepted' || receipt.outcome === 'unknown');
 				ctx.send(client, {
 					type: 'command_result',
 					success: receipt.outcome === 'accepted',
@@ -344,7 +363,8 @@ export function handleSendCommand(
 						prompt: effectiveCommand,
 					});
 			})
-			.catch((error) =>
+			.catch((error) => {
+				settleBinding?.(false);
 				ctx.send(client, {
 					type: 'command_result',
 					success: false,
@@ -352,8 +372,8 @@ export function handleSendCommand(
 					dispatchId,
 					error: error instanceof Error ? error.message : 'DispatchAdmissionFailed',
 					requestId: message.requestId,
-				})
-			);
+				});
+			});
 		return;
 	}
 
