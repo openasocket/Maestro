@@ -1717,6 +1717,35 @@
 				],
 				"notes": "No guard dropped; no hunk took one whole side.",
 				"unmergedAfter": 71
+			},
+			"MCOMP-33-00R13": {
+				"resolvedAt": "2026-11-09",
+				"resolvedBy": "Maestro-Claude",
+				"files": [
+					"src/main/process-manager/spawners/CodexAppServerSpawner.ts",
+					"src/main/process-manager/spawners/OpencodeServerSpawner.ts"
+				],
+				"method": "Seven hunks (2 + 5) resolved by a shape-asserting script (Working/mcomp-33-00r13/resolve.mjs, both sides read in full, every assert before any write, hunks back-to-front); staged through merge-tool.mjs stage (prettier exit 0, 69 unmerged left). Working/mcomp-33-00r13/check.mjs: 0 syntax diagnostics in both, every export of HEAD and MERGE_HEAD present, no markers, every seam count at least the larger of HEAD and MERGE_HEAD (codexManagedRequestSession 1, codexRequestEffect 1, authority.decide 1+1, revokePendingEffects 6, EFFECT_REVOKED 3+2, ctx.effects 1, managedOpencodeRefusal 2, opencodeManagedScope 2, OpencodeManagedEffectGate 4, gate revokeAll 3, options.effects 1, harnessInteractionBroker 2+3, handlePermissionUpdated 3, handlePermissionReplied 2, steerCodexAppServerTurn 1, fallbackToCli 3+1). git diff HEAD +308 -20, git diff MERGE_HEAD +567 -25. Both suites (CodexAppServerSpawner.test, OpencodeServerSpawner.test, auto-merged) cannot load yet: they reach src/shared/maestro-lib/launch/agent-args.ts, still unmerged (00R21).",
+				"hunks": {
+					"src/main/process-manager/spawners/CodexAppServerSpawner.ts": [
+						"Imports: HEAD's server-requests import (answerCodexServerRequest, codexManagedRequestSession, codexRequestEffect) replaces upstream's single-name one; upstream's steering, interaction-requests, harnessInteractionBroker, CodexAppServerRequest and CodexServerRequestAnswer imports follow; HEAD's managed effects import (EFFECT_REVOKED, effectDigest, unavailableEffectAuthority, ManagedEffectAuthority/Binding/Decision) kept.",
+						"Server request answering: upstream's shape (answerServerRequest(request: CodexAppServerRequest), answerInteractiveServerRequest, respondToServerRequest(request, answer)) with HEAD's managed path in front: an admitted turn goes to answerManagedServerRequest (HEAD's body verbatim: session join, exact effect, lease binding, live authority, pending map, revoke on abort) and never to upstream's Standard-mode interaction broker; unmanaged turns take upstream's Standard interaction, else the sandbox grant table (HEAD's unmanaged branch was the same table, not repeated). HEAD's policy-vocabulary calls go through a new respondWithPolicy(request, policy) that builds the answer with answerCodexServerRequest; revokePendingEffects kept verbatim on it."
+					],
+					"src/main/process-manager/spawners/OpencodeServerSpawner.ts": [
+						"Types import: upstream's fetchWithTimeout import plus HEAD's ProcessSpawnAdmission in the types import.",
+						"Imports and managed section: upstream's nextSpawnGeneration, harnessInteractionBroker and permission-requests imports; the SDK type import keeps HEAD's Permission; then HEAD's managed section verbatim (OpencodeServerSpawnerOptions.effects, managedOpencodeRefusal, opencodeManagedScope, opencodePermissionEffect, OpencodeManagedEffectGate) plus one added gate method refuseUnbound(permissionId, serverUrl): a current-protocol permission (permission.asked) under management is logged unavailable and rejected at once on /permission/{id}/reply (fetchWithTimeout), never left pending and never handed to the broker.",
+						"ensureServer options: both upstream's permissionMode: config.permissionMode and HEAD's managed: opencodeManagedScope(admission) when admitted.",
+						"Setup failure: HEAD's managed refusal (no CLI fallback, nothing started) first, then upstream's Standard-mode refusal (native approval channel required), then the unmanaged CLI fallback.",
+						"Event pump: an admitted turn sends permission.updated to the effect gate only, refuses permission.asked for its session through refuseUnbound, and drops permission.replied; an unmanaged turn takes upstream's broker routing (permission.updated, permission.asked, permission.replied) unchanged."
+					]
+				},
+				"semanticConflictsForC": [
+					"00R14 (OpencodeServerManager) must keep both ensureServer options: a managed scope always starts with OPENCODE_MANAGED_PERMISSION_CONFIG (every tool asks) whatever permissionMode says, and the server cache key must separate the managed scope and upstream's permission mode; the spawner now passes both.",
+					"Managed OpenCode turns refuse OpenCode's current permission protocol (permission.asked) as unavailable (added here, fail closed). Lifting it needs an effect projection for OpencodeCurrentPermissionRequest (permission, patterns, tool.messageID/callID) bound and decided by OpencodeManagedEffectGate and answered on /permission/{id}/reply.",
+					"Codex managed turns keep the effect authority ahead of upstream's Standard interaction broker. Upstream now sets approvalPolicy 'on-request' for Standard mode (HEAD always 'never'), so a managed Standard turn's approvals now reach the authority; 00C should confirm a managed turn's approval policy is the one the lease intends, and that the Standard-mode 'no exec fallback' refusals compose with the managed launch refusal."
+				],
+				"notes": "No guard dropped; no hunk took one whole side.",
+				"unmergedAfter": 69
 			}
 		}
 	}
