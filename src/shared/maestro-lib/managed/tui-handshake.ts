@@ -22,7 +22,10 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 
 import { canonicalJson } from '../../canonicalJson';
+import { STEERING_TOKEN_BYTES, STEERING_TOKEN_ENV_VAR } from '../../chatSteering';
 import type { LaunchPermissionMode } from '../launch/env';
+import type { DispatchLease } from './authority';
+import type { ManagedPrincipalRef } from './types';
 
 export const TUI_HANDSHAKE_ENV_VAR = 'MAESTRO_MANAGED_TUI_ADMISSION';
 export const TUI_HANDSHAKE_VERSION = 1;
@@ -55,7 +58,21 @@ export interface TuiHandshakePayload {
 	allowedFlags: string[];
 	/** The route's permission ceiling, or null for no pin. */
 	permissionMode: LaunchPermissionMode | null;
+	/**
+	 * Who owns the terminal the TUI drives: the producer that admitted it and
+	 * the lease's actor (MCOMP-21-04). Absent on a handshake that names none.
+	 */
+	owner?: TuiTerminalOwner;
 	issuedAt: string;
+}
+
+/** The producers that sign a maestro-p admission. */
+export type TuiTerminalSurface = 'desktop' | 'cli' | 'cue';
+const TUI_TERMINAL_SURFACES: readonly TuiTerminalSurface[] = ['desktop', 'cli', 'cue'];
+
+export interface TuiTerminalOwner {
+	surface: TuiTerminalSurface;
+	actor: ManagedPrincipalRef;
 }
 
 /** The wire shape: the payload and an HMAC-SHA256 over its canonical JSON, hex. */
@@ -172,6 +189,18 @@ export function tuiHandshakeProblems(value: unknown): string[] {
 	}
 	if (!PERMISSION_MODES.includes(p.permissionMode as LaunchPermissionMode | null)) {
 		problems.push('payload.permissionMode is not a launch permission mode or null');
+	}
+	if (p.owner !== undefined) {
+		const owner = p.owner;
+		if (
+			!isRecord(owner) ||
+			!TUI_TERMINAL_SURFACES.includes(owner.surface as TuiTerminalSurface) ||
+			!isRecord(owner.actor) ||
+			!isText(owner.actor.kind) ||
+			!isText(owner.actor.id)
+		) {
+			problems.push('payload.owner is not a terminal owner (surface and actor)');
+		}
 	}
 	if (!isText(p.issuedAt)) problems.push('payload.issuedAt is not a string');
 	return problems;
@@ -291,6 +320,8 @@ export interface BuildTuiHandshakeInput {
 	args: readonly string[];
 	/** The route's permission ceiling, or null for no pin. */
 	permissionMode: LaunchPermissionMode | null;
+	/** The terminal's owner, signed into the payload when given. */
+	owner?: TuiTerminalOwner;
 	digestFile?: (filePath: string) => string;
 	now?: () => Date;
 }
@@ -338,9 +369,135 @@ export function buildTuiHandshake(input: BuildTuiHandshakeInput): TuiHandshakeBu
 		binary: { path: input.binaryPath, digest },
 		allowedFlags: [...allowedFlags],
 		permissionMode: input.permissionMode,
+		...(input.owner ? { owner: input.owner } : {}),
 		issuedAt: (input.now ?? (() => new Date()))().toISOString(),
 	};
 	return { ok: true, encoded: encodeTuiHandshake(payload, input.key), payload };
+}
+
+// ── A headless producer's stamp (MCOMP-21-04) ─────────────────────────────────
+
+/**
+ * The names a host stamps on a maestro-p launch after its admission: the
+ * signed handshake, the run's steering token, and the data directory the TUI
+ * resolves the key from. They name the lease, so they are never part of the
+ * spec the lease digests; `startTurn` adds them to the spawn after its gate
+ * (`StartTurnOptions.admission.hostEnv`), and accepts no other name there.
+ */
+export const TUI_STAMPED_ENV_NAMES: readonly string[] = [
+	TUI_HANDSHAKE_ENV_VAR,
+	STEERING_TOKEN_ENV_VAR,
+	'MAESTRO_USER_DATA',
+];
+
+/**
+ * `env` without a handshake or a steering token it inherited. A TUI under a
+ * headless producer acts only on the admission this producer signs for this
+ * run: one another host (or an earlier run) left in the shell would verify
+ * against the same data directory's key and replay that run's admission, and
+ * an inherited steering token would let whoever holds it type into this
+ * terminal. Applied on every local maestro-p launch, managed or not.
+ */
+export function withoutInheritedTuiAdmission(
+	env: Readonly<Record<string, string | undefined>>
+): Record<string, string | undefined> {
+	const { [TUI_HANDSHAKE_ENV_VAR]: _handshake, [STEERING_TOKEN_ENV_VAR]: _token, ...rest } = env;
+	return rest;
+}
+
+/**
+ * The claude binary and the arguments after the maestro-p script, when
+ * `command` + `args` is a local maestro-p launch (the script as the command,
+ * or as the first argument of a Node host); null for any other launch.
+ * `MAESTRO_CLAUDE_BIN` is read from the env the launch will spawn with.
+ */
+export function tuiLaunchOf(
+	command: string,
+	args: readonly string[],
+	env: Readonly<Record<string, string | undefined>>,
+	isMaestroP: (binaryPath: string | undefined) => boolean
+): { claudeBinPath: string | null; args: string[] } | null {
+	const [first, ...rest] = args;
+	const launchArgs = isMaestroP(first) ? rest : isMaestroP(command) ? [...args] : null;
+	if (!launchArgs) return null;
+	return { claudeBinPath: env.MAESTRO_CLAUDE_BIN?.trim() || null, args: launchArgs };
+}
+
+export interface TuiAdmissionStampInput {
+	/** The host's data directory: where the key is kept and where the TUI is told to look. */
+	dataDir: string | null | undefined;
+	/** The lease the producer's admission returned, and the request id it was admitted under. */
+	lease: Pick<
+		DispatchLease,
+		'leaseId' | 'authorityId' | 'attemptId' | 'runId' | 'policyRevision' | 'actor'
+	>;
+	requestId: string;
+	/** The launch as `tuiLaunchOf` read it. */
+	launch: { claudeBinPath: string | null; args: readonly string[] };
+	permissionMode: LaunchPermissionMode | null;
+	/** Which producer owns the terminal the TUI drives. */
+	surface: TuiTerminalSurface;
+	digestFile?: (filePath: string) => string;
+	now?: () => Date;
+	mintSteeringToken?: () => string;
+}
+
+export type TuiAdmissionStamp =
+	| { ok: true; env: Record<string, string>; payload: TuiHandshakePayload; steeringToken: string }
+	| { ok: false; reason: string };
+
+/**
+ * What a headless producer (the CLI, standalone Cue) stamps on one admitted
+ * maestro-p launch: the handshake signed with its own data directory's key,
+ * naming the lease's run, the approved binary's digest, the permission
+ * ceiling and the terminal's owner (the producer and the lease's actor); a
+ * fresh steering token for the run; and the data directory restated so the
+ * TUI checks against this key and no other. A refusal is the launch's
+ * refusal: a managed producer that cannot sign never hands the TUI a launch
+ * with no handshake, which the TUI would read as an unmanaged host.
+ */
+export function stampTuiAdmission(input: TuiAdmissionStampInput): TuiAdmissionStamp {
+	const refuse = (reason: string): TuiAdmissionStamp => ({ ok: false, reason });
+	if (!input.dataDir)
+		return refuse('this host names no data directory to keep the handshake key in');
+	if (!input.launch.claudeBinPath) return refuse('the launch names no MAESTRO_CLAUDE_BIN');
+	let key: string;
+	try {
+		key = loadOrCreateTuiHandshakeKey(input.dataDir);
+	} catch (error) {
+		return refuse(`the handshake key could not be loaded: ${(error as Error).message}`);
+	}
+	const { lease } = input;
+	const built = buildTuiHandshake({
+		key,
+		run: {
+			leaseId: lease.leaseId,
+			authorityId: lease.authorityId,
+			attemptId: lease.attemptId,
+			requestId: input.requestId,
+			runId: lease.runId,
+			policyRevision: lease.policyRevision,
+		},
+		owner: { surface: input.surface, actor: { kind: lease.actor.kind, id: lease.actor.id } },
+		binaryPath: input.launch.claudeBinPath,
+		args: input.launch.args,
+		permissionMode: input.permissionMode,
+		digestFile: input.digestFile,
+		now: input.now,
+	});
+	if (!built.ok) return refuse(built.reason);
+	const steeringToken =
+		input.mintSteeringToken?.() ?? randomBytes(STEERING_TOKEN_BYTES).toString('hex');
+	return {
+		ok: true,
+		env: {
+			[TUI_HANDSHAKE_ENV_VAR]: built.encoded,
+			[STEERING_TOKEN_ENV_VAR]: steeringToken,
+			MAESTRO_USER_DATA: input.dataDir,
+		},
+		payload: built.payload,
+		steeringToken,
+	};
 }
 
 // ── The TUI side ─────────────────────────────────────────────────────────────

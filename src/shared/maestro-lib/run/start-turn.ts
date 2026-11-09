@@ -19,6 +19,7 @@ import {
 	type HostAuthority,
 } from '../managed/authority';
 import type { ManagedDenialCode } from '../managed/types';
+import { TUI_STAMPED_ENV_NAMES } from '../managed/tui-handshake';
 
 /**
  * A sensible cap on one buffered stdout line, for a caller that wants one.
@@ -348,7 +349,19 @@ export interface StartTurnOptions {
 	 * managed standing (`installTurnSinkStanding`) the omission is refused
 	 * before any effect, never run plain.
 	 */
-	admission?: { gate: DispatchAdmission; attribution: DispatchAttribution };
+	admission?: {
+		gate: DispatchAdmission;
+		attribution: DispatchAttribution;
+		/**
+		 * What the host stamps on the spawn after the gate admits it
+		 * (MCOMP-21-04): facts that name the lease (a maestro-p launch's signed
+		 * handshake, its steering token, the data directory the TUI reads the
+		 * key from), so they cannot be in the spec the lease digests. Only
+		 * `TUI_STAMPED_ENV_NAMES` may be stamped; any other name is refused
+		 * before the gate, so this is never a way around the snapshot.
+		 */
+		hostEnv?: Readonly<Record<string, string>>;
+	};
 	/**
 	 * The provider whose parser reads the stream. Each turn gets its OWN parser
 	 * instance: parsers keep per-stream state, and two turns of one provider
@@ -498,17 +511,31 @@ export function startTurn(
 	// The admission sees exactly what spawn sees: the snapshot is built from
 	// the final spec, here, and nothing runs between the verdict and the spawn.
 	const gate = options.admission?.gate;
+	const hostEnv = options.admission?.hostEnv;
+	if (hostEnv) {
+		const unstampable = Object.keys(hostEnv).filter(
+			(name) => !TUI_STAMPED_ENV_NAMES.includes(name)
+		);
+		if (unstampable.length > 0) {
+			throw new DispatchRefusedError(
+				'denied',
+				'policy-denied',
+				`The host may stamp only the maestro-p admission after its gate, not ${unstampable.join(', ')}; nothing was started.`
+			);
+		}
+	}
 	if (options.admission) {
 		const { attribution } = options.admission;
 		const verdict = options.admission.gate.admit(buildDispatchSnapshot(final, attribution));
 		if (!verdict.ok) throw new DispatchRefusedError(verdict.state, verdict.code, verdict.message);
 	}
+	const spawnEnv = hostEnv ? { ...final.env, ...hostEnv } : final.env;
 
 	let child: ChildProcess;
 	try {
 		child = spawn(final.command, final.args, {
 			cwd: final.cwd,
-			env: final.env,
+			env: spawnEnv,
 			shell: final.shell ?? false,
 			stdio: [stdinMode, 'pipe', 'pipe'],
 		});

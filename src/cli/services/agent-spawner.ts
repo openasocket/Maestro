@@ -49,6 +49,7 @@ import {
 import {
 	buildDispatchSnapshot,
 	type DispatchAttribution,
+	type DispatchLease,
 } from '../../shared/maestro-lib/managed/authority';
 import {
 	createHeadlessSpawnAuthority,
@@ -105,7 +106,13 @@ import {
 	createStandaloneClaudeSpawnCoreDeps,
 	type ClaudeSpawnCoreDeps,
 	type PackagedAppHost,
+	isMaestroPBinaryPath,
 } from '../../shared/maestro-lib/launch/interactive-mode';
+import {
+	stampTuiAdmission,
+	tuiLaunchOf,
+	withoutInheritedTuiAdmission,
+} from '../../shared/maestro-lib/managed/tui-handshake';
 
 // Types from the SSH wrapper are imported type-only so no runtime module load
 // happens for non-SSH sessions - the SSH chain pulls in execFile/which helpers
@@ -914,7 +921,12 @@ export function resetCliSpawnAuthority(): void {
 }
 
 type CliAdmission =
-	| { ok: true; admission: StartTurnOptions['admission'] }
+	| {
+			ok: true;
+			admission: StartTurnOptions['admission'];
+			/** The lease and the request it was admitted under; absent on a standalone host. */
+			granted?: { lease: DispatchLease; requestId: string };
+	  }
 	| { ok: false; result: AgentResult };
 
 function managedRefusal(
@@ -1006,7 +1018,46 @@ async function admitCliLaunch(
 	return {
 		ok: true,
 		admission: { gate: leaseAdmission(authority.authority, admitted.lease), attribution },
+		granted: { lease: admitted.lease, requestId },
 	};
+}
+
+/**
+ * The admission of a local maestro-p launch with its TUI stamp (MCOMP-21-04):
+ * the handshake this host signs for the lease just granted, a fresh steering
+ * token and the data directory the TUI checks the key in, handed to
+ * `startTurn` to add after its gate. A standalone launch, and any launch that
+ * is not maestro-p, comes back as it was. A managed one this host cannot sign
+ * is refused by name: a TUI handed no handshake would run as unmanaged.
+ */
+function withCliTuiStamp(
+	admitted: Extract<CliAdmission, { ok: true }>,
+	spec: TurnProcessSpec,
+	permissionMode: LaunchPermissionMode | null
+): CliAdmission {
+	if (!admitted.admission || !admitted.granted) return admitted;
+	const launch = tuiLaunchOf(spec.command, spec.args, spec.env, isMaestroPBinaryPath);
+	if (!launch) return admitted;
+	const stamp = stampTuiAdmission({
+		dataDir: resolveUserDataDir(),
+		lease: admitted.granted.lease,
+		requestId: admitted.granted.requestId,
+		launch,
+		permissionMode,
+		surface: 'cli',
+	});
+	if (!stamp.ok) {
+		admitted.granted.lease.release({ outcome: 'spawn-failed', message: stamp.reason });
+		return {
+			ok: false,
+			result: managedRefusal(
+				'denied',
+				'policy-denied',
+				`This host runs under management and the maestro-p admission handshake could not be built: ${stamp.reason}. Nothing was started.`
+			),
+		};
+	}
+	return { ...admitted, admission: { ...admitted.admission, hostEnv: stamp.env } };
 }
 
 /** The attribution a CLI launch is admitted with: the provider, the operation and the target. */
@@ -1243,7 +1294,10 @@ async function spawnClaudeAgent(
 		spawnArgs = applied.args;
 		// Merge what maestro-p adds (MAESTRO_CLAUDE_BIN, ELECTRON_RUN_AS_NODE,
 		// NODE_PATH) over the planned env, which already holds the user's vars.
-		spawnEnv = { ...spawnEnv, ...(applied.customEnvVars ?? {}) };
+		// A handshake or steering token the shell left behind never reaches the
+		// TUI (MCOMP-21-04): it acts only on what this launch stamps after its
+		// admission below, or, standalone, on none.
+		spawnEnv = withoutInheritedTuiAdmission({ ...spawnEnv, ...(applied.customEnvVars ?? {}) });
 	}
 
 	// Claude reports its cost and per-model usage as running SESSION totals; the
@@ -1421,7 +1475,7 @@ async function spawnClaudeAgent(
 		env: spawnEnv,
 		stdin: sshStdinScript || plan.stdin,
 	};
-	const admitted = await admitCliLaunch(
+	const admittedLaunch = await admitCliLaunch(
 		overrides.managed,
 		spec,
 		cliAttribution('claude-code', {
@@ -1430,6 +1484,9 @@ async function spawnClaudeAgent(
 			model: overrides.customModel,
 		})
 	);
+	const admitted = admittedLaunch.ok
+		? withCliTuiStamp(admittedLaunch, spec, plan.permission.ceiling)
+		: admittedLaunch;
 	if (!admitted.ok) return admitted.result;
 	let turn: ReturnType<typeof startTurn>;
 	try {
