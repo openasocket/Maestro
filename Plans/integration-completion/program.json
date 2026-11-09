@@ -6199,6 +6199,18 @@
 					"id": "MCOMP-25-04A"
 				},
 				{
+					"label": "hold the managed Codex spawn test to the bounded standard mode",
+					"kind": "TEST",
+					"targets": [
+						"src/__tests__/main/ipc/handlers/process/handle-spawn.managed.test.ts"
+					],
+					"outcome": "Inserted during execution after MCOMP-25-04A; landed as 3541f561c. The 25-05 source run found one failing case, `handle-spawn.managed.test.ts` \"refuses a standard Codex request under a standard ceiling by the bypass flag the desktop's batch arguments carry\": since 5b21fa706 (MCOMP-21-13) a standard Codex batch turn runs with `--sandbox workspace-write` in place of the bypass flag, so the expectation was stale, not a regression. Replace it with the current behavior and keep the flag check by name. Bounded: 1 test file, under 50 lines. Backlog: M-06.",
+					"backlog": ["M-06"],
+					"requires": ["MAESTRO-CONTRACT-INPUTS-BUILD"],
+					"produces": [],
+					"id": "MCOMP-25-05A"
+				},
+				{
 					"label": "Verify and publish implementation inputs",
 					"kind": "VERIFY",
 					"targets": ["Plans/integration-completion/evidence/interactive-build.json"],
@@ -6213,7 +6225,7 @@
 			"produces": ["MAESTRO-DESKTOP-APP-BUILD"],
 			"id": "MCOMP-25",
 			"path": ".maestro/playbooks/2026-10-29-Maestro-Integration-Completion/MCOMP-25.md",
-			"taskCount": 9,
+			"taskCount": 10,
 			"stage": "S12"
 		},
 		{
@@ -7354,7 +7366,7 @@
 				"PAIR-DIRECT-EVIDENCE"
 			],
 			"nativeInputs": false,
-			"taskCount": 85
+			"taskCount": 86
 		},
 		{
 			"id": "S13",
@@ -7511,8 +7523,8 @@
 			"taskCount": 1
 		}
 	],
-	"taskCount": 447,
-	"taskCounts": { "IMPLEMENT": 331, "TEST": 56, "VERIFY": 60 },
+	"taskCount": 448,
+	"taskCounts": { "IMPLEMENT": 331, "TEST": 57, "VERIFY": 60 },
 	"artifacts": {
 		"MEGA-CONTRACTS-FOUNDATION-BUILD": {
 			"producerDocument": "GCOMP-01",
@@ -8698,6 +8710,7 @@
 			"MCOMP-25-03",
 			"MCOMP-25-04",
 			"MCOMP-25-04A",
+			"MCOMP-25-05A",
 			"MCOMP-25-05",
 			"MCOMP-26-01"
 		]
