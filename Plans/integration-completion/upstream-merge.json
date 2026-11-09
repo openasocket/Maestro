@@ -2710,6 +2710,33 @@
 					"run": "src/__tests__/main/pianola/memory-{concurrency,attribution,transport,cli-config,recall,eligibility,cli,provenance}.test.ts",
 					"result": "134 passed, 0 failed (memory-transport 31 passed, 3 Windows-only skipped)"
 				}
+			},
+			"MCOMP-33-00H1": {
+				"completedAt": "2026-11-09",
+				"completedBy": "Maestro-Claude",
+				"worktreeCommit": "5db2b18ee",
+				"worktreeParent": "d58e80e4b",
+				"change": "pianola-lifecycle.ts passes deps.spawnAuthority as the fourth initializePianolaMemory argument, the same lazily read authority the PianolaSupervisor holds as managedPort, so the memory CLI backfill child is admitted on a managed desktop instead of reading a null port.",
+				"files": [
+					"src/main/pianola/pianola-lifecycle.ts",
+					"src/__tests__/main/pianola/pianola-lifecycle.managed.test.ts"
+				],
+				"test": "pianola-lifecycle.managed.test.ts, 3 cases: memory host and supervisor receive the same authority; it is read lazily (a later enrollment governs); a standalone host passes none. Working/mcomp-33-00e/mutate.mjs: dropping the argument fails 2 of 3; all pass with the repair.",
+				"typeCheck": {
+					"tsconfig.lint.json": {
+						"exit": 0,
+						"errors": 0
+					},
+					"tsconfig.main.json": {
+						"exit": 0,
+						"errors": 0
+					}
+				},
+				"suites": {
+					"run": "src/__tests__/main/pianola/{pianola-lifecycle.managed,memory-eligibility}.test.ts",
+					"result": "11 passed, 0 failed",
+					"preExisting": "src/__tests__/integration/pianola-native-acceptance.integration.test.ts fails to load with and without the change (child_process mock has no default export, reached through start-turn.ts via host-adapter.ts); left for MCOMP-33-00S."
+				}
 			}
 		}
 	}
