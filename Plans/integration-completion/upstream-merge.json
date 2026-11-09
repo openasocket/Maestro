@@ -2474,6 +2474,61 @@
 				"outsideHunks": "None. The shell ceiling on configured notification commands (holdNotificationCommand, main process) is not in these files and is unchanged; on a remote client the commands are not configurable at all, so the remote branch needs no lock.",
 				"semanticFor00C": [],
 				"tests": "NotificationsPanel.test, remoteOwnership.test, ManagedSettingSection.test, searchableSettings.test and the GeneralTab folder: 7 files, 302/302."
+			},
+			"MCOMP-33-00C": {
+				"committedAt": "2026-11-09",
+				"committedBy": "Maestro-Claude",
+				"mergeCommit": "b01db5c0836d1c2252938ff4eb160de341992416",
+				"mergeParents": [
+					"40ec42bab70fa96d49a5749aa9f9e648cc9b5d4a",
+					"919d28a662f14e442389c874fef7b7efba116037"
+				],
+				"repairCommit": "f5367a7f7",
+				"repairs": {
+					"src/main/web-server/handlers/messageHandlers/queue.ts": "enqueueCommand pads upstream dispatchCallback and control with undefined ahead of delegation and dispatchTicket (closes the 00R32 note).",
+					"src/main/index.ts": "duplicate SshRemoteConfig type import (both sides added one) removed.",
+					"src/main/ipc/handlers/agents.ts": "unused buildSshCommand import dropped: upstream moved the SSH model discovery into src/main/agents/model-discovery.ts (00R10)."
+				},
+				"typeCheckFirstPass": {
+					"tsconfig.lint.json": 36,
+					"tsconfig.main.json": 49,
+					"tsconfig.cli.json": 43
+				},
+				"typeCheck": {
+					"tsconfig.lint.json": {
+						"exit": 2,
+						"errors": 35,
+						"mergeIntroducedErrors": 0,
+						"missingDependencyErrors": 35
+					},
+					"tsconfig.main.json": {
+						"exit": 2,
+						"errors": 45,
+						"mergeIntroducedErrors": 0,
+						"missingDependencyErrors": 45
+					},
+					"tsconfig.cli.json": {
+						"exit": 2,
+						"errors": 42,
+						"mergeIntroducedErrors": 0,
+						"missingDependencyErrors": 42
+					}
+				},
+				"typeCheckNote": "Every remaining error is TS2307 for an upstream dependency absent from the symlinked node_modules (@agentclientprotocol/sdk ^2.0.2, @anthropic-ai/claude-agent-sdk ^0.3.310, @github/copilot-sdk ^1.0.26, sqlite-vec 0.1.6, @huggingface/transformers 3.8.1) or an implicit any / unknown cascading from those untyped imports. No error outside those importers. Continuation MCOMP-33-00D installs them in the worktree and takes the type check to zero.",
+				"semanticCarries": {
+					"settledHere": ["00R32 queue.ts enqueueCommand padding"],
+					"toMCOMP3300E": [
+						"00R09 restoreManagedSyncPath lacks the upstream install-directory refusal",
+						"00R12/00R15 fail-closed refusal of a managed lease with harnessControlMode native and of native CLI control off a standalone authority: lift only after buildSpawnRequestSnapshot binds nativeAcpArgs, nativeRpcArgs, appendSystemPrompt, permissionMode, harnessControlMode",
+						"00R23 queue release start (pianola-queue-routing, WebServer.startQueueHandoffFromMain) must forward the actor",
+						"00R27 Pianola memory backfill (memory-transport.ts execFileNoThrow) is unadmitted"
+					],
+					"toMCOMP3300S": [
+						"00R31 CallbackRegistry.test six executeCommand cases want the merged wire",
+						"00R33 messageHandlers.test 28 HEAD fixed-slot cases, messageHandlers.managed.test 8 cases need readyState OPEN, pianola-new-tab-dispatch runExisting passes no ticket/delegation",
+						"00R34 eight HEAD-wire preload cases need the merged order"
+					]
+				}
 			}
 		}
 	}
