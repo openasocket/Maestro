@@ -652,3 +652,119 @@ describe('holdDeleteEffect and the actor labels (MRC2-04-09A, MRC2-04-12)', () =
 		});
 	});
 });
+
+describe('a confirmed effect is held again against the ceiling current at the answer (MCOMP-19-06A)', () => {
+	const operator: LocalEffectActor = { kind: 'transport', actor: { peer: 'in-process' } };
+	let work: string;
+	let file: string;
+	beforeEach(() => {
+		work = fs.mkdtempSync(path.join(os.tmpdir(), 'maestro-local-effects-rehold-'));
+		file = path.join(work, 'a.txt');
+		fs.writeFileSync(file, 'a');
+		vi.mocked(logger.warn).mockClear();
+	});
+	afterEach(() => fs.rmSync(work, { recursive: true, force: true }));
+
+	/** The sink: hold the delete, then remove the file only when the hold resolves. */
+	async function deleteSink(source: ReturnType<typeof createLocalEffectsPolicySource>) {
+		await holdDeleteEffect(source, [file], operator, 'FS');
+		fs.rmSync(file);
+	}
+
+	/** An enrolled source whose confirmer runs `during` while the prompt is open, then confirms. */
+	function sourceConfirming(
+		during: (s: ReturnType<typeof createLocalEffectsPolicySource>) => void
+	) {
+		let source: ReturnType<typeof createLocalEffectsPolicySource>;
+		const confirm = vi.fn<LocalEffectConfirmer>(async () => {
+			during(source);
+			return 'confirmed';
+		});
+		source = createLocalEffectsPolicySource({
+			identity: { read: () => enrolled },
+			policy: () => ({ appliedRevision: 3 }),
+			confirm,
+		});
+		expect(source.install(document())).toMatchObject({ installed: true });
+		return { source, confirm };
+	}
+
+	it('a ceiling revoked while the prompt is open refuses unavailable and leaves the file', async () => {
+		const { source, confirm } = sourceConfirming((s) => s.clear());
+		await expect(deleteSink(source)).rejects.toMatchObject({
+			name: 'LocalEffectRefusedError',
+			code: 'unavailable',
+			message: expect.stringMatching(/^\[managed-unavailable\] after the operator confirmed, /),
+			receipt: { policyRevision: 3, effect: 'delete', target: file, outcome: 'unavailable' },
+		});
+		expect(confirm).toHaveBeenCalledTimes(1);
+		expect(fs.existsSync(file)).toBe(true);
+		expect(logger.warn).toHaveBeenCalledTimes(1);
+	});
+
+	it('a class narrowed to deny while the prompt is open refuses denied and leaves the file', async () => {
+		const { source } = sourceConfirming((s) => {
+			expect(
+				s.install(document({ classes: [{ class: 'destructive', verdict: 'deny' }] }))
+			).toMatchObject({ installed: true });
+		});
+		await expect(deleteSink(source)).rejects.toMatchObject({
+			code: 'denied',
+			receipt: { class: 'destructive', outcome: 'denied' },
+		});
+		expect(fs.existsSync(file)).toBe(true);
+	});
+
+	it('a ceiling moved to another revision while the prompt is open refuses unavailable', async () => {
+		const { source } = sourceConfirming((s) => {
+			expect(s.install(document({ policyRevision: 4 }))).toMatchObject({ installed: true });
+		});
+		await expect(
+			holdLocalEffect(source, { effect: 'trash', actor: operator, target: file })
+		).resolves.toMatchObject({ allowed: false, code: 'unavailable' });
+		expect(fs.existsSync(file)).toBe(true);
+	});
+
+	it('an unchanged ceiling admits the answer once (outcome confirmed) and the file is removed', async () => {
+		const { source, confirm } = sourceConfirming(() => undefined);
+		await expect(
+			holdLocalEffect(source, { effect: 'delete', actor: operator, target: file })
+		).resolves.toEqual({
+			allowed: true,
+			managed: {
+				policyRevision: 3,
+				class: 'destructive',
+				effect: 'delete',
+				actor: 'the operator',
+				target: file,
+				count: 1,
+				outcome: 'confirmed',
+			},
+		});
+		await expect(deleteSink(source)).resolves.toBeUndefined();
+		expect(confirm).toHaveBeenCalledTimes(2);
+		expect(fs.existsSync(file)).toBe(false);
+		expect(logger.warn).not.toHaveBeenCalled();
+	});
+
+	it('a class widened to allow while the prompt is open still admits on the answer given', async () => {
+		const { source } = sourceConfirming((s) => {
+			s.install(document({ classes: [{ class: 'destructive', verdict: 'allow' }] }));
+		});
+		await expect(deleteSink(source)).resolves.toBeUndefined();
+		expect(fs.existsSync(file)).toBe(false);
+	});
+
+	it('standalone asks nothing and removes the file', async () => {
+		const confirm = vi.fn<LocalEffectConfirmer>(async () => 'declined');
+		const source = createLocalEffectsPolicySource({
+			identity: { read: () => ({ status: 'none' }) },
+			policy: () => ({ appliedRevision: 3 }),
+			confirm,
+		});
+		source.install(document());
+		await expect(deleteSink(source)).resolves.toBeUndefined();
+		expect(confirm).not.toHaveBeenCalled();
+		expect(fs.existsSync(file)).toBe(false);
+	});
+});

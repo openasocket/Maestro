@@ -362,17 +362,29 @@ export function createLocalEffectsPolicySource(
 		clear() {
 			installed = null;
 		},
-		authorize(request) {
-			const read = deps.identity.read();
-			const unbindable =
-				request.actor.kind === 'transport'
-					? pairedDeviceActorProblems(request.actor.actor, read)
-					: [];
-			return resolveLocalEffectVerdict(
-				localEffectVerdict(standing(read), request, unbindable),
-				request,
-				deps.confirm ?? null
-			);
+		async authorize(request) {
+			const hold = (): LocalEffectVerdict => {
+				const read = deps.identity.read();
+				const unbindable =
+					request.actor.kind === 'transport'
+						? pairedDeviceActorProblems(request.actor.actor, read)
+						: [];
+				return localEffectVerdict(standing(read), request, unbindable);
+			};
+			const decision = await resolveLocalEffectVerdict(hold(), request, deps.confirm ?? null);
+			if (!decision.allowed || decision.managed?.outcome !== 'confirmed') return decision;
+			// MCOMP-19-06A: a prompt can stay open for minutes, so the answer is
+			// held again against the standing read now. A ceiling cleared, moved
+			// or narrowed meanwhile refuses by its own code; a confirm again is
+			// admitted on the answer already given.
+			const current = hold();
+			if (current.verdict !== 'deny') return decision;
+			return {
+				allowed: false,
+				code: current.code,
+				message: `after the operator confirmed, ${current.message}`,
+				managed: current.managed,
+			};
 		},
 	};
 }
