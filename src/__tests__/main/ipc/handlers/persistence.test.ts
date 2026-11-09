@@ -186,6 +186,24 @@ import {
 	getMediaToolStatus,
 } from '../../../../main/plugins/plugin-media-tools';
 
+/**
+ * Standalone managed seams for a process manager double: no host authority
+ * port, so `spawnAdmitted` spawns exactly as `spawn` (ProcessManager.spawnAdmitted
+ * on a standalone host) and `admissionOf` binds none. The spawn handler asks
+ * `managedPort()` before the launch plan, spawns through `spawnAdmitted` and
+ * reads `admissionOf()` for the managed run it returns.
+ */
+function withStandaloneManagedPort<T extends object & { spawn: (...args: never[]) => unknown }>(
+	manager: T
+) {
+	return Object.assign(manager, {
+		managedPort: () => null,
+		admissionOf: () => null,
+		spawnAdmitted: async (config: unknown) =>
+			(manager.spawn as unknown as (config: unknown) => unknown)(config),
+	});
+}
+
 describe('persistence IPC handlers', () => {
 	let handlers: Map<string, (...args: any[]) => any>;
 	let persistence: PersistenceHandlers;
@@ -1141,11 +1159,13 @@ describe('persistence IPC handlers', () => {
 						);
 						return { success: true, pid: 42 };
 					});
-					const manager = Object.assign(new EventEmitter(), {
-						spawn,
-						get: () => undefined,
-						getAll: () => [],
-					});
+					const manager = withStandaloneManagedPort(
+						Object.assign(new EventEmitter(), {
+							spawn,
+							get: () => undefined,
+							getAll: () => [],
+						})
+					);
 					registerProcessHandlers({
 						getProcessManager: () => manager as never,
 						getAgentDetector: () =>
@@ -1524,7 +1544,9 @@ describe('persistence IPC handlers', () => {
 				}
 				return { success: true, pid: 42 };
 			});
-			const manager = Object.assign(events, { spawn, get: () => undefined, getAll: () => [] });
+			const manager = withStandaloneManagedPort(
+				Object.assign(events, { spawn, get: () => undefined, getAll: () => [] })
+			);
 			const definition = getAgentDefinition('codex')!;
 			const processDeps = {
 				getProcessManager: () => manager as never,
@@ -2073,20 +2095,22 @@ describe('persistence IPC handlers', () => {
 				Object.assign(f.deps, { callbackRegistry: () => registry });
 				let destroyed = false;
 				const owner = { id: 7, isDestroyed: () => destroyed };
-				const peerManager = Object.assign(new EventEmitter(), {
-					spawn: vi.fn((config: { sessionId: string }) => {
-						if (scenario === 'partial-unknown' || scenario === 'stop-unknown-native')
-							throw new Error('Spawn acknowledgement lost');
-						if (scenario === 'partial-unknown-false' && peerManager.spawn.mock.calls.length === 2)
-							return { success: false, pid: -1 };
-						if (scenario === 'fast') {
-							peerManager.emit('data', config.sessionId, 'Fast reply');
-							peerManager.emit('exit', config.sessionId, 0);
-						}
-						return { success: true, pid: 4242 };
-					}),
-					kill: vi.fn(),
-				});
+				const peerManager = withStandaloneManagedPort(
+					Object.assign(new EventEmitter(), {
+						spawn: vi.fn((config: { sessionId: string }) => {
+							if (scenario === 'partial-unknown' || scenario === 'stop-unknown-native')
+								throw new Error('Spawn acknowledgement lost');
+							if (scenario === 'partial-unknown-false' && peerManager.spawn.mock.calls.length === 2)
+								return { success: false, pid: -1 };
+							if (scenario === 'fast') {
+								peerManager.emit('data', config.sessionId, 'Fast reply');
+								peerManager.emit('exit', config.sessionId, 0);
+							}
+							return { success: true, pid: 4242 };
+						}),
+						kill: vi.fn(),
+					})
+				);
 				peerManager.kill.mockImplementation((...args: unknown[]) => {
 					if (scenario === 'stop-sync-native') peerManager.emit('exit', args[0], 1);
 					if (scenario === 'stop-kill-error-native') throw new Error('Kill failed');
@@ -3790,7 +3814,9 @@ describe('persistence IPC handlers', () => {
 						config.pianolaQueueItemId
 					);
 				});
-				const manager = Object.assign(events, { spawn, get: () => undefined, getAll: () => [] });
+				const manager = withStandaloneManagedPort(
+					Object.assign(events, { spawn, get: () => undefined, getAll: () => [] })
+				);
 				const definition = getAgentDefinition('codex')!;
 				const attempt = handleProcessSpawn(
 					{
@@ -3902,7 +3928,9 @@ describe('persistence IPC handlers', () => {
 					);
 					return { success: true, pid: 42 };
 				});
-				const manager = Object.assign(events, { spawn, get: () => undefined, getAll: () => [] });
+				const manager = withStandaloneManagedPort(
+					Object.assign(events, { spawn, get: () => undefined, getAll: () => [] })
+				);
 				const definition = getAgentDefinition('codex')!;
 				const start = async (dispatchId?: string) => {
 					await handleProcessSpawn(

@@ -60,6 +60,14 @@ async function spawnNativeWithResult(
 		getHarnessControlCapabilities: vi.fn(() =>
 			options.nativeCapabilities === undefined ? { protocol: 'test' } : options.nativeCapabilities
 		),
+		// Standalone host: no authority port, so spawnAdmitted spawns as before
+		// and no admission is bound (see ProcessManager.managedPort / spawnAdmitted
+		// / admissionOf).
+		managedPort: vi.fn(() => null),
+		admissionOf: vi.fn(() => null),
+		spawnAdmitted: vi.fn(async (config: unknown) =>
+			(processManager.spawn as (config: unknown) => unknown)(config)
+		),
 	};
 	const safeSend = vi.fn();
 	const webContentsSend = vi.fn();
