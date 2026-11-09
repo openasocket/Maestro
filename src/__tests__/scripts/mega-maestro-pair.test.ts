@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -12,6 +13,17 @@ import {
 	pairRunStatus,
 	probeLinuxRuntime,
 } from '../../../scripts/mega-maestro-pair.mjs';
+import {
+	ACCEPTANCE_CASES,
+	ACCEPTANCE_ROWS,
+	SYNTHETIC_PROVIDER_SOURCE,
+	assessAcceptance,
+	observeHarnessEffects,
+	observeLedgerReceipt,
+	pairCaseEvidence,
+	presentAcceptanceInputs,
+	type AcceptanceCaseEvidence,
+} from '../integration/mega-maestro/journeys';
 
 describe('pair runner inputs (declared Docker and artifact fixtures)', () => {
 	let root: string;
@@ -230,4 +242,127 @@ describe('pair runner completion evidence', () => {
 			).toBe(verdict === 'failed' ? 'failed' : 'blocked');
 		}
 	);
+});
+
+describe('mandatory acceptance rows (MCOMP-33-02)', () => {
+	type Evidence = AcceptanceCaseEvidence;
+	const inputs = () =>
+		Object.fromEntries(ACCEPTANCE_CASES.flatMap((c) => c.requires.map((i) => [i.id, true])));
+	const seen = { observed: true, by: 'test', detail: null, problems: [] };
+	const passing = (): Evidence[] =>
+		ACCEPTANCE_CASES.map((c) => ({
+			caseId: c.id,
+			status: 'passed',
+			host: c.runner === 'electron' ? 'electron' : 'node',
+			endpoint: 'actual',
+			artifacts: { runtimeSha256: 'a', endpointRevision: 'b', appSha256: 'c' },
+			observations: { effect: seen, receipt: seen },
+		}));
+	const row = (id: string, evidence: Evidence[], present: Record<string, boolean> = inputs()) =>
+		assessAcceptance(evidence, present).find((r) => r.id === id)!;
+	const patched = (id: string, patch: Partial<Evidence>) =>
+		passing().map((e) => (e.caseId === id ? { ...e, ...patch } : e));
+
+	it('binds exactly the 19 rows of the program manifest to declared, used cases', () => {
+		const file = path.resolve(__dirname, '../../../Plans/integration-completion/program.json');
+		const matrix = JSON.parse(fs.readFileSync(file, 'utf8')).acceptanceMatrix as { id: string }[];
+		expect(ACCEPTANCE_ROWS.map((r) => r.id).sort()).toEqual(matrix.map((r) => r.id).sort());
+		expect(matrix).toHaveLength(19);
+		const ids = ACCEPTANCE_CASES.map((c) => c.id);
+		expect([...new Set(ACCEPTANCE_ROWS.flatMap((r) => r.cases))].sort()).toEqual([...ids].sort());
+		for (const c of ACCEPTANCE_CASES.filter((c) => c.runner === 'electron'))
+			expect(c.requires.some((i) => i.kind === 'native')).toBe(true);
+	});
+
+	it('holds every row pending without evidence or inputs, and passes only a full actual set', () => {
+		expect(assessAcceptance([], {}).every((r) => r.verdict === 'pending')).toBe(true);
+		expect(row('GUI-03', [], {}).cases[0].missingInputs).toContain(
+			'MAESTRO-APP-MACOS-BUILD | MAESTRO-APP-WINDOWS-BUILD'
+		);
+		expect(assessAcceptance(passing(), inputs()).every((r) => r.verdict === 'passed')).toBe(true);
+		const oneApp = { ...inputs(), 'MAESTRO-APP-WINDOWS-BUILD': false };
+		expect(row('GUI-01', passing(), oneApp).verdict).toBe('passed');
+		expect(row('GUI-01', passing(), { ...oneApp, 'MAESTRO-APP-MACOS-BUILD': false }).verdict).toBe(
+			'pending'
+		);
+		expect(row('cue', patched('electron.cue-prompt-shell-cli', { status: 'failed' })).verdict).toBe(
+			'failed'
+		);
+		const twice = [...passing(), passing().find((e) => e.caseId === 'cli.standalone')!];
+		expect(row('standalone', twice).verdict).toBe('pending');
+	});
+
+	it.each<[string, Partial<Evidence>, string]>([
+		['a fixture endpoint', { endpoint: 'fixture' }, 'contract-fixture'],
+		['a browser render', { host: 'browser' }, 'ran on browser, not electron'],
+		['no app digest', { artifacts: { runtimeSha256: 'a', endpointRevision: 'b' } }, 'desktop app'],
+		['no receipt observation', { observations: { effect: seen } }, 'receipt observation'],
+	])('never counts %s as desktop acceptance', (_label, patch, reason) => {
+		const gui = row('GUI-03', patched('electron.interactive-run-controls', patch));
+		expect(gui.verdict).toBe('not-counted');
+		expect(gui.cases[0].reasons.join('; ')).toContain(reason);
+	});
+
+	it('takes producer freshness over any declaration, and maps a pair journey as Node evidence', () => {
+		const stale = { 'CP-01': { fresh: false, detail: 'stale' } };
+		expect(presentAcceptanceInputs(stale, { 'CP-01': true, X: true })).toEqual({
+			'CP-01': false,
+			X: true,
+		});
+		const journey = { id: 'library.admit', surface: 'library' as const, status: 'passed' as const };
+		expect(
+			pairCaseEvidence(
+				{ ...journey, reason: null, steps: [] },
+				{ runtimeSha256: null, endpointRevision: null }
+			)
+		).toMatchObject({
+			caseId: 'library.admit',
+			host: 'node',
+			endpoint: 'actual',
+			observations: {},
+		});
+	});
+
+	it('observes the harness program effects off disk and a central receipt in the ledger', () => {
+		const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'pair-observe-')));
+		try {
+			expect(observeHarnessEffects(dir).observed).toBe(false);
+			const marker = path.join(dir, 'child.marker');
+			const ran = spawnSync(process.execPath, ['-e', SYNTHETIC_PROVIDER_SOURCE], {
+				cwd: dir,
+				input: JSON.stringify({ childMarker: marker }),
+				timeout: 10_000,
+			});
+			expect(ran.status).toBe(0);
+			expect(observeHarnessEffects(dir, marker)).toMatchObject({
+				observed: true,
+				detail: { childMarker: true },
+			});
+			const ledger = path.join(dir, 'receipts.json');
+			const decision = { decisionId: 'd', requestDigest: 'r', brokerId: 'b', policyRevision: 3 };
+			const receipt = (leaseId: string, d: unknown, state: string) => ({
+				leaseId,
+				decision: d,
+				effect: { state },
+			});
+			const receipts = [
+				receipt('l1', decision, 'released'),
+				receipt('l2', null, 'released'),
+				receipt('l3', decision, 'bound'),
+			];
+			fs.writeFileSync(ledger, JSON.stringify({ receipts }));
+			expect(observeLedgerReceipt(ledger, 'l1').observed).toBe(true);
+			expect(observeLedgerReceipt(ledger, 'l2').problems).toEqual([
+				'decided in process: no central receipt',
+			]);
+			expect(observeLedgerReceipt(ledger, 'l3').problems).toEqual([
+				'the effect has not ended (bound)',
+			]);
+			expect(observeLedgerReceipt(ledger, 'l9').problems).toEqual([
+				'0 ledger records for lease l9',
+			]);
+		} finally {
+			fs.rmSync(dir, { recursive: true, force: true });
+		}
+	});
 });
