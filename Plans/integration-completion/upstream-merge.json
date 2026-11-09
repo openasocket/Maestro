@@ -2379,6 +2379,27 @@
 				"outsideHunks": "core.ts ProcessSpawnResponse gained HEAD's managed sink refusal field (previously inline in global.d.ts); global.d.ts dead ManagedRunView import removed.",
 				"semanticFor00C": [],
 				"tests": "core.test.ts + useRemoteHandlers.test.ts 116/116."
+			},
+			"MCOMP-33-00R36": {
+				"resolvedAt": "2026-11-09",
+				"resolvedBy": "Maestro-Claude",
+				"files": [
+					"src/renderer/hooks/remote/useRemoteIntegration.ts",
+					"src/renderer/hooks/session/useSessionCrud.ts",
+					"src/renderer/hooks/ui/useIdleNotification.ts"
+				],
+				"method": "Nine hunks resolved by a shape-asserting script (Working/mcomp-33-00r36/resolve.mjs, both sides read in full, every replacement computed before any write); staged through merge-tool.mjs stage (9 unmerged left; prettier left all three unchanged). Working/mcomp-33-00r36/check.mjs: 0 syntax diagnostics, every HEAD and MERGE_HEAD seam count kept.",
+				"hunks": {
+					"useRemoteIntegration.ts": "imports (1): kept both; onRemoteCommand params (1): receiptChannel, pianolaDispatchId, delegation, dispatchTicket; onRemoteNewAITabWithPrompt params (1): control, delegation, dispatchTicket; new-tab body (2, one conflict): upstream try-wrapped body with Pianola control phases, HEAD delegation and dispatchTicket re-applied on the slash-command queued item and the remoteCommand detail, upstream busy-no-longer-queues taken; onRemoteEnqueueCommand params (1): dispatchCallback, control, delegation, dispatchTicket.",
+					"useSessionCrud.ts": "type and implementation signature (2): upstream harnessControlMode, then HEAD operation and policy, HEAD CreateNewSessionResult return.",
+					"useIdleNotification.ts": "imports (1): kept both (notifyRefusedNotificationCommand, isWebDesktop)."
+				},
+				"outsideHunks": "useSessionCrud.test.ts MCOMP-23 cases: positional filler widened 19 to 20 for the harnessControlMode slot.",
+				"semanticFor00C": [
+					"00R38: NewInstanceModal onCreate must pass codexTransport, harnessControlMode, operation, policy in that order.",
+					"A supervised (Pianola control) queue item is built main-side and carries no delegation or dispatch ticket."
+				],
+				"tests": "useIdleNotification + useSessionCrud 79/79; useRemoteIntegration.test.ts waits on 00R37."
 			}
 		}
 	}
