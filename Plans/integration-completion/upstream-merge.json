@@ -2400,6 +2400,21 @@
 					"A supervised (Pianola control) queue item is built main-side and carries no delegation or dispatch ticket."
 				],
 				"tests": "useIdleNotification + useSessionCrud 79/79; useRemoteIntegration.test.ts waits on 00R37."
+			},
+			"MCOMP-33-00R37": {
+				"resolvedAt": "2026-11-09",
+				"resolvedBy": "Maestro-Claude",
+				"files": ["src/__tests__/renderer/hooks/useRemoteIntegration.test.ts"],
+				"method": "Four hunks resolved by a shape-asserting script (Working/mcomp-33-00r37/resolve.mjs, both sides read in full, every replacement computed before the single write); nine auto-merged HEAD cases outside the hunks re-slotted onto the R35 global.d.ts callback orders in the same script; staged through merge-tool.mjs stage (8 unmerged left; prettier left it unchanged). Working/mcomp-33-00r37/check.mjs: 0 syntax diagnostics, every MERGE_HEAD title kept, every HEAD and MERGE_HEAD seam count kept; the five HEAD titles it lists are four upstream renames of base cases (26c01e4 and the routing rename) and the one adapted case named below.",
+				"hunks": {
+					"handler type (1)": "HEAD Parameters<typeof window.maestro.process.onRemoteEnqueueCommand>[0], which derives from the merged global.d.ts and so carries upstream dispatchCallback/control as well as delegation/dispatchTicket.",
+					"busy receipt case (1)": "upstream 26c01e4 removed the agent-level busy refusal and deleted the case; kept the receipt coverage on the merged behavior as 'does not reject the delivery receipt when only the agent is busy' (receipt slot 8, forwarded on the remoteCommand detail).",
+					"new-tab cases (1)": "HEAD's two MRC-08-02 ticket cases first, then upstream's three Pianola control cases. Ticket moves to slot 8; the queued-ticket case uses a custom slash command because a busy agent no longer queues a plain new-tab prompt.",
+					"enqueue cases (1)": "HEAD's two MRC-08-02 ticket cases on slot 12 (the queued one on a busy TAB, since another busy tab is no longer a line), then upstream's held-prepare it.each and the case renamed to a busy tab."
+				},
+				"outsideHunks": "onRemoteCommand consult-first, unknown-session and forwarded receipts moved to slot 8; the MRC-07-04C delegation case to receipt 8 / delegation 10 and the MRC-08-01B ticket case to receipt 8 / ticket 11 (comments updated); the MRC-07-04D new-tab delegation case to slot 7 (slot 6 is upstream control) via the slash-command queue path; the MRC-07-04D enqueue delegation case to slot 11.",
+				"semanticFor00C": [],
+				"tests": "useRemoteIntegration.test.ts 156/156 in the worktree."
 			}
 		}
 	}
