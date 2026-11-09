@@ -1568,6 +1568,26 @@
 				"semanticConflictsForC": [],
 				"notes": "No new semantic conflict. The runner now declares the binding at slot 10 while HeadlessAgentRunner in plugin-manager-singleton.ts (unmerged, R07) still has to add the trailing binding parameter after turn; until R07 the destructured `binding` has no declared type, which 00C type-checks.",
 				"unmergedAfter": 84
+			},
+			"MCOMP-33-00R07": {
+				"resolvedAt": "2026-11-09",
+				"resolvedBy": "Maestro-Claude",
+				"files": [
+					"src/__tests__/main/plugins/authorization-ledger.test.ts",
+					"src/main/plugins/plugin-manager-singleton.ts"
+				],
+				"method": "Two hunks (one per file) resolved by a shape-asserting script (Working/mcomp-33-00r07/resolve.mjs, both sides read in full); staged through merge-tool.mjs stage (prettier exit 0). Every test and describe title of HEAD and MERGE_HEAD is present in the merged suite. Suites run in the worktree: authorization-ledger, plugin-headless-agent-runner and plugin-host-handlers 291 of 291 pass.",
+				"hunks": {
+					"src/main/plugins/plugin-manager-singleton.ts": [
+						"HeadlessAgentRunner parameters: upstream's writerLeaseHeld (slot 8, Relay reservation) and turn settings (slot 9), then the integration's consent-bound PluginActBinding (MRC-09-02A) as the trailing slot 10, closing the 00R04/00R05/00R06 contract: the host handlers set args[10], the runner destructures it there."
+					],
+					"src/__tests__/main/plugins/authorization-ledger.test.ts": [
+						"Both sides appended top-level describes after 'rejects when a granted cap is no longer requested by the manifest'. The integration blocks kept whole in order (readConsent MRC-09-01, the sealed ledger under a managed ceiling MRC-09-06, authorization acts under the managed standing MCOMP-21-14), then upstream's 'legacy original export grant migration' describe whole; the shared closing lines appear once per block."
+					]
+				},
+				"semanticConflictsForC": [],
+				"notes": "No new semantic conflict. With the trailing binding declared, the runner binding from 00R06 is typed again; 00C type-checks the other HeadlessAgentRunner callers (Relay continuity passes writerLeaseHeld and turn only).",
+				"unmergedAfter": 82
 			}
 		}
 	}
