@@ -6645,6 +6645,20 @@
 					"id": "MCOMP-31-01"
 				},
 				{
+					"label": "Compose approved provider routes into the managed launch",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"Plans/integration-completion/contract-coverage.json",
+						"src/__tests__/shared/maestro-lib/turns/run-agent-turn.provider-route.test.ts",
+						"src/shared/maestro-lib/turns/run-agent-turn.ts"
+					],
+					"outcome": "Inserted during execution after MCOMP-31-01; landed as c57d141b5. Read `Plans/integration-completion/EXECUTION-RULES.md`. In `src/shared/maestro-lib/turns/run-agent-turn.ts` and `src/shared/maestro-lib/launch/agent-args.ts` (reuse `bindApprovedCredentials()`/`managedAccountRef()` in `managed/credentials.ts`, `applyManagedEnvCeiling()` in `launch/env.ts`, `providerTransportForRoute()` in `managed/provider-contract.ts`), require `approveProviderRoute()` to return `qualified` for the exact launch candidate before a managed real-provider launch proceeds: bind the approved gateway destination and credential reference and the qualified sandbox backend id into the launch, preserve standard permission modes and exact tool authority, and refuse (never fall back to standalone, personal OAuth, another transport or an unqualified route) when the approval is unavailable. Standalone launches are unchanged. The verifier is host-injected; no production verifier is installed. Add focused tests. Limit to 1-3 authored files and fewer than 500 changed lines. Backlog: M-05, QUAL-01.",
+					"backlog": ["M-05", "QUAL-01"],
+					"requires": ["MEGA-DESKTOP-POLICY-BUILD", "MEGA-QUALIFIED-PROVIDERS-BUILD"],
+					"produces": [],
+					"id": "MCOMP-31-01A"
+				},
+				{
 					"label": "Adapt SDK transports to native runtime qualified adapters",
 					"kind": "IMPLEMENT",
 					"targets": [
@@ -6687,6 +6701,21 @@
 					"id": "MCOMP-31-04"
 				},
 				{
+					"label": "Open the endpoint through the platform client",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/__tests__/cli/services/host-managed.test.ts",
+						"src/__tests__/main/enterprise/service.test.ts",
+						"src/cli/services/host-managed.ts",
+						"src/main/enterprise/service.ts"
+					],
+					"outcome": "Inserted during execution after MCOMP-31-04; landed as 6bd9add53. Read `Plans/integration-completion/EXECUTION-RULES.md`. Switch the default `openPort` in `src/main/enterprise/service.ts` and `src/cli/services/host-managed.ts` from `createLocalEndpointClient({ socketPath })` to `createPlatformEndpointClient({ socketPath, native })` with an optional host-injected `EndpointNativePort` dependency (none installed in production), so a macOS or Windows host with no native port refuses to open the endpoint by name (enrollment answers `no-endpoint`) instead of dialing an unverified socket, and Linux behaves as before. Check `identity-store.ts`'s `endpoint.socketPath` absolute-path rule accepts a Windows local pipe name. Add focused tests for both composition sites (darwin/win32 with no port refused, a fixture port accepted, linux unchanged). Limit to 1-3 authored files and fewer than 500 changed lines. Backlog: QUAL-02.",
+					"backlog": ["QUAL-02"],
+					"requires": ["MEGA-NATIVE-MACOS-BUILD", "MEGA-NATIVE-WINDOWS-BUILD"],
+					"produces": [],
+					"id": "MCOMP-31-04A"
+				},
+				{
 					"label": "Test actual provider and platform native app routes",
 					"kind": "TEST",
 					"targets": [
@@ -6699,6 +6728,34 @@
 					"requires": [],
 					"produces": [],
 					"id": "MCOMP-31-05"
+				},
+				{
+					"label": "Author the managed provider GUI journeys",
+					"kind": "TEST",
+					"targets": [
+						"e2e/managed-provider.spec.ts"
+					],
+					"outcome": "Inserted during execution after MCOMP-31-05; landed as 62dd1588d. Read `Plans/integration-completion/EXECUTION-RULES.md`. Author `e2e/managed-provider.spec.ts` on the existing Playwright harness (`e2e/fixtures/managed-host.ts`): fixture mode proves a refused route never falls back (no unmanaged spawn, no other provider, no swapped agent); endpoint mode holds the per-provider native GUI cases MCOMP-32 executes (allowed output under a lease, denied write/network/descendant escape observed from outside, credential isolation, mid-run policy change), with inputs read and a missing one failing by name. One authored file, fewer than 500 changed lines. Backlog: QUAL-01, QUAL-02, QUAL-03.",
+					"backlog": ["QUAL-01", "QUAL-02", "QUAL-03"],
+					"requires": [],
+					"produces": [],
+					"id": "MCOMP-31-05B"
+				},
+				{
+					"label": "A declared fixture native endpoint port for unpackaged e2e builds",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"e2e/fixtures/managed-host.ts",
+						"e2e/managed-agents.spec.ts",
+						"src/__tests__/main/enterprise/e2e-endpoint-native.test.ts",
+						"src/main/enterprise/e2e-endpoint-native.ts",
+						"src/main/index.ts"
+					],
+					"outcome": "Inserted during execution after MCOMP-31-05B; landed as 8adcfce0b. Read `Plans/integration-completion/EXECUTION-RULES.md`. Since MCOMP-31-04A a macOS or Windows desktop with no `EndpointNativePort` refuses to open the endpoint, so the fixture-mode enrolled journeys in `e2e/managed-*.spec.ts` (managed-agent-run, managed-recovery, managed-communications, managed-agents, managed-provider) cannot enroll against the contract-fixture daemon on those hosts. Add a host-injected fixture port (`EndpointNativePort` v1 for the host platform and transport, answering a labeled fixture server identity) that `createEnterpriseService` receives as `endpointNative` ONLY when the app is unpackaged (`!app.isPackaged`), `NODE_ENV === 'test'` and an explicit `MAESTRO_E2E_ENDPOINT_NATIVE=fixture` is set; a packaged build ignores the variable entirely and still refuses (test that). Set the variable in `e2e/fixtures/managed-host.ts` fixture mode only, never in endpoint mode. Unit-test the gate (packaged, wrong NODE_ENV, absent variable each install nothing) and rerun the fixture-mode managed e2e specs on macOS. Never install a permissive port in production or weaken `endpointNativePortProblem`. Limit to 1-3 authored files and fewer than 500 changed lines. Backlog: QUAL-02.",
+					"backlog": ["QUAL-02"],
+					"requires": [],
+					"produces": [],
+					"id": "MCOMP-31-05A"
 				},
 				{
 					"label": "Verify and publish implementation inputs",
@@ -6723,7 +6780,7 @@
 			],
 			"id": "MCOMP-31",
 			"path": ".maestro/playbooks/2026-10-29-Maestro-Integration-Completion/MCOMP-31.md",
-			"taskCount": 6,
+			"taskCount": 10,
 			"stage": "S16"
 		},
 		{
@@ -7516,7 +7573,7 @@
 				"MEGA-QUALIFIED-PROVIDERS-BUILD"
 			],
 			"nativeInputs": false,
-			"taskCount": 7
+			"taskCount": 11
 		},
 		{
 			"id": "S17",
@@ -7611,8 +7668,8 @@
 			"taskCount": 1
 		}
 	],
-	"taskCount": 453,
-	"taskCounts": { "IMPLEMENT": 336, "TEST": 57, "VERIFY": 60 },
+	"taskCount": 457,
+	"taskCounts": { "IMPLEMENT": 339, "TEST": 58, "VERIFY": 60 },
 	"artifacts": {
 		"MEGA-CONTRACTS-FOUNDATION-BUILD": {
 			"producerDocument": "GCOMP-01",
@@ -8543,6 +8600,7 @@
 			"MCOMP-29-03",
 			"MCOMP-29-05",
 			"MCOMP-31-01",
+			"MCOMP-31-01A",
 			"MCOMP-31-06"
 		],
 		"BASE-02": [
@@ -8613,7 +8671,9 @@
 			"MCOMP-21-13",
 			"MCOMP-21-16",
 			"MCOMP-31-01",
+			"MCOMP-31-01A",
 			"MCOMP-31-05",
+			"MCOMP-31-05B",
 			"MCOMP-31-06",
 			"GCOMP-28-01",
 			"MCOMP-32-01",
@@ -8649,7 +8709,10 @@
 			"GCOMP-20-08",
 			"GCOMP-20-09",
 			"MCOMP-31-04",
+			"MCOMP-31-04A",
 			"MCOMP-31-05",
+			"MCOMP-31-05B",
+			"MCOMP-31-05A",
 			"MCOMP-31-06",
 			"GCOMP-26-01",
 			"GCOMP-27-01",
@@ -8682,6 +8745,7 @@
 			"MCOMP-31-02",
 			"MCOMP-31-03",
 			"MCOMP-31-05",
+			"MCOMP-31-05B",
 			"MCOMP-31-06",
 			"GCOMP-28-01",
 			"MCOMP-32-01",
