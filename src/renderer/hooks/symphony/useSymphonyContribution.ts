@@ -3,7 +3,10 @@
  *
  * Handles creating a new session for a Symphony contribution:
  *   - Validates session uniqueness
- *   - Creates session with Symphony metadata
+ *   - Asks the host to admit the agent BEFORE any repository effect, then runs
+ *     the repository steps (clone, branch, documents, draft PR) and fills the
+ *     agent's Auto Run folder and contribution through an edit commit; a failed
+ *     start withdraws the admitted agent (MCOMP-23-04D)
  *   - Detects git repo and fetches branches/tags
  *   - Registers active contribution in Symphony persistent state
  *   - Auto-starts batch run with contribution documents
@@ -17,7 +20,10 @@
 import { useCallback } from 'react';
 import type { ToolType, Session, AITab, BatchRunConfig } from '../../types';
 import type { SymphonyContributionData } from '../../components/SymphonyModal';
-import type { SymphonyContributionOutcome } from '../../components/SymphonyModal/types';
+import type {
+	SymphonyContributionOutcome,
+	SymphonyRepositoryStart,
+} from '../../components/SymphonyModal/types';
 import { useSessionStore } from '../../stores/sessionStore';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { getModalActions } from '../../stores/modalStore';
@@ -28,7 +34,13 @@ import { gitService } from '../../services/git';
 import { notifyToast } from '../../stores/notificationStore';
 import { DEFAULT_BATCH_PROMPT } from '../../components/BatchRunnerModal';
 import { logger } from '../../utils/logger';
-import { commitNewAgent } from '../../services/agentCommit';
+import {
+	applyCommittedEdit,
+	commitAgentRecord,
+	commitNewAgent,
+	describeAgentCommitRefusal,
+} from '../../services/agentCommit';
+import { captureException } from '../../utils/sentry';
 
 // ============================================================================
 // Dependencies interface
@@ -52,6 +64,25 @@ export interface UseSymphonyContributionReturn {
 	 * draft and show a host refusal by field (MCOMP-23-04C).
 	 */
 	handleStartContribution: (data: SymphonyContributionData) => Promise<SymphonyContributionOutcome>;
+}
+
+type SymphonyStartedContribution = Omit<SymphonyRepositoryStart, 'success' | 'error'> & {
+	contributionId: string;
+};
+
+/**
+ * Remove an admitted agent whose contribution never started. It never entered
+ * the store, so this is the explicit tombstone an ordinary agent removal flushes
+ * (removal is not a governed authoring operation). False when the host failed.
+ */
+async function withdrawAdmittedAgent(sessionId: string): Promise<boolean> {
+	try {
+		const ok = await window.maestro.sessions.setMany([], [sessionId]);
+		return ok !== false;
+	} catch (error) {
+		captureException(error, { extra: { sessionId, operation: 'symphony-withdraw-agent' } });
+		return false;
+	}
 }
 
 // ============================================================================
@@ -108,6 +139,10 @@ export function useSymphonyContribution(
 
 			const newId = generateId();
 			const initialTabId = generateId();
+			// The modal hands over its repository steps instead of running them
+			// first, so the agent is admitted before anything is cloned, forked or
+			// claimed (MCOMP-23-04D). Without them the contribution already started.
+			const startRepository = data.startRepository;
 
 			// Check git repo status
 			const isGitRepo = await gitService.isRepo(data.localPath);
@@ -194,17 +229,18 @@ export function useSymphonyContribution(
 				customPath: data.customPath,
 				customArgs: data.customArgs,
 				customEnvVars: data.customEnvVars,
-				// Auto Run setup - use autoRunPath from contribution
-				autoRunFolderPath: data.autoRunPath,
+				// Auto Run setup - use autoRunPath from contribution (filled by the
+				// finishing edit when the repository steps run after the admit)
+				autoRunFolderPath: startRepository ? undefined : data.autoRunPath,
 				// Symphony metadata for tracking
 				symphonyMetadata: {
 					isSymphonySession: true,
-					contributionId: data.contributionId,
+					contributionId: startRepository ? '' : (data.contributionId ?? ''),
 					repoSlug: data.repo.slug,
 					issueNumber: data.issue.number,
 					issueTitle: data.issue.title,
 					documentPaths: data.issue.documentPaths.map((d) => d.path),
-					status: 'running',
+					status: startRepository ? 'cloning' : 'running',
 				},
 				claudeInteractive:
 					data.agentType === 'claude-code' ? { mode: 'api', modeReason: 'auto' } : undefined,
@@ -226,26 +262,89 @@ export function useSymphonyContribution(
 			if (!committed.ok) {
 				return { ok: false, error: committed.message, refusal: committed.refusal };
 			}
-			setSessions((prev) => [...prev, committed.session]);
+			let session = committed.session;
+			let started: SymphonyStartedContribution = {
+				contributionId: data.contributionId ?? '',
+				autoRunPath: data.autoRunPath,
+				branchName: data.branchName,
+				draftPrNumber: data.draftPrNumber,
+				draftPrUrl: data.draftPrUrl,
+			};
+			let finishError: SymphonyContributionOutcome | null = null;
+			if (startRepository) {
+				// The admitted agent stays out of the store until the contribution
+				// started, so a failed start never shows (or runs) an agent.
+				let start: SymphonyRepositoryStart;
+				try {
+					start = await startRepository(newId);
+				} catch (err) {
+					start = {
+						success: false,
+						error: err instanceof Error ? err.message : 'Failed to start contribution',
+					};
+				}
+				if (!start.success || !start.contributionId) {
+					const error = start.error ?? 'Failed to start contribution';
+					if (await withdrawAdmittedAgent(newId)) return { ok: false, error };
+					// The record could not be removed: show it, so the user can.
+					setSessions((prev) => [...prev, session]);
+					return {
+						ok: false,
+						error: `${error} The agent "${data.sessionName}" could not be withdrawn; remove it from the Left Bar.`,
+					};
+				}
+				started = {
+					contributionId: start.contributionId,
+					autoRunPath: start.autoRunPath,
+					branchName: start.branchName,
+					draftPrNumber: start.draftPrNumber,
+					draftPrUrl: start.draftPrUrl,
+				};
+				// The contribution exists now; its Auto Run folder and id reach the
+				// agent through the host's edit commit, never a local write.
+				const finished: Session = {
+					...session,
+					autoRunFolderPath: started.autoRunPath,
+					symphonyMetadata: {
+						...session.symphonyMetadata!,
+						contributionId: started.contributionId,
+						status: 'running',
+					},
+				};
+				const edit = await commitAgentRecord('edit', finished);
+				if (edit.ok) {
+					session = applyCommittedEdit(session, finished, edit.record);
+				} else {
+					// Reported, not swallowed: the agent and the contribution stay (it is
+					// registered below, so the Active tab can cancel it), but no run starts.
+					const message = `The contribution started, but its agent could not be updated: ${describeAgentCommitRefusal(edit)}`;
+					logger.warn(`[Symphony] ${message}`);
+					finishError = { ok: false, error: message, refusal: edit };
+					if (!fromDialog) {
+						notifyToast({ type: 'error', title: 'Symphony Agent Refused', message });
+					}
+				}
+			}
+			setSessions((prev) => [...prev, session]);
 			setActiveSessionId(newId);
-			setSymphonyModalOpen(false);
+			if (!finishError) setSymphonyModalOpen(false);
 
 			// Register active contribution in Symphony persistent state
 			// This makes it show up in the Active tab of the Symphony modal
 			window.maestro.symphony
 				.registerActive({
-					contributionId: data.contributionId,
+					contributionId: started.contributionId,
 					sessionId: newId,
 					repoSlug: data.repo.slug,
 					repoName: data.repo.name,
 					issueNumber: data.issue.number,
 					issueTitle: data.issue.title,
 					localPath: data.localPath,
-					branchName: data.branchName || '',
+					branchName: started.branchName || '',
 					totalDocuments: data.issue.documentPaths.length,
 					agentType: data.agentType,
-					draftPrNumber: data.draftPrNumber,
-					draftPrUrl: data.draftPrUrl,
+					draftPrNumber: started.draftPrNumber,
+					draftPrUrl: started.draftPrUrl,
 				})
 				.catch((err: unknown) => {
 					logger.error('[Symphony] Failed to register active contribution:', undefined, err);
@@ -268,8 +367,11 @@ export function useSymphonyContribution(
 			// Switch to Auto Run tab so user sees the documents
 			setActiveRightTab('autorun');
 
+			if (finishError) return finishError;
+
 			// Auto-start batch run with all contribution documents
-			if (data.autoRunPath && data.issue.documentPaths.length > 0) {
+			const autoRunPath = session.autoRunFolderPath;
+			if (autoRunPath && data.issue.documentPaths.length > 0) {
 				const batchConfig: BatchRunConfig = {
 					documents: data.issue.documentPaths.map((doc) => ({
 						id: generateId(),
@@ -287,7 +389,7 @@ export function useSymphonyContribution(
 						batchConfig.documents.length,
 						'documents',
 					]);
-					startBatchRun(newId, batchConfig, data.autoRunPath!);
+					startBatchRun(newId, batchConfig, autoRunPath);
 				}, 500);
 			}
 			return { ok: true };

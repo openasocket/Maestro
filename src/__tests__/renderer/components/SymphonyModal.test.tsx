@@ -510,10 +510,13 @@ describe('SymphonyModal', () => {
 			});
 			expect(onStartContribution).toHaveBeenCalledTimes(1);
 			expect(onStartContribution.mock.calls[0][0]).toMatchObject({
-				contributionId: 'contrib_1',
 				localPath: '/home/u/Maestro-Symphony/test-owner-test-repo-42',
 				expectedPolicyRevision: 6,
 			});
+			// The agent is admitted first: the modal ran no repository step itself
+			// and has no contribution to name yet (MCOMP-23-04D).
+			expect(onStartContribution.mock.calls[0][0]).not.toHaveProperty('contributionId');
+			expect(mockUseSymphonyReturn.startContribution).not.toHaveBeenCalled();
 			// The commit has not answered: the dialog still holds the draft.
 			expect(screen.getByTestId('agent-creation-dialog')).toBeInTheDocument();
 
@@ -559,18 +562,29 @@ describe('SymphonyModal', () => {
 			expect(screen.queryByTestId('agent-creation-dialog')).not.toBeInTheDocument();
 		});
 
-		it('never reaches the agent commit when the contribution does not start', async () => {
+		it('hands the repository steps to the handler, run with the admitted agent id', async () => {
 			mockUseSymphonyReturn.startContribution = vi
 				.fn()
 				.mockResolvedValue({ success: false, error: 'Failed to clone repository' });
-			const onStartContribution = vi.fn();
+			const onStartContribution = vi.fn(
+				async (data: {
+					startRepository?: (id: string) => Promise<{ success: boolean; error?: string }>;
+				}) => {
+					const start = await data.startRepository!('agent-1');
+					return { ok: false as const, error: start.error ?? '' };
+				}
+			);
 			await openDialog(onStartContribution);
 
 			let result: unknown;
 			await act(async () => {
 				result = await dialogProps.current!.onCreateAgent(config(6));
 			});
-			expect(onStartContribution).not.toHaveBeenCalled();
+			expect(mockUseSymphonyReturn.startContribution).toHaveBeenCalledTimes(1);
+			const call = (mockUseSymphonyReturn.startContribution as ReturnType<typeof vi.fn>).mock
+				.calls[0];
+			expect(call[3]).toBe('agent-1');
+			expect(call[4]).toBe('/home/u/Maestro-Symphony/test-owner-test-repo-42');
 			expect(result).toEqual({ success: false, error: 'Failed to clone repository' });
 			expect(screen.getByTestId('agent-creation-dialog')).toBeInTheDocument();
 		});

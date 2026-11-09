@@ -2,8 +2,26 @@ import type { Theme } from '../../types';
 import type { RegisteredRepository, SymphonyIssue } from '../../../shared/symphony-types';
 import type { AgentCommitRefusal } from '../../services/agentCommit';
 
+/** What the repository steps (clone, branch, documents, draft PR) came to. */
+export interface SymphonyRepositoryStart {
+	success: boolean;
+	contributionId?: string;
+	branchName?: string;
+	autoRunPath?: string;
+	draftPrNumber?: number;
+	draftPrUrl?: string;
+	error?: string;
+}
+
 export interface SymphonyContributionData {
-	contributionId: string;
+	/**
+	 * The repository steps, run by the handler only AFTER the host admitted the
+	 * agent, with that agent's id (MCOMP-23-04D). A refused agent therefore
+	 * clones, forks and claims nothing. Absent: the contribution already started,
+	 * and `contributionId` and the fields after it describe it.
+	 */
+	startRepository?: (sessionId: string) => Promise<SymphonyRepositoryStart>;
+	contributionId?: string;
 	localPath: string;
 	autoRunPath?: string;
 	branchName?: string;
