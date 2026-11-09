@@ -1901,6 +1901,39 @@
 				],
 				"notes": "No case dropped; no hunk took one whole side. Every hunk was additive on both sides.",
 				"unmergedAfter": 57
+			},
+			"MCOMP-33-00R19": {
+				"resolvedAt": "2026-11-09",
+				"resolvedBy": "Maestro-Claude",
+				"files": [
+					"src/shared/maestro-lib/runtime/server.ts",
+					"src/shared/maestro-lib/runtime/server-requests.ts",
+					"src/shared/maestro-lib/runtime/turns.ts"
+				],
+				"method": "Five hunks resolved by a shape-asserting script (Working/mcomp-33-00r19/resolve.mjs, both sides read in full, every replacement computed before the write of each file, plus one asserted edit outside the hunks in turns.ts); staged through merge-tool.mjs stage (prettier left all three unchanged, 54 unmerged left). Working/mcomp-33-00r19/check.mjs: 0 syntax diagnostics on all three, no markers, every seam count at least the larger side. The runtime turns/server suites cannot load until src/shared/maestro-lib/launch/env.ts (00R21) merges (server-frames 17/17 passes).",
+				"hunks": {
+					"src/shared/maestro-lib/runtime/server.ts": [
+						"Hunk 1 (describe() doc): one doc naming both: the build version, whether a macOS host holds the machine awake (upstream), and why no managed standing was composed (HEAD).",
+						"Hunk 2 (describe() shape and options): both: describe() returns managedUnavailable (HEAD) and preventingSleep (upstream); then HEAD roundParents and communications options and upstream answer() (host-served Cue bridge messages).",
+						"Hunk 3 (statusReport): both: HEAD managed and managedUnavailable (hostManagedStanding/hostManagedUnavailable), then upstream preventingSleep."
+					],
+					"src/shared/maestro-lib/runtime/server-requests.ts": [
+						"Hunk 1 (imports): both: HEAD managed wire operation imports from ../client/host-control and upstream ThinkingMode/UsageStats (import_agent tab parsing). runtimeManagedScope() and managedScopeRefusal() untouched."
+					],
+					"src/shared/maestro-lib/runtime/turns.ts": [
+						"Hunk 1 (send body): HEAD shape kept: send() words the answer of submitText() (queued, started, not-found, rejected, refused by standing, failed held/dropped). Upstream body was its old inline lookup+queue with one addition, the lifted-agent refusal, which moved into submitText (see outsideHunks)."
+					]
+				},
+				"outsideHunks": [
+					"turns.ts submitText(): upstream liftedSendRefusal(record) check added right after the agent lookup, returning status rejected; it now covers send() (fails rejected, as upstream) and the managed port sendManaged() (journaled failed, refused other). Upstream auto-merged dequeue check in startItem() kept."
+				],
+				"semanticConflictsForC": [
+					"RuntimeServerOptions.answer (upstream) is served after the runtime declines; runtime-host.ts (00R18) passes cue.answer, so 00C type-checks that wiring together with roundParents and communications.",
+					"HostStatusReport (client/types.ts, 00R20) must accept managed, managedUnavailable and preventingSleep, which statusReport() now emits.",
+					"turns.ts and server suites unrun until launch/env.ts (00R21); 00S runs them."
+				],
+				"notes": "No case or guard dropped. Runtime turns still pass no route the managed launch did not approve: the minted/caller dispatch path in submitText is unchanged.",
+				"unmergedAfter": 54
 			}
 		}
 	}
