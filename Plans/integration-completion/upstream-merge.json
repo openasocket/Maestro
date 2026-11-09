@@ -3024,6 +3024,30 @@
 					"result": "540 passed, 0 failed (was 157 failed: 136 + 21)"
 				},
 				"tools": "Working/mcomp-33-00s4 (apply.mjs, apply2.mjs, commit-wt.mjs, record.mjs)"
+			},
+			"MCOMP-33-00S5": {
+				"completedAt": "2026-11-09",
+				"completedBy": "Maestro-Claude",
+				"worktreeCommit": "7454045b1",
+				"worktreeParent": "6fd95640e",
+				"verdict": "Two causes. (1) Suite side: upstream handle-spawn holds the provider session writer for config.sessionId until the turn exits; the suite spy never exits, and the \"second send\" case sent twice on PROCESS with no exit between, so the second send hung and the abandoned wait then held the writer for every later case (19 of 24 timeouts). afterEach now ends every harness turn (exit on PROCESS and the terminal id) and the second-send case ends the first turn before sending again (endTurn helper). (2) Source side, masked by the timeouts: upstream refuses a Standard turn with no native approval channel (hasStandardApprovalChannel; Codex over exec has none), which refused HEAD's managed Standard Codex turn under a lent route that runs as the qualified bounded combination (--sandbox workspace-write) measured by the launch plan. Per 00R13/00R21 a managed turn never reaches upstream's approval broker, so the gate now also requires !launchPermission?.ceiling: only turns the plan measured against no ceiling need the approval channel.",
+				"change": {
+					"src/main/ipc/handlers/process/handle-spawn.ts": "Standard approval-channel gate skipped when the launch plan decision names a ceiling (launchPermission?.ceiling).",
+					"src/__tests__/main/ipc/handlers/process/handle-spawn.managed.test.ts": "harnessManagers registry plus top-level afterEach ending each turn; endTurn() helper used between the two sends; new case: a managed port lending no route still gets the approval-channel refusal for Standard Codex exec."
+				},
+				"mutation": "The existing case \"runs a standard Codex request under a standard ceiling with the provider's bounded sandbox in place of the batch bypass flag\" fails without the source change (success false, refusal \"Standard permission mode needs a native approval channel\"); the new no-route case fails if the gate is removed.",
+				"typeCheck": {
+					"tsconfig.main.json": {
+						"exit": 0,
+						"errors": 0
+					},
+					"testFiles": "not in any project config; an ad hoc config over the suite gives 25 errors before and after, the suite's one (TS7006 at the pre-existing mock.calls.map) unchanged"
+				},
+				"suites": {
+					"run": "process/handle-spawn.managed.test.ts; then src/__tests__/main/ipc/handlers/, src/__tests__/main/process-manager/, shared agentMetadata",
+					"result": "managed spawn 25/25 in 1.1s (was 19 failed of 24, ~200s); wider run 102 files, 3742 passed, 7 skipped, 0 failed"
+				},
+				"tools": "Working/mcomp-33-00s5 (apply.mjs, apply2.mjs, apply3.mjs, debug.mjs, tsc-suite.mjs, commit-wt.mjs, record.mjs)"
 			}
 		}
 	}
