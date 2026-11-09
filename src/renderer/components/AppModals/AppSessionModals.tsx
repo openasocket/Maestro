@@ -3,6 +3,7 @@ import type { AdditionalDirectory, Theme, Session, ToolType } from '../../types'
 
 // Session Management Modal Components
 import { NewInstanceModal, EditAgentModal } from '../NewInstanceModal';
+import type { NewInstanceModalProps } from '../NewInstanceModal/types';
 import { NewAgentChoiceModal } from '../NewAgentChoiceModal';
 import { RenameSessionModal } from '../RenameSessionModal';
 import { RenameTabModal } from '../RenameTabModal';
@@ -26,36 +27,8 @@ export interface AppSessionModalsProps {
 	// NewInstanceModal
 	newInstanceModalOpen: boolean;
 	onCloseNewInstanceModal: () => void;
-	onCreateSession: (
-		agentId: string,
-		workingDir: string,
-		name: string,
-		nudgeMessage?: string,
-		newSessionMessage?: string,
-		customPath?: string,
-		customArgs?: string,
-		customEnvVars?: Record<string, string>,
-		customModel?: string,
-		customContextWindow?: number,
-		customProviderPath?: string,
-		sessionSshRemoteConfig?: {
-			enabled: boolean;
-			remoteId: string | null;
-			workingDirOverride?: string;
-		},
-		customEffort?: string,
-		groupId?: string,
-		enableMaestroP?: boolean,
-		maestroPPath?: string,
-		maestroPMode?: 'interactive' | 'dynamic',
-		retryOnAvailabilityErrors?: boolean,
-		retryOnTokenExhaustion?: boolean,
-		additionalDirectories?: AdditionalDirectory[],
-		/** Codex only: spend a reset credit automatically on quota exhaustion. Defaults off. */
-		codexAutoResetOnExhaustion?: boolean,
-		/** Codex only: which transport chat turns use. `undefined` means `exec`. */
-		codexTransport?: CodexTransport
-	) => void;
+	/** The New Agent form's create callback (`createNewSession`): awaited, so a refusal keeps the draft. */
+	onCreateSession: NewInstanceModalProps['onCreate'];
 	existingSessions: Session[];
 	sourceSession?: Session; // For agent duplication
 	newInstancePresetGroupId?: string | null; // Group to place the new agent in

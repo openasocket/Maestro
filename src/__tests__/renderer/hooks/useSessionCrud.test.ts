@@ -747,6 +747,125 @@ describe('useSessionCrud', () => {
 			expect(mockMaestro.sessions.commitAgent.mock.calls[0][0].operation).toBe('clone');
 			expect(useSessionStore.getState().sessions).toHaveLength(1);
 		});
+
+		describe('the New Agent form policy revision (MCOMP-23-03A)', () => {
+			// Explicit host double: the applied policy is revision 5, and a create the
+			// form built from any other revision is refused as stale, nothing written.
+			const APPLIED = 5;
+			const host = async (request: {
+				record: Record<string, unknown>;
+				expectedPolicyRevision?: number | null;
+			}) =>
+				request.expectedPolicyRevision !== undefined && request.expectedPolicyRevision !== APPLIED
+					? {
+							ok: false as const,
+							code: 'stale' as const,
+							reason: 'The agent policy changed. Refresh the approved choices and try again.',
+							policyRevision: APPLIED,
+							fields: [],
+						}
+					: { ok: true as const, record: request.record, managed: true, policyRevision: APPLIED };
+			const fromForm = (
+				create: ReturnType<typeof useSessionCrud>['createNewSession'],
+				expectedPolicyRevision: number | null,
+				operation: 'create' | 'clone' = 'create'
+			) =>
+				create(
+					'claude-code',
+					'/test/project',
+					'From Form',
+					...(Array<undefined>(19).fill(undefined) as []),
+					operation,
+					{ expectedPolicyRevision }
+				);
+
+			beforeEach(() => {
+				mockMaestro.sessions.commitAgent.mockImplementation(host);
+			});
+			afterEach(() => {
+				// vi.clearAllMocks keeps implementations: put the shared echo back.
+				mockMaestro.sessions.commitAgent.mockImplementation(
+					async (request: { record: Record<string, unknown> }) => ({
+						ok: true,
+						record: request.record,
+						managed: false,
+						policyRevision: null,
+					})
+				);
+			});
+
+			it('sends the revision the form showed and answers the stale refusal without a toast', async () => {
+				useSessionStore.setState({ activeSessionId: 'previous' });
+				const { result } = renderHook(() => useSessionCrud(createDeps()));
+
+				let outcome: Awaited<ReturnType<typeof result.current.createNewSession>> | undefined;
+				await act(async () => {
+					outcome = await fromForm(result.current.createNewSession, 4);
+				});
+
+				expect(mockMaestro.sessions.commitAgent).toHaveBeenCalledTimes(1);
+				expect(mockMaestro.sessions.commitAgent.mock.calls[0][0]).toMatchObject({
+					operation: 'create',
+					expectedPolicyRevision: 4,
+				});
+				expect(outcome).toMatchObject({
+					ok: false,
+					refusal: { code: 'stale', policyRevision: APPLIED },
+				});
+				expect(useSessionStore.getState().sessions).toHaveLength(0);
+				expect(useSessionStore.getState().activeSessionId).toBe('previous');
+				// The form lists the refusal inline; a toast would say it twice.
+				expect(notifyToast).not.toHaveBeenCalled();
+			});
+
+			it('commits when the form is current, and carries the clone operation with it', async () => {
+				const { result } = renderHook(() => useSessionCrud(createDeps()));
+
+				let outcome: Awaited<ReturnType<typeof result.current.createNewSession>> | undefined;
+				await act(async () => {
+					outcome = await fromForm(result.current.createNewSession, APPLIED, 'clone');
+				});
+
+				expect(mockMaestro.sessions.commitAgent.mock.calls[0][0]).toMatchObject({
+					operation: 'clone',
+					expectedPolicyRevision: APPLIED,
+				});
+				const [inserted] = useSessionStore.getState().sessions;
+				expect(outcome).toEqual({ ok: true, sessionId: inserted.id });
+			});
+
+			it('passes a standalone form revision of null through unchanged', async () => {
+				const { result } = renderHook(() => useSessionCrud(createDeps()));
+
+				await act(async () => {
+					await fromForm(result.current.createNewSession, null);
+				});
+
+				expect(mockMaestro.sessions.commitAgent.mock.calls[0][0].expectedPolicyRevision).toBeNull();
+			});
+
+			it('keeps the toast and sends no revision for a caller other than the form', async () => {
+				const { result } = renderHook(() => useSessionCrud(createDeps()));
+				mockMaestro.sessions.commitAgent.mockResolvedValueOnce({
+					ok: false,
+					code: 'field',
+					reason: 'Outside the approved choices.',
+					policyRevision: APPLIED,
+					fields: [{ field: 'model', reason: 'model is not approved' }],
+				});
+
+				await act(async () => {
+					await result.current.createNewSession('claude-code', '/test/project', 'Other Caller');
+				});
+
+				expect(mockMaestro.sessions.commitAgent.mock.calls[0][0]).not.toHaveProperty(
+					'expectedPolicyRevision'
+				);
+				expect(notifyToast).toHaveBeenCalledWith(
+					expect.objectContaining({ title: 'Agent Creation Refused' })
+				);
+			});
+		});
 	});
 
 	// ========================================================================

@@ -35,6 +35,7 @@ import type { CrossTabSearchJumpTarget } from '../CrossTabSearchModal';
 import type { RecoveryAction } from '../AgentErrorModal';
 import type { MergeOptions } from '../MergeSessionModal';
 import type { SendToAgentOptions } from '../SendToAgentModal';
+import type { NewInstanceModalProps } from '../NewInstanceModal/types';
 
 // Group components
 import { AppInfoModals } from './AppInfoModals';
@@ -99,29 +100,8 @@ export interface AppModalsProps {
 
 	// --- AppSessionModals props ---
 	onCloseNewInstanceModal: () => void;
-	onCreateSession: (
-		agentId: string,
-		workingDir: string,
-		name: string,
-		nudgeMessage?: string,
-		newSessionMessage?: string,
-		customPath?: string,
-		customArgs?: string,
-		customEnvVars?: Record<string, string>,
-		customModel?: string,
-		customContextWindow?: number,
-		customProviderPath?: string,
-		sessionSshRemoteConfig?: {
-			enabled: boolean;
-			remoteId: string | null;
-			workingDirOverride?: string;
-		},
-		customEffort?: string,
-		groupId?: string,
-		enableMaestroP?: boolean,
-		maestroPPath?: string,
-		maestroPMode?: 'interactive' | 'dynamic'
-	) => void;
+	/** The New Agent form's create callback (`createNewSession`): awaited, so a refusal keeps the draft. */
+	onCreateSession: NewInstanceModalProps['onCreate'];
 	duplicatingSessionId?: string | null; // Session ID to duplicate from
 	newInstancePresetGroupId?: string | null; // Group to place the new agent in
 	newInstancePresetWorkingDir?: string | null; // Working directory to seed the new agent with

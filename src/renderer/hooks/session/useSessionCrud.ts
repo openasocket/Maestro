@@ -101,7 +101,13 @@ export interface UseSessionCrudReturn {
 		/** Codex only: which transport chat turns use. `undefined` means `exec`. */
 		codexTransport?: CodexTransport,
 		/** `clone` when the form duplicates an agent; the host checks it as a clone. */
-		operation?: NewAgentOperation
+		operation?: NewAgentOperation,
+		/**
+		 * Sent by the New Agent form only: the policy revision its approved choices
+		 * were read from, so the host answers `stale` when the policy moved. The
+		 * form reports a refusal inline, so passing this also silences the toast.
+		 */
+		policy?: { expectedPolicyRevision: number | null }
 	) => Promise<CreateNewSessionResult>;
 	/** Opens the delete agent confirmation modal */
 	deleteSession: (id: string) => void;
@@ -200,7 +206,9 @@ export function useSessionCrud(deps: UseSessionCrudDeps): UseSessionCrudReturn {
 			/** Codex only: which transport chat turns use. `undefined` means `exec`. */
 			codexTransport?: CodexTransport,
 			/** `clone` when the form duplicates an agent; the host checks it as a clone. */
-			operation: NewAgentOperation = 'create'
+			operation: NewAgentOperation = 'create',
+			/** The New Agent form's policy revision (see the return type above). */
+			policy?: { expectedPolicyRevision: number | null }
 		): Promise<CreateNewSessionResult> => {
 			try {
 				// Get agent definition to get correct command
@@ -299,7 +307,13 @@ export function useSessionCrud(deps: UseSessionCrudDeps): UseSessionCrudReturn {
 				// The host checks the record exactly as it will be stored and commits it
 				// (MCOMP-23-02). Only the canonical record it returns enters the store; a
 				// refusal wrote nothing, so the form keeps its draft.
-				const committed = await commitNewAgent(operation, draft);
+				// The form sends the revision it showed (so a moved policy is `stale`)
+				// and lists a refusal by field itself; other callers keep the toast.
+				const committed = await commitNewAgent(
+					operation,
+					draft,
+					policy ? { expectedPolicyRevision: policy.expectedPolicyRevision, notify: false } : {}
+				);
 				if (!committed.ok) {
 					return { ok: false, error: committed.message, refusal: committed.refusal };
 				}
