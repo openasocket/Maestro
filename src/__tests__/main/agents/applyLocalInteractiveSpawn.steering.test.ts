@@ -7,7 +7,7 @@
  * report "not steerable" for every turn, with nothing anywhere saying why.
  */
 
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { STEERING_SOCKET_ENV_VAR } from '../../../shared/chatSteering';
 import { applyLocalInteractiveSpawnDecision } from '../../../main/ipc/handlers/process/apply-local-interactive-spawn';
@@ -15,9 +15,17 @@ import { steeringSocketPathFor } from '../../../main/process-manager/steering-cl
 import type { ClaudeSpawnContext } from '../../../main/ipc/handlers/process/resolve-claude-spawn-context';
 import type { SpawnProcessConfig } from '../../../main/ipc/handlers/process/spawn-types';
 
+const { warn } = vi.hoisted(() => ({ warn: vi.fn() }));
 vi.mock('../../../main/utils/logger', () => ({
-	logger: { warn: vi.fn(), error: vi.fn(), debug: vi.fn(), info: vi.fn() },
+	logger: { warn, error: vi.fn(), debug: vi.fn(), info: vi.fn() },
 }));
+
+import { heldListeners, setListenerAuthority } from '../../../main/enterprise/listener-gate';
+import {
+	listenerVerdict,
+	type ListenerCeilingEntry,
+	type ListenerRequest,
+} from '../../../main/enterprise/listener-policy';
 
 const PROCESS_KEY = 'agent-abc-ai-tab-1';
 
@@ -117,5 +125,119 @@ describe('applyLocalInteractiveSpawnDecision - steering channel', () => {
 		const result = run(config(), interactiveContext({ resolvedMaestroPBinPath: undefined }));
 
 		expect(result.customEnvVarsToPass?.[STEERING_SOCKET_ENV_VAR]).toBeUndefined();
+	});
+});
+
+/** Install a managed ceiling listing `listeners` over the real verdict; returns every request it was asked. */
+function installCeiling(listeners: ListenerCeilingEntry[]): ListenerRequest[] {
+	const asked: ListenerRequest[] = [];
+	setListenerAuthority({
+		evaluateListener(request) {
+			asked.push(request);
+			return listenerVerdict(
+				{ standing: 'managed', ceiling: { policyRevision: 3, listeners }, policyRevision: 3 },
+				request
+			);
+		},
+	});
+	return asked;
+}
+
+describe('applyLocalInteractiveSpawnDecision - steering listener ceiling (MCOMP-19-01D)', () => {
+	afterEach(() => {
+		setListenerAuthority(null);
+		warn.mockClear();
+	});
+
+	it('refused: spawns maestro-p WITHOUT a steering socket and reports the hold by name', () => {
+		const asked = installCeiling([{ kind: 'web', reach: 'loopback' }]);
+		const result = applyLocalInteractiveSpawnDecision({
+			config: config(),
+			agent: null,
+			claudeContext: interactiveContext(),
+			commandToSpawn: 'claude',
+			argsToSpawn: [],
+			customEnvVarsToPass: { ANTHROPIC_BASE_URL: 'https://gateway.example' },
+		});
+
+		const socketPath = steeringSocketPathFor(PROCESS_KEY);
+		expect(asked).toEqual([{ kind: 'steering', bind: socketPath, port: 0 }]);
+		expect(result.customEnvVarsToPass?.[STEERING_SOCKET_ENV_VAR]).toBeUndefined();
+		expect(result.customEnvVarsToPass?.ANTHROPIC_BASE_URL).toBe('https://gateway.example');
+		expect(result.steeringHold).toMatchObject({
+			kind: 'steering',
+			bind: socketPath,
+			port: 0,
+			reach: 'loopback',
+			code: 'kind-denied',
+		});
+		expect(result.steeringHold?.message).toMatch(/^\[managed-kind-denied\]/);
+		expect(warn).toHaveBeenCalledWith(
+			expect.stringContaining('[managed-kind-denied]'),
+			expect.any(String),
+			expect.objectContaining({ sessionId: PROCESS_KEY, code: 'kind-denied' })
+		);
+		expect(heldListeners()).toEqual([
+			expect.objectContaining({
+				kind: 'steering',
+				bind: socketPath,
+				code: 'kind-denied',
+				count: 1,
+			}),
+		]);
+
+		// The turn still runs through maestro-p (the same command, args and real
+		// claude as an unheld launch), only unsteerable.
+		setListenerAuthority(null);
+		const unheld = applyLocalInteractiveSpawnDecision({
+			config: config(),
+			agent: null,
+			claudeContext: interactiveContext(),
+			commandToSpawn: 'claude',
+			argsToSpawn: [],
+			customEnvVarsToPass: { ANTHROPIC_BASE_URL: 'https://gateway.example' },
+		});
+		expect(result.commandToSpawn).toBe(unheld.commandToSpawn);
+		expect(result.argsToSpawn).toEqual(unheld.argsToSpawn);
+		expect(result.claudeBinPath).toBe(unheld.claudeBinPath);
+		const { [STEERING_SOCKET_ENV_VAR]: _socket, ...unheldEnv } = unheld.customEnvVarsToPass ?? {};
+		expect(result.customEnvVarsToPass).toEqual(unheldEnv);
+	});
+
+	it('admitted: names the socket exactly as before and records nothing', () => {
+		const asked = installCeiling([{ kind: 'steering', reach: 'loopback' }]);
+		const result = run(config(), interactiveContext());
+
+		expect(asked).toHaveLength(1);
+		expect(result.customEnvVarsToPass?.[STEERING_SOCKET_ENV_VAR]).toBe(
+			steeringSocketPathFor(PROCESS_KEY)
+		);
+		expect(result.steeringHold).toBeUndefined();
+		expect(heldListeners()).toEqual([]);
+		expect(warn).not.toHaveBeenCalled();
+	});
+
+	it('standalone: no authority is consulted and the socket is named', () => {
+		const result = run(config(), interactiveContext());
+
+		expect(result.customEnvVarsToPass?.[STEERING_SOCKET_ENV_VAR]).toBe(
+			steeringSocketPathFor(PROCESS_KEY)
+		);
+		expect(result.steeringHold).toBeUndefined();
+		expect(heldListeners()).toEqual([]);
+	});
+
+	it('does not ask the ceiling for a turn that opens no channel (API mode, SSH)', () => {
+		const asked = installCeiling([]);
+		run(config(), interactiveContext({ claudeResolvedMode: 'api' }));
+		run(
+			config({
+				sessionSshRemoteConfig: { enabled: true, remoteId: 'box' },
+			} as Partial<SpawnProcessConfig>),
+			interactiveContext()
+		);
+
+		expect(asked).toEqual([]);
+		expect(heldListeners()).toEqual([]);
 	});
 });

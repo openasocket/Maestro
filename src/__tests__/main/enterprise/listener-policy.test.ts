@@ -573,8 +573,19 @@ describe('sink classification by source', () => {
 			.replace(/^\s*\/\/.*$/gm, '')
 			.match(/\b(holdListener|listenerHoldFor)\(/g) ?? [];
 
-	/** Every inbound sink: the kind its task assigned, the exact gate call, and the first thing after it that reaches a socket or a process. */
-	const SINKS: ReadonlyArray<{ file: string; kind: ListenerKind; call: string; before: string }> = [
+	/**
+	 * Every inbound sink: the kind its task assigned, the exact gate call, and the
+	 * first thing after it that reaches a socket or a process. `times` (default 1)
+	 * is how often the call appears: the tunnel asks again on every supervised
+	 * reconnect (MCOMP-19-01A).
+	 */
+	const SINKS: ReadonlyArray<{
+		file: string;
+		kind: ListenerKind;
+		call: string;
+		before: string;
+		times?: number;
+	}> = [
 		{
 			file: 'src/main/web-server/WebServer.ts',
 			kind: 'web',
@@ -586,6 +597,7 @@ describe('sink classification by source', () => {
 			kind: 'tunnel',
 			call: "listenerHoldFor({ kind: 'tunnel', bind: TUNNEL_TARGET_HOST, port })",
 			before: 'isCloudflaredInstalled()',
+			times: 2,
 		},
 		{
 			file: 'src/main/lite/tunnel.ts',
@@ -635,29 +647,40 @@ describe('sink classification by source', () => {
 			call: "listenerHoldFor({ kind: 'cue-webhook', bind: host, port })",
 			before: 'http.createServer(',
 		},
+		{
+			file: 'src/main/permission-relay/PermissionRelayServer.ts',
+			kind: 'relay',
+			call: "holdListener({ kind: 'relay', bind: socketPath, port: 0 })",
+			before: 'fs.unlinkSync(socketPath)',
+		},
+		{
+			file: 'src/main/coworking/coworking-bridge.ts',
+			kind: 'coworking',
+			call: "listenerHoldFor({ kind: 'coworking', bind: getBridgeSocketPath(), port: 0 })",
+			before: 'listenOnBridgeSocket()',
+		},
+		{
+			file: 'src/main/lite/tailnet-relay.ts',
+			kind: 'ssh-tunnel',
+			call: "holdListener({ kind: 'ssh-tunnel', bind: '127.0.0.1', port: 0 })",
+			before: 'await readDestination()',
+		},
+		{
+			// The socket binds inside the maestro-p child, which has no listener
+			// authority; the desktop holds it at the spawn that names it (MCOMP-19-01D).
+			file: 'src/main/ipc/handlers/process/apply-local-interactive-spawn.ts',
+			kind: 'steering',
+			call: "listenerHoldFor({ kind: 'steering', bind: socketPath, port: 0 })",
+			before: '[STEERING_SOCKET_ENV_VAR]: socketPath',
+		},
 	];
 
-	/** The kinds no sink of this build holds: loopback-only observability and the three OS-local sockets. */
+	/** The kinds no sink of this build holds: the loopback-only Cue status server. */
 	const UNHELD: ReadonlyArray<{ file: string; kind: ListenerKind; bind: string }> = [
 		{
 			file: 'src/main/cue/cue-status-server.ts',
 			kind: 'cue-status',
 			bind: 'server.listen(options.port, CUE_STATUS_HOST)',
-		},
-		{
-			file: 'src/main/permission-relay/PermissionRelayServer.ts',
-			kind: 'relay',
-			bind: 'server.listen(socketPath,',
-		},
-		{
-			file: 'src/maestro-p/steering-server.ts',
-			kind: 'steering',
-			bind: 'server.listen(socketPath)',
-		},
-		{
-			file: 'src/main/coworking/coworking-bridge.ts',
-			kind: 'coworking',
-			bind: 'srv.listen(socketPath)',
 		},
 	];
 
@@ -670,7 +693,10 @@ describe('sink classification by source', () => {
 			);
 			const at = text.indexOf(sink.call);
 			expect(at, `${sink.file} holds ${sink.kind}`).toBeGreaterThan(-1);
-			expect(text.indexOf(sink.call, at + 1), `${sink.file} holds ${sink.kind} once`).toBe(-1);
+			const times = text.split(sink.call).length - 1;
+			expect(times, `${sink.file} holds ${sink.kind} ${sink.times ?? 1} time(s)`).toBe(
+				sink.times ?? 1
+			);
 			expect(
 				text.slice(0, at),
 				`${sink.file} reaches ${sink.before} only after the hold`
@@ -680,14 +706,22 @@ describe('sink classification by source', () => {
 			);
 		}
 		const perFile = new Map<string, number>();
-		for (const sink of SINKS) perFile.set(sink.file, (perFile.get(sink.file) ?? 0) + 1);
+		for (const sink of SINKS)
+			perFile.set(sink.file, (perFile.get(sink.file) ?? 0) + (sink.times ?? 1));
 		for (const [file, count] of perFile) expect(gateCalls(source(file)), file).toHaveLength(count);
 		expect(source('src/main/lite/discovery/tailscale.ts')).toMatch(
 			/const TAILNET_DISCOVERY_LISTENER = \{[^}]*kind: 'tailnet'[^}]*\} as const satisfies ListenerRequest;/
 		);
 	});
 
-	it('the four kinds no sink holds are loopback-only or OS-local by record, and consult no gate', () => {
+	it('the maestro-p steering server, which has no listener authority, consults no gate', () => {
+		const text = source('src/maestro-p/steering-server.ts');
+		expect(text).not.toMatch(/listener-gate'/);
+		expect(gateCalls(text)).toEqual([]);
+		expect(text).toContain('server.listen(socketPath)');
+	});
+
+	it('the one kind no sink holds is loopback-only by record, and consults no gate', () => {
 		const held = new Set(SINKS.map((sink) => sink.kind));
 		expect(LISTENER_KINDS.filter((kind) => !held.has(kind))).toEqual(UNHELD.map((u) => u.kind));
 		for (const entry of UNHELD) {

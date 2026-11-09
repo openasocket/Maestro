@@ -4,6 +4,7 @@ import { applyClaudeSpawnDecision } from '../../../agents/resolveClaudeSpawnMode
 import { isMaestroPBinaryPath } from '../../../agents/claude-usage-startup';
 import { STEERING_SOCKET_ENV_VAR } from '../../../../shared/chatSteering';
 import { steeringSocketPathFor } from '../../../process-manager/steering-client';
+import { listenerHoldFor, type ListenerHold } from '../../../enterprise/listener-gate';
 import { logger } from '../../../utils/logger';
 import type { ClaudeSpawnContext } from './resolve-claude-spawn-context';
 import type { SpawnProcessConfig } from './spawn-types';
@@ -25,6 +26,11 @@ export interface LocalInteractiveSpawnResult {
 	customEnvVarsToPass: Record<string, string> | undefined;
 	/** The real claude binary maestro-p drives; set only when this turn runs through maestro-p. */
 	claudeBinPath?: string;
+	/**
+	 * The listener ceiling's refusal of this turn's steering socket (MCOMP-19-01D),
+	 * set only when a managed ceiling held it: the turn then runs unsteerable.
+	 */
+	steeringHold?: ListenerHold;
 }
 
 /**
@@ -102,15 +108,33 @@ export function applyLocalInteractiveSpawnDecision(
 	// The path is DERIVED from the process key instead of minted and passed along,
 	// because the client runs later from an IPC call that knows only that key. See
 	// steeringSocketPathFor.
-	const steeringEnv = {
-		...applied.customEnvVars,
-		[STEERING_SOCKET_ENV_VAR]: steeringSocketPathFor(config.sessionId),
-	};
+	//
+	// The socket binds inside the maestro-p child, which holds no listener
+	// authority, so the managed listener ceiling is asked HERE, before the spawn
+	// (MCOMP-19-01D), with the socket path as the OS-local bind (reach
+	// `loopback`). Steering is optional for a turn: maestro-p opens no channel
+	// when the variable is absent and the client reports "not steerable". So a
+	// hold does not refuse the spawn; the turn runs without the socket and the
+	// hold is reported by its `[managed-<code>]` name (and recorded once in
+	// `heldListeners()`, which the managed status lists).
+	const socketPath = steeringSocketPathFor(config.sessionId);
+	const steeringHold = listenerHoldFor({ kind: 'steering', bind: socketPath, port: 0 });
+	if (steeringHold) {
+		logger.warn(
+			`Steering channel not opened: ${steeringHold.message}; this turn cannot be steered`,
+			LOG_CONTEXT,
+			{ sessionId: config.sessionId, code: steeringHold.code }
+		);
+	}
+	const steeringEnv = steeringHold
+		? applied.customEnvVars
+		: { ...applied.customEnvVars, [STEERING_SOCKET_ENV_VAR]: socketPath };
 
 	return {
 		commandToSpawn: applied.command,
 		argsToSpawn: applied.args,
 		customEnvVarsToPass: steeringEnv,
 		claudeBinPath: claudeCommandForInteractive,
+		...(steeringHold ? { steeringHold } : {}),
 	};
 }
