@@ -82,7 +82,7 @@ import {
 	restoreManagedSettingPins,
 	setSettingsWriteAuthority,
 } from './enterprise/settings-policy';
-import { encoreFlagPins } from '../shared/managedSettingsLock';
+import { effectiveTrustedKeys, encoreFlagPins } from '../shared/managedSettingsLock';
 import { createInstallPolicySource } from './enterprise/install-policy';
 import {
 	createCredentialCustodySource,
@@ -1918,6 +1918,42 @@ app
 		});
 		// Expose the same instance to the IPC registration phase below.
 		pluginAuthStore = authStore;
+		// The plugin ceiling source (MRC-09-03): the one installed ceiling, bound to
+		// the applied policy revision under the same enrollment rule the spawn
+		// authority uses, read live on every call and every live hold. No endpoint
+		// operation of this build carries a plugin ceiling (CP-01), so nothing
+		// installs one yet: an enrolled host holds none and the broker refuses each
+		// plugin call by name instead of running it on consent alone; a standalone
+		// host is unchanged.
+		// Composed here, beside the ledger (MCOMP-21-07A): the same standing the
+		// broker's `managed` reads holds the ledger's mint, allowlist widening and
+		// load verify, installed before the first plugin refresh or first-party mint.
+		// An install or clear refreshes the registry, so a load the ceiling now
+		// refuses (or admits again) takes effect without a restart.
+		const refreshPluginsForPolicy = (why: string): void => {
+			void pluginManager
+				?.refresh()
+				.catch((error) =>
+					logger.error(`[Plugins] refresh after ${why} failed: ${String(error)}`, '[Plugins]')
+				);
+		};
+		const pluginPolicy = createPluginPolicySource({
+			enrolled: () =>
+				enterpriseService !== null && enterpriseService.identity.read().status !== 'none',
+			policy: () => enterpriseService?.policy.status() ?? null,
+		});
+		const installPluginCeiling = pluginPolicy.install;
+		const clearPluginCeiling = pluginPolicy.clear;
+		pluginPolicy.install = (raw) => {
+			const outcome = installPluginCeiling(raw);
+			if (outcome.installed) refreshPluginsForPolicy('a plugin ceiling install');
+			return outcome;
+		};
+		pluginPolicy.clear = () => {
+			clearPluginCeiling();
+			refreshPluginsForPolicy('a plugin ceiling clear');
+		};
+		authStore.setManagedStanding(() => pluginPolicy.standing());
 
 		// Enterprise enrollment: the protected identity, endpoint client, lifecycle,
 		// policy status and host adapter, composed before the IPC handlers so every
@@ -2085,10 +2121,14 @@ app
 			const userKeys = Array.isArray(keys)
 				? keys.filter((k): k is string => typeof k === 'string')
 				: [];
+			// A managed pin of pluginTrustedKeys replaces the user's keys (MCOMP-21-07A).
 			// Merge the built-in publisher anchor so a signed, bundled first-party
 			// plugin is trusted without the user adding a key (publisher-keys.ts).
-			return resolveTrustedKeys(userKeys);
+			return resolveTrustedKeys(effectiveTrustedKeys(userKeys, settingsPolicy.pins()));
 		};
+		// A settings policy change can drop a trusted key or pin a new list (and the
+		// plugin standing follows the same policy revision): re-verify every plugin now.
+		settingsPolicy.onChange(() => refreshPluginsForPolicy('a settings policy change'));
 		// The live grant source every enforcement seam now reads (sealed, identity-
 		// bound, anti-rollback) instead of the forgeable on-disk store.
 		const grantsOf = (pluginId: string) => authStore.readGrants(pluginId);
@@ -2274,18 +2314,6 @@ app
 		const DISPATCH_DENY_TOAST_THROTTLE_MS = 60_000;
 		const dispatchDenyToastAt = new Map<string, number>();
 
-		// The plugin ceiling source (MRC-09-03): the one installed ceiling, bound to
-		// the applied policy revision under the same enrollment rule the spawn
-		// authority uses, read live on every call and every live hold. No endpoint
-		// operation of this build carries a plugin ceiling (CP-01), so nothing
-		// installs one yet: an enrolled host holds none and the broker refuses each
-		// plugin call by name instead of running it on consent alone; a standalone
-		// host is unchanged.
-		const pluginPolicy = createPluginPolicySource({
-			enrolled: () =>
-				enterpriseService !== null && enterpriseService.identity.read().status !== 'none',
-			policy: () => enterpriseService?.policy.status() ?? null,
-		});
 		const pluginBroker = new PermissionBroker({
 			getGrants: (pluginId) => grantsOf(pluginId),
 			managed: () => pluginPolicy.standing(),
@@ -3648,7 +3676,9 @@ app
 					? `an untrusted plugin can't combine transcripts:read with net:fetch or process:spawn (only a trusted, signed plugin can).`
 					: outcome.reason === 'bad-nonce'
 						? `the consent request expired or was superseded - try again.`
-						: `consent was rejected (${outcome.reason}).`;
+						: outcome.reason === 'managed' && outcome.message
+							? outcome.message.replace(/\.?$/, '.')
+							: `consent was rejected (${outcome.reason}).`;
 			logger.toast(
 				`Couldn't enable "${pluginId}": ${reasonMsg} Re-enable it to choose a different set.`,
 				'Plugins'

@@ -28,7 +28,7 @@ import {
 	type PermissionGrant,
 } from '../../shared/plugins/permissions';
 import { transcriptReadEgressConflict } from '../../shared/plugins/capability-policy';
-import type { AuthIdentity } from './authorization-ledger';
+import { ManagedPluginAuthorizationError, type AuthIdentity } from './authorization-ledger';
 
 export interface ConsentTicket {
 	pluginId: string;
@@ -134,11 +134,12 @@ export type MintRejection =
 	| 'conflict' // transcripts:read + egress on an untrusted plugin
 	| 'bundled-act-verb' // an act verb rode the plain approved[] channel (forgery/spoof)
 	| 'bad-high-risk' // approvedHighRisk carried a non-act-verb capability
-	| 'bad-unattended'; // unattended named a cap not separately approved as high-risk
+	| 'bad-unattended' // unattended named a cap not separately approved as high-risk
+	| 'managed'; // the managed plugin ceiling refused the mint (ManagedPluginAuthorizationError)
 
 export type MintOutcome =
 	| { ok: true; grants: PermissionGrant[] }
-	| { ok: false; reason: MintRejection };
+	| { ok: false; reason: MintRejection; message?: string };
 
 export interface ConsentMinterDeps {
 	registry: ConsentNonceRegistry;
@@ -341,7 +342,15 @@ export class ConsentMinter {
 			if (this.open !== null || this.deps.senderStillCurrent?.(sender) === false)
 				return { ok: false, reason: 'untrusted-sender' };
 			if (authorizationChanged) return { ok: false, reason: 'offer-changed' };
-			this.deps.store.mint(req.pluginId, grants, identity);
+			try {
+				this.deps.store.mint(req.pluginId, grants, identity);
+			} catch (error) {
+				// A refusing ceiling is a named result, never an unhandled throw; the
+				// ledger refused before it wrote, so nothing was minted.
+				if (error instanceof ManagedPluginAuthorizationError)
+					return { ok: false, reason: 'managed', message: error.message };
+				throw error;
+			}
 			return { ok: true, grants };
 		} finally {
 			unsubscribe?.();

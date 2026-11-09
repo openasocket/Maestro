@@ -40,6 +40,7 @@ import {
 	MANAGED_LOCK_KEYS,
 	NO_MANAGED_SETTING_LOCKS,
 	PLUGIN_SET_LOCK_KEY,
+	PLUGIN_TRUSTED_KEYS_LOCK_KEY,
 	PROMPT_SET_LOCK_KEY,
 	agentConfigLockKey,
 	applyManagedPins,
@@ -447,7 +448,10 @@ const unguardedSetters = new WeakMap<object, Setter>();
  * for a removal): `set(key, value)`, `set(object)`, `delete`, `reset(...keys)`, `clear()`.
  */
 function writesOfMutation(method: string, args: unknown[]): readonly [string, unknown][] {
-	if (method === 'clear') return LOCKABLE_SETTING_KEYS.map((key) => [key, undefined]);
+	// A clear removes every key: the lockable ones and the trusted plugin keys a
+	// managed set pins under the settings key itself (MCOMP-21-07A).
+	if (method === 'clear')
+		return [...LOCKABLE_SETTING_KEYS, PLUGIN_TRUSTED_KEYS_LOCK_KEY].map((key) => [key, undefined]);
 	if (method === 'reset')
 		return args
 			.filter((arg): arg is string => typeof arg === 'string')
