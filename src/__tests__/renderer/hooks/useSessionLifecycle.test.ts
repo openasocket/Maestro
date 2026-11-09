@@ -1923,15 +1923,17 @@ describe('useSessionLifecycle', () => {
 			(window as any).maestro.sessions.commitAgent as ReturnType<typeof vi.fn>;
 		type Save = ReturnType<typeof useSessionLifecycle>['handleSaveEditAgent'];
 		// Every positional argument up to the trailing policy slot, renaming only.
+		// The policy is slot 28 of 29 (harnessControlMode sits at 23), the slot
+		// EditAgentModal writes.
 		const saveName = (
 			save: Save,
 			name: string,
 			policy?: { expectedPolicyRevision: number | null }
 		) => {
-			const args = new Array(28).fill(undefined) as Parameters<Save>;
+			const args = new Array(29).fill(undefined) as Parameters<Save>;
 			args[0] = 'session-1';
 			args[1] = name;
-			if (policy) args[27] = policy;
+			if (policy) args[28] = policy;
 			return save(...args);
 		};
 

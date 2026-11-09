@@ -240,27 +240,32 @@ describe('create-ssh-remote command', () => {
 	});
 
 	describe('federation opt-in', () => {
-		it('stores federation: true for --federation on and echoes it in JSON', () => {
-			createSshRemote('Host Box', { host: 'box', federation: 'on', json: true });
+		it('stores federation: true for --federation on and echoes it in JSON', async () => {
+			await createSshRemote('Host Box', { host: 'box', federation: 'on', json: true });
 
-			expect(writeSshRemotes).toHaveBeenCalledWith([
+			expect(writtenRemotes()).toEqual([
 				expect.objectContaining({ name: 'Host Box', federation: true }),
 			]);
 			const parsed = JSON.parse(consoleSpy.mock.calls[0][0]);
 			expect(parsed).toMatchObject({ success: true, federation: true });
 		});
 
-		it('leaves no federation field for --federation off', () => {
-			createSshRemote('Host Box', { host: 'box', federation: 'off' });
+		it('leaves no federation field for --federation off', async () => {
+			await createSshRemote('Host Box', { host: 'box', federation: 'off' });
 
-			const written = vi.mocked(writeSshRemotes).mock.calls[0][0][0];
-			expect(written.federation).toBeUndefined();
+			const written = writtenRemotes() as Array<{ name?: string; federation?: unknown }>;
+			expect(written).toHaveLength(1);
+			expect(written[0].name).toBe('Host Box');
+			expect(written[0]).not.toHaveProperty('federation', true);
+			expect(written[0].federation).toBeUndefined();
 		});
 
-		it('leaves the field out of the record and the JSON when the flag is not passed', () => {
-			createSshRemote('Plain', { host: 'box', json: true });
+		it('leaves the field out of the record and the JSON when the flag is not passed', async () => {
+			await createSshRemote('Plain', { host: 'box', json: true });
 
-			expect(vi.mocked(writeSshRemotes).mock.calls[0][0][0].federation).toBeUndefined();
+			const written = writtenRemotes() as Array<{ federation?: unknown }>;
+			expect(written).toHaveLength(1);
+			expect(written[0].federation).toBeUndefined();
 			expect(JSON.parse(consoleSpy.mock.calls[0][0])).not.toHaveProperty('federation');
 		});
 	});
