@@ -8,6 +8,7 @@
  * one the runtime ran, and that the verbs with no bridge message of their own (rename, delete) reach
  * the runtime through the IPC channels the desktop's UI calls.
  */
+import { AsyncLocalStorage } from 'async_hooks';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -298,5 +299,66 @@ describe('group chats and consults over the wire', () => {
 		const texts = answers.map((result) => value(result).answer).sort();
 		expect(texts).toEqual(['Answer from call 1', 'Answer from call 2']);
 		expect(answers.map((result) => value(result).agentName).sort()).toEqual(['Alpha', 'Beta']);
+	});
+
+	describe('a host round parent custody (MCOMP-17-03CB)', () => {
+		/** Serve the same runtime again with `roundParents`, and reconnect the client to it. */
+		async function serveWith(roundParents: { run<T>(round: () => Promise<T>): Promise<T> }) {
+			await client.connection.close();
+			await server.close();
+			server = await startRuntimeServer({
+				runtime,
+				token: TOKEN,
+				cliSecret: SECRET,
+				onStopRequested: () => undefined,
+				roundParents,
+			});
+			writeCliServerInfoTo(dir, {
+				port: server.port,
+				token: TOKEN,
+				pid: process.pid,
+				startedAt: Date.now(),
+				cliSecret: SECRET,
+				hostKind: 'headless',
+			});
+			client = createWsMaestroClient({
+				userDataDir: dir,
+				reconcileIntervalMs: 0,
+				heartbeatIntervalMs: 60_000,
+			});
+			value(await client.connection.connect());
+		}
+
+		it('runs every turn of a started and a sent round inside its own custody round', async () => {
+			const inRound = new AsyncLocalStorage<number>();
+			let rounds = 0;
+			const run = <T>(round: () => Promise<T>): Promise<T> => inRound.run(++rounds, round);
+			await serveWith({ run });
+			const seen: string[] = [];
+			script = (call) => {
+				seen.push(`${call.role}:${inRound.getStore() ?? 'none'}`);
+				return ROUND(call);
+			};
+			const watch = watchChat();
+			const { chatId } = value(
+				await client.groupChats.create({ name: 'Custody', participantIds: ['a1', 'a2'] })
+			);
+			await watch.idle();
+			expect(rounds).toBe(1);
+			value(await client.groupChats.send(chatId, 'once more'));
+			await watch.idle(2);
+			expect(rounds).toBe(2);
+
+			// Every turn of the first round ran in round 1 and every turn of the second in round 2.
+			expect(seen.length).toBeGreaterThanOrEqual(8);
+			const firstRound = seen.slice(0, seen.indexOf('synthesis:1') + 1);
+			expect(firstRound.every((entry) => entry.endsWith(':1'))).toBe(true);
+			expect(seen.slice(firstRound.length).every((entry) => entry.endsWith(':2'))).toBe(true);
+			expect(seen).toEqual(expect.arrayContaining(['moderator:2', 'participant:2', 'synthesis:2']));
+
+			// A stop is not a round: the custody is not asked for one.
+			value(await client.groupChats.stop(chatId));
+			expect(rounds).toBe(2);
+		});
 	});
 });

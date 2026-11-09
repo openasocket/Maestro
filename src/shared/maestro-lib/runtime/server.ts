@@ -45,7 +45,11 @@ import { providerRouteSupport } from '../providers/capabilities';
 import { getVisibleAgentDefinitions } from '../providers/definitions';
 import type { MaestroRuntime } from './index';
 import { autoRunStateFrame, createFrameState, framesForEvent, type Frame } from './server-frames';
-import { createRequestHandler, runtimeManagedScope } from './server-requests';
+import {
+	createRequestHandler,
+	runtimeManagedScope,
+	type RoundParentCustody,
+} from './server-requests';
 
 const LOG_CONTEXT = '[RuntimeServer]';
 
@@ -74,6 +78,14 @@ export interface RuntimeServerOptions {
 		version?: string;
 		managedUnavailable?: string;
 	};
+	/**
+	 * The custody this host's own group chat rounds run under (MCOMP-17-03CB): handed to the
+	 * request handler as `roundParents`, so `start_group_chat` and `send_group_chat_message` run
+	 * inside its `run` and every background process a round starts binds to one host-standing
+	 * parent. The host passes the same custody's `lookup` to the runtime as
+	 * `backgroundParentContext`. Absent: a round runs with no parent, as before.
+	 */
+	roundParents?: Pick<RoundParentCustody, 'run'>;
 }
 
 export interface RuntimeServer {
@@ -166,8 +178,12 @@ export function hostManagedStanding(input: {
 export async function startRuntimeServer(options: RuntimeServerOptions): Promise<RuntimeServer> {
 	const { runtime } = options;
 	const epoch = crypto.randomUUID();
-	// Managed requests are admitted in the runtime's own scope (MRC-08-05), read per request.
-	const handle = createRequestHandler(runtime, { managedScope: runtimeManagedScope(runtime) });
+	// Managed requests are admitted in the runtime's own scope (MRC-08-05), read per request, and a
+	// room round runs under the host's round parent custody when it composed one (MCOMP-17-03CB).
+	const handle = createRequestHandler(runtime, {
+		managedScope: runtimeManagedScope(runtime),
+		...(options.roundParents ? { roundParents: options.roundParents } : {}),
+	});
 	const frameState = createFrameState();
 	const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_PAYLOAD_BYTES });
 	const sockets = new Set<WebSocket>();
