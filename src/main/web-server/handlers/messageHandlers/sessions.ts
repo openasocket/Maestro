@@ -124,6 +124,8 @@ export function handleCreateSession(
 	if (message.codexTransport === 'app-server' || message.codexTransport === 'exec') {
 		config.codexTransport = message.codexTransport;
 	}
+	// `duplicate-agent` creates a clone; the host checks it as one (MCOMP-23-02C).
+	if (message.operation === 'clone') config.operation = 'clone';
 	const hasConfig = Object.keys(config).length > 0;
 
 	ctx.callbacks
@@ -136,10 +138,13 @@ export function handleCreateSession(
 			readBackgroundField(message)
 		)
 		.then((result) => {
+			const sessionId = result && 'sessionId' in result ? result.sessionId : undefined;
 			ctx.send(client, {
 				type: 'create_session_result',
-				success: !!result,
-				sessionId: result?.sessionId,
+				success: !!sessionId,
+				sessionId,
+				// A host refusal names its fields; the CLI prints it instead of a bare failure.
+				...(result && 'error' in result && { error: result.error }),
 				requestId: message.requestId,
 			});
 		})

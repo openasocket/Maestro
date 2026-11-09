@@ -1217,7 +1217,7 @@ interface MaestroAPI {
 		) => () => void;
 		sendRemoteCreateSessionResponse: (
 			responseChannel: string,
-			result: { sessionId: string } | null
+			result: { sessionId: string } | { error: string } | null
 		) => void;
 		onRemoteDeleteSession: (callback: (sessionId: string) => void) => () => void;
 		onRemoteRenameSession: (

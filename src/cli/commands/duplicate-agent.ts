@@ -100,6 +100,8 @@ export async function duplicateAgent(
 		retryOnTokenExhaustion: input.retryOnTokenExhaustion,
 		codexAutoResetOnExhaustion: input.codexAutoResetOnExhaustion,
 		codexTransport: input.codexTransport,
+		// The desktop host checks a duplicate as a clone, like the GUI's Duplicate...
+		operation: 'clone',
 	};
 
 	// Only the bridge call sits inside the try, so a failCommand exit below is

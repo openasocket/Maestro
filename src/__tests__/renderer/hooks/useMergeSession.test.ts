@@ -11,6 +11,7 @@ import { createMockAITab } from '../../helpers/mockTab';
 import { createMockSession as baseCreateMockSession } from '../../helpers/mockSession';
 import type { MergeOptions } from '../../../renderer/components/MergeSessionModal';
 import * as contextGroomer from '../../../renderer/services/contextGroomer';
+import { useSessionStore } from '../../../renderer/stores/sessionStore';
 
 // Mock the context grooming service
 vi.mock('../../../renderer/services/contextGroomer', async () => {
@@ -695,14 +696,78 @@ describe('useMergeSession', () => {
 	});
 });
 
-// Note: useMergeSessionWithSessions tests are skipped because:
-// 1. The base useMergeSession hook tests cover all core functionality
-// 2. useMergeSessionWithSessions is a thin wrapper that adds session state management
-// 3. Integration tests in the app provide full coverage of the session management flow
-// 4. The concurrent render issues with renderHook cleanup cause flaky tests
-describe.skip('useMergeSessionWithSessions', () => {
-	it('placeholder for wrapper hook tests', () => {
-		// These tests are covered by integration tests
-		expect(true).toBe(true);
+// The wrapper's new-agent path (MCOMP-23-02C): the merged agent is committed
+// through the host (sessions:commitAgent) before it enters the store.
+describe('useMergeSessionWithSessions - host commit', () => {
+	const options: MergeOptions = {
+		groomContext: false,
+		createNewSession: true,
+		preserveTimestamps: true,
+	};
+
+	beforeEach(() => {
+		vi.clearAllMocks();
+	});
+
+	afterEach(() => {
+		cleanup();
+		__resetMergeInProgress?.();
+	});
+
+	function setup(sourceLogs: number) {
+		const logs: LogEntry[] = Array.from({ length: sourceLogs }, (_, i) => ({
+			id: `log-${i}`,
+			timestamp: i,
+			source: i % 2 ? 'ai' : 'user',
+			text: `line ${i}`,
+		}));
+		const source = createMockSession('source-1', 'claude-code', 'idle', [
+			createMockTab('tab-1', logs),
+		]);
+		const target = createMockSession('target-1');
+		useSessionStore.setState({ sessions: [source, target] });
+		const setSessions = vi.fn();
+		const { result } = renderHook(() =>
+			useMergeSessionWithSessions({ setSessions, activeTabId: 'tab-1' })
+		);
+		return { result, source, setSessions };
+	}
+
+	it('commits the merged agent as a create and keeps its whole transcript', async () => {
+		const { result, source, setSessions } = setup(120);
+		let outcome: Awaited<ReturnType<typeof result.current.executeMerge>> | undefined;
+		await act(async () => {
+			outcome = await result.current.executeMerge(source, 'tab-1', 'target-1', 'tab-1', options);
+		});
+
+		expect(outcome).toMatchObject({ success: true, newSessionId: 'new-merged-session-id' });
+		const request = vi.mocked(window.maestro.sessions.commitAgent).mock.calls[0][0];
+		expect(request.operation).toBe('create');
+		// The record the host checks is the persisted form (capped transcript)...
+		expect((request.record.aiTabs as AITab[])[0].logs).toHaveLength(100);
+		// ...while the live agent keeps the full merged history.
+		const inserted = (setSessions.mock.calls[0][0] as (prev: Session[]) => Session[])([]);
+		expect(inserted[0].aiTabs[0].logs).toHaveLength(122);
+	});
+
+	it('returns the refusal and inserts nothing when the host refuses', async () => {
+		vi.mocked(window.maestro.sessions.commitAgent).mockResolvedValueOnce({
+			ok: false,
+			code: 'field',
+			reason: 'A choice is not approved.',
+			policyRevision: 1,
+			fields: [{ field: 'provider', reason: 'not approved' }],
+		} as never);
+		const { result, source, setSessions } = setup(2);
+		let outcome: Awaited<ReturnType<typeof result.current.executeMerge>> | undefined;
+		await act(async () => {
+			outcome = await result.current.executeMerge(source, 'tab-1', 'target-1', 'tab-1', options);
+		});
+
+		expect(outcome).toEqual({
+			success: false,
+			error: 'A choice is not approved. (provider: not approved)',
+		});
+		expect(setSessions).not.toHaveBeenCalled();
 	});
 });

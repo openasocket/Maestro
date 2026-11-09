@@ -71,3 +71,55 @@ describe('handleCreateSession - background intent (issue #1496)', () => {
 		expect(backgroundArg({ background: 'yes' as unknown as boolean })).toBe(false);
 	});
 });
+
+describe('handleCreateSession - host commit (MCOMP-23-02C)', () => {
+	function dispatch(message: Partial<WebClientMessage>) {
+		const ctx = makeCtx();
+		handleCreateSession(
+			ctx,
+			{} as WebClient,
+			{
+				name: 'Agent',
+				toolType: 'codex',
+				cwd: '/tmp',
+				requestId: 'r1',
+				...message,
+			} as WebClientMessage
+		);
+		return ctx;
+	}
+
+	it('carries a duplicate as a clone and nothing else', () => {
+		dispatch({ operation: 'clone' });
+		dispatch({ operation: 'edit' });
+		expect(createSession.mock.calls[0][4]).toMatchObject({ operation: 'clone' });
+		expect(createSession.mock.calls[1][4]).toBeUndefined();
+	});
+
+	it('answers a host refusal with its reason instead of a bare failure', async () => {
+		createSession.mockResolvedValue({ error: 'A choice is not approved. (model: no)' });
+		const ctx = dispatch({});
+		await vi.waitFor(() =>
+			expect(ctx.send).toHaveBeenCalledWith(
+				{},
+				{
+					type: 'create_session_result',
+					success: false,
+					sessionId: undefined,
+					error: 'A choice is not approved. (model: no)',
+					requestId: 'r1',
+				}
+			)
+		);
+	});
+
+	it('still answers a created agent with its id', async () => {
+		const ctx = dispatch({});
+		await vi.waitFor(() =>
+			expect(ctx.send).toHaveBeenCalledWith(
+				{},
+				{ type: 'create_session_result', success: true, sessionId: 'new-1', requestId: 'r1' }
+			)
+		);
+	});
+});

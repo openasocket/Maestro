@@ -34,6 +34,7 @@ import type { MergeState, TabMergeState } from '../../stores/operationStore';
 import { useSessionStore } from '../../stores/sessionStore';
 import { estimateTokensFromLogs } from '../../../shared/formatters';
 import { logger } from '../../utils/logger';
+import { commitNewAgent } from '../../services/agentCommit';
 
 // Re-export types from the canonical store location
 export type { MergeState, TabMergeState } from '../../stores/operationStore';
@@ -671,7 +672,7 @@ export function useMergeSessionWithSessions(
 							(a, b) => a.timestamp - b.timestamp
 						);
 
-						const { session: newSession } = createMergedSession({
+						const { session: draft } = createMergedSession({
 							name: mergedName,
 							projectRoot: sourceSession.projectRoot,
 							toolType: sourceSession.toolType,
@@ -679,7 +680,15 @@ export function useMergeSessionWithSessions(
 							groupId: sourceSession.groupId,
 						});
 
-						// Add new session to state
+						// The host checks the new agent before it exists (MCOMP-23-02C); its
+						// merged transcript stays whole, the configuration is the canonical one.
+						const committed = await commitNewAgent('create', draft, {
+							title: 'Merge Refused',
+							notify: false,
+							keepDraftRows: true,
+						});
+						if (!committed.ok) return { success: false, error: committed.message };
+						const newSession = committed.session;
 						setSessions((prev) => [...prev, newSession]);
 
 						// Log merge operation to history

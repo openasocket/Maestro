@@ -109,6 +109,8 @@ describe('duplicate-agent command', () => {
 			codexTransport: 'app-server',
 			sessionSshRemoteConfig: { enabled: false, remoteId: null },
 			additionalDirectories: [{ path: '/shared/docs', read: true, write: false }],
+			// The desktop host checks a duplicate as a clone (MCOMP-23-02C).
+			operation: 'clone',
 		});
 		expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('new-1'));
 		// A copy shares its source's directory, which the modal also warns about.

@@ -109,6 +109,7 @@ import type {
 	DeleteGroupCallback,
 	MoveSessionToGroupCallback,
 	CreateSessionCallback,
+	CreateSessionResult,
 	CreateWorktreeSessionCallback,
 	CreateSessionConfig,
 	DeleteSessionCallback,
@@ -1006,7 +1007,7 @@ export class CallbackRegistry {
 		groupId?: string,
 		config?: CreateSessionConfig,
 		background?: boolean
-	): Promise<{ sessionId: string } | null> {
+	): Promise<CreateSessionResult | null> {
 		if (!this.callbacks.createSession) return null;
 		return this.callbacks.createSession(name, toolType, cwd, groupId, config, background);
 	}

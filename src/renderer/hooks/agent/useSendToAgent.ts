@@ -39,6 +39,7 @@ import { useOperationStore } from '../../stores/operationStore';
 import { estimateTokensFromLogs } from '../../../shared/formatters';
 import type { TransferState, TransferLastRequest } from '../../stores/operationStore';
 import { logger } from '../../utils/logger';
+import { commitNewAgent } from '../../services/agentCommit';
 
 // Re-export types from the canonical store location
 export type { TransferState } from '../../stores/operationStore';
@@ -660,8 +661,16 @@ Please confirm you've reviewed this context and let me know you're ready to cont
 					activeTab.autoSendOnActivate = true;
 				}
 
-				// Add new session to state
-				setSessions((prev) => [...prev, newSession]);
+				// The host checks the new agent before it exists (MCOMP-23-02C); the
+				// transfer notice and pending context stay on its tab.
+				const committed = await commitNewAgent('create', newSession, {
+					title: 'Transfer Refused',
+					notify: false,
+					keepDraftRows: true,
+				});
+				if (!committed.ok) return { success: false, error: committed.message };
+				const createdSession = committed.session;
+				setSessions((prev) => [...prev, createdSession]);
 
 				// Log transfer operation to history
 				const targetAgentName = getAgentDisplayName(targetAgent);

@@ -425,6 +425,46 @@ describe('useSendToAgentWithSessions', () => {
 		expect(mockSetSessions).toHaveBeenCalled();
 	});
 
+	it('commits the new agent through the host and inserts nothing on refusal', async () => {
+		const commitAgent = vi.mocked(window.maestro.sessions.commitAgent);
+		commitAgent.mockResolvedValueOnce({
+			ok: false,
+			code: 'field',
+			reason: 'A choice is not approved.',
+			policyRevision: 1,
+			fields: [{ field: 'provider', reason: 'not approved' }],
+		} as never);
+		const { result } = renderHook(() =>
+			useSendToAgentWithSessions({
+				setSessions: mockSetSessions,
+				onSessionCreated: mockOnSessionCreated,
+				onNavigateToSession: mockOnNavigateToSession,
+			})
+		);
+
+		let outcome: Awaited<ReturnType<typeof result.current.executeTransfer>> | undefined;
+		await act(async () => {
+			outcome = await result.current.executeTransfer(
+				createMockSession('source-1', 'claude-code'),
+				'tab-1',
+				'opencode',
+				{ groomContext: true, createNewSession: true }
+			);
+		});
+
+		expect(commitAgent.mock.calls.at(-1)?.[0]).toMatchObject({
+			operation: 'create',
+			record: { toolType: 'opencode' },
+		});
+		expect(outcome).toEqual({
+			success: false,
+			error: 'A choice is not approved. (provider: not approved)',
+		});
+		expect(mockSetSessions).not.toHaveBeenCalled();
+		expect(mockOnSessionCreated).not.toHaveBeenCalled();
+		expect(mockOnNavigateToSession).not.toHaveBeenCalled();
+	});
+
 	it('sets autoSendOnActivate flag on new session tab for automatic context injection', async () => {
 		const sessions = [createMockSession('existing-1')];
 

@@ -27,6 +27,7 @@ import { gitService } from '../../services/git';
 import { notifyToast } from '../../stores/notificationStore';
 import { DEFAULT_BATCH_PROMPT } from '../../components/BatchRunnerModal';
 import { logger } from '../../utils/logger';
+import { commitNewAgent } from '../../services/agentCommit';
 
 // ============================================================================
 // Dependencies interface
@@ -204,7 +205,13 @@ export function useSymphonyContribution(
 					data.agentType === 'claude-code' ? { mode: 'api', modeReason: 'auto' } : undefined,
 			};
 
-			setSessions((prev) => [...prev, newSession]);
+			// The host checks the agent before it exists (MCOMP-23-02C). A refusal is
+			// toasted by field and nothing starts: no agent, no registration, no run.
+			const committed = await commitNewAgent('create', newSession, {
+				title: 'Symphony Agent Refused',
+			});
+			if (!committed.ok) return;
+			setSessions((prev) => [...prev, committed.session]);
 			setActiveSessionId(newId);
 			setSymphonyModalOpen(false);
 

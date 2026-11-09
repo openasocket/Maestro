@@ -122,15 +122,24 @@ export async function commitAgentRecord(
  */
 export function sessionFromCommittedRecord(
 	draft: Session,
-	record: Record<string, unknown>
+	record: Record<string, unknown>,
+	options: { keepDraftRows?: boolean } = {}
 ): Session {
+	window.dispatchEvent(
+		new CustomEvent(SESSION_PERSISTENCE_BASELINE_EVENT, { detail: [structuredClone(record)] })
+	);
+	if (options.keepDraftRows) {
+		// The canonical configuration over the draft's own rows: persistence caps a
+		// tab's transcript, and an agent born with one (a Merge target) shows it all.
+		return applyAgentConfigEdit(
+			draft as unknown as Record<string, unknown>,
+			record
+		) as unknown as Session;
+	}
 	const session: Record<string, unknown> = { ...record };
 	for (const field of RUNTIME_ONLY_FIELDS) {
 		if (session[field] === undefined && draft[field] !== undefined) session[field] = draft[field];
 	}
-	window.dispatchEvent(
-		new CustomEvent(SESSION_PERSISTENCE_BASELINE_EVENT, { detail: [structuredClone(record)] })
-	);
 	return session as unknown as Session;
 }
 
@@ -167,7 +176,10 @@ export type NewAgentCommitResult =
  * Commit a NEW agent (create, clone, import) and return the session it enters
  * the store as, built from the canonical record. Every creation path (the New
  * Agent form, a duplicate, the onboarding wizard, a worktree child, CLI
- * `create-worktree`) goes through here, so none inserts its draft first. A
+ * `create-worktree`, `create-agent` and `duplicate-agent`, a Merge or Send to
+ * Agent target, a Symphony contribution) goes through here, so none inserts its
+ * draft first. `keepDraftRows` keeps the draft's transcript rows (only the
+ * configuration comes from the record) for an agent born with history. A
  * refusal inserted nothing; it is logged and toasted under `title` (pass
  * `notify: false` when the caller reports it itself) and returned with its
  * one-line description.
@@ -175,9 +187,14 @@ export type NewAgentCommitResult =
 export async function commitNewAgent(
 	operation: NewAgentOperation,
 	draft: Session,
-	options: AgentCommitOptions & { title?: string; notify?: boolean } = {}
+	options: AgentCommitOptions & { title?: string; notify?: boolean; keepDraftRows?: boolean } = {}
 ): Promise<NewAgentCommitResult> {
-	const { title = 'Agent Creation Refused', notify = true, ...commitOptions } = options;
+	const {
+		title = 'Agent Creation Refused',
+		notify = true,
+		keepDraftRows = false,
+		...commitOptions
+	} = options;
 	const outcome = await commitAgentRecord(operation, draft, commitOptions);
 	if (!outcome.ok) {
 		const message = describeAgentCommitRefusal(outcome);
@@ -190,7 +207,7 @@ export async function commitNewAgent(
 	}
 	return {
 		ok: true,
-		session: sessionFromCommittedRecord(draft, outcome.record),
+		session: sessionFromCommittedRecord(draft, outcome.record, { keepDraftRows }),
 		managed: outcome.managed,
 		policyRevision: outcome.policyRevision,
 	};

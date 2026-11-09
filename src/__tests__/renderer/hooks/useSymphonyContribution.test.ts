@@ -87,6 +87,14 @@ import type { RegisteredRepository, SymphonyIssue } from '../../../shared/sympho
 
 const mockRegisterActive = vi.fn().mockResolvedValue(undefined);
 const mockRecordSessionCreated = vi.fn();
+// The standalone host (sessions:commitAgent): admits and echoes the record.
+const admitRecord = async (request: { record: Record<string, unknown> }) => ({
+	ok: true,
+	record: request.record,
+	managed: false,
+	policyRevision: null,
+});
+const mockCommitAgent = vi.fn(admitRecord);
 
 const mockMaestro = {
 	agents: {
@@ -97,6 +105,10 @@ const mockMaestro = {
 	},
 	stats: {
 		recordSessionCreated: mockRecordSessionCreated,
+	},
+	sessions: {
+		commitAgent: mockCommitAgent,
+		setActiveSessionId: vi.fn().mockResolvedValue(undefined),
 	},
 };
 
@@ -183,6 +195,7 @@ beforeEach(() => {
 		command: 'claude',
 	});
 	mockRegisterActive.mockResolvedValue(undefined);
+	mockCommitAgent.mockImplementation(admitRecord);
 	(gitService.isRepo as ReturnType<typeof vi.fn>).mockResolvedValue(false);
 	(gitService.getBranches as ReturnType<typeof vi.fn>).mockResolvedValue(['main']);
 	(gitService.getTags as ReturnType<typeof vi.fn>).mockResolvedValue([]);
@@ -229,6 +242,58 @@ describe('useSymphonyContribution', () => {
 			const { result } = renderHook(() => useSymphonyContribution(deps));
 
 			expect(typeof result.current.handleStartContribution).toBe('function');
+		});
+	});
+
+	// ========================================================================
+	// Host commit (MCOMP-23-02C)
+	// ========================================================================
+	describe('host commit', () => {
+		it('commits the contribution agent as a create before inserting it', async () => {
+			const deps = createDeps();
+			const { result } = renderHook(() => useSymphonyContribution(deps));
+
+			await act(async () => {
+				await result.current.handleStartContribution(createContributionData());
+			});
+
+			expect(mockCommitAgent).toHaveBeenCalledTimes(1);
+			const request = mockCommitAgent.mock.calls[0][0] as unknown as {
+				operation: string;
+				record: Record<string, unknown>;
+			};
+			expect(request.operation).toBe('create');
+			expect(request.record).toMatchObject({ name: 'Fix the thing', cwd: '/tmp/cloned-repo' });
+			expect(useSessionStore.getState().sessions.map((s) => s.id)).toEqual([request.record.id]);
+		});
+
+		it('on refusal inserts nothing, starts nothing and names the field', async () => {
+			mockCommitAgent.mockResolvedValueOnce({
+				ok: false,
+				code: 'field',
+				reason: 'A choice is not approved.',
+				policyRevision: 3,
+				fields: [{ field: 'workspace', reason: 'not an approved workspace' }],
+			} as never);
+			vi.spyOn(logger, 'warn').mockImplementation(() => {});
+			const deps = createDeps();
+			const { result } = renderHook(() => useSymphonyContribution(deps));
+
+			await act(async () => {
+				await result.current.handleStartContribution(createContributionData());
+			});
+
+			expect(useSessionStore.getState().sessions).toEqual([]);
+			expect(useSessionStore.getState().activeSessionId).toBe('');
+			expect(mockRegisterActive).not.toHaveBeenCalled();
+			expect(mockRecordSessionCreated).not.toHaveBeenCalled();
+			expect(deps.startBatchRun).not.toHaveBeenCalled();
+			expect(notifyToast).toHaveBeenCalledWith(
+				expect.objectContaining({
+					title: 'Symphony Agent Refused',
+					message: expect.stringContaining('workspace: not an approved workspace'),
+				})
+			);
 		});
 	});
 

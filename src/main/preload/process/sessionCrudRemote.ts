@@ -92,7 +92,7 @@ export function createSessionCrudRemoteApi() {
 		 */
 		sendRemoteCreateSessionResponse: (
 			responseChannel: string,
-			result: { sessionId: string } | null
+			result: { sessionId: string } | { error: string } | null
 		): void => {
 			ipcRenderer.send(responseChannel, result);
 		},

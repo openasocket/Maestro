@@ -56,6 +56,7 @@ import { gitService } from '../../services/git';
 import { spawnWorktreeAgentAndDispatch } from '../../utils/worktreeSpawn';
 import { resolveAutoRunDispatchTarget } from '../../services/autoRunDispatchTarget';
 import { notifyToast } from '../../stores/notificationStore';
+import { commitNewAgent } from '../../services/agentCommit';
 import { reserveGoalRunLaunch, releaseGoalRunLaunch, waitForGoalRunStart } from './goalRunLaunch';
 import { killAgentAiProcesses } from '../../services/process';
 import {
@@ -1640,7 +1641,20 @@ export function useAppRemoteEventListeners(deps: UseAppRemoteEventListenersDeps)
 				claudeInteractive: newAgentClaudeInteractive(toolType),
 			};
 
-			setSessions((prev: Session[]) => [...prev, newSession]);
+			// The host checks the record before it exists (MCOMP-23-02C): a refusal
+			// inserts nothing and the CLI gets the reason by field, not a bare failure.
+			// `duplicate-agent` says `clone`; anything else is a plain create.
+			const committed = await commitNewAgent(
+				config?.operation === 'clone' ? 'clone' : 'create',
+				newSession
+			);
+			if (!committed.ok) {
+				window.maestro.process.sendRemoteCreateSessionResponse(responseChannel, {
+					error: committed.message,
+				});
+				return;
+			}
+			setSessions((prev: Session[]) => [...prev, committed.session]);
 			// A background create leaves the Left Bar selection where it is. The
 			// agent still exists, is listed, and is addressable by the id handed
 			// back - it just does not take the window from whoever is working.
@@ -1655,19 +1669,9 @@ export function useAppRemoteEventListeners(deps: UseAppRemoteEventListenersDeps)
 				isRemote: false,
 			});
 
-			// Persist the new agent to disk synchronously before responding. The
-			// renderer's debounced persistence path (useDebouncedPersistence) is
-			// driven by React render cycles and a 2s timer, so a CLI consumer that
-			// runs `create-agent` and then immediately `list agents` / `send` would
-			// otherwise hit the disk-backed CLI storage layer before the in-memory
-			// session has been flushed - surfacing as `AGENT_NOT_FOUND` (issue #1013).
-			// `setMany` is incremental and idempotent: the debounced flush that
-			// follows simply rewrites the same row.
-			try {
-				await window.maestro.sessions.setMany([newSession], []);
-			} catch (persistErr) {
-				logger.error('[Remote] Failed to persist new CLI-created session:', undefined, persistErr);
-			}
+			// No separate flush: the host commit above wrote the record before it
+			// answered, so a CLI that runs `create-agent` and then immediately
+			// `list agents` / `send` finds it on disk (issue #1013).
 
 			window.maestro.process.sendRemoteCreateSessionResponse(responseChannel, {
 				sessionId: newId,

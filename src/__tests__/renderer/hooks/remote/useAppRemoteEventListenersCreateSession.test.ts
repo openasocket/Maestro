@@ -32,6 +32,29 @@ vi.mock('../../../../renderer/utils/browserTabPersistence', () => ({
 vi.mock('../../../../renderer/utils/ids', () => ({ generateId: () => 'new-id' }));
 
 const ack = vi.fn();
+// The standalone host (sessions:commitAgent): admits and echoes the record.
+const admitRecord = async (request: { record: Record<string, unknown> }) => ({
+	ok: true,
+	record: request.record,
+	managed: false,
+	policyRevision: null,
+});
+const commitAgent = vi.fn(admitRecord);
+
+function dispatchCreate(config: Record<string, unknown>) {
+	window.dispatchEvent(
+		new CustomEvent('maestro:remoteCreateSession', {
+			detail: {
+				name: 'Copy',
+				toolType: 'claude-code',
+				cwd: '/p',
+				config,
+				responseChannel: 'ch',
+				background: true,
+			},
+		})
+	);
+}
 
 function setup() {
 	const setSessions = vi.fn();
@@ -75,10 +98,11 @@ async function create(toolType: string, config: Record<string, unknown>): Promis
 
 beforeEach(() => {
 	vi.clearAllMocks();
+	commitAgent.mockImplementation(admitRecord);
 	(window as any).maestro = {
 		agents: { get: vi.fn(async (id: string) => ({ id })) },
 		stats: { recordSessionCreated: vi.fn() },
-		sessions: { setMany: vi.fn(async () => undefined) },
+		sessions: { setMany: vi.fn(async () => undefined), commitAgent },
 		process: { sendRemoteCreateSessionResponse: ack },
 	};
 });
@@ -135,5 +159,40 @@ describe('maestro:remoteCreateSession', () => {
 		});
 		expect('codexAutoResetOnExhaustion' in defaults).toBe(false);
 		expect('codexTransport' in defaults).toBe(false);
+	});
+
+	it('commits a create through the host and inserts the canonical record', async () => {
+		const agent = await create('claude-code', {});
+		expect(commitAgent).toHaveBeenCalledTimes(1);
+		expect(commitAgent.mock.calls[0][0]).toMatchObject({
+			operation: 'create',
+			record: { id: 'new-id', name: 'Copy', cwd: '/p' },
+		});
+		expect(agent.id).toBe('new-id');
+	});
+
+	it('commits a duplicate-agent copy as a clone', async () => {
+		await create('claude-code', { operation: 'clone' });
+		expect(commitAgent.mock.calls[0][0]).toMatchObject({ operation: 'clone' });
+	});
+
+	it('answers the CLI with the refusal by field and inserts nothing', async () => {
+		commitAgent.mockResolvedValueOnce({
+			ok: false,
+			code: 'field',
+			reason: 'A choice is not approved.',
+			policyRevision: 2,
+			fields: [{ field: 'model', reason: 'not an approved model' }],
+		} as never);
+		const { setSessions } = setup();
+		dispatchCreate({});
+		await waitFor(() =>
+			expect(ack).toHaveBeenCalledWith('ch', {
+				error: 'A choice is not approved. (model: not an approved model)',
+			})
+		);
+		expect(setSessions).not.toHaveBeenCalled();
+		expect((window as any).maestro.sessions.setMany).not.toHaveBeenCalled();
+		expect((window as any).maestro.stats.recordSessionCreated).not.toHaveBeenCalled();
 	});
 });

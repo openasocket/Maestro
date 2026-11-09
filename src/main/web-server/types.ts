@@ -1371,7 +1371,12 @@ export interface CreateSessionConfig {
 	codexAutoResetOnExhaustion?: boolean;
 	/** Codex only: chat-turn transport. Absent means `exec`. */
 	codexTransport?: CodexTransport;
+	/** The host authoring operation: `clone` for `duplicate-agent`, else a create. */
+	operation?: 'create' | 'clone';
 }
+
+/** A created agent's id, or the host's reason for refusing it (by field). */
+export type CreateSessionResult = { sessionId: string } | { error: string };
 
 export type CreateSessionCallback = (
 	name: string,
@@ -1380,7 +1385,7 @@ export type CreateSessionCallback = (
 	groupId?: string,
 	config?: CreateSessionConfig,
 	background?: boolean
-) => Promise<{ sessionId: string } | null>;
+) => Promise<CreateSessionResult | null>;
 /**
  * Create a new agent in a git worktree branched off an existing parent agent,
  * without an Auto Run playbook. The desktop creates the worktree on disk, builds

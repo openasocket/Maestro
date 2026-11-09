@@ -36,6 +36,7 @@ import type {
 	UsageDashboardData,
 	AchievementData,
 	CreateSessionConfig,
+	CreateSessionResult,
 	DirectorNotesSynopsisResult,
 	WebPlaybook,
 	WebPlaybookDocument,
@@ -420,7 +421,7 @@ export interface MessageHandlerCallbacks {
 		groupId?: string,
 		config?: CreateSessionConfig,
 		background?: boolean
-	) => Promise<{ sessionId: string } | null>;
+	) => Promise<CreateSessionResult | null>;
 	createWorktreeSession: (
 		parentSessionId: string,
 		config: {
