@@ -698,7 +698,39 @@ describe('sink classification by source', () => {
 			call: "holdListener({ kind: 'runtime-host', bind: RUNTIME_HOST_BIND, port: options.port ?? 0 })",
 			before: 'await deps.startServer(',
 		},
+		{
+			// The Federation forward (upstream-new, MCOMP-33-00L1): held in the admission the
+			// lifecycle installs on the shared forward manager, ahead of the remote identity hold
+			// and of the manager the deps acquire from. The manager's own order is the next case.
+			file: 'src/main/federation/index.ts',
+			kind: 'ssh-tunnel',
+			call: "holdListener({ kind: 'ssh-tunnel', bind: '127.0.0.1', port: 0 })",
+			before: 'getSshForwardManager().acquire(',
+		},
 	];
+
+	it('the shared Federation forward asks its admission before the discovery, the port probe and the ssh spawn', () => {
+		const text = source('src/shared/maestro-lib/client/ssh-forward.ts')
+			.replace(/\/\*[\s\S]*?\*\//g, '')
+			.replace(/^\s*\/\/.*$/gm, '');
+		const admit = text.indexOf('await this.options.admit(remote);');
+		expect(admit).toBeGreaterThan(-1);
+		for (const reach of [
+			'await this.options.discover(remote)',
+			'await this.options.allocatePort()',
+			'this.options.spawn(',
+		])
+			expect(text.indexOf(reach), reach).toBeGreaterThan(admit);
+		expect(text).toContain('admit: options.admit ?? ((remote) => processAdmission?.(remote))');
+		const lifecycle = source('src/main/federation/index.ts');
+		expect(lifecycle).toContain('setSshForwardAdmission(holdFederationForward);');
+		expect(lifecycle.indexOf('setSshForwardAdmission(holdFederationForward);')).toBeLessThan(
+			lifecycle.indexOf('service = new PeerMirrorService(')
+		);
+		expect(lifecycle).toMatch(
+			/holdRemoteAccess\(\{\s*class: 'probe',\s*remote,\s*operation: 'federation-forward'/
+		);
+	});
 
 	/**
 	 * The kinds no sink of this build holds. Empty since MCOMP-21-01 held the Cue

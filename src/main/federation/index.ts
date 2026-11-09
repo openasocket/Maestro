@@ -6,11 +6,16 @@
  * store listener is registered, no ssh runs, and the IPC handlers answer `{ enabled: false }`.
  */
 
-import { getSshForwardManager } from '../../shared/maestro-lib/client/ssh-forward';
+import {
+	getSshForwardManager,
+	setSshForwardAdmission,
+} from '../../shared/maestro-lib/client/ssh-forward';
 import { createWsMaestroClient } from '../../shared/maestro-lib/client/ws-client';
 import type { MirrorPush } from '../../shared/maestro-lib/client/peer-mirror';
 import type { SshRemoteConfig } from '../../shared/types';
+import { holdListener } from '../enterprise/listener-gate';
 import type { FirstPartySupervisorHooks } from '../plugins/first-party-bridge';
+import { holdRemoteAccess } from '../ssh-remote-manager';
 import { captureException } from '../utils/sentry';
 import type { SafeSendFn } from '../utils/safe-send';
 import { PeerMirrorService, type PeerMirrorServiceDeps } from './peer-mirror-service';
@@ -40,6 +45,25 @@ export interface FederationRuntimeDeps {
 	overrides?: Partial<PeerMirrorServiceDeps>;
 }
 
+/**
+ * The managed hold of one Federation forward attempt (MCOMP-33-00L1), asked by the shared forward
+ * manager before the remote discovery's ssh, the free-port probe and the `ssh -L` spawn. The
+ * loopback forward is held as `ssh-tunnel`, the way the Lite tunnel and paired relay hold theirs;
+ * the peer itself is held as a remote `probe` under the managed remote identity before any byte
+ * leaves for it. A refusal throws `[managed-<code>] ...`: the forward goes down with that error and
+ * nothing was dialed. Standalone neither gate has an authority and nothing is consulted.
+ */
+export async function holdFederationForward(remote: SshRemoteConfig): Promise<void> {
+	holdListener({ kind: 'ssh-tunnel', bind: '127.0.0.1', port: 0 });
+	const held = await holdRemoteAccess({
+		class: 'probe',
+		remote,
+		operation: 'federation-forward',
+		target: null,
+	});
+	if (held) throw new Error(held.message);
+}
+
 /** The deps the real service runs on: the shared SSH forward manager and the WebSocket client. */
 export function buildPeerMirrorServiceDeps(deps: FederationRuntimeDeps): PeerMirrorServiceDeps {
 	return {
@@ -64,6 +88,8 @@ export function createFederationSupervisorHooks(
 ): FirstPartySupervisorHooks {
 	return {
 		reconcile: () => {
+			// Every forward this process opens is held from here on (idempotent).
+			setSshForwardAdmission(holdFederationForward);
 			if (service) {
 				service.reconcile();
 				return;

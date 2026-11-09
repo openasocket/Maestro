@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../../cli/services/storage', () => ({
 	readSshRemotes: vi.fn(() => []),
+	dataDirHasManagedBinding: vi.fn(() => false),
 	resolveSshRemoteId: vi.fn((id: string) => id),
 	// The real matcher, so the agent part resolves the way a local target does.
 	resolveAgentId: (ref: string, list: Array<{ id: string; name: string }>) => {
@@ -118,6 +119,7 @@ function depsWith(
 		},
 		isFederationEnabled: () => true,
 		isLocalAgent: () => false,
+		isManagedDataDir: () => false,
 		acquireForward: vi.fn(() => lease),
 		createClient: vi.fn(() => client),
 		createBridge: vi.fn(
@@ -289,6 +291,30 @@ describe('resolvePeerAgent', () => {
 		const error = await rejection(resolvePeerAgent('buildbox:docs', deps));
 		expect(error.code).toBe('federation-off');
 		expect(error.message).toContain('maestro-cli update-ssh-remote r1-abcdef --federation on');
+		expect(deps.acquireForward).not.toHaveBeenCalled();
+	});
+
+	it('refuses on a managed data dir by name, before any forward or discovery (MCOMP-33-00L1)', async () => {
+		const deps = depsWith({ isManagedDataDir: () => true });
+		const error = await rejection(resolvePeerAgent('buildbox:docs', deps));
+		expect(error.code).toBe('managed-unavailable');
+		expect(error.exitCode).toBe(ExitCode.GeneralError);
+		expect(error.peer).toBe('buildbox');
+		expect(error.message).toMatch(
+			/^\[managed-unavailable\] under management maestro-cli cannot open the Federation forward to peer "buildbox"/
+		);
+		expect(error.message).toContain('Nothing was dialed.');
+		expect(deps.acquireForward).not.toHaveBeenCalled();
+		expect(deps.createClient).not.toHaveBeenCalled();
+	});
+
+	it('reads the managed binding of the data dir when no seam names one', async () => {
+		const { dataDirHasManagedBinding } = await import('../../../cli/services/storage');
+		vi.mocked(dataDirHasManagedBinding).mockReturnValueOnce(true);
+		const { isManagedDataDir: _unused, ...deps } = depsWith();
+		const error = await rejection(connectPeer('buildbox', deps));
+		expect(error.code).toBe('managed-unavailable');
+		expect(dataDirHasManagedBinding).toHaveBeenCalled();
 		expect(deps.acquireForward).not.toHaveBeenCalled();
 	});
 

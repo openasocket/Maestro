@@ -25,6 +25,8 @@
  *   failed` means nothing listens on the forwarded port anymore: the host
  *   stopped or restarted on another port.
  * - **Stopping goes through `stopProcess()`.**
+ * - **Every attempt is admitted first.** The admission (`setSshForwardAdmission()`) is asked
+ *   before the discovery, the port probe and the spawn; a managed host refuses there by name.
  *
  * The forward owns its ssh process (`ControlMaster=no`, `ControlPath=none`):
  * riding a ControlMaster would park the forward inside the master and let the
@@ -111,7 +113,27 @@ export type SshForwardSpawn = (
 	options: { stdio: ['ignore', 'ignore', 'pipe']; windowsHide: true; shell: false }
 ) => ChildProcess;
 
+/**
+ * Asked at the start of every attempt, before anything reaches a process or a socket: the
+ * discovery's ssh, the local port probe and the forward's spawn. A throw (or a rejection) refuses
+ * the attempt; the forward goes `down` with that error and retries with backoff, asking again.
+ */
+export type SshForwardAdmission = (remote: SshRemoteConfig) => void | Promise<void>;
+
+let processAdmission: SshForwardAdmission | null = null;
+
+/**
+ * Install (or, with null, remove) the admission every forward of this process is asked with when
+ * its manager names none. The desktop installs the managed listener and remote holds here
+ * (`src/main/federation/index.ts`); with none installed nothing is consulted.
+ */
+export function setSshForwardAdmission(admit: SshForwardAdmission | null): void {
+	processAdmission = admit;
+}
+
 export interface SshForwardManagerOptions {
+	/** Default: the process-wide admission (`setSshForwardAdmission()`), read per attempt. */
+	admit?: SshForwardAdmission;
 	/** Default `discoverRemoteHost()`. */
 	discover?: (remote: SshRemoteConfig) => Promise<RemoteHostDiscovery>;
 	/** Default `child_process.spawn`. */
@@ -373,6 +395,10 @@ class RemoteForward {
 		const remote = this.remote;
 		const label = remoteLabel(remote);
 		try {
+			// Held before the discovery's ssh, the port probe and the spawn (MCOMP-33-00L1): a
+			// refusal is this attempt's error and nothing was dialed.
+			await this.options.admit(remote);
+			if (!isCurrent()) return;
 			const host = endpointOf(remote, await this.options.discover(remote));
 			if (!isCurrent()) return;
 			const localPort = await this.options.allocatePort();
@@ -454,6 +480,7 @@ export class SshForwardManager {
 
 	constructor(options: SshForwardManagerOptions = {}) {
 		this.options = {
+			admit: options.admit ?? ((remote) => processAdmission?.(remote)),
 			discover: options.discover ?? ((remote) => discoverRemoteHost(remote)),
 			spawn: options.spawn ?? ((command, args, opts) => nodeSpawn(command, [...args], opts)),
 			sshPath: options.sshPath,

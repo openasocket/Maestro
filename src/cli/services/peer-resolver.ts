@@ -40,7 +40,12 @@ import type { AITabRecord, AgentRecord } from '../../shared/maestro-lib/store/re
 import type { SshRemoteConfig } from '../../shared/types';
 import { ExitCode } from '../exit-codes';
 import { isEncoreEnabled } from '../utils/encore-gate';
-import { readSshRemotes, resolveAgentId, resolveSshRemoteId } from './storage';
+import {
+	dataDirHasManagedBinding,
+	readSshRemotes,
+	resolveAgentId,
+	resolveSshRemoteId,
+} from './storage';
 import { ACTIVE_TAB_KEYWORD, matchTabId } from './session-command';
 
 /** A `peer:agent` target, split on its first colon. */
@@ -59,6 +64,8 @@ export type PeerErrorCode =
 	| 'ambiguous-peer'
 	/** The SSH remote is not opted in to Federation, so Maestro never dials it (decision D8). */
 	| 'federation-off'
+	/** The data dir is managed: this terminal holds no authority to hold the forward, so none opens. */
+	| 'managed-unavailable'
 	/** The remote has no usable `maestro-cli`. */
 	| 'not-installed'
 	/** The CLI is there, but no host is running. */
@@ -123,6 +130,8 @@ export interface PeerResolverDeps {
 	isFederationEnabled(): boolean;
 	/** Does `target` name a LOCAL agent? Default: `resolveAgentId()` succeeds. */
 	isLocalAgent(target: string): boolean;
+	/** Is the data dir enrolled with a management peer? Default: a managed binding file is present. */
+	isManagedDataDir(): boolean;
 	acquireForward(remote: SshRemoteConfig): SshForwardLease;
 	createClient(endpoint: () => Promise<ForwardedHostEndpoint>): MaestroClient;
 	createBridge(endpoint: ForwardedHostEndpoint): BridgeConnection;
@@ -142,6 +151,7 @@ const defaultDeps: PeerResolverDeps = {
 			return false;
 		}
 	},
+	isManagedDataDir: () => dataDirHasManagedBinding(),
 	acquireForward: (remote) => getSshForwardManager().acquire(remote),
 	createClient: (endpoint) => createWsMaestroClient({ endpoint }),
 	createBridge: (endpoint) => new BridgeConnection({ endpoint }),
@@ -265,6 +275,18 @@ export async function connectPeer(
 	const remote = findPeerRemote(peerRef, deps);
 	requireFederationRemote(remote);
 	const peer = peerIdFor(remote, deps.readRemotes());
+	// Under management the forward never opens from this terminal (MCOMP-33-00L1): a bare CLI holds
+	// no listener or remote-identity authority that could hold the `ssh -L`, the discovery's ssh or
+	// the peer bytes to a ceiling, so it is refused by name before anything is dialed. The desktop
+	// holds the same forward (`holdFederationForward()` in src/main/federation/index.ts).
+	if (deps.isManagedDataDir()) {
+		throw new PeerResolveError(
+			'managed-unavailable',
+			`[managed-unavailable] under management maestro-cli cannot open the Federation forward to peer "${peer}" from this terminal: it holds no authority that could hold the SSH forward to a ceiling. Nothing was dialed.`,
+			ExitCode.GeneralError,
+			peer
+		);
+	}
 
 	let opened: PeerClient;
 	try {

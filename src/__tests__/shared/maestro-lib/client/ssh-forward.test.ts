@@ -10,6 +10,7 @@ import {
 	SshForwardError,
 	SshForwardManager,
 	buildSshForwardArgs,
+	setSshForwardAdmission,
 	type SshForwardManagerOptions,
 	type SshForwardSpawn,
 	type SshForwardState,
@@ -350,5 +351,68 @@ describe('SshForwardManager', () => {
 		expect(h.children.map((child) => child.signals)).toEqual([['SIGTERM'], ['SIGTERM']]);
 		expect(lease.state()).toEqual({ status: 'stopped' });
 		expect(() => h.manager.acquire(remote)).toThrow(/disposed/);
+	});
+});
+
+describe('SshForwardManager admission (MCOMP-33-00L1)', () => {
+	const REFUSAL = '[managed-unavailable] the managed listener ceiling is unavailable (no ceiling)';
+
+	afterEach(() => setSshForwardAdmission(null));
+
+	it('a refused attempt runs no discovery, probes no port and spawns no ssh, and asks again on retry', async () => {
+		const allocatePort = vi.fn(async () => 50000);
+		const admit = vi.fn(() => {
+			throw new Error(REFUSAL);
+		});
+		const h = harness([running(4001)], { admit, allocatePort });
+		const lease = h.manager.acquire(remote);
+		await expect(lease.ready()).rejects.toThrow(REFUSAL);
+		expect(admit).toHaveBeenCalledWith(remote);
+		expect(h.discover).not.toHaveBeenCalled();
+		expect(allocatePort).not.toHaveBeenCalled();
+		expect(h.spawn).not.toHaveBeenCalled();
+		expect(lease.state()).toMatchObject({ status: 'down', attempt: 1, retryInMs: 1000 });
+
+		await vi.advanceTimersByTimeAsync(1000);
+		expect(admit).toHaveBeenCalledTimes(2);
+		expect(h.discover).not.toHaveBeenCalled();
+		expect(h.spawn).not.toHaveBeenCalled();
+		await lease.release();
+	});
+
+	it('an async admission is awaited before the discovery, then the forward opens', async () => {
+		const order: string[] = [];
+		const admit = vi.fn(async () => {
+			order.push('admit');
+		});
+		const h = harness([running(4001)], { admit });
+		h.discover.mockImplementation(async () => {
+			order.push('discover');
+			return running(4001);
+		});
+		const lease = h.manager.acquire(remote);
+		expect(await lease.ready()).toMatchObject({ remotePort: 4001 });
+		expect(order).toEqual(['admit', 'discover']);
+		expect(h.spawn).toHaveBeenCalledTimes(1);
+		await lease.release();
+	});
+
+	it('a manager that names no admission asks the process-wide one, read per attempt', async () => {
+		const h = harness([running(4001)]);
+		const admit = vi.fn(async () => {
+			throw new Error(REFUSAL);
+		});
+		setSshForwardAdmission(admit);
+		const lease = h.manager.acquire(remote);
+		await expect(lease.ready()).rejects.toThrow(REFUSAL);
+		expect(h.discover).not.toHaveBeenCalled();
+		expect(h.spawn).not.toHaveBeenCalled();
+
+		// Lifted: the next attempt dials.
+		setSshForwardAdmission(null);
+		await vi.advanceTimersByTimeAsync(1000);
+		expect(await lease.ready()).toMatchObject({ remotePort: 4001 });
+		expect(admit).toHaveBeenCalledTimes(1);
+		await lease.release();
 	});
 });
