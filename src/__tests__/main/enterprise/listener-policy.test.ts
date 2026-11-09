@@ -673,6 +673,13 @@ describe('sink classification by source', () => {
 			call: "listenerHoldFor({ kind: 'steering', bind: socketPath, port: 0 })",
 			before: '[STEERING_SOCKET_ENV_VAR]: socketPath',
 		},
+		{
+			// The group chat room turn's twin of the tab spawn above (MCOMP-19-01E).
+			file: 'src/main/group-chat/spawnGroupChatAgent.ts',
+			kind: 'steering',
+			call: "listenerHoldFor({ kind: 'steering', bind: socketPath, port: 0 })",
+			before: 'return socketPath;',
+		},
 	];
 
 	/** The kinds no sink of this build holds: the loopback-only Cue status server. */

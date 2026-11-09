@@ -7,7 +7,7 @@
  * router would wait the full supervising timeout. Regression guard for that.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // Keep applyClaudeSpawnDecision + buildRemoteInteractiveSpawn REAL (they own the
 // actual `--max-wait` arg injection, which is what we want to assert lands in
@@ -86,6 +86,15 @@ import type {
 	ManagedIdentityView,
 } from '../../../shared/maestro-lib/managed/endpoint-port';
 import { MANAGED_CONTRACT_VERSION } from '../../../shared/maestro-lib/managed/types';
+import { STEERING_SOCKET_ENV_VAR } from '../../../shared/chatSteering';
+import { steeringSocketPathFor } from '../../../main/process-manager/steering-client';
+import { heldListeners, setListenerAuthority } from '../../../main/enterprise/listener-gate';
+import {
+	listenerVerdict,
+	type ListenerCeilingEntry,
+	type ListenerRequest,
+} from '../../../main/enterprise/listener-policy';
+import { logger } from '../../../main/utils/logger';
 
 function makeAgent(): AgentConfig {
 	return {
@@ -878,5 +887,131 @@ describe('spawnGroupChatAgent', () => {
 				await fake.close();
 			}
 		});
+	});
+});
+
+/** Install a managed ceiling listing `listeners` over the real verdict; returns every request it was asked. */
+function installListenerCeiling(listeners: ListenerCeilingEntry[]): ListenerRequest[] {
+	const asked: ListenerRequest[] = [];
+	setListenerAuthority({
+		evaluateListener(request) {
+			asked.push(request);
+			return listenerVerdict(
+				{ standing: 'managed', ceiling: { policyRevision: 3, listeners }, policyRevision: 3 },
+				request
+			);
+		},
+	});
+	return asked;
+}
+
+describe('spawnGroupChatAgent - steering listener ceiling (MCOMP-19-01E)', () => {
+	const PROCESS_ID = 'group-chat-room1-participant-Alice-1';
+	let spawnSpy: ReturnType<typeof vi.fn>;
+	let processManager: IProcessManager;
+
+	beforeEach(() => {
+		vi.clearAllMocks();
+		spawnSpy = vi.fn().mockReturnValue({ pid: 4242, success: true });
+		processManager = {
+			spawn: spawnSpy,
+			write: vi.fn().mockReturnValue(true),
+			kill: vi.fn().mockReturnValue(true),
+		} as unknown as IProcessManager;
+		mockResolve.mockReturnValue({
+			mode: 'interactive',
+			reason: 'auto',
+			maestroPBinPath: '/bundled/maestro-p.js',
+			claudeRealBinPath: '/usr/local/bin/claude',
+		});
+	});
+	afterEach(() => setListenerAuthority(null));
+
+	async function participantTurn(overrides: Record<string, unknown> = {}) {
+		await spawnGroupChatAgent({
+			sessionId: PROCESS_ID,
+			agentId: 'claude-code',
+			agent: makeAgent(),
+			command: '/usr/local/bin/claude',
+			args: ['--print', '--', 'hello'],
+			cwd: '/tmp/work',
+			tokenMode: 'interactive',
+			customEnvVars: { ANTHROPIC_BASE_URL: 'https://gateway.example' },
+			processManager,
+			debugLabel: 'participant: Alice',
+			...overrides,
+		});
+		expect(spawnSpy).toHaveBeenCalledTimes(1);
+		const spawned = spawnSpy.mock.calls[0][0] as {
+			command: string;
+			args: string[];
+			customEnvVars?: Record<string, string>;
+		};
+		spawnSpy.mockClear();
+		return spawned;
+	}
+
+	it('refused: spawns maestro-p WITHOUT a steering socket and reports the hold by name', async () => {
+		const asked = installListenerCeiling([{ kind: 'web', reach: 'loopback' }]);
+		const held = await participantTurn();
+
+		const socketPath = steeringSocketPathFor(PROCESS_ID);
+		expect(asked).toEqual([{ kind: 'steering', bind: socketPath, port: 0 }]);
+		expect(held.customEnvVars ?? {}).not.toHaveProperty(STEERING_SOCKET_ENV_VAR);
+		expect(held.customEnvVars?.ANTHROPIC_BASE_URL).toBe('https://gateway.example');
+		expect(vi.mocked(logger.warn)).toHaveBeenCalledWith(
+			expect.stringMatching(/\[managed-kind-denied\].*cannot be steered/),
+			'[GroupChat:Spawn]',
+			expect.objectContaining({ sessionId: PROCESS_ID, code: 'kind-denied' })
+		);
+		expect(heldListeners()).toEqual([
+			expect.objectContaining({
+				kind: 'steering',
+				bind: socketPath,
+				code: 'kind-denied',
+				count: 1,
+			}),
+		]);
+
+		// The turn still runs through maestro-p, identical to an unheld launch but unsteerable.
+		setListenerAuthority(null);
+		const unheld = await participantTurn();
+		expect(held.command).toBe(process.execPath);
+		expect(held.command).toBe(unheld.command);
+		expect(held.args).toEqual(unheld.args);
+		const { [STEERING_SOCKET_ENV_VAR]: socket, ...unheldEnv } = unheld.customEnvVars ?? {};
+		expect(socket).toBe(socketPath);
+		expect(held.customEnvVars).toEqual(unheldEnv);
+	});
+
+	it('admitted: names the socket and records nothing', async () => {
+		const asked = installListenerCeiling([{ kind: 'steering', reach: 'loopback' }]);
+		const spawned = await participantTurn();
+
+		expect(asked).toHaveLength(1);
+		expect(spawned.customEnvVars?.[STEERING_SOCKET_ENV_VAR]).toBe(
+			steeringSocketPathFor(PROCESS_ID)
+		);
+		expect(heldListeners()).toEqual([]);
+		expect(vi.mocked(logger.warn)).not.toHaveBeenCalled();
+	});
+
+	it('standalone: no authority is consulted and the socket is named', async () => {
+		const spawned = await participantTurn();
+
+		expect(spawned.customEnvVars?.[STEERING_SOCKET_ENV_VAR]).toBe(
+			steeringSocketPathFor(PROCESS_ID)
+		);
+		expect(heldListeners()).toEqual([]);
+	});
+
+	it('asks nothing for an API-mode turn, which opens no channel', async () => {
+		mockResolve.mockReturnValue({ mode: 'api', reason: 'auto' });
+		const asked = installListenerCeiling([{ kind: 'web', reach: 'loopback' }]);
+		const spawned = await participantTurn({ tokenMode: 'api' });
+
+		expect(asked).toEqual([]);
+		expect(spawned.customEnvVars ?? {}).not.toHaveProperty(STEERING_SOCKET_ENV_VAR);
+		expect(heldListeners()).toEqual([]);
 	});
 });

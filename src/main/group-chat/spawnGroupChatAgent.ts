@@ -42,6 +42,8 @@ import type { ManagedDenialCode } from '../../shared/maestro-lib/managed/types';
 import { applySystemPromptDelivery } from '../utils/system-prompt-delivery';
 import { dispatchedChildContext } from '../process-manager/ProcessManager';
 import { steeringSocketPathFor } from '../process-manager/steering-client';
+import { listenerHoldFor } from '../enterprise/listener-gate';
+import { logger } from '../utils/logger';
 import type { DispatchedSpawnIds, ProcessSpawnActor } from '../process-manager/types';
 
 /**
@@ -157,6 +159,31 @@ export function groupChatSpawnLineage(sessionId: string): GroupChatSpawnLineage 
 }
 
 /**
+ * Where a local maestro-p group chat turn opens its steering socket, or null when it opens none.
+ *
+ * The socket binds inside the maestro-p child, which holds no listener authority, so the managed
+ * listener ceiling is asked HERE, the one desktop site that names the socket for a room turn
+ * (MCOMP-19-01E; the tab spawn's twin is `applyLocalInteractiveSpawnDecision`, MCOMP-19-01D),
+ * with the socket path as the OS-local bind (reach `loopback`). The library calls this only for
+ * a turn that resolved to a LOCAL maestro-p, so API and SSH turns ask nothing. Steering is
+ * optional for a turn: on a hold the turn runs unsteerable, the hold is logged by its
+ * `[managed-<code>]` name and recorded once in `heldListeners()`, which the managed status lists.
+ */
+export function groupChatSteeringSocketPath(processId: string): string | null {
+	const socketPath = steeringSocketPathFor(processId);
+	const hold = listenerHoldFor({ kind: 'steering', bind: socketPath, port: 0 });
+	if (hold) {
+		logger.warn(
+			`Steering channel not opened: ${hold.message}; this group chat turn cannot be steered`,
+			'[GroupChat:Spawn]',
+			{ sessionId: processId, code: hold.code }
+		);
+		return null;
+	}
+	return socketPath;
+}
+
+/**
  * Spawn a Group Chat agent process with SSH + Windows shell handling applied.
  *
  * The helper:
@@ -226,7 +253,7 @@ export async function spawnGroupChatAgent(
 			probeRemoteMaestroP: ensureRemoteMaestroPProbed,
 			windowsSpawnConfig: getWindowsSpawnConfig,
 			beginTurn: beginGroupChatTurn,
-			steeringSocketPath: steeringSocketPathFor,
+			steeringSocketPath: groupChatSteeringSocketPath,
 		}
 	);
 

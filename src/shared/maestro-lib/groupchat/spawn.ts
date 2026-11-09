@@ -146,9 +146,11 @@ export interface GroupChatSpawnDeps {
 	/**
 	 * Where a local maestro-p turn opens its steering socket, keyed by process id, so the host can
 	 * type a user message into the running turn (group chat steering). A host that cannot steer
-	 * leaves it out and the turn opens no channel.
+	 * leaves it out and the turn opens no channel. A host that may steer only some turns answers
+	 * null for the others (the desktop does when its managed listener ceiling holds the socket,
+	 * MCOMP-19-01E), and that turn opens no channel either: steering is optional for a turn.
 	 */
-	steeringSocketPath?(processId: string): string;
+	steeringSocketPath?(processId: string): string | null;
 }
 
 /** The process a turn starts, in the fields both hosts read. */
@@ -253,10 +255,14 @@ export async function prepareGroupChatSpawn(
 		spawnArgs = applied.args;
 		spawnEnvVars = applied.customEnvVars;
 		// The socket is local, so a turn on an SSH remote never gets one.
-		if (deps.steeringSocketPath && !sshRemoteConfig?.enabled) {
+		const steeringSocket =
+			deps.steeringSocketPath && !sshRemoteConfig?.enabled
+				? deps.steeringSocketPath(processId)
+				: null;
+		if (steeringSocket) {
 			spawnEnvVars = {
 				...(spawnEnvVars ?? {}),
-				[STEERING_SOCKET_ENV_VAR]: deps.steeringSocketPath(processId),
+				[STEERING_SOCKET_ENV_VAR]: steeringSocket,
 			};
 		}
 		if (debugLabel) {
