@@ -822,6 +822,16 @@ export interface AITab {
 	 * after a refused or failed spawn.
 	 */
 	managedRun?: ManagedRunView;
+	/**
+	 * The host's refusal of the tab's latest send (`SpawnResult.managed` plus
+	 * its message), when a managed host refused it at the sink and so no run
+	 * started. Cleared with `managedRun` when the next send starts.
+	 */
+	managedRefusal?: {
+		state: 'denied' | 'unavailable' | 'unknown';
+		code: string;
+		message: string;
+	};
 	inputValue: string; // Pending input text for this tab
 	/**
 	 * Which rung of the bang ladder this tab's composer is on: `'shell'` means

@@ -9,6 +9,7 @@ import {
 	type TerminalViewHandle,
 } from '../TerminalView';
 import { InputArea } from '../InputArea';
+import { AiTabManagedRun } from '../Enterprise/AiTabManagedRun';
 import type { FilePreviewHandle } from '../FilePreview';
 import { WizardConversationView, DocumentGenerationView } from '../InlineWizard';
 import { BrowserTabView, type BrowserTabViewHandle } from './BrowserTabView';
@@ -1075,6 +1076,12 @@ export const MainPanelContent = React.memo(function MainPanelContent(props: Main
 			    below the z-30 tiling drop overlay so drags still hit-test on top. */}
 			{shouldShowInputArea && (
 				<div data-tour="input-area" ref={inputAreaAvoidRef} className="relative z-[3] shrink-0">
+					{/* The managed run the focused AI tab's last send started, with the
+					    recovery the host allows (MCOMP-25-02A). Draws nothing on a
+					    standalone host, which records no run on a tab. */}
+					{activeTab && (
+						<AiTabManagedRun theme={theme} sessionId={activeSession.id} tab={activeTab} />
+					)}
 					<InputArea
 						session={activeSession}
 						theme={theme}

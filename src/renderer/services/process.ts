@@ -38,26 +38,42 @@ export interface ProcessSpawnResult {
 	};
 	/** The managed run this spawn started (identifiers only); absent on a standalone host. */
 	managedRun?: ManagedRunView;
+	/** Why the spawn did not start, when it did not. */
+	error?: string;
+	/** Set when a managed host refused the spawn at the sink (`SpawnResult.managed`). */
+	managed?: { state: 'denied' | 'unavailable' | 'unknown'; code: string };
 }
 
 /**
- * Record on an AI tab the managed run its send started. Call it with no run
- * before the spawn (a new send clears the previous turn's run, so a retry or a
- * refused spawn never shows a lease it was not admitted under) and with the
- * spawn's `managedRun` after it. Writes nothing when the tab already says so.
+ * Record on an AI tab what its send started on a managed host: the run the
+ * sink admitted (`managedRun`) or the host's refusal (`managedRefusal`), so
+ * the AI tab can show it (MCOMP-25-02A). Call it with no result before the
+ * spawn (a new send clears the previous turn's run and refusal, so a retry or
+ * a failed spawn never shows a lease it was not admitted under) and with the
+ * spawn's result after it. A standalone host returns neither, so nothing is
+ * written. Writes nothing when the tab already says so.
  */
 export function noteTurnManagedRun(
 	sessionId: string,
 	tabId: string,
-	managedRun?: ManagedRunView
+	spawned?: Pick<ProcessSpawnResult, 'managedRun' | 'managed' | 'error'> | null
 ): void {
 	const tab = useSessionStore
 		.getState()
 		.sessions.find((s) => s.id === sessionId)
 		?.aiTabs.find((t) => t.id === tabId);
-	if (!tab || tab.managedRun === managedRun) return;
-	if (!tab.managedRun && !managedRun) return;
-	updateAiTab(sessionId, tabId, (t) => ({ ...t, managedRun }));
+	if (!tab) return;
+	const managedRun = spawned?.managedRun;
+	const managedRefusal = spawned?.managed
+		? {
+				state: spawned.managed.state,
+				code: spawned.managed.code,
+				message: spawned.error ?? '',
+			}
+		: undefined;
+	if (tab.managedRun === managedRun && !tab.managedRefusal && !managedRefusal) return;
+	if (!tab.managedRun && !managedRun && !tab.managedRefusal && !managedRefusal) return;
+	updateAiTab(sessionId, tabId, (t) => ({ ...t, managedRun, managedRefusal }));
 }
 
 export const processService = {

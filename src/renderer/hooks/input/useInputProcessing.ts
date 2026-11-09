@@ -1690,7 +1690,7 @@ export function useInputProcessing(deps: UseInputProcessingDeps): UseInputProces
 							// Per-session SSH remote config (takes precedence over agent-level SSH config)
 							sessionSshRemoteConfig: freshSession.sessionSshRemoteConfig,
 						});
-						noteTurnManagedRun(resolvedSessionId, freshActiveTab.id, spawned?.managedRun);
+						noteTurnManagedRun(resolvedSessionId, freshActiveTab.id, spawned);
 					} catch (error) {
 						logger.error('Failed to spawn agent batch process:', undefined, error);
 						// "Agent process already running" is a COLLISION, not an outcome:

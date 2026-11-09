@@ -432,6 +432,10 @@ interface MaestroAPI {
 			sshRemote?: { id: string; name: string; host: string };
 			/** The managed run this spawn started (identifiers only); absent on a standalone host. */
 			managedRun?: ManagedRunView;
+			/** Why the spawn did not start, when it did not. */
+			error?: string;
+			/** Set when a managed host refused the spawn at the sink. */
+			managed?: { state: 'denied' | 'unavailable' | 'unknown'; code: string };
 		}>;
 		spawnTerminalTab: (config: {
 			sessionId: string;

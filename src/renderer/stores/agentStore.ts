@@ -610,7 +610,7 @@ export const useAgentStore = create<AgentStore>()((set, get) => ({
 					// The host's dispatch ticket waits with the item for the same reason.
 					dispatchTicket: item.dispatchTicket,
 				});
-				noteTurnManagedRun(sessionId, targetTab.id, spawned?.managedRun);
+				noteTurnManagedRun(sessionId, targetTab.id, spawned);
 			} else if (item.type === 'command' && item.command) {
 				// Process a slash command - find matching command
 				// Check user-defined commands first, then agent-discovered commands with prompts
@@ -717,7 +717,7 @@ export const useAgentStore = create<AgentStore>()((set, get) => ({
 						delegation: item.delegation,
 						dispatchTicket: item.dispatchTicket,
 					});
-					noteTurnManagedRun(sessionId, targetTab.id, spawned?.managedRun);
+					noteTurnManagedRun(sessionId, targetTab.id, spawned);
 				} else {
 					// Unknown command - add error log and reset to idle
 					useSessionStore.getState().addLogToTab(
