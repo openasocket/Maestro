@@ -3096,6 +3096,27 @@
 				},
 				"static": "prettier --check clean; eslint 0 errors (suite files are eslint-ignored)",
 				"tools": "Working/mcomp-33-00s7 (apply-test.mjs, import-path.mjs, tsc-suite.mjs, commit-wt.mjs, record.mjs)"
+			},
+			"MCOMP-33-00S8": {
+				"completedAt": "2026-11-09",
+				"completedBy": "Maestro-Claude",
+				"worktreeCommit": "1be779c80",
+				"worktreeParent": "6ce44f5f0",
+				"verdict": "Both suites carried the wrong side; the source is right in both. (1) useSessionLifecycle (3, MCOMP-23-04A): upstream rc added harnessControlMode at slot 23 of handleSaveEditAgent, so the merged signature has 29 parameters and the policy is slot 28; the merged EditAgentModal already writes saveArguments[28] and AppSessionModals / NewInstanceModal types agree. The feature-branch suite helper saveName filled 28 slots and put the policy at 27 (now convertProviderHistory), so commitAgent got no expectedPolicyRevision. Helper now fills 29 and sets slot 28. (2) create-ssh-remote (3): the upstream federation opt-in cases reference writeSshRemotes, which HEAD replaced with writeSettingThroughHost (MCOMP-19-05). Ported to await the command and read the record through the suite helper writtenRemotes(); assertions kept (federation true for on, absent for off and when not passed, JSON echo). Source create-ssh-remote.ts still stores federation (federation || undefined, JSON echo only when the flag is passed).",
+				"change": {
+					"src/__tests__/renderer/hooks/useSessionLifecycle.test.ts": "saveName fills 29 slots, policy at slot 28, with a comment naming the slot.",
+					"src/__tests__/cli/commands/create-ssh-remote.test.ts": "three federation cases async, read through writtenRemotes(), plus a length check on the written array."
+				},
+				"mutation": "Suite-only repair, no source change, so no mutation case. The source paths these cases exercise (policy at slot 28, federation stored) are unchanged by this task.",
+				"typeCheck": {
+					"testFiles": "suites in no project config; ad hoc config over both: create-ssh-remote 4 errors before, 1 after (pre-existing unused consoleErrorSpy); useSessionLifecycle 50 before, 49 after (pre-existing window.maestro typing); 0 new (Working/mcomp-33-00s8/tsc-suite.mjs)"
+				},
+				"suites": {
+					"run": "src/__tests__/renderer/hooks/useSessionLifecycle.test.ts, src/__tests__/cli/commands/create-ssh-remote.test.ts",
+					"result": "118/118 (was 6 failed)"
+				},
+				"static": "prettier --write left both files unchanged",
+				"tools": "Working/mcomp-33-00s8 (apply-ssh.mjs, apply-lifecycle.mjs, run.mjs, tsc-suite.mjs, commit-wt.mjs, record.mjs)"
 			}
 		}
 	}
