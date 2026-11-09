@@ -298,6 +298,144 @@ describe('useSymphonyContribution', () => {
 	});
 
 	// ========================================================================
+	// The outcome the creation dialog reads (MCOMP-23-04C)
+	// ========================================================================
+	describe('contribution outcome', () => {
+		/**
+		 * A managed host double at policy revision 6 that refuses one workspace
+		 * and answers `stale` for any other revision, as `sessions:commitAgent`
+		 * does. Explicit per test, restored by the beforeEach admitRecord reset.
+		 */
+		function managedHost(options: { refusedWorkspace?: string } = {}) {
+			mockCommitAgent.mockImplementation((async (request: {
+				record: Record<string, unknown>;
+				expectedPolicyRevision?: number | null;
+			}) => {
+				if (request.expectedPolicyRevision !== 6) {
+					return {
+						ok: false,
+						code: 'stale',
+						reason: 'The policy changed; review the choices again.',
+						policyRevision: 6,
+						fields: [],
+					};
+				}
+				if (request.record.cwd === options.refusedWorkspace) {
+					return {
+						ok: false,
+						code: 'field',
+						reason: 'A choice is not approved.',
+						policyRevision: 6,
+						fields: [{ field: 'workspace', reason: 'not an approved workspace' }],
+					};
+				}
+				return { ok: true, record: request.record, managed: true, policyRevision: 6 };
+			}) as never);
+			vi.spyOn(logger, 'warn').mockImplementation(() => {});
+		}
+
+		async function start(data: SymphonyContributionData) {
+			const deps = createDeps();
+			const { result } = renderHook(() => useSymphonyContribution(deps));
+			let outcome: unknown;
+			await act(async () => {
+				outcome = await result.current.handleStartContribution(data);
+			});
+			return { deps, outcome };
+		}
+
+		it('a refusal from the dialog returns the refusal, starts nothing and toasts nothing', async () => {
+			managedHost({ refusedWorkspace: '/tmp/cloned-repo' });
+			vi.useFakeTimers();
+			const { deps, outcome } = await start(createContributionData({ expectedPolicyRevision: 6 }));
+			vi.advanceTimersByTime(1000);
+			vi.useRealTimers();
+
+			const request = mockCommitAgent.mock.calls[0][0] as unknown as {
+				expectedPolicyRevision?: number | null;
+			};
+			expect(request.expectedPolicyRevision).toBe(6);
+			expect(outcome).toEqual({
+				ok: false,
+				error: expect.stringContaining('workspace: not an approved workspace'),
+				refusal: expect.objectContaining({
+					code: 'field',
+					fields: [{ field: 'workspace', reason: 'not an approved workspace' }],
+				}),
+			});
+			expect(useSessionStore.getState().sessions).toEqual([]);
+			expect(mockRegisterActive).not.toHaveBeenCalled();
+			expect(mockRecordSessionCreated).not.toHaveBeenCalled();
+			expect(deps.startBatchRun).not.toHaveBeenCalled();
+			expect(notifyToast).not.toHaveBeenCalled();
+		});
+
+		it('a mismatched revision answers stale and inserts nothing', async () => {
+			managedHost();
+			const { outcome } = await start(createContributionData({ expectedPolicyRevision: 5 }));
+
+			expect(outcome).toMatchObject({ ok: false, refusal: { code: 'stale', policyRevision: 6 } });
+			expect(useSessionStore.getState().sessions).toEqual([]);
+			expect(mockRegisterActive).not.toHaveBeenCalled();
+			expect(notifyToast).not.toHaveBeenCalled();
+		});
+
+		it('a null revision (standalone dialog) is sent as null', async () => {
+			const { outcome } = await start(createContributionData({ expectedPolicyRevision: null }));
+
+			const request = mockCommitAgent.mock.calls[0][0] as unknown as Record<string, unknown>;
+			expect(request).toHaveProperty('expectedPolicyRevision', null);
+			expect(outcome).toEqual({ ok: true });
+		});
+
+		it('an admitted agent answers ok after it is in the store and registered', async () => {
+			managedHost({ refusedWorkspace: '/elsewhere' });
+			const { outcome } = await start(createContributionData({ expectedPolicyRevision: 6 }));
+
+			expect(outcome).toEqual({ ok: true });
+			expect(useSessionStore.getState().sessions).toHaveLength(1);
+			expect(mockRegisterActive).toHaveBeenCalledTimes(1);
+		});
+
+		it('a caller without a revision sends none and keeps the refusal toast', async () => {
+			mockCommitAgent.mockResolvedValueOnce({
+				ok: false,
+				code: 'field',
+				reason: 'A choice is not approved.',
+				policyRevision: 3,
+				fields: [{ field: 'workspace', reason: 'not an approved workspace' }],
+			} as never);
+			vi.spyOn(logger, 'warn').mockImplementation(() => {});
+			const { outcome } = await start(createContributionData());
+
+			const request = mockCommitAgent.mock.calls[0][0] as unknown as Record<string, unknown>;
+			expect(request).not.toHaveProperty('expectedPolicyRevision');
+			expect(outcome).toMatchObject({ ok: false, refusal: { code: 'field' } });
+			expect(notifyToast).toHaveBeenCalledWith(
+				expect.objectContaining({ title: 'Symphony Agent Refused' })
+			);
+		});
+
+		it('a missing agent definition and a duplicate answer with their error', async () => {
+			mockMaestro.agents.get.mockResolvedValueOnce(null);
+			vi.spyOn(logger, 'error').mockImplementation(() => {});
+			const missing = await start(createContributionData());
+			expect(missing.outcome).toEqual({ ok: false, error: 'Agent not found: claude-code' });
+
+			(validateNewSession as ReturnType<typeof vi.fn>).mockReturnValueOnce({
+				valid: false,
+				error: 'An agent with this name already exists',
+			});
+			const duplicate = await start(createContributionData());
+			expect(duplicate.outcome).toEqual({
+				ok: false,
+				error: 'An agent with this name already exists',
+			});
+			expect(mockCommitAgent).not.toHaveBeenCalled();
+		});
+	});
+
+	// ========================================================================
 	// Agent lookup
 	// ========================================================================
 	describe('agent lookup', () => {

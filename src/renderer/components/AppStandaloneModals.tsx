@@ -31,6 +31,7 @@ import { ImageAnnotator } from './ImageAnnotator/ImageAnnotator';
 import { MaestroWizard, WizardResumeModal } from './Wizard';
 import { TourOverlay } from './Wizard/tour';
 import type { SymphonyContributionData } from './SymphonyModal';
+import type { SymphonyContributionOutcome } from './SymphonyModal/types';
 import type { MindMapLayoutType } from './DocumentGraph/mindMapLayouts';
 import { HostFolderPicker } from './HostFolderPicker';
 import { AgentBundleModals } from './Bundles/AgentBundleModals';
@@ -110,7 +111,7 @@ export interface AppStandaloneModalsProps {
 
 	// --- Symphony ---
 	setActiveSessionId: (id: string) => void;
-	onStartContribution: (data: SymphonyContributionData) => Promise<void>;
+	onStartContribution: (data: SymphonyContributionData) => Promise<SymphonyContributionOutcome>;
 	encoreFeatures: EncoreFeatureFlags;
 
 	// --- Director's Notes ---

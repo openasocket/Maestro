@@ -17,6 +17,7 @@
 import { useCallback } from 'react';
 import type { ToolType, Session, AITab, BatchRunConfig } from '../../types';
 import type { SymphonyContributionData } from '../../components/SymphonyModal';
+import type { SymphonyContributionOutcome } from '../../components/SymphonyModal/types';
 import { useSessionStore } from '../../stores/sessionStore';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { getModalActions } from '../../stores/modalStore';
@@ -45,8 +46,12 @@ export interface UseSymphonyContributionDeps {
 // ============================================================================
 
 export interface UseSymphonyContributionReturn {
-	/** Handle starting a Symphony contribution (creates session, starts batch) */
-	handleStartContribution: (data: SymphonyContributionData) => Promise<void>;
+	/**
+	 * Handle starting a Symphony contribution (creates session, starts batch).
+	 * Resolves with what the agent came to, so the creation dialog can keep its
+	 * draft and show a host refusal by field (MCOMP-23-04C).
+	 */
+	handleStartContribution: (data: SymphonyContributionData) => Promise<SymphonyContributionOutcome>;
 }
 
 // ============================================================================
@@ -69,7 +74,7 @@ export function useSymphonyContribution(
 	const defaultSaveToHistory = useSettingsStore((s) => s.defaultSaveToHistory);
 
 	const handleStartContribution = useCallback(
-		async (data: SymphonyContributionData) => {
+		async (data: SymphonyContributionData): Promise<SymphonyContributionOutcome> => {
 			logger.info('[Symphony] Creating session for contribution:', undefined, data);
 
 			// Get agent definition
@@ -81,7 +86,7 @@ export function useSymphonyContribution(
 					title: 'Symphony Error',
 					message: `Agent not found: ${data.agentType}`,
 				});
-				return;
+				return { ok: false, error: `Agent not found: ${data.agentType}` };
 			}
 
 			// Validate uniqueness against current store (event-time read)
@@ -98,7 +103,7 @@ export function useSymphonyContribution(
 					title: 'Agent Creation Failed',
 					message: validation.error || 'Cannot create duplicate agent',
 				});
-				return;
+				return { ok: false, error: validation.error || 'Cannot create duplicate agent' };
 			}
 
 			const newId = generateId();
@@ -205,12 +210,22 @@ export function useSymphonyContribution(
 					data.agentType === 'claude-code' ? { mode: 'api', modeReason: 'auto' } : undefined,
 			};
 
-			// The host checks the agent before it exists (MCOMP-23-02C). A refusal is
-			// toasted by field and nothing starts: no agent, no registration, no run.
+			// The host checks the agent before it exists (MCOMP-23-02C). A refusal
+			// starts nothing (no agent, no registration, no run) and is returned, so
+			// the creation dialog keeps its draft and shows the reasons by field. The
+			// dialog sends the policy revision its choices were read from and reports
+			// the refusal itself; a caller without one keeps the toast (MCOMP-23-04C).
+			const fromDialog = data.expectedPolicyRevision !== undefined;
 			const committed = await commitNewAgent('create', newSession, {
 				title: 'Symphony Agent Refused',
+				...(fromDialog && {
+					expectedPolicyRevision: data.expectedPolicyRevision,
+					notify: false,
+				}),
 			});
-			if (!committed.ok) return;
+			if (!committed.ok) {
+				return { ok: false, error: committed.message, refusal: committed.refusal };
+			}
 			setSessions((prev) => [...prev, committed.session]);
 			setActiveSessionId(newId);
 			setSymphonyModalOpen(false);
@@ -275,6 +290,7 @@ export function useSymphonyContribution(
 					startBatchRun(newId, batchConfig, data.autoRunPath!);
 				}, 500);
 			}
+			return { ok: true };
 		},
 		[defaultSaveToHistory, startBatchRun, inputRef]
 	);
