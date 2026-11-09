@@ -167,6 +167,7 @@ import {
 import { anchorAccountForDirectory } from './utils/keyring-anchor';
 import { installationOfSnapshot } from './enterprise/inventory';
 import { createEnterpriseService, type EnterpriseService } from './enterprise/service';
+import { e2eFixtureEndpointNative } from './enterprise/e2e-endpoint-native';
 import { ENTERPRISE_IDENTITY_ANCHOR_SERVICE } from './enterprise/identity-store';
 import {
 	FirstPartyPluginBridge,
@@ -2010,6 +2011,12 @@ app
 				// installation from the capability snapshots (never the path), and the
 				// contracts pin the importer writes into the checkout (absent when packaged).
 				os: { platform: process.platform, release: os.release(), arch: process.arch },
+				// The labeled fixture endpoint port (MCOMP-31-05A): unpackaged test builds only.
+				endpointNative: e2eFixtureEndpointNative({
+					isPackaged: app.isPackaged,
+					env: process.env,
+					platform: process.platform,
+				}),
 				installed: (agentId) => installationOfSnapshot(capabilitySnapshots.get(agentId)),
 				contractsPin: path.join(app.getAppPath(), 'vendor', 'mega-maestro', 'contracts.pin.json'),
 				// The account a run's usage settles under (MCOMP-27-01): the stored agent's

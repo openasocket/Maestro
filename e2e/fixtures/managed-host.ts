@@ -195,7 +195,14 @@ export const managedTest = base.extend<{ projectDir: string; stub: StubProvider 
 	electronLaunchEnv: async ({ testDataDir, stub }, use) => {
 		seedQuietSettings(testDataDir);
 		if (MANAGED_MODE === 'fixture') seedStubProvider(testDataDir, stub);
-		await use({ MAESTRO_USER_DATA: testDataDir });
+		// Fixture mode only: the unpackaged app installs its labeled fixture native
+		// endpoint port so macOS/Windows can enroll against the fixture daemon.
+		// Endpoint mode clears it (even if the shell exported it): a real endpoint
+		// needs a real native port.
+		await use({
+			MAESTRO_USER_DATA: testDataDir,
+			MAESTRO_E2E_ENDPOINT_NATIVE: MANAGED_MODE === 'fixture' ? 'fixture' : '',
+		});
 	},
 	// eslint-disable-next-line no-empty-pattern
 	projectDir: async ({}, use) => {

@@ -108,7 +108,12 @@ const test = base.extend<{ projectDir: string }>({
 				agentPowersPromptSeen: true,
 			})
 		);
-		await use({ MAESTRO_USER_DATA: testDataDir });
+		// Fixture mode only: the unpackaged app's labeled fixture native endpoint port
+		// (MCOMP-31-05A); endpoint mode clears it.
+		await use({
+			MAESTRO_USER_DATA: testDataDir,
+			MAESTRO_E2E_ENDPOINT_NATIVE: MODE === 'fixture' ? 'fixture' : '',
+		});
 	},
 	// eslint-disable-next-line no-empty-pattern
 	projectDir: async ({}, use) => {
