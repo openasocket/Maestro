@@ -18,6 +18,7 @@ import {
 	createHeldHostAdapter,
 	createHostInstallationStanding,
 	HOST_ANCHOR_UNAVAILABLE_REASON,
+	HOST_COMMANDS_UNCOMPOSED_REASON,
 	HOST_SEAL_UNAVAILABLE_REASON,
 	resolveHostCustody,
 	type HostCustodyRead,
@@ -204,7 +205,12 @@ describe('composeHostManaged', () => {
 				endpointSchemas.attachmentRequest.parse(envelope.payload);
 		}
 		endpointSchemas.endpointStatus.parse(composed.status()!.endpoint);
-		const calls = fake.calls.length;
+		// Every accepted attachment lists the notices (MCOMP-21-03A); close waits for that listing,
+		// so only calls other than it are counted: none may follow the close.
+		const notListing = () =>
+			fake!.calls.filter((c) => (c.body as { operation?: string }).operation !== 'noticeList')
+				.length;
+		const calls = notListing();
 		const closing = composed.lifecycle.close();
 		expect(adapter.status().authority).toBe('none');
 		expect(adapter.telemetry).toBeNull();
@@ -214,9 +220,111 @@ describe('composeHostManaged', () => {
 		await composed.lifecycle.close();
 		expect(composed.status()?.authority).toBe('none');
 		expect(adapter.telemetry).toBeNull();
-		expect(fake.calls).toHaveLength(calls);
+		expect(notListing()).toBe(calls);
 		expect(() => composed.managed.host!(installation)).toThrow('closed');
 		expect(composed.standing.read().standing).toBe('managed');
+	});
+
+	it('composes the notice inbox over the same adapter: ledger first, listed only once registered, receipts recovered after a restart, commands refused by name (MCOMP-21-03A)', async () => {
+		const operations: string[] = [];
+		const notice = {
+			campaignId: 'c-1',
+			messageId: 'm-1',
+			body: 'Planned maintenance on Friday.',
+			expiresAt: new Date(NOW + 86_400_000).toISOString(),
+			kind: 'notice',
+			agentInput: false,
+		};
+		fake = await startFakeEndpoint({
+			registrationRequired: true,
+			capabilities: ['execution', 'inbox', 'noticeList'],
+			now: () => NOW,
+			operations: {
+				noticeList: () => {
+					operations.push('noticeList');
+					return { outcome: 'notices', items: [notice], nextOffset: null };
+				},
+				inbox: (payload) => {
+					const request = payload as { messageId: string; action: { kind: string } };
+					operations.push(`inbox:${request.action.kind}`);
+					return {
+						outcome: 'recorded',
+						messageId: request.messageId,
+						receiptId: `rcpt-${operations.length}`,
+						state: request.action.kind,
+					};
+				},
+			},
+		});
+		await enroll(fake.socketPath);
+		const ledgerFile = path.join(dir, 'maestro-managed-inbox-receipts.json');
+		const composed = composeHostManaged({
+			userDataDir: dir,
+			version: '1.1.0',
+			custody: custody(),
+			now: () => NOW,
+		});
+		if (!composed.composed) throw new Error(composed.reason);
+		// No command service on a detached host: refused by name, never a stand-in.
+		expect(composed.communications.commands).toEqual({
+			composed: false,
+			reason: HOST_COMMANDS_UNCOMPOSED_REASON,
+		});
+		expect(composed.communications.inbox()).toBeNull();
+		composed.managed.host!(installation);
+		const inbox = composed.communications.inbox();
+		if (!inbox) throw new Error('No inbox was composed');
+		expect(inbox.status()).toMatchObject({ loaded: false, file: ledgerFile });
+
+		// The attach loads the ledger first; the endpoint wants a registration, so nothing is listed.
+		await composed.lifecycle.attach();
+		expect(composed.status()?.authority).toBe('none');
+		expect(inbox.status()).toMatchObject({ loaded: true, standing: { ok: false } });
+		expect(operations).toEqual([]);
+		expect((await inbox.refresh()).outcome).toBe('no-standing');
+		expect(operations).toEqual([]);
+
+		// Once registered, the accepted attachment lists the notices and records `delivered`.
+		expect((await composed.control.beginRegistration()).status).toBe('ok');
+		expect((await composed.control.completeRegistration()).status).toBe('ok');
+		await vi.waitFor(() => expect(operations).toEqual(['noticeList', 'inbox:delivered']));
+		expect(
+			await inbox.act({ campaignId: 'c-1', messageId: 'm-1', action: { kind: 'read' } })
+		).toMatchObject({ status: 'recorded' });
+		expect(inbox.status().receipts.total).toBe(2);
+		await composed.lifecycle.close();
+		expect(composed.communications.inbox()).toBeNull();
+		// Digests and states on disk, never the body.
+		expect(fs.readFileSync(ledgerFile, 'utf8')).not.toContain(notice.body);
+
+		// A restart recovers the receipts from the ledger in the data directory, endpoint or not.
+		await fake.close();
+		fake = undefined;
+		const restarted = composeHostManaged({
+			userDataDir: dir,
+			version: '1.1.0',
+			custody: custody(),
+			now: () => NOW,
+		});
+		if (!restarted.composed) throw new Error(restarted.reason);
+		restarted.managed.host!({ ...installation, processEpoch: 'restarted' });
+		try {
+			await restarted.lifecycle.attach();
+			expect(restarted.communications.inbox()!.status()).toMatchObject({
+				loaded: true,
+				receipts: { total: 2, byState: { recorded: 2 } },
+			});
+		} finally {
+			await restarted.lifecycle.close();
+		}
+	});
+
+	it('composes no inbox and names no command service without protected custody (MCOMP-21-03A)', async () => {
+		await enroll('/tmp/unused.sock');
+		const held = composeHostManaged({ userDataDir: dir, version: '1' });
+		expect(held.composed).toBe(false);
+		expect('communications' in held).toBe(false);
+		expect(fs.existsSync(path.join(dir, 'maestro-managed-inbox-receipts.json'))).toBe(false);
 	});
 
 	it('relays supported enrollment without promoting the pending record to authority', async () => {

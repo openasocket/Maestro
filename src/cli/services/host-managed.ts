@@ -50,6 +50,12 @@ import {
 	ENTERPRISE_IDENTITY_FILE_NAME,
 	type EnterpriseIdentityStore,
 } from '../../main/enterprise/identity-store';
+import {
+	createInboxClient,
+	createInboxReceiptLedger,
+	MANAGED_INBOX_RECEIPTS_FILE_NAME,
+	type InboxClient,
+} from '../../main/enterprise/inbox';
 import { ENTERPRISE_SUPPORTED_CAPABILITIES } from '../../main/enterprise/service';
 import {
 	anchorAccountForDirectory,
@@ -84,6 +90,32 @@ export const HOST_SEAL_UNAVAILABLE_REASON =
 export const HOST_ANCHOR_UNAVAILABLE_REASON =
 	'no OS credential store holds the freshness anchor (@napi-rs/keyring did not load, or there is no ' +
 	'credential store), so a rollback could not be told from the newest record';
+
+/**
+ * Why the detached host composes no endpoint command service (MCOMP-21-03A). The desktop's
+ * `createCommandService` decides a cancel through the broker dispatch bridge's live leases and
+ * receipts, a refresh through the policy status service, and a report from the installation
+ * inventory; the headless runtime admits through its own host authority and holds none of those,
+ * so a command service composed here would revoke leases nothing admitted with and report a run
+ * it cannot see. No producer delivers a command to a runtime yet either (CP-02). Until the command
+ * ports are composed over the runtime's own work (continuation MCOMP-21-03B), no command is
+ * consumed here and the host says so by this name, never with a stand-in.
+ */
+export const HOST_COMMANDS_UNCOMPOSED_REASON =
+	'the detached host composes no endpoint command service: its cancel, report and refresh ports ' +
+	"need the runtime's own dispatch authority, policy status and inventory, which are not composed " +
+	'headless yet (MCOMP-21-03B), so no endpoint command is consumed here';
+
+/** The endpoint communications a composed host holds (MCOMP-21-03A). */
+export interface HostCommunications {
+	/**
+	 * The notice inbox over the host adapter, its receipt ledger in the data directory. Null until
+	 * the runtime has acquired the adapter, and after close.
+	 */
+	inbox(): InboxClient | null;
+	/** Commands are not composed on a detached host; why, by name. */
+	readonly commands: { composed: false; reason: string };
+}
 
 export interface HostCustodyInput {
 	userDataDir: string;
@@ -163,6 +195,8 @@ export type HostManagedComposition =
 			status(): ManagedEnrollmentStatus | null;
 			/** What this process can say of the installation, composed or not (`createHostInstallationStanding`). */
 			standing: InstallationStandingSource;
+			/** The endpoint inbox and the (uncomposed) command service of this standing. */
+			communications: HostCommunications;
 	  }
 	| {
 			composed: false;
@@ -451,6 +485,9 @@ export function composeHostManaged(deps: HostManagedDeps): HostManagedCompositio
 	let port: EndpointPort | null = null;
 	let lifecycle: EnrollmentLifecycle | null = null;
 	let adapter: ManagedHostAdapter | null = null;
+	let inbox: InboxClient | null = null;
+	// The listing an attach started, so close waits for it before the socket goes.
+	let listing: Promise<unknown> | null = null;
 	let closed = false;
 	let closing: Promise<void> | undefined;
 	const status = (): ManagedEnrollmentStatus | null => {
@@ -518,6 +555,16 @@ export function composeHostManaged(deps: HostManagedDeps): HostManagedCompositio
 			],
 			capabilities: { supported: ENTERPRISE_SUPPORTED_CAPABILITIES, required: [] },
 			now,
+			// As on the desktop: every accepted attachment lists the notices again. The inbox
+			// standing refuses the listing unless this process holds a live registration.
+			onAttached: () => {
+				if (closed || !inbox) return;
+				const pending = inbox.refresh().catch(() => undefined);
+				listing = pending;
+				void pending.finally(() => {
+					if (listing === pending) listing = null;
+				});
+			},
 		});
 		lifecycle = enrollment;
 		adapter = createManagedHostAdapter({
@@ -527,6 +574,15 @@ export function composeHostManaged(deps: HostManagedDeps): HostManagedCompositio
 				return closed ? null : port;
 			},
 			status: () => status()!,
+			now,
+		});
+		// The notice inbox over this same adapter, its receipts beside the record (MCOMP-21-03A).
+		inbox = createInboxClient({
+			host: adapter,
+			ledger: createInboxReceiptLedger({
+				file: path.join(deps.userDataDir, MANAGED_INBOX_RECEIPTS_FILE_NAME),
+				now,
+			}),
 			now,
 		});
 		return adapter;
@@ -540,8 +596,15 @@ export function composeHostManaged(deps: HostManagedDeps): HostManagedCompositio
 		standing,
 		control,
 		status,
+		communications: {
+			inbox: () => (closed ? null : inbox),
+			commands: { composed: false, reason: HOST_COMMANDS_UNCOMPOSED_REASON },
+		},
 		lifecycle: {
 			async attach() {
+				// The receipts recover first: a record pending at the last exit becomes uncertain,
+				// and the listing an attach starts records against the loaded ledger.
+				if (inbox && !closed) await inbox.load();
 				// No sealed record, no dial: an unenrolled host never opens a socket here.
 				if (!lifecycle || identity.read().status !== 'ok') return;
 				await control.connect();
@@ -549,6 +612,8 @@ export function composeHostManaged(deps: HostManagedDeps): HostManagedCompositio
 			close: () => {
 				closed = true;
 				closing ??= (async () => {
+					// The inbox stops before the standing closes: the listing in flight settles first.
+					await listing;
 					await lifecycle?.close();
 					port = null;
 				})();

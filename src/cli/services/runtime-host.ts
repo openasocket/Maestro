@@ -344,6 +344,18 @@ export async function startRuntimeHost(
 				`Re-attaching the managed standing failed: ${error instanceof Error ? error.message : String(error)}`
 			);
 		}
+		// What reaches this host from the endpoint (MCOMP-21-03A), said once: the inbox and its
+		// recovered receipts, and why no command is consumed. A host that composed no standing
+		// composes neither and says nothing here; its reason is `managedUnavailable`.
+		if (composition?.composed) {
+			const inbox = composition.communications.inbox()?.status();
+			log(
+				inbox
+					? `Managed inbox: receipts ${inbox.loaded ? `loaded (${inbox.receipts.total})` : `not loaded${inbox.load && !inbox.load.ok ? ` (${inbox.load.reason})` : ''}`}; ${inbox.standing.ok ? 'listing notices' : `no listing: ${inbox.standing.reason}`}.`
+					: 'Managed inbox: not composed (the runtime holds no host adapter).'
+			);
+			log(`Managed commands: none consumed (${composition.communications.commands.reason}).`);
+		}
 		// The bridge is held before anything consumes work (MCOMP-21-03): no telemetry, no Cue, no
 		// socket. A refusal throws `ListenerDeniedError` and the catch below releases the directory.
 		// Installed here, over this runtime's standing: the gate otherwise has no authority headless.
