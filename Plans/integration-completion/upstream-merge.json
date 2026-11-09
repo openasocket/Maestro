@@ -1638,6 +1638,34 @@
 				],
 				"notes": "No guard dropped. execFile removal is deliberate (HEAD removed it with its only use); the federation import is used at line ~2404.",
 				"unmergedAfter": 77
+			},
+			"MCOMP-33-00R10": {
+				"resolvedAt": "2026-11-09",
+				"resolvedBy": "Maestro-Claude",
+				"files": [
+					"src/main/ipc/handlers/agents.ts",
+					"src/renderer/stores/agentStore.ts",
+					"src/main/agents/model-discovery.ts"
+				],
+				"method": "Three hunks resolved by a shape-asserting script (Working/mcomp-33-00r10/resolve.mjs, both sides read in full); staged through merge-tool.mjs stage (prettier exit 0, 75 unmerged left). TypeScript transpile of each file: 0 syntax diagnostics. Managed seam counts identical to HEAD (agents.ts: holdAgentConfigWrite, applyAgentConfigWriteStrict, ManagedSettingLockedError, providerProbeManaged; agentStore.ts: noteTurnManagedRun, noteTurnManagedRefusal); the five holdRemoteProbe() calls of HEAD are all kept (three in agents.ts, two in model-discovery.ts). Suites: 450/450 tests pass in the 23 loadable files of src/__tests__/main/agents, agents*.test.ts, listAgentModelsHandler and agentStore.test; 16 files cannot load yet because they reach still-unmerged src/main/process-manager/types.ts (00R11), src/main/web-server/handlers/bridgeHandlers.ts (00R31), src/shared/maestro-lib/launch/agent-args.ts and env.ts (00R21).",
+				"hunks": {
+					"src/main/ipc/handlers/agents.ts": [
+						"remote model discovery block (remoteModelCache, discoverModelsFromRemoteConfigs, discoverModelsRemote): upstream lifted it into the new src/main/agents/model-discovery.ts (40adc775c, shared by the IPC picker and maestro-cli models over the bridge), so the block is removed here as upstream has it, and the integration's two MRC2-05-07A holds are re-applied in the moved functions (see model-discovery.ts). Outside the hunk: the three remote-probe helpers holdRemoteProbe, remoteAccessRefusedError and execRemoteProbeCommand moved verbatim to model-discovery.ts and exported (one definition; model-discovery cannot import the handler module that imports it), agents.ts imports them back for detectAgentsRemote, the slash-command read and the maestro-p probe; the now-unused holdRemoteAccess, remoteAccessRefusal, RemoteAccessRequest and ExecResult imports dropped."
+					],
+					"src/main/agents/model-discovery.ts": [
+						"(auto-added by upstream, no conflict markers) discoverModelsFromRemoteConfigs: holdRemoteProbe class read / operation read-opencode-configs / count configPaths.length before the try, refusal thrown by name via remoteAccessRefusedError, the read run through execRemoteProbeCommand. discoverModelsRemote: holdRemoteProbe class probe / operation discover-models after the cache check (a cached list opens no session) and before any ssh command is built, refusal thrown by name, the probe run through execRemoteProbeCommand with upstream's timeout message. Only execRemoteProbeCommand builds an ssh command in the file (asserted)."
+					],
+					"src/renderer/stores/agentStore.ts": [
+						"processQueuedItem message spawn (before): upstream's managed-queue boundary (queue card submission, transcript boundary flush, Pianola dispatch ids on the spawn) kept whole; the integration's noteTurnManagedRun(sessionId, tabId) clear placed right before the spawn, which upstream renamed spawned -> spawnResult.",
+						"after the spawn: the integration's noteTurnManagedRun(sessionId, tabId, spawnResult) first (so a managed run or refusal is shown even when the managed-queue check then throws), then upstream's DispatchNativeStartFailed / DispatchCaptureUnknown checks and queue reconciliation."
+					]
+				},
+				"semanticConflictsForC": [
+					"window.maestro.process.spawn's return type must carry both the integration's managedRun / managed / error fields (read by noteTurnManagedRun) and upstream's pianolaRunId / pianolaQueueReconciled; the preload and renderer global declarations are unmerged (00R34/00R35), so 00C's type check confirms the union.",
+					"Upstream's maestro-cli models path (src/main/web-server/handlers/messageHandlers/models.ts) now reaches discoverModelsRemote too, so a remote-access refusal thrown by name surfaces over the bridge; 00C/00S should confirm the bridge maps it to an error result rather than an empty list."
+				],
+				"notes": "No guard dropped. agentStore.ts command-branch spawn (auto-merged) still notes the managed run before and after.",
+				"unmergedAfter": 75
 			}
 		}
 	}
