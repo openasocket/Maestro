@@ -300,7 +300,10 @@ export function createPianolaLifecycle(deps: PianolaLifecycleDependencies): Pian
 		memoryHost: initializePianolaMemory(
 			() => isEncoreFeatureEnabled(deps.settingsStore, 'pianola'),
 			() => discoverMemoryCliProviders(deps.agentDetector, deps.agentConfigsStore),
-			() => readMemoryCliEnvironments(deps.agentConfigsStore)
+			() => readMemoryCliEnvironments(deps.agentConfigsStore),
+			// The same authority the supervisor holds, so the memory CLI backfill
+			// child is admitted on a managed host (MCOMP-33-00H1).
+			deps.spawnAuthority
 		),
 	};
 }
