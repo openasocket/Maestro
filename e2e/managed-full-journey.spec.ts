@@ -15,13 +15,17 @@
  * MCOMP-34 executes endpoint mode against the exact paired artifacts.
  *
  * This file holds enrollment, runs, standalone and create (MCOMP-33-02B), run
- * controls, edit/clone/import and live policy (MCOMP-33-02C); the remaining
- * Electron cases are authored by the inserted continuations MCOMP-33-02D..02F.
+ * controls, edit/clone/import and live policy (MCOMP-33-02C), offline and
+ * restart, isolation and keyboard, and the credential route (MCOMP-33-02D);
+ * the remaining Electron cases are authored by MCOMP-33-02E..02F.
  */
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
-import type { ElectronApplication, Page } from '@playwright/test';
+import type { ElectronApplication, Locator, Page } from '@playwright/test';
+import { ENTERPRISE_IDENTITY_FILE_NAME } from '../src/main/enterprise/identity-store';
 import { MANAGED_BINDING_FILE_NAME } from '../src/shared/maestro-lib/runtime/data-dir-lock';
+import { parseManagedSpawnRefusal } from '../src/shared/processErrors';
 import {
 	startFakeEndpoint,
 	type FakeEndpoint,
@@ -43,10 +47,12 @@ import {
 	writeCaseEvidence,
 } from './fixtures/acceptance-evidence';
 import {
+	FIXTURE_ENROLLMENT,
 	FIXTURE_PROVIDER,
 	MANAGED_MODE,
 	RUN_ACTION,
 	activeTabManaged,
+	composer,
 	createAgent,
 	dismissErrorDialog,
 	enroll,
@@ -56,9 +62,12 @@ import {
 	managedState,
 	managedTest as test,
 	readRunEndpointInputs,
+	register,
+	relaunch,
 	runOperator,
 	runState,
 	sendTurn,
+	type ManagedRunEndpointInputs,
 	type StubProvider,
 } from './fixtures/managed-host';
 
@@ -70,6 +79,8 @@ interface CaseContext {
 	stub: StubProvider;
 	/** The contract-fixture endpoint, started on first use and closed after the case. */
 	fixtureEndpoint: () => Promise<FakeEndpoint>;
+	/** Close the app and launch it again over the same data dir; `app` and `page` follow. */
+	restart: () => Promise<void>;
 	observe: (kind: AcceptanceObserver, observation: AcceptanceObservation) => void;
 }
 
@@ -83,6 +94,8 @@ function acceptance(id: string, body: (ctx: CaseContext) => Promise<void>) {
 	test(`${id}: ${spec.title}`, async ({
 		electronApp,
 		window: page,
+		appPath,
+		electronLaunchEnv,
 		testDataDir,
 		projectDir,
 		stub,
@@ -90,36 +103,51 @@ function acceptance(id: string, body: (ctx: CaseContext) => Promise<void>) {
 		const artifacts = caseArtifacts(MANAGED_MODE);
 		const observations: Partial<Record<AcceptanceObserver, AcceptanceObservation>> = {};
 		let endpoint: FakeEndpoint | null = null;
+		let relaunched: ElectronApplication | null = null;
 		let status: 'passed' | 'failed' = 'failed';
+		let ctx: CaseContext | null = null;
 		try {
-			await body({
-				app: electronApp,
-				page,
-				dataDir: testDataDir,
-				projectDir,
-				stub,
-				fixtureEndpoint: async () =>
-					(endpoint ??= await startFakeEndpoint({
-						capabilities: ['telemetry', 'execution', 'inbox', 'noticeList', 'enrollment'],
-						operations: {
-							enrollment: () => ({ outcome: 'enrollment_pending', enrollmentId: 'enrollment-e2e' }),
-						},
-					})),
-				observe: (kind, observation) => {
-					observations[kind] = observation;
-				},
-			});
+			await body(
+				(ctx = {
+					app: electronApp,
+					page,
+					dataDir: testDataDir,
+					projectDir,
+					stub,
+					fixtureEndpoint: async () =>
+						(endpoint ??= await startFakeEndpoint({
+							capabilities: ['telemetry', 'execution', 'inbox', 'noticeList', 'enrollment'],
+							operations: {
+								enrollment: () => ({
+									outcome: 'enrollment_pending',
+									enrollmentId: 'enrollment-e2e',
+								}),
+							},
+						})),
+					restart: async () => {
+						await ctx!.app.close();
+						const again = await relaunch(appPath, electronLaunchEnv, testDataDir);
+						relaunched = ctx!.app = again.app;
+						ctx!.page = again.page;
+					},
+					observe: (kind, observation) => {
+						observations[kind] = observation;
+					},
+				})
+			);
 			status = 'passed';
 		} finally {
 			writeCaseEvidence({
 				caseId: id,
 				status,
-				host: await observeHost(electronApp),
+				// A case whose relaunch failed has no app left to ask; it is recorded failed.
+				host: await observeHost(ctx?.app ?? electronApp).catch(() => 'browser' as const),
 				endpoint: MANAGED_MODE === 'endpoint' ? 'actual' : 'fixture',
 				artifacts,
 				observations,
 			});
 			await (endpoint as FakeEndpoint | null)?.close();
+			await (relaunched as ElectronApplication | null)?.close();
 		}
 	});
 }
@@ -208,6 +236,91 @@ async function commitCopy(page: Page, agentId: string, operation: 'clone' | 'imp
 		},
 		{ id: agentId, op: operation }
 	);
+}
+
+/** Bring an agent's AI tab into view (after a restart). */
+async function openAgent(page: Page, name: string) {
+	await page.locator('[data-nav-key]').filter({ hasText: name }).first().click();
+}
+
+/** The endpoint inputs one case needs beyond the shared ones; a missing one fails by name. */
+function requireInputs<K extends keyof ManagedRunEndpointInputs>(
+	inputs: ManagedRunEndpointInputs,
+	keys: K[]
+): ManagedRunEndpointInputs & Required<Pick<ManagedRunEndpointInputs, K>> {
+	const missing = keys.filter((k) => {
+		const value = inputs[k];
+		return !value || (Array.isArray(value) && value.length === 0);
+	});
+	if (missing.length) throw new Error(`Endpoint inputs lack: ${missing.join(', ')}.`);
+	return inputs as ManagedRunEndpointInputs & Required<Pick<ManagedRunEndpointInputs, K>>;
+}
+
+/** Press `key` until the focus is inside `target`, as a keyboard user reaches it. */
+async function focusByKeyboard(page: Page, target: Locator, key = 'Tab', max = 80) {
+	for (let i = 0; i < max; i++) {
+		await page.keyboard.press(key);
+		const inside = await target
+			.evaluate((el) => el.contains(document.activeElement))
+			.catch(() => false);
+		if (inside) return true;
+	}
+	return false;
+}
+
+/** Files under `dir` (4 MB or less) whose bytes hold any of `needles`, relative to `dir`. */
+function filesContaining(dir: string, needles: string[]): string[] {
+	const hits: string[] = [];
+	const walk = (at: string) => {
+		for (const entry of fs.readdirSync(at, { withFileTypes: true })) {
+			const file = path.join(at, entry.name);
+			if (entry.isDirectory()) walk(file);
+			else if (entry.isFile() && fs.statSync(file).size <= 4 * 1024 * 1024) {
+				const bytes = fs.readFileSync(file);
+				if (needles.some((n) => bytes.includes(n))) hits.push(path.relative(dir, file));
+			}
+		}
+	};
+	if (fs.existsSync(dir)) walk(dir);
+	return hits;
+}
+
+/**
+ * A turn on the agent's own provider through the real `process:spawn` sink,
+ * carrying a session environment override: the managed refusal, or null when
+ * the sink did not refuse it.
+ */
+async function spawnWithOverride(
+	page: Page,
+	agent: { id: string; toolType: string },
+	cwd: string,
+	prompt: string,
+	env: Record<string, string>
+) {
+	const message = await page.evaluate(
+		async ({ id, toolType, cwd, prompt, env }) => {
+			const config = (await window.maestro.agents.get(toolType)) as {
+				path?: string;
+				command?: string;
+			} | null;
+			return window.maestro.process
+				.spawn({
+					sessionId: `${id}-ai-e2e-override`,
+					toolType,
+					cwd,
+					command: config?.path || config?.command || toolType,
+					args: [],
+					prompt,
+					sessionCustomEnvVars: env,
+				} as Parameters<typeof window.maestro.process.spawn>[0])
+				.then(
+					() => null,
+					(error: Error) => error.message
+				);
+		},
+		{ id: agent.id, toolType: agent.toolType, cwd, prompt, env }
+	);
+	return parseManagedSpawnRefusal(message ?? '');
 }
 
 test.describe(`Electron acceptance cases (${MANAGED_MODE} mode)`, () => {
@@ -549,5 +662,203 @@ test.describe(`Electron acceptance cases (${MANAGED_MODE} mode)`, () => {
 		);
 		ctx.observe('effect', effect);
 		expect(effect.problems).toEqual([]);
+	});
+
+	acceptance('electron.offline-restart', async (ctx) => {
+		const inputs =
+			MANAGED_MODE === 'endpoint'
+				? requireInputs(readRunEndpointInputs(), ['takeOffline', 'restoreOnline'])
+				: null;
+		if (!inputs) await expectStubProvider(ctx.page, ctx.stub);
+		const name = 'E2E Accept Offline';
+		const provider = inputs?.approvedProvider ?? FIXTURE_PROVIDER;
+		const agent = await createAgent(ctx.page, provider, name, ctx.projectDir);
+		const endpoint = inputs ? null : await ctx.fixtureEndpoint();
+		await enroll(ctx.page, inputs?.socketPath ?? endpoint!.socketPath, inputs ?? undefined);
+		const enrolled = await managedState(ctx.page);
+		const firstLease = inputs ? (await approvedTurn(ctx, agent)).leaseId : null;
+		const leases = ledgerLeases(ctx.dataDir).length;
+		const launches = ctx.stub.launches().length;
+
+		// Offline: the endpoint goes away under the desktop; the next send is refused.
+		if (endpoint) await endpoint.close();
+		else runOperator(inputs!.takeOffline);
+		const prompt = inputs?.approvedPrompt ?? 'offline acceptance turn';
+		await sendTurn(ctx.page, name, prompt);
+		await dismissErrorDialog(ctx.page);
+		await expect(runState(ctx.page).root).toHaveAttribute(
+			'data-run-word',
+			/^(denied|offline|unknown|revoked)$/,
+			{ timeout: 60_000 }
+		);
+		await expect
+			.poll(async () => (await activeTabManaged(ctx.page, agent.id)).managedRefusal)
+			.not.toBeNull();
+		const refusal = (await activeTabManaged(ctx.page, agent.id)).managedRefusal!;
+		const offlineTookNoLease = ledgerLeases(ctx.dataDir).length === leases;
+		if (inputs) runOperator(inputs.restoreOnline);
+		// Let the debounced session write land before the app goes away.
+		const sessions = path.join(ctx.dataDir, 'maestro-sessions.json');
+		await expect.poll(() => fs.readFileSync(sessions, 'utf8').includes(refusal.code)).toBe(true);
+
+		// Restart: the enrollment survives, the registration does not, the refusal stands.
+		await ctx.restart();
+		const { page } = ctx;
+		await expect
+			.poll(async () => (await managedState(page))?.standing, { timeout: 30_000 })
+			.not.toBe('unenrolled');
+		const restarted = await managedState(page);
+		expect(restarted?.standing).not.toBe('managed');
+		expect(restarted?.reason).toBeTruthy();
+		await openAgent(page, name);
+		expect((await activeTabManaged(page, agent.id)).managedRefusal).toEqual(refusal);
+		if (inputs) {
+			await register(page, inputs);
+			const revision = (await managedState(page))?.policy?.appliedRevision;
+			expect(revision).toBe(enrolled?.policy?.appliedRevision);
+		} else {
+			// Still offline after the restart: the constraint holds, nothing runs.
+			await expectRefusedSend(ctx, agent, 'offline after restart turn');
+		}
+		const checks = {
+			'the enrollment record is still on disk': fs.existsSync(
+				path.join(ctx.dataDir, ENTERPRISE_IDENTITY_FILE_NAME)
+			),
+			'the restart kept the enrolled org':
+				restarted?.enrollment?.orgId === enrolled?.enrollment?.orgId &&
+				restarted?.enrollment?.tenantId === enrolled?.enrollment?.tenantId,
+			'the offline send took no lease': offlineTookNoLease,
+			'nothing ran on its own after the restart': inputs
+				? ledgerLeases(ctx.dataDir).length === leases
+				: !ctx.stub.sawPrompt(prompt) && ctx.stub.launches().length === launches,
+			...(firstLease
+				? {
+						'the first lease is read back from the ledger': observeLedgerReceipt(
+							ledgerFile(ctx.dataDir),
+							firstLease
+						).observed,
+					}
+				: {}),
+		};
+		const effect = observeOnDisk(
+			{ refusal, standing: restarted?.standing, reason: restarted?.reason },
+			checks
+		);
+		ctx.observe('effect', effect);
+		expect(effect.problems).toEqual([]);
+	});
+
+	acceptance('electron.isolation-accessibility', async (ctx) => {
+		const { page } = ctx;
+		const inputs = MANAGED_MODE === 'endpoint' ? readRunEndpointInputs() : null;
+		if (!inputs) await expectStubProvider(page, ctx.stub);
+		const name = 'E2E Accept Keyboard';
+		const provider = inputs?.approvedProvider ?? FIXTURE_PROVIDER;
+		const agent = await createAgent(page, provider, name, ctx.projectDir);
+		await enroll(
+			page,
+			inputs?.socketPath ?? (await ctx.fixtureEndpoint()).socketPath,
+			inputs ?? undefined
+		);
+		const enrollment = inputs?.enrollment ?? FIXTURE_ENROLLMENT;
+
+		// Keyboard: the managed choices of the New Agent form, opened and used from keys alone.
+		await page.keyboard.press('Meta+n');
+		const dialog = page.getByRole('dialog', { name: 'Create New Agent' });
+		await expect(dialog).toBeVisible();
+		const notice = dialog.getByTestId('managed-choices-notice');
+		const refresh = notice.getByRole('button', { name: 'Refresh policy' });
+		const formReached = await focusByKeyboard(page, refresh);
+		if (formReached) await page.keyboard.press('Enter');
+		await page.keyboard.press('Escape');
+		await expect(dialog).toBeHidden();
+
+		// The run state's own controls, reached back from the composer.
+		const prompt = inputs?.approvedPrompt ?? 'keyboard acceptance turn';
+		if (inputs) await approvedTurn(ctx, agent);
+		else await expectRefusedSend(ctx, agent, prompt);
+		const controls = runState(page).root.getByRole('button');
+		const hasControl = (await controls.count()) > 0;
+		await composer(page, name).focus();
+		const runReached = hasControl && (await focusByKeyboard(page, controls.first(), 'Shift+Tab'));
+
+		// Isolation: the host is bound to the org it was given and keeps no enrollment secret.
+		const state = await managedState(page);
+		const leaked = filesContaining(ctx.dataDir, [
+			enrollment.invitation,
+			enrollment.keyPossessionProof,
+		]);
+		const checks = {
+			'the managed choices of the New Agent form are reachable by keyboard': formReached,
+			'the run state control is reachable by keyboard': !hasControl || runReached,
+			'the host is enrolled to the tenant and org it was given':
+				state?.enrollment?.tenantId === enrollment.tenantId &&
+				state?.enrollment?.orgId === enrollment.orgId,
+			'no enrollment secret is stored in the data dir': leaked.length === 0,
+			...(inputs
+				? {}
+				: { 'the refused prompt never reached the provider': !ctx.stub.sawPrompt(prompt) }),
+		};
+		const effect = observeOnDisk({ enrollment: state?.enrollment, leaked, hasControl }, checks);
+		ctx.observe('effect', effect);
+		expect(effect.problems).toEqual([]);
+	});
+
+	acceptance('electron.credential-route', async (ctx) => {
+		const { page } = ctx;
+		const inputs = MANAGED_MODE === 'endpoint' ? readRunEndpointInputs() : null;
+		if (!inputs) await expectStubProvider(page, ctx.stub);
+		const provider = inputs?.approvedProvider ?? FIXTURE_PROVIDER;
+		const agent = await createAgent(page, provider, 'E2E Accept Credential', ctx.projectDir);
+		await enroll(
+			page,
+			inputs?.socketPath ?? (await ctx.fixtureEndpoint()).socketPath,
+			inputs ?? undefined
+		);
+		if (inputs) await approvedTurn(ctx, agent);
+		else await expectRefusedSend(ctx, agent, 'credential route turn');
+		const leases = ledgerLeases(ctx.dataDir).length;
+		const launches = ctx.stub.launches().length;
+
+		// A credential of no one here and an account directory of no one's, as session overrides.
+		const foreignSecret = `e2e-foreign-credential-${process.pid}-${Date.now()}`;
+		const foreignAccount = fs.mkdtempSync(path.join(os.tmpdir(), 'maestro-e2e-foreign-account-'));
+		try {
+			const prompt = inputs?.approvedPrompt ?? 'credential override turn';
+			const env = await spawnWithOverride(page, agent, ctx.projectDir, prompt, {
+				ANTHROPIC_API_KEY: foreignSecret,
+				OPENAI_API_KEY: foreignSecret,
+			});
+			const account = await spawnWithOverride(page, agent, ctx.projectDir, prompt, {
+				CLAUDE_CONFIG_DIR: foreignAccount,
+				CODEX_HOME: foreignAccount,
+			});
+			// An admitted override turn runs out of sight: give it time to touch what it would.
+			if (inputs && (!env || !account)) await page.waitForTimeout(15_000);
+			const record = (await hostRecords(page)).find((r) => r.id === agent.id);
+			const checks = {
+				...(inputs
+					? {}
+					: {
+							'the env override was refused': env !== null,
+							'the account override was refused': account !== null,
+							'no fallback spawn reached the provider':
+								ctx.stub.launches().length === launches && !ctx.stub.sawPrompt(prompt),
+							'the overrides took no lease': ledgerLeases(ctx.dataDir).length === leases,
+						}),
+				'nothing was written into the foreign account': listDir(foreignAccount).length === 0,
+				'the foreign credential is nowhere in the data dir':
+					filesContaining(ctx.dataDir, [foreignSecret]).length === 0,
+				'the agent keeps its provider': record?.toolType === agent.toolType,
+			};
+			const effect = observeOnDisk(
+				{ refusals: { env, account }, toolType: record?.toolType },
+				checks
+			);
+			ctx.observe('effect', effect);
+			expect(effect.problems).toEqual([]);
+		} finally {
+			fs.rmSync(foreignAccount, { recursive: true, force: true });
+		}
 	});
 });

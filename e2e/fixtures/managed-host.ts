@@ -56,6 +56,12 @@ export interface ManagedRunEndpointInputs {
 	restorePolicy: string[];
 	/** argv that revokes this installation's registration on the endpoint. */
 	revokeRegistration: string[];
+	/**
+	 * argv that takes the endpoint offline and brings it back (the offline and
+	 * restart case only; that case fails by name when either is missing).
+	 */
+	takeOffline?: string[];
+	restoreOnline?: string[];
 }
 
 export const MANAGED_MODE = resolveManagedMode(process.env.MAESTRO_E2E_MANAGED_MODE);
@@ -309,20 +315,20 @@ export async function activeTabManaged(page: Page, agentId: string) {
 	}, agentId);
 }
 
+/** What fixture mode enrolls with; none of it may be stored in the clear. */
+export const FIXTURE_ENROLLMENT: ManagedRunEndpointInputs['enrollment'] = {
+	tenantId: 'tenant-e2e',
+	orgId: 'org-e2e',
+	mode: 'managed',
+	invitation: 'invitation-e2e',
+	collectionProfile: 'metadata',
+	trustRootDigest: 'a'.repeat(64),
+	keyPossessionProof: 'proof-e2e',
+};
+
 /** Enroll and register through the desktop's own lifecycle (the real enterprise IPC). */
 export async function enroll(page: Page, socketPath: string, inputs?: ManagedRunEndpointInputs) {
-	const request = {
-		socketPath,
-		...(inputs?.enrollment ?? {
-			tenantId: 'tenant-e2e',
-			orgId: 'org-e2e',
-			mode: 'managed' as const,
-			invitation: 'invitation-e2e',
-			collectionProfile: 'metadata' as const,
-			trustRootDigest: 'a'.repeat(64),
-			keyPossessionProof: 'proof-e2e',
-		}),
-	};
+	const request = { socketPath, ...(inputs?.enrollment ?? FIXTURE_ENROLLMENT) };
 	const enrolled = await page.evaluate(
 		(r) => window.maestro.enterprise.requestEnrollment(r),
 		request
