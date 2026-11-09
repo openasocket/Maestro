@@ -15,6 +15,7 @@ import {
 import {
 	callingLocalEffectActor,
 	holdDeleteEffect,
+	holdReplacementEffect,
 	type LocalEffectAuthority,
 } from '../../enterprise/local-effects-policy';
 
@@ -455,6 +456,16 @@ export function registerPlaybooksHandlers(deps: PlaybooksHandlerDependencies): v
 				if (!manifest.name || !Array.isArray(manifest.documents)) {
 					throw new Error('Invalid playbook manifest');
 				}
+
+				// A document or asset already in the folder is replaced, so it is held as a
+				// delete ONCE, before any folder is created or file written (MCOMP-19-03A).
+				const destinations = new Set([
+					...documentEntries.map((e) => path.join(autoRunFolderPath, path.basename(e.entryName))),
+					...assetEntries.map((e) =>
+						path.join(autoRunFolderPath, 'assets', path.basename(e.entryName))
+					),
+				]);
+				await holdReplacementEffect(localEffects(), [...destinations], actor, LOG_CONTEXT);
 
 				// Extract document files to autorun folder
 				const importedDocs: string[] = [];

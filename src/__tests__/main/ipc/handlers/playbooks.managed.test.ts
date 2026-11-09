@@ -8,7 +8,9 @@
  *
  * The real handlers and the real policy sources run here over a mocked
  * `fs/promises` and a mocked archive read, so a refusal is proven by the
- * absence of any mkdir or write.
+ * absence of any mkdir or write. The import's REPLACEMENTS (MCOMP-19-03A) are
+ * found on a real temporary folder: a document or asset already there is held
+ * as one destructive delete before the first mkdir or write.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -16,6 +18,8 @@ import type { App, BrowserWindow } from 'electron';
 import { dialog } from 'electron';
 import crypto from 'crypto';
 import fs from 'fs/promises';
+import * as nodeFs from 'fs';
+import os from 'os';
 import path from 'path';
 
 import { createInstallPolicySource } from '../../../../main/enterprise/install-policy';
@@ -41,9 +45,11 @@ vi.mock('electron', () => ({
 vi.mock('fs/promises', () => ({
 	default: { readFile: vi.fn(), writeFile: vi.fn(), mkdir: vi.fn(), unlink: vi.fn() },
 }));
-vi.mock('fs', () => {
+vi.mock('fs', async (importOriginal) => {
+	// The real module, so the replacement hold reads what is on disk; only the export stream is faked.
+	const actual = await importOriginal<typeof import('fs')>();
 	const createWriteStream = vi.fn();
-	return { createWriteStream, default: { createWriteStream } };
+	return { ...actual, createWriteStream, default: { ...actual, createWriteStream } };
 });
 vi.mock('archiver', () => ({ default: vi.fn() }));
 vi.mock('../../../../main/utils/zip-archive', async (importOriginal) => ({
@@ -94,13 +100,13 @@ const pin = (file: string, bytes: Buffer) => ({
 describe('playbooks delete and ZIP import under the managed ceilings (MRC2-04-09A)', () => {
 	function register(
 		mode: 'standalone' | 'enrolled' | 'ceiling' | 'none',
-		options: { verdict?: 'allow' | 'deny'; pins?: ReturnType<typeof pin>[] } = {}
+		options: { verdict?: 'allow' | 'deny' | 'confirm'; pins?: ReturnType<typeof pin>[] } = {}
 	) {
 		const identity = {
 			read: (): IdentityRead => (mode === 'standalone' ? { status: 'none' } : enrolled),
 		};
 		const policy = () => ({ appliedRevision: 3 });
-		const localEffects = createLocalEffectsPolicySource({ identity, policy });
+		const localEffects = createLocalEffectsPolicySource({ identity, policy, confirm });
 		const install = createInstallPolicySource({ identity, policy });
 		if (mode === 'ceiling') {
 			const effects = localEffects.install({
@@ -119,6 +125,7 @@ describe('playbooks delete and ZIP import under the managed ceilings (MRC2-04-09
 		});
 	}
 
+	const confirm = vi.fn<(prompt: unknown) => Promise<'confirmed' | 'declined' | 'unavailable'>>();
 	const call = (channel: string, ...args: unknown[]) => registered.get(channel)!({}, ...args);
 	const importArchive = () => call('playbooks:import', 'session-1', '/autorun');
 
@@ -239,5 +246,84 @@ describe('playbooks delete and ZIP import under the managed ceilings (MRC2-04-09
 		register('ceiling', { verdict: 'allow' });
 		expect(await call('playbooks:deleteAll', 'session-1')).toEqual({ success: true });
 		expect(fs.unlink).toHaveBeenCalledTimes(1);
+	});
+
+	describe('an import over documents and assets already in the folder (MCOMP-19-03A)', () => {
+		const allPins = [pin('manifest.json', manifest), pin('doc1.md', doc), pin('logo.png', asset)];
+		let root: string;
+		const importInto = () => call('playbooks:import', 'session-1', root);
+
+		beforeEach(() => {
+			root = nodeFs.realpathSync(nodeFs.mkdtempSync(path.join(os.tmpdir(), 'mcomp-19-03a-')));
+		});
+		afterEach(() => {
+			nodeFs.rmSync(root, { recursive: true, force: true });
+		});
+		const seed = () => {
+			nodeFs.writeFileSync(path.join(root, 'doc1.md'), 'OLD DOC');
+			nodeFs.mkdirSync(path.join(root, 'assets'));
+			nodeFs.writeFileSync(path.join(root, 'assets', 'logo.png'), 'OLD PNG');
+		};
+
+		it('a denying destructive class refuses the import once, naming both replacements, before any folder or file', async () => {
+			seed();
+			register('ceiling', { verdict: 'deny', pins: allPins });
+			const result = await runAsTransport({ kind: 'cli' }, () => importInto());
+			expect(result.success).toBe(false);
+			expect(result.error).toMatch(
+				/\[managed-denied\] the local-effects ceiling denies the destructive class; deleting items \(2 items, the first .*doc1\.md\) for maestro-cli is refused$/
+			);
+			expect(fs.mkdir).not.toHaveBeenCalled();
+			expect(fs.writeFile).not.toHaveBeenCalled();
+			expect(vi.mocked(logger.warn).mock.calls).toEqual([
+				[
+					'Delete refused by the managed local-effects ceiling; nothing was removed',
+					'[Playbooks]',
+					expect.objectContaining({
+						code: 'denied',
+						receipt: expect.objectContaining({ count: 2 }),
+					}),
+				],
+			]);
+			expect(nodeFs.readFileSync(path.join(root, 'doc1.md'), 'utf8')).toBe('OLD DOC');
+			expect(nodeFs.readFileSync(path.join(root, 'assets', 'logo.png'), 'utf8')).toBe('OLD PNG');
+		});
+
+		it('a confirm class asks once; declined refuses with nothing written, confirmed imports', async () => {
+			nodeFs.writeFileSync(path.join(root, 'doc1.md'), 'OLD DOC');
+			register('ceiling', { verdict: 'confirm', pins: allPins });
+			confirm.mockResolvedValueOnce('declined');
+			const declined = await importInto();
+			expect(declined.success).toBe(false);
+			expect(declined.error).toContain('[managed-declined]');
+			expect(confirm).toHaveBeenCalledTimes(1);
+			expect(fs.mkdir).not.toHaveBeenCalled();
+			expect(fs.writeFile).not.toHaveBeenCalled();
+
+			confirm.mockResolvedValueOnce('confirmed');
+			expect((await importInto()).success).toBe(true);
+			expect(confirm).toHaveBeenCalledTimes(2);
+			expect(fs.writeFile).toHaveBeenCalledWith(path.join(root, 'doc1.md'), '# Document', 'utf-8');
+		});
+
+		it('a fresh folder replaces nothing: the same denying ceiling imports without asking', async () => {
+			register('ceiling', { verdict: 'deny', pins: allPins });
+			const imported = await importInto();
+			expect(imported.success).toBe(true);
+			expect(confirm).not.toHaveBeenCalled();
+			expect(logger.warn).not.toHaveBeenCalled();
+			expect(fs.writeFile).toHaveBeenCalledTimes(3);
+		});
+
+		it('standalone and no authority import over existing files as before', async () => {
+			seed();
+			register('standalone');
+			expect((await importInto()).success).toBe(true);
+			registered.clear();
+			register('none');
+			expect((await importInto()).success).toBe(true);
+			expect(confirm).not.toHaveBeenCalled();
+			expect(logger.warn).not.toHaveBeenCalled();
+		});
 	});
 });
