@@ -6418,6 +6418,36 @@
 					"id": "MCOMP-29-01"
 				},
 				{
+					"label": "Track managed Auto Run runs at task boundaries",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/shared/maestro-lib/autorun/__tests__/task-boundary.test.ts",
+						"src/shared/maestro-lib/autorun/engine-types.ts",
+						"src/shared/maestro-lib/autorun/run-playbook.ts",
+						"src/shared/maestro-lib/runtime/autorun.ts"
+					],
+					"outcome": "Inserted during execution after MCOMP-29-01; landed as b9b081781. Read `Plans/integration-completion/EXECUTION-RULES.md`. Give the Auto Run engine an optional task-boundary hook (`src/shared/maestro-lib/autorun/engine-types.ts` and the engine loop) that awaits `CooperativeRun.atBoundary()` between tasks and stops cleanly on `stop`, and have the managed host that runs Auto Run with a run id (`src/cli/services/host-managed.ts` / `createRuntimeAutoRun`) compose `createCommandService({ cooperativePause: true })`, `runControl.track(runId)` on launch and `end()` on finish. Never suspend a process; a task in flight finishes first. Add focused tests (pause between two tasks, resume, cancel while parked, end with a pending pause). 1-3 authored files, under 500 changed lines. Backlog: G-07.",
+					"backlog": ["G-07"],
+					"requires": ["MAESTRO-CONTRACT-INPUTS-BUILD"],
+					"produces": [],
+					"id": "MCOMP-29-01A"
+				},
+				{
+					"label": "Compose the cooperative pause on the managed host",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/__tests__/cli/services/host-managed.test.ts",
+						"src/cli/services/host-managed.ts",
+						"src/shared/maestro-lib/runtime/__tests__/autorun.test.ts",
+						"src/shared/maestro-lib/runtime/index.ts"
+					],
+					"outcome": "Inserted during execution after MCOMP-29-01A; landed as 43f25df92. Read `Plans/integration-completion/EXECUTION-RULES.md`. Add `runControl?()` to `MaestroRuntimeOptions.managed` in `src/shared/maestro-lib/runtime/index.ts` and pass it to `createRuntimeAutoRun`'s `managed`; in `src/cli/services/host-managed.ts` compose `createCommandService({ ..., cooperativePause: true })` and hand `managed.runControl = () => commands?.runControl ?? null` (null until the adapter is acquired and after close). Pause/resume then appear in `capabilities()` only on this host; the desktop `service.ts` stays uncomposed by name. Add a runtime-level test through `createMaestroRuntime` (pause parks a launched playbook between tasks, resume runs on, `autoRun.stop` while parked stops it, a pending pause settles `no-effect` at run end) and a host-managed test that the composed service lists `command-pause_run`/`command-resume_run`. Never suspend a process. 1-3 authored files, under 500 changed lines. Backlog: G-07.",
+					"backlog": ["G-07"],
+					"requires": ["MAESTRO-CONTRACT-INPUTS-BUILD"],
+					"produces": [],
+					"id": "MCOMP-29-01B"
+				},
+				{
 					"label": "Compose native notice inbox and private response",
 					"kind": "IMPLEMENT",
 					"targets": [
@@ -6443,6 +6473,64 @@
 					"requires": ["MEGA-COMMANDS-BUILD"],
 					"produces": [],
 					"id": "MCOMP-29-03"
+				},
+				{
+					"label": "Serve the communication verbs from a detached host",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"docs/agent-guides/CLI-UI-PARITY.md",
+						"src/__tests__/cli/services/runtime-host-communications.test.ts",
+						"src/cli/commands/managed-inbox.ts",
+						"src/cli/services/runtime-host.ts",
+						"src/main/enterprise/service.ts",
+						"src/main/web-server/handlers/messageHandlers/managed.ts"
+					],
+					"outcome": "Inserted during execution after MCOMP-29-03; landed as 251a9507a. Read `Plans/integration-completion/EXECUTION-RULES.md`. Export from `src/main/web-server/handlers/messageHandlers/managed.ts` the inbox/command branch of its `answer()` (validation by `inboxActionProblem` and `validateLocalCommand`, the same thrown sentences) as one function over `ManagedCommunications`, and have the desktop handler call it. In `src/cli/services/runtime-host.ts` (or `host-managed.ts`) build a `ManagedCommunicationsPort` from `createManagedCommunications({ identity, inbox: composition.communications.inbox, commands: composition.communications.commands, place: 'on this host' })` and pass it to `startServer({ communications })`; an uncomposed host passes none. Update the wire comment in `src/cli/commands/managed-inbox.ts` and the Covered row in `docs/agent-guides/CLI-UI-PARITY.md`. Test: the CLI verbs (`managedInboxList`, `managedInboxAct`, `managedCommand`, `managedCommandStatus`) against a real `startRuntimeServer`/handler on a composed and an uncomposed host. 1-3 authored files, under 500 changed lines. Backlog: G-07, M-05.",
+					"backlog": ["G-07"],
+					"requires": ["MAESTRO-CONTRACT-INPUTS-BUILD"],
+					"produces": [],
+					"id": "MCOMP-29-03A"
+				},
+				{
+					"label": "Pause, resume and inbox recovery verbs",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"docs/agent-guides/CLI-UI-PARITY.md",
+						"src/__tests__/cli/commands/managed.test.ts",
+						"src/__tests__/main/enterprise/commands-v2.test.ts",
+						"src/__tests__/main/web-server/handlers/messageHandlers.managed.test.ts",
+						"src/cli/commands/managed-inbox.ts",
+						"src/cli/index.ts",
+						"src/main/enterprise/commands.ts",
+						"src/main/enterprise/service.ts"
+					],
+					"outcome": "Inserted during execution after MCOMP-29-03A; landed as e7d4a6619. Read `Plans/integration-completion/EXECUTION-RULES.md`. Add `pause-run`/`resume-run` (with `runId`) to `LocalCommandAction` and `issueLocal` in `src/main/enterprise/commands.ts` (recipient runId bound like cancel; a host without `cooperativePause` answers `unsupported-capability` by name; the output labels the pause cooperative at a task boundary, never OS suspension), accept them in `validateLocalCommand`, and add `maestro-cli managed command pause|resume <runId>`; add `recover` to the shared communications facade (`InboxClient.recover()`, answering `unsupported` where no recovery port is composed) with a `managed_inbox_recover` verb on both bridges and `maestro-cli managed inbox recover`. Tests for each. 1-3 authored files per run, under 500 changed lines; insert a further bounded continuation if it does not fit. Backlog: G-07, M-05.",
+					"backlog": ["G-07"],
+					"requires": ["MAESTRO-CONTRACT-INPUTS-BUILD"],
+					"produces": [],
+					"id": "MCOMP-29-03B"
+				},
+				{
+					"label": "Inbox recovery verb",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"docs/agent-guides/CLI-UI-PARITY.md",
+						"src/__tests__/cli/commands/managed.test.ts",
+						"src/__tests__/cli/services/runtime-host-communications.test.ts",
+						"src/__tests__/main/enterprise/communications-bridge.test.ts",
+						"src/__tests__/main/web-server/handlers/messageHandlers.managed.test.ts",
+						"src/cli/commands/managed-inbox.ts",
+						"src/cli/index.ts",
+						"src/main/enterprise/service.ts",
+						"src/main/web-server/handlers/messageHandlers/WebSocketMessageHandler.ts",
+						"src/main/web-server/handlers/messageHandlers/managed.ts",
+						"src/shared/maestro-lib/runtime/server-requests.ts"
+					],
+					"outcome": "Inserted during execution after MCOMP-29-03B; landed as 03682a1b3. Read `Plans/integration-completion/EXECUTION-RULES.md`. Add `inboxRecover` to the shared communications facade (`ManagedCommunications` / `createManagedCommunications` in `src/main/enterprise/service.ts`) over `InboxClient.recover()` (which already answers `unsupported` where no recovery port is composed; no inbox composed is a refusal by name), add `managed_inbox_recover` to `MANAGED_COMMUNICATION_TYPES` in `src/shared/maestro-lib/runtime/server-requests.ts` and to `answerManagedCommunication()`, admit it on the desktop bridge (`messageHandlers/managed.ts` type list and `WebSocketMessageHandler.ts` switch, CLI-secret clients only), and add `maestro-cli managed inbox recover` in `src/cli/index.ts` / `src/cli/commands/managed-inbox.ts` printing the `InboxRecovery` summary; add the CLI-UI-PARITY row. Tests for each (bridge, detached host via `runtime-host-communications.test.ts`, CLI; update the \"eleven managed message types\" count in `src/__tests__/cli/commands/managed.test.ts`). 1-3 authored source files per run plus tests, under 500 changed lines; insert a further bounded continuation if it does not fit. Backlog: G-07, M-05.",
+					"backlog": ["G-07"],
+					"requires": ["MAESTRO-CONTRACT-INPUTS-BUILD"],
+					"produces": [],
+					"id": "MCOMP-29-03C"
 				},
 				{
 					"label": "Test communications with actual native GUI",
@@ -6473,7 +6561,7 @@
 			"produces": ["MAESTRO-COMMAND-CONSUMERS-BUILD"],
 			"id": "MCOMP-29",
 			"path": ".maestro/playbooks/2026-10-29-Maestro-Integration-Completion/MCOMP-29.md",
-			"taskCount": 5,
+			"taskCount": 10,
 			"stage": "S14"
 		},
 		{
@@ -7396,7 +7484,7 @@
 				"MEGA-COMMANDS-BUILD"
 			],
 			"nativeInputs": false,
-			"taskCount": 6
+			"taskCount": 11
 		},
 		{
 			"id": "S15",
@@ -7523,8 +7611,8 @@
 			"taskCount": 1
 		}
 	],
-	"taskCount": 448,
-	"taskCounts": { "IMPLEMENT": 331, "TEST": 57, "VERIFY": 60 },
+	"taskCount": 453,
+	"taskCounts": { "IMPLEMENT": 336, "TEST": 57, "VERIFY": 60 },
 	"artifacts": {
 		"MEGA-CONTRACTS-FOUNDATION-BUILD": {
 			"producerDocument": "GCOMP-01",
@@ -8367,8 +8455,13 @@
 			"MCOMP-21-03",
 			"MCOMP-21-16",
 			"MCOMP-29-01",
+			"MCOMP-29-01A",
+			"MCOMP-29-01B",
 			"MCOMP-29-02",
 			"MCOMP-29-03",
+			"MCOMP-29-03A",
+			"MCOMP-29-03B",
+			"MCOMP-29-03C",
 			"MCOMP-29-04",
 			"MCOMP-29-05",
 			"GCOMP-25-01",
