@@ -4,7 +4,18 @@
  */
 
 import { randomUUID } from 'crypto';
-import { BrowserWindow } from 'electron';
+import * as path from 'path';
+import { app, BrowserWindow, safeStorage } from 'electron';
+import {
+	createCustodyCredentialSlot,
+	credentialCustodyStanding,
+	custodyReferenceFor,
+	formatCredentialRefusal,
+	type CredentialCustodyDecision,
+	type CustodyCredentialSlot,
+} from '../enterprise/credential-custody';
+import { anchorAccountForDirectory, createKeyringAnchor } from '../utils/keyring-anchor';
+import { safeStorageSeal } from '../utils/safe-storage-seal';
 import { WebServer, type WebServerOptions } from './WebServer';
 import { tunnelManager } from '../tunnel-manager';
 import { createRemoteHostStatusProvider } from './remote-host-status';
@@ -119,6 +130,140 @@ export interface WebServerFactoryDependencies {
 	getManaged?: () => ManagedOperations | null;
 }
 
+// ============================================================================
+// The persistent web link token (MCOMP-21-05)
+// ============================================================================
+
+/** The file the sealed token lives in, in the data folder and never in the synced settings. */
+export const WEB_AUTH_TOKEN_FILE = 'maestro-web-link.json';
+const WEB_AUTH_TOKEN_ANCHOR_SERVICE = 'com.maestro.web-auth-token';
+/** What the `webAuthToken` setting holds under management: a marker, never the token. */
+export const WEB_AUTH_TOKEN_REFERENCE = custodyReferenceFor('web.authToken');
+
+let webAuthTokenSlot: CustodyCredentialSlot | null = null;
+
+/** Replace the token's custody slot (tests). Null rebuilds the production slot on next use. */
+export function setWebAuthTokenSlot(slot: CustodyCredentialSlot | null): void {
+	webAuthTokenSlot = slot;
+}
+
+function getWebAuthTokenSlot(): CustodyCredentialSlot {
+	if (!webAuthTokenSlot) {
+		const dir = app.getPath('userData');
+		webAuthTokenSlot = createCustodyCredentialSlot({
+			credential: 'web.authToken',
+			file: path.join(dir, WEB_AUTH_TOKEN_FILE),
+			seal: safeStorageSeal(safeStorage),
+			anchor: createKeyringAnchor(
+				WEB_AUTH_TOKEN_ANCHOR_SERVICE,
+				anchorAccountForDirectory('web-auth-token', dir)
+			),
+		});
+	}
+	return webAuthTokenSlot;
+}
+
+function writeSlot(slot: CustodyCredentialSlot, token: string): CredentialCustodyDecision {
+	try {
+		return slot.write(token);
+	} catch {
+		return {
+			allowed: false,
+			code: 'unprotected',
+			message: 'the persistent web link token could not be sealed under the OS key store.',
+		};
+	}
+}
+
+/**
+ * The token a persistent web link starts with. Standalone it is the plain
+ * `webAuthToken` setting, as it always was. Under management the setting holds
+ * only the slot's opaque reference and the token lives sealed for the current
+ * installation; a plaintext token left in settings is migrated into custody
+ * (or, when custody refuses, rotated) and never kept. A token that does not
+ * open for this owner (another installation, an enrollment that is gone, an
+ * older copy) is rotated. No token value is ever logged.
+ */
+export function resolvePersistentWebAuthToken(settingsStore: SettingsStore): string {
+	const stored = settingsStore.get<string | null>('webAuthToken', null);
+	const plain = stored && UUID_V4_REGEX.test(stored) ? stored : null;
+	if (credentialCustodyStanding() === 'standalone') {
+		if (plain) return plain;
+		// A reference left by an enrollment that is gone opens nothing here: drop its sealed copy.
+		if (stored === WEB_AUTH_TOKEN_REFERENCE) getWebAuthTokenSlot().clear();
+		else if (stored) {
+			logger.warn(
+				'Stored webAuthToken is not a valid UUID, generating new token',
+				'WebServerFactory'
+			);
+		}
+		const fresh = randomUUID();
+		try {
+			settingsStore.set('webAuthToken', fresh);
+		} catch {
+			// Persist failure is non-fatal - server starts with an ephemeral token
+			logger.warn(
+				'Failed to persist new webAuthToken, URL will not survive restart',
+				'WebServerFactory'
+			);
+		}
+		return fresh;
+	}
+	const slot = getWebAuthTokenSlot();
+	if (stored === slot.reference) {
+		const kept = slot.read();
+		if (kept) return kept;
+	}
+	// Migrate a plaintext token, or rotate one that no longer opens for this owner.
+	const token = plain ?? randomUUID();
+	const decision = writeSlot(slot, token);
+	try {
+		settingsStore.set('webAuthToken', decision.allowed ? slot.reference : null);
+	} catch {
+		logger.warn('Failed to replace the stored web link token', 'WebServerFactory');
+	}
+	if (decision.allowed) return token;
+	slot.clear();
+	logger.warn(
+		`${formatCredentialRefusal(decision)} The web link changes at every start.`,
+		'WebServerFactory'
+	);
+	// A plaintext token custody refused is not reused: the link rotates.
+	return randomUUID();
+}
+
+/**
+ * Keep `token` as the persistent web link token and turn the link on. Under
+ * management it is sealed first and refused by name when custody refuses;
+ * nothing is written then. Throws on a settings write failure (the caller rolls back).
+ */
+export function persistWebAuthToken(
+	settingsStore: SettingsStore,
+	token: string
+): { ok: true } | { ok: false; message: string } {
+	if (credentialCustodyStanding() === 'standalone') {
+		settingsStore.set('persistentWebLink', true);
+		settingsStore.set('webAuthToken', token);
+		return { ok: true };
+	}
+	const slot = getWebAuthTokenSlot();
+	const decision = writeSlot(slot, token);
+	if (!decision.allowed) return { ok: false, message: formatCredentialRefusal(decision) };
+	settingsStore.set('persistentWebLink', true);
+	settingsStore.set('webAuthToken', slot.reference);
+	return { ok: true };
+}
+
+/** Turn the persistent web link off and forget its token, in settings and in custody. */
+export function clearPersistedWebAuthToken(settingsStore: SettingsStore): void {
+	const stored = settingsStore.get<string | null>('webAuthToken', null);
+	settingsStore.set('persistentWebLink', false);
+	settingsStore.set('webAuthToken', null);
+	if (credentialCustodyStanding() !== 'standalone' || stored === WEB_AUTH_TOKEN_REFERENCE) {
+		getWebAuthTokenSlot().clear();
+	}
+}
+
 /**
  * Creates a factory function for creating web servers with the given dependencies.
  * This allows dependency injection and makes the code more testable.
@@ -138,32 +283,10 @@ export function createWebServerFactory(deps: WebServerFactoryDependencies) {
 		const port = useCustomPort ? customPort : 0;
 
 		// Determine security token: persistent or ephemeral
-		let securityToken: string | undefined;
 		const persistentWebLink = settingsStore.get('persistentWebLink', false);
-		if (persistentWebLink) {
-			const storedToken = settingsStore.get<string | null>('webAuthToken', null);
-			// Validate stored token is a proper UUID before trusting it
-			if (storedToken && UUID_V4_REGEX.test(storedToken)) {
-				securityToken = storedToken;
-			} else {
-				if (storedToken) {
-					logger.warn(
-						'Stored webAuthToken is not a valid UUID, generating new token',
-						'WebServerFactory'
-					);
-				}
-				securityToken = randomUUID();
-				try {
-					settingsStore.set('webAuthToken', securityToken);
-				} catch {
-					// Persist failure is non-fatal - server starts with an ephemeral token
-					logger.warn(
-						'Failed to persist new webAuthToken, URL will not survive restart',
-						'WebServerFactory'
-					);
-				}
-			}
-		}
+		const securityToken = persistentWebLink
+			? resolvePersistentWebAuthToken(settingsStore)
+			: undefined;
 
 		const server = new WebServer(port, securityToken, options);
 

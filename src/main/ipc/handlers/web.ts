@@ -37,6 +37,10 @@ import type { AutoRunRemoteControl } from '../../../shared/autoRunRemote';
 import type { SettingsStoreInterface } from '../../stores/types';
 import { writeCliServerInfo, readCliServerInfo } from '../../../shared/cli-server-discovery';
 import { getCliSecret } from '../../web-server/auth/cli-secret';
+import {
+	clearPersistedWebAuthToken,
+	persistWebAuthToken,
+} from '../../web-server/web-server-factory';
 import { createLiveModeController, setLiveModeController } from '../../web-server/live-mode';
 import { isWebContentsAvailable } from '../../utils/safe-send';
 import type { tunnelManager } from '../../tunnel-manager';
@@ -578,9 +582,13 @@ export function registerWebHandlers(deps: WebHandlerDependencies): void {
 			return { success: false, message: 'Web server is not running.' };
 		}
 		try {
-			const currentToken = webServer.getSecurityToken();
-			settingsStore.set('persistentWebLink', true);
-			settingsStore.set('webAuthToken', currentToken);
+			// Under management the token is sealed for this installation and settings
+			// keep only its opaque reference (MCOMP-21-05); a custody refusal writes nothing.
+			const kept = persistWebAuthToken(settingsStore, webServer.getSecurityToken());
+			if (!kept.ok) {
+				logger.warn(kept.message, 'WebServer');
+				return { success: false, message: kept.message };
+			}
 			logger.info(
 				'Persisted current web server token and enabled persistent web link',
 				'WebServer'
@@ -604,8 +612,7 @@ export function registerWebHandlers(deps: WebHandlerDependencies): void {
 	// persistentWebLink=false with a stale token, which the factory ignores.
 	ipcMain.handle('live:clearPersistentToken', async () => {
 		try {
-			settingsStore.set('persistentWebLink', false);
-			settingsStore.set('webAuthToken', null);
+			clearPersistedWebAuthToken(settingsStore);
 			logger.info('Cleared persistent web link token and disabled flag', 'WebServer');
 			return { success: true };
 		} catch (error: any) {
