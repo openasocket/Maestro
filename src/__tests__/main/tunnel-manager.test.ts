@@ -489,4 +489,83 @@ describe('TunnelManager', () => {
 			expect(status.error).toBeNull();
 		});
 	});
+
+	// MCOMP-19-01A: every supervised respawn republishes the port, so the
+	// listener ceiling is asked again before cloudflared is respawned.
+	describe('supervision - listener ceiling on reconnect', () => {
+		const connectThenDrop = async () => {
+			const startPromise = tunnelManager.start(3000);
+			await new Promise((resolve) => setImmediate(resolve));
+			mockProcess.stderr.emit('data', Buffer.from('https://abc.trycloudflare.com'));
+			await startPromise;
+			expect(mocks.mockSpawn).toHaveBeenCalledTimes(1);
+			mockProcess.emit('exit', 1);
+		};
+
+		it('respawns when the ceiling still admits the tunnel, asking it per reconnect', async () => {
+			const gate = await import('../../main/enterprise/listener-gate');
+			const requests: unknown[] = [];
+			gate.setListenerAuthority({
+				evaluateListener(request) {
+					requests.push(request);
+					return {
+						allowed: true,
+						managed: { ...request, policyRevision: 1, reach: 'public', outcome: 'within-ceiling' },
+					};
+				},
+			});
+			try {
+				await connectThenDrop();
+				expect(requests).toHaveLength(1);
+				await vi.advanceTimersByTimeAsync(1000);
+				expect(requests).toEqual([
+					{ kind: 'tunnel', bind: '127.0.0.1', port: 3000 },
+					{ kind: 'tunnel', bind: '127.0.0.1', port: 3000 },
+				]);
+				expect(mocks.mockSpawn).toHaveBeenCalledTimes(2);
+			} finally {
+				gate.setListenerAuthority(null);
+			}
+		});
+
+		it('spawns nothing and ends supervision when a ceiling installed after start refuses', async () => {
+			const gate = await import('../../main/enterprise/listener-gate');
+			await connectThenDrop();
+			gate.setListenerAuthority({
+				evaluateListener(request) {
+					return {
+						allowed: false,
+						code: 'kind-denied',
+						message: 'the listener ceiling admits no tunnel listener',
+						managed: { ...request, policyRevision: 4, reach: 'public', outcome: 'kind-denied' },
+					};
+				},
+			});
+			try {
+				await vi.advanceTimersByTimeAsync(1000);
+				expect(mocks.mockSpawn).toHaveBeenCalledTimes(1);
+				expect(tunnelManager.getStatus()).toEqual({
+					isRunning: false,
+					url: null,
+					error: '[managed-kind-denied] the listener ceiling admits no tunnel listener',
+				});
+				expect(gate.heldListeners()).toMatchObject([
+					{ kind: 'tunnel', port: 3000, code: 'kind-denied' },
+				]);
+				// Supervision ended: no later backoff window respawns either.
+				await vi.advanceTimersByTimeAsync(60000);
+				expect(mocks.mockSpawn).toHaveBeenCalledTimes(1);
+			} finally {
+				gate.setListenerAuthority(null);
+			}
+		});
+
+		it('asks nothing standalone: the reconnect respawns as before', async () => {
+			const gate = await import('../../main/enterprise/listener-gate');
+			await connectThenDrop();
+			await vi.advanceTimersByTimeAsync(1000);
+			expect(mocks.mockSpawn).toHaveBeenCalledTimes(2);
+			expect(gate.heldListeners()).toEqual([]);
+		});
+	});
 });

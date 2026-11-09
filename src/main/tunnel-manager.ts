@@ -224,9 +224,23 @@ class TunnelManager {
 			if (!this.supervise || this.supervisedPort === null) {
 				return;
 			}
+			// Every respawn republishes the port, so the listener ceiling is
+			// asked again (MCOMP-19-01A): a ceiling installed, narrowed or
+			// revoked since start() holds the reconnect. A hold ends
+			// supervision, spawns nothing and is the status error.
+			const port = this.supervisedPort;
+			const held = listenerHoldFor({ kind: 'tunnel', bind: TUNNEL_TARGET_HOST, port });
+			if (held) {
+				this.supervise = false;
+				this.supervisedPort = null;
+				this.url = null;
+				this.error = held.message;
+				logger.info(`Tunnel reconnect held by policy: ${held.message}`, 'TunnelManager');
+				return;
+			}
 			// Fire and forget: success resets counters in handleOutput; failure
 			// exits and re-enters onUnexpectedExit via the exit handler.
-			void this.spawnTunnel(this.supervisedPort);
+			void this.spawnTunnel(port);
 		}, delay);
 	}
 
