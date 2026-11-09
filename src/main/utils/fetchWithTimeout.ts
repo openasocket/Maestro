@@ -28,6 +28,13 @@
  * count (`heldEgress()`, MRC2-05-03): the managed status projection reads
  * that ledger, so a caller whose request is off under the policy (a check-in,
  * a stats flush) can be a quiet no-op instead of a toast on every start.
+ *
+ * A redirect is a new destination, so under an authority it is held too
+ * (MCOMP-19-01): the chokepoint follows the chain itself, resolves each
+ * `Location` against the URL that answered it, and holds that absolute URL
+ * before the next socket opens. A first request the ceiling admits can
+ * therefore never be bounced to a destination it does not list. One request
+ * budget covers the whole chain.
  */
 
 import type {
@@ -155,6 +162,95 @@ export function holdEgress(
 	throw refused;
 }
 
+/** The redirect limit `fetch()` itself applies; a held chain keeps the same bound. */
+export const MAX_EGRESS_REDIRECTS = 20;
+
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+
+/** Request headers the Fetch standard strips when a redirect crosses origins. */
+const CROSS_ORIGIN_STRIPPED_HEADERS = ['authorization', 'proxy-authorization', 'cookie'];
+
+/** Headers that describe a body, dropped with it when a redirect turns the request into a GET. */
+const BODY_HEADERS = ['content-type', 'content-length', 'content-encoding', 'content-language'];
+
+function originOf(url: string): string {
+	return new URL(url).origin;
+}
+
+/**
+ * The request a redirect hop sends, by the Fetch standard's rules: a 303 (or
+ * a 301/302 answering a POST) becomes a bodiless GET; a 307/308 replays the
+ * method and the body, which a one-shot stream cannot do; a hop to another
+ * origin loses the credentials the first origin was sent.
+ */
+function redirectedInit(
+	init: RequestInit,
+	status: number,
+	crossOrigin: boolean,
+	url: string
+): RequestInit {
+	const method = (init.method ?? 'GET').toUpperCase();
+	const toGet =
+		(status === 303 && method !== 'GET' && method !== 'HEAD') ||
+		((status === 301 || status === 302) && method === 'POST');
+	if (!toGet && init.body instanceof ReadableStream)
+		throw new TypeError(
+			`Request to ${url} was redirected with a ${status}, which replays a streamed body that cannot be sent twice`
+		);
+	const headers = new Headers(init.headers);
+	if (crossOrigin) for (const name of CROSS_ORIGIN_STRIPPED_HEADERS) headers.delete(name);
+	if (toGet) for (const name of BODY_HEADERS) headers.delete(name);
+	return {
+		...init,
+		headers,
+		...(toGet ? { method: 'GET', body: undefined } : {}),
+	};
+}
+
+/**
+ * Follow a redirect chain one hop at a time, holding each destination against
+ * the installed authority BEFORE the next socket opens. A `Location` is
+ * resolved against the URL that answered it, so a relative, a scheme-relative
+ * or a cross-host redirect is held as the absolute URL it actually names; a
+ * hop the ceiling refuses throws the same `EgressDeniedError` (and records the
+ * same hold) as a refused first request, and nothing is sent to it. The
+ * returned response is the last hop's, so `response.url` is the final URL;
+ * `response.redirected` reads false because each hop was its own request.
+ */
+async function fetchHoldingRedirects(
+	url: string,
+	init: RequestInit,
+	egress: EgressClass | FetchEgressOptions
+): Promise<Response> {
+	let current = url;
+	let request = init;
+	for (let hop = 0; ; hop++) {
+		const response = await fetch(current, { ...request, redirect: 'manual' });
+		const location = REDIRECT_STATUSES.has(response.status)
+			? response.headers?.get('location')
+			: null;
+		if (!location) return response;
+		// The redirect's own body is never read; release its socket first.
+		void response.body?.cancel().catch(() => {});
+		if (hop >= MAX_EGRESS_REDIRECTS)
+			throw new TypeError(`Request to ${url} exceeded ${MAX_EGRESS_REDIRECTS} redirects`);
+		let next: string;
+		try {
+			next = new URL(location, current).href;
+		} catch {
+			throw new TypeError(`Request to ${url} was redirected to an invalid location`);
+		}
+		holdEgress(next, egress);
+		request = redirectedInit(
+			request,
+			response.status,
+			originOf(next) !== originOf(current),
+			current
+		);
+		current = next;
+	}
+}
+
 /**
  * `fetch()` with a request budget.
  *
@@ -208,7 +304,13 @@ export async function fetchWithTimeout(
 		: controller.signal;
 
 	try {
-		return await fetch(url, { ...options, signal });
+		// Standalone, or a caller that handles redirects itself (`manual`
+		// returns the 3xx, `error` rejects on one), leaves through one fetch.
+		// Under an authority every other redirect is followed HERE so each hop
+		// is held before its socket opens (MCOMP-19-01).
+		if (!egressAuthority || options.redirect === 'manual' || options.redirect === 'error')
+			return await fetch(url, { ...options, signal });
+		return await fetchHoldingRedirects(url, { ...options, signal }, egress);
 	} finally {
 		// Release the timer as soon as the response lands. Letting it run to
 		// completion would pin the closure for the full budget on every call.

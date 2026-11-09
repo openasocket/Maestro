@@ -27,6 +27,7 @@ import {
 	isEgressDeniedError,
 	isFetchTimeoutError,
 	MAX_EGRESS_HOLDS,
+	MAX_EGRESS_REDIRECTS,
 	setEgressAuthority,
 } from '../../../main/utils/fetchWithTimeout';
 
@@ -367,6 +368,218 @@ describe('fetchWithTimeout under an egress authority', () => {
 		await fetchWithTimeout(URL_UNDER_TEST);
 
 		expect(mockFetch).toHaveBeenCalledTimes(1);
+	});
+});
+
+/** A recording fetch that answers each URL from a table; an unlisted URL fails the test. */
+function scriptedFetch(routes: Record<string, () => Response>) {
+	const seen: { url: string; init: RequestInit }[] = [];
+	const fn = vi.fn(async (url: string, init: RequestInit = {}) => {
+		seen.push({ url, init });
+		const route = routes[url];
+		if (!route) throw new Error(`fetch must not be called for ${url}`);
+		return route();
+	});
+	return { fn, seen };
+}
+
+function redirect(status: number, location: string): Response {
+	return new Response(null, { status, headers: { location } });
+}
+
+describe('redirects under an egress authority (MCOMP-19-01)', () => {
+	const realFetch = global.fetch;
+
+	afterEach(() => {
+		setEgressAuthority(null);
+		global.fetch = realFetch;
+		vi.restoreAllMocks();
+	});
+
+	const githubOnly = () =>
+		managedSource({
+			policyRevision: 3,
+			classes: [{ class: 'updates', destinations: ['github.com', '*.githubusercontent.com'] }],
+		});
+
+	it('leaves the standalone path on native redirect handling', async () => {
+		const mockFetch = vi.fn().mockResolvedValue(new Response('ok', { status: 200 }));
+		global.fetch = mockFetch as unknown as typeof fetch;
+
+		await fetchWithTimeout('https://github.com/a', {}, 1000, 'updates');
+
+		expect(mockFetch.mock.calls[0][1]).not.toHaveProperty('redirect');
+	});
+
+	it('holds every hop, resolved to an absolute URL, before its socket opens', async () => {
+		const { fn, seen } = scriptedFetch({
+			'https://github.com/releases/latest': () => redirect(302, '/releases/tag/v2'),
+			'https://github.com/releases/tag/v2': () =>
+				redirect(301, '//objects.githubusercontent.com/asset?sig=secret'),
+			'https://objects.githubusercontent.com/asset?sig=secret': () =>
+				new Response('bytes', { status: 200 }),
+		});
+		global.fetch = fn as unknown as typeof fetch;
+		const source = githubOnly();
+		const evaluate = vi.spyOn(source, 'evaluateEgress');
+		setEgressAuthority(source);
+
+		const response = await fetchWithTimeout(
+			'https://github.com/releases/latest',
+			{},
+			1000,
+			'updates'
+		);
+
+		expect(await response.text()).toBe('bytes');
+		expect(seen.map((call) => call.url)).toEqual([
+			'https://github.com/releases/latest',
+			'https://github.com/releases/tag/v2',
+			'https://objects.githubusercontent.com/asset?sig=secret',
+		]);
+		expect(seen.every((call) => call.init.redirect === 'manual')).toBe(true);
+		expect(evaluate.mock.calls.map(([request]) => request.url)).toEqual(
+			seen.map((call) => call.url)
+		);
+		expect(heldEgress()).toEqual([]);
+	});
+
+	it('refuses a redirect to an unlisted destination without contacting it', async () => {
+		const { fn, seen } = scriptedFetch({
+			'https://github.com/releases/latest': () =>
+				redirect(307, 'https://evil.example/payload?token=secret'),
+		});
+		global.fetch = fn as unknown as typeof fetch;
+		setEgressAuthority(githubOnly());
+
+		await expect(
+			fetchWithTimeout('https://github.com/releases/latest', {}, 1000, 'updates')
+		).rejects.toMatchObject({
+			name: 'EgressDeniedError',
+			code: 'destination-denied',
+			class: 'updates',
+			url: 'https://evil.example/payload?token=secret',
+		});
+		expect(seen.map((call) => call.url)).toEqual(['https://github.com/releases/latest']);
+		expect(heldEgress()).toEqual([
+			expect.objectContaining({ code: 'destination-denied', origin: 'https://evil.example' }),
+		]);
+		expect(JSON.stringify(heldEgress())).not.toContain('secret');
+	});
+
+	it('gives the enterprise-endpoint class no redirect exception', async () => {
+		const { fn, seen } = scriptedFetch({
+			'https://mega.example/control': () => redirect(302, 'https://elsewhere.example/'),
+		});
+		global.fetch = fn as unknown as typeof fetch;
+		setEgressAuthority(
+			managedSource({
+				policyRevision: 3,
+				classes: [{ class: 'enterprise-endpoint', destinations: ['mega.example'] }],
+			})
+		);
+
+		await expect(
+			fetchWithTimeout('https://mega.example/control', {}, 1000, 'enterprise-endpoint')
+		).rejects.toMatchObject({ code: 'destination-denied', class: 'enterprise-endpoint' });
+		expect(seen).toHaveLength(1);
+	});
+
+	it('re-reads the authority per hop, so a revocation mid-chain stops the next hop', async () => {
+		const source = githubOnly();
+		const { fn, seen } = scriptedFetch({
+			'https://github.com/a': () => {
+				source.clear();
+				return redirect(302, 'https://github.com/b');
+			},
+		});
+		global.fetch = fn as unknown as typeof fetch;
+		setEgressAuthority(source);
+
+		await expect(
+			fetchWithTimeout('https://github.com/a', {}, 1000, 'updates')
+		).rejects.toMatchObject({ code: 'unavailable' });
+		expect(seen.map((call) => call.url)).toEqual(['https://github.com/a']);
+	});
+
+	it('turns a 303 into a bodiless GET and drops credentials across origins', async () => {
+		const { fn, seen } = scriptedFetch({
+			'https://github.com/upload': () =>
+				redirect(303, 'https://objects.githubusercontent.com/done'),
+			'https://objects.githubusercontent.com/done': () => new Response('ok', { status: 200 }),
+		});
+		global.fetch = fn as unknown as typeof fetch;
+		setEgressAuthority(githubOnly());
+
+		await fetchWithTimeout(
+			'https://github.com/upload',
+			{
+				method: 'POST',
+				body: '{"a":1}',
+				headers: {
+					Authorization: 'Bearer secret',
+					'Content-Type': 'application/json',
+					'X-Keep': '1',
+				},
+			},
+			1000,
+			'updates'
+		);
+
+		const hop = seen[1].init;
+		expect(hop.method).toBe('GET');
+		expect(hop.body).toBeUndefined();
+		const headers = new Headers(hop.headers);
+		expect(headers.get('authorization')).toBeNull();
+		expect(headers.get('content-type')).toBeNull();
+		expect(headers.get('x-keep')).toBe('1');
+	});
+
+	it('replays method, body and same-origin credentials on a 307', async () => {
+		const { fn, seen } = scriptedFetch({
+			'https://github.com/a': () => redirect(307, '/b'),
+			'https://github.com/b': () => new Response('ok', { status: 200 }),
+		});
+		global.fetch = fn as unknown as typeof fetch;
+		setEgressAuthority(githubOnly());
+
+		await fetchWithTimeout(
+			'https://github.com/a',
+			{ method: 'PUT', body: 'payload', headers: { Authorization: 'Bearer t' } },
+			1000,
+			'updates'
+		);
+
+		expect(seen[1].init).toMatchObject({ method: 'PUT', body: 'payload' });
+		expect(new Headers(seen[1].init.headers).get('authorization')).toBe('Bearer t');
+	});
+
+	it('bounds the chain at MAX_EGRESS_REDIRECTS', async () => {
+		const fn = vi.fn(async () => redirect(302, 'https://github.com/loop'));
+		global.fetch = fn as unknown as typeof fetch;
+		setEgressAuthority(githubOnly());
+
+		await expect(fetchWithTimeout('https://github.com/loop', {}, 1000, 'updates')).rejects.toThrow(
+			`exceeded ${MAX_EGRESS_REDIRECTS} redirects`
+		);
+		expect(fn).toHaveBeenCalledTimes(MAX_EGRESS_REDIRECTS + 1);
+	});
+
+	it('leaves a caller that handles redirects itself to one fetch', async () => {
+		const mockFetch = vi.fn().mockResolvedValue(redirect(302, 'https://evil.example/'));
+		global.fetch = mockFetch as unknown as typeof fetch;
+		setEgressAuthority(githubOnly());
+
+		const response = await fetchWithTimeout(
+			'https://github.com/a',
+			{ redirect: 'manual' },
+			1000,
+			'updates'
+		);
+
+		expect(response.status).toBe(302);
+		expect(mockFetch).toHaveBeenCalledTimes(1);
+		expect(mockFetch.mock.calls[0][1]).toMatchObject({ redirect: 'manual' });
 	});
 });
 
