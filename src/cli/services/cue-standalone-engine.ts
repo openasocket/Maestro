@@ -77,6 +77,7 @@ import {
 import type { CueRunResult } from '../../shared/cue/contracts';
 import type { CueExternalNotification } from '../../main/cue/cue-notify-webhook';
 import type { ListenerAuthority } from '../../main/enterprise/listener-policy';
+import type { GitExecutionGate } from '../../main/enterprise/repository-policy';
 import { formatJsonLogLine } from '../../shared/jsonLogLine';
 // The managed binding and the headless port: plain maestro-lib, no Electron,
 // the same modules `agent-spawner.ts` holds statically for every CLI verb.
@@ -639,24 +640,87 @@ export async function buildStandaloneCueListenerAuthority(options: {
 	const now = options.now ?? (() => Date.now());
 	return {
 		evaluateListener(request) {
-			const host = options.managedHost;
-			const { binding } = readStandaloneCueStanding(host, now, startedAt, options.standing);
-			const policy =
-				binding.state === 'enrolled' && host
-					? host.policyStatus()
-					: 'record' in binding
-						? { appliedRevision: binding.record.policyRevision }
-						: null;
-			return listenerVerdict(
-				managedListenerStanding({
-					enrolled: binding.state !== 'standalone',
-					policy,
-					ceiling: null,
-				}),
-				request
+			const { enrolled, policy } = readStandaloneCueCeilingStanding(
+				options.managedHost,
+				now,
+				startedAt,
+				options.standing
 			);
+			return listenerVerdict(managedListenerStanding({ enrolled, policy, ceiling: null }), request);
 		},
 	};
+}
+
+/**
+ * What a desktop ceiling source is judged over, read from the installation
+ * standing (`readStandaloneCueStanding`): managed for any binding state but
+ * `standalone` (enrolled, enrolled with no reachable authority, unreadable),
+ * under the attached host's applied revision when the binding is enrolled,
+ * else the record's last applied one (the policy kept offline), else none.
+ */
+function readStandaloneCueCeilingStanding(
+	host: StandaloneCueManagedHost | null,
+	now: () => number,
+	startedAt: string,
+	source?: InstallationStandingSource
+): { enrolled: boolean; policy: { appliedRevision: number | null } | null } {
+	const { binding } = readStandaloneCueStanding(host, now, startedAt, source);
+	const policy =
+		binding.state === 'enrolled' && host
+			? host.policyStatus()
+			: 'record' in binding
+				? { appliedRevision: binding.record.policyRevision }
+				: null;
+	return { enrolled: binding.state !== 'standalone', policy };
+}
+
+/**
+ * The git execution gate a standalone Cue engine holds its forge effects and
+ * git writes to (MCOMP-21-01B). The GitHub poller holds every poll at
+ * `holdGitForgeEffect('poll', ...)`, which answers null with no gate
+ * installed, and only the desktop's app-ready block installs one, so without
+ * this an enrolled machine's headless engine polled GitHub with the account
+ * token unheld.
+ *
+ * The desktop's own gate (`createGitExecutionGate`) over a repository
+ * standing read fresh on every hold from the same installation standing the
+ * listener authority reads (`readStandaloneCueCeilingStanding`), judged
+ * with the desktop's rule (`managedRepositoryStanding` +
+ * `repositoryEffectVerdict`). No binding and no custody record is standalone
+ * and nothing is held, unchanged. Managed, no endpoint operation delivers a
+ * repository ceiling (CP-01), so every poll is refused `unavailable` by name
+ * and the poller reports it as its managed refusal, never as a `gh` login
+ * failure. No remote endpoint qualifier is composed headless, so a managed git
+ * write over SSH is refused `remote-unqualified`, never run unmanaged.
+ *
+ * Async because `repository-policy.ts` is loaded on demand (its static
+ * closure is Electron-free, but every `maestro-cli` verb reaches this module).
+ */
+export async function buildStandaloneCueGitExecutionGate(options: {
+	managedHost: StandaloneCueManagedHost | null;
+	/** The installation standing the binding is held to. Default: this process's own read. */
+	standing?: InstallationStandingSource;
+	now?: () => number;
+}): Promise<GitExecutionGate> {
+	const { createGitExecutionGate, managedRepositoryStanding, repositoryEffectVerdict } =
+		await import('../../main/enterprise/repository-policy');
+	const startedAt = new Date().toISOString();
+	const now = options.now ?? (() => Date.now());
+	const standing = () => {
+		const { enrolled, policy } = readStandaloneCueCeilingStanding(
+			options.managedHost,
+			now,
+			startedAt,
+			options.standing
+		);
+		return managedRepositoryStanding({ enrolled, policy, ceiling: null });
+	};
+	return createGitExecutionGate({
+		repository: {
+			standing,
+			authorize: (request) => repositoryEffectVerdict(standing(), request),
+		},
+	});
 }
 
 export interface StandaloneCueEngineOptions {
@@ -755,18 +819,30 @@ export async function createStandaloneCueEngine(
 	// for something else entirely (`cue schedule`, `cue list`) should not pay
 	// the load cost for. Every `cue-engine` subcommand is the one place that
 	// cost is worth paying.
-	const [{ CueEngine: CueEngineCtor }, { setListenerAuthority }, listeners] = await Promise.all([
+	const standingOptions = {
+		managedHost: options.managedHost ?? null,
+		...(options.standing ? { standing: options.standing } : {}),
+	};
+	const [
+		{ CueEngine: CueEngineCtor },
+		{ setListenerAuthority },
+		{ setGitExecutionGate },
+		listeners,
+		gitGate,
+	] = await Promise.all([
 		import('../../main/cue/cue-engine'),
 		import('../../main/enterprise/listener-gate'),
-		buildStandaloneCueListenerAuthority({
-			managedHost: options.managedHost ?? null,
-			...(options.standing ? { standing: options.standing } : {}),
-		}),
+		import('../../main/utils/remote-git'),
+		buildStandaloneCueListenerAuthority(standingOptions),
+		buildStandaloneCueGitExecutionGate(standingOptions),
 	]);
 	// Installed before the engine exists, so the webhook receiver its first
 	// webhook subscription opens and the status server the command binds next
-	// are both held at the gate (MCOMP-21-01). Process-wide, like the desktop's.
+	// are both held at the gate (MCOMP-21-01), and the GitHub poller's first
+	// poll is held at the repository gate (MCOMP-21-01B). Process-wide, like
+	// the desktop's.
 	setListenerAuthority(listeners);
+	setGitExecutionGate(gitGate);
 	return new CueEngineCtor(buildStandaloneCueEngineDeps(options));
 }
 

@@ -89,8 +89,10 @@ vi.mock('../../../cli/services/host-managed', () => ({
 import {
 	AUTO_RUN_NEEDS_HOST,
 	buildStandaloneCueEngineDeps,
+	buildStandaloneCueGitExecutionGate,
 	buildStandaloneCueSpawnPort,
 	consoleCueLog,
+	createStandaloneCueEngine,
 	cueLogForFormat,
 	jsonCueLog,
 	stderrCueLog,
@@ -845,6 +847,89 @@ describe('managed admission (MRC-07-02A)', () => {
 		expect(executeCuePrompt.mock.calls[0][0].admission.context.workflow).toMatchObject({
 			ownerEpoch: '5',
 			fencingToken: 'fence-5',
+		});
+	});
+
+	/**
+	 * The repository gate (MCOMP-21-01B): the GitHub poller holds every poll at
+	 * `holdGitForgeEffect('poll', ...)`, which answers null with no gate, and
+	 * only the desktop installed one. The engine now installs the desktop's own
+	 * gate over the same installation standing, read per hold.
+	 */
+	describe('repository gate (MCOMP-21-01B)', () => {
+		const poll = { effect: 'poll' as const, destination: 'https://github.com', read: null };
+		// Loaded the way the engine loads it: an earlier case resets the module
+		// registry, so a static import would hold a different instance.
+		const remoteGit = () => import('../../../main/utils/remote-git');
+		afterEach(async () => (await remoteGit()).setGitExecutionGate(null));
+
+		it('holds nothing standalone and reads no repository', async () => {
+			const read = vi.fn(async () => 'https://github.com/owner/repo.git');
+			const gate = await buildStandaloneCueGitExecutionGate({ managedHost: null });
+			expect(await gate.holdForge({ ...poll, repository: 'owner/repo' })).toEqual({
+				allowed: true,
+				operation: null,
+			});
+			expect(await gate.holdForge({ ...poll, read })).toEqual({ allowed: true, operation: null });
+			expect(read).not.toHaveBeenCalled();
+		});
+
+		it('refuses a poll unavailable by name on an enrolled machine with no host, under the revision kept offline', async () => {
+			await enroll();
+			const gate = await buildStandaloneCueGitExecutionGate({ managedHost: null });
+			const decision = await gate.holdForge({ ...poll, repository: 'owner/repo' });
+			expect(decision).toMatchObject({
+				allowed: false,
+				code: 'unavailable',
+				managed: {
+					policyRevision: 7,
+					effect: 'poll',
+					repository: 'owner/repo',
+					outcome: 'unavailable',
+				},
+			});
+			if (decision.allowed) return;
+			expect(decision.message).toContain('repository ceiling is unavailable');
+			expect(decision.message).toContain('policy revision 7');
+		});
+
+		it('stays managed when the binding file is deleted under a custody that holds the record, and re-reads per hold', async () => {
+			await enroll('endpoint-test', { mirror: false });
+			const gate = await buildStandaloneCueGitExecutionGate({ managedHost: attachedHost() });
+			expect(await gate.holdForge({ ...poll, repository: 'owner/repo' })).toMatchObject({
+				allowed: false,
+				code: 'unavailable',
+			});
+			custody.standing = null; // unenrolled between two polls of the same engine
+			expect(await gate.holdForge({ ...poll, repository: 'owner/repo' })).toEqual({
+				allowed: true,
+				operation: null,
+			});
+		});
+
+		it('refuses a managed git write over SSH as remote-unqualified, with no qualifier composed headless', async () => {
+			await enroll();
+			const read = vi.fn(async () => null);
+			const gate = await buildStandaloneCueGitExecutionGate({ managedHost: null });
+			const decision = await gate.hold({
+				args: ['commit', '-m', 'x'],
+				target: { kind: 'ssh', remote: { id: 'r1', name: 'box' } as never, cwd: '/w' },
+				read,
+			});
+			expect(decision).toMatchObject({ allowed: false, code: 'remote-unqualified' });
+			expect(read).not.toHaveBeenCalled();
+		});
+
+		it("is installed process-wide by createStandaloneCueEngine, so the poller's hold refuses by name", async () => {
+			await enroll();
+			const { holdGitForgeEffect } = await remoteGit();
+			// No gate before the engine: the executor answers null, the hole this closes.
+			expect(await holdGitForgeEffect('poll', null, 'https://github.com', 'owner/repo')).toBeNull();
+			await createStandaloneCueEngine({ onLog: vi.fn() });
+			const refused = await holdGitForgeEffect('poll', null, 'https://github.com', 'owner/repo');
+			expect(refused).toMatchObject({ exitCode: 'EMANAGED' });
+			expect(refused?.stderr).toMatch(/^\[managed-unavailable\] /);
+			expect(refused?.stderr).not.toMatch(/gh auth|login/i);
 		});
 	});
 });
