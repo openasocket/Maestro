@@ -1442,8 +1442,8 @@
 		"rules": "the rules of the first selection apply unchanged (no forced reset, checkout loss, history rewrite or signing change; landing only on feature/mega-maestro-v1.1.0-rc by a merge commit; enterprise guards and standalone semantics survive; the desktop host stays Electron)",
 		"tool": ".maestro/playbooks/Working/mcomp-33-00/merge-tool.mjs (the MCOMP-01-03 driver with the second worktree and selection; not in git)",
 		"status": {
-			"state": "landed on the feature branch at 58bad53dc and pushed; MCOMP-33-00L1 done (db3a95641); continuations MCOMP-33-00L2..L3 open ahead of the re-pin MCOMP-33-00P",
-			"updatedBy": "MCOMP-33-00L1"
+			"state": "landed on the feature branch at 58bad53dc and pushed; MCOMP-33-00L1 and 00L2 done (b8e291c01); continuation MCOMP-33-00L3 open ahead of the re-pin MCOMP-33-00P",
+			"updatedBy": "MCOMP-33-00L2"
 		},
 		"progress": {
 			"MCOMP-33-00R01": {
@@ -3259,6 +3259,33 @@
 				},
 				"notCovered": "maestro-cli remote-host status|start (src/cli/commands/remote-host.ts) still calls discoverRemoteHost / startRemoteHost directly with no managed refusal; outside the named paths of this task (the forward, its discovery, the peer connection). Candidate for a follow-up continuation or MCOMP-33-03.",
 				"tools": "Working/mcomp-33-00l1: edit-*.mjs, mutate.mjs (mutate.json), check.mjs (check.json), record.mjs"
+			},
+			"MCOMP-33-00L2": {
+				"completedAt": "2026-11-09",
+				"completedBy": "Maestro-Claude",
+				"commit": "b8e291c01",
+				"authoredFiles": [
+					"src/main/pianola/memory-transport.ts",
+					"src/__tests__/main/pianola/memory-transport.test.ts",
+					"Plans/integration-completion/contract-coverage.json (extensionProposals[4].pianolaMemoryEgressClass)"
+				],
+				"holds": {
+					"transport": "MemoryTransportScope.requestJson awaits holdMemoryEgress(url) before controller.startRequest, so every physical request (each NaN 429/502/524 retry included) is held before the permit opens; a refusal throws MemoryTransportError managed-<code> with terminal not-started and nothing is sent or left uncertain.",
+					"worker": "The memory worker holds no egress authority, so memoryEgressClient (read from workerData.memoryCliAdmission, the 00H channel) asks the main thread with { kind: 'egress', id, url }; serveMemoryCliAdmission answers with holdEgress(url, MEMORY_EGRESS_CLASS) on the main chokepoint (the refusal recorded in heldEgress()). A lost answer (60s) refuses outcome-unknown. Launch answers carry no kind, egress answers carry kind egress, so both clients share one port. No channel (main thread, tests): the local chokepoint. memory-host.ts unchanged.",
+					"class": "content (MEMORY_EGRESS_CLASS), the nearest closed class; the missing model-inference class is recorded in contract-coverage.json, none invented."
+				},
+				"tests": {
+					"suites": [
+						"src/__tests__/main/pianola/memory-transport.test.ts: new describe hosted memory egress on a managed host (5 cases: refusal by name over a real MessageChannel with nothing sent and no request row; every retry held and a listed destination leaves; unlisted destination refused destination-denied; local chokepoint with no channel; standalone unchanged)"
+					],
+					"related": "12 files (memory-transport, relevance, rerank, concurrency, cli, embed, recall, quality, batch-store, evidence, pianola-lifecycle.managed, fetchWithTimeout): 183 passed, 4 skipped",
+					"runtime": "memory suites need the Electron ABI better-sqlite3 of the main checkout: run vitest under ELECTRON_RUN_AS_NODE=1 node_modules/electron/dist/Electron.app/Contents/MacOS/Electron",
+					"mutation": "drop the holdMemoryEgress(url) call -> killed (Tests  4 failed | 1 passed | 34 skipped (39))",
+					"typecheck": "tsc -p tsconfig.main.json and tsconfig.lint.json: 0 errors",
+					"lint": "eslint 0 errors on the source (suite is eslint-ignored); prettier clean"
+				},
+				"notCovered": "A redirect of a hosted request: requestJson uses a bare fetch that follows redirects without a hold (fetchWithTimeout holds each hop). Recorded in contract-coverage.json; candidate for MCOMP-33-03.",
+				"tools": "Working/mcomp-33-00l2: edit.mjs + block.ts, apply-test.mjs + cases.ts, mutate.mjs (mutate.json), dashes.mjs, commit.mjs, record.mjs"
 			}
 		}
 	}
