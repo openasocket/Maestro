@@ -27,6 +27,7 @@ import type { DispatchReceiptRecord } from '../../../main/enterprise/dispatch';
 import type { createProcessSpawnAuthority } from '../../../main/enterprise/spawn-authority';
 import type { AdmissionOutcome } from '../../../shared/maestro-lib/managed/authority';
 import type {
+	EndpointComponent,
 	EndpointPort,
 	EndpointStatus,
 	ManagedIdentityRecord,
@@ -310,7 +311,9 @@ export async function runPairJourneys(deps: JourneyDeps): Promise<JourneyRun> {
 	const find = (id: string): PairJourney => PAIR_JOURNEYS.find((j) => j.id === id)!;
 
 	// library.handshake: always runs, every other journey stands on its attachment.
-	const components = [{ id: 'maestro-lib', kind: 'runtime', version: lib.MAESTRO_LIB_VERSION }];
+	const components: EndpointComponent[] = [
+		{ id: 'maestro-lib', kind: 'runtime', version: lib.MAESTRO_LIB_VERSION },
+	];
 	const attach = () =>
 		port.attach({
 			...installation,
@@ -555,7 +558,8 @@ export async function runPairJourneys(deps: JourneyDeps): Promise<JourneyRun> {
 			})
 		);
 		const fence = lib.workflowFenceOf(claim);
-		if (!fence || fence.fence === null) return false;
+		// A refusal carries fence: null and no owner epoch; only an owned fence narrows here.
+		if (!fence || !('ownerEpoch' in fence)) return false;
 		const verified = desktopPort.verify({
 			actor: { peer: 'in-process' },
 			identity,

@@ -132,8 +132,15 @@ function attachOutput(app: ElectronApplication): () => string {
 	return () => buf;
 }
 
+/** Playwright's electron.launch takes only defined string values (an unset key is dropped). */
+function launchEnv(env: NodeJS.ProcessEnv): Record<string, string> {
+	return Object.fromEntries(
+		Object.entries(env).filter((entry): entry is [string, string] => entry[1] !== undefined)
+	);
+}
+
 export async function launch(env: NodeJS.ProcessEnv): Promise<LaunchedApp> {
-	const app = await electron.launch({ args: [MAIN_ENTRY], env, timeout: 60_000 });
+	const app = await electron.launch({ args: [MAIN_ENTRY], env: launchEnv(env), timeout: 60_000 });
 	const output = attachOutput(app);
 	const window = await app.firstWindow();
 	await window.waitForLoadState('domcontentloaded');
@@ -152,7 +159,7 @@ export async function relaunch(launched: LaunchedApp, seeded: SeededEnv): Promis
 /** First (throwaway) launch lets the app materialize default config files in
  *  the demo dir so we can flip flags against a valid settings document. */
 async function materializeDefaults(env: NodeJS.ProcessEnv): Promise<void> {
-	const app = await electron.launch({ args: [MAIN_ENTRY], env, timeout: 60_000 });
+	const app = await electron.launch({ args: [MAIN_ENTRY], env: launchEnv(env), timeout: 60_000 });
 	await app.firstWindow();
 	await app.close();
 }
