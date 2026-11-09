@@ -1961,6 +1961,38 @@
 				],
 				"notes": "No case, field or guard dropped.",
 				"unmergedAfter": 51
+			},
+			"MCOMP-33-00R21": {
+				"resolvedAt": "2026-11-09",
+				"resolvedBy": "Maestro-Claude",
+				"files": [
+					"src/shared/maestro-lib/launch/agent-args.ts",
+					"src/shared/maestro-lib/launch/env.ts",
+					"src/shared/maestro-lib/agents/consult.ts"
+				],
+				"method": "Five hunks resolved by a shape-asserting script (Working/mcomp-33-00r21/resolve.mjs, both sides read in full, every replacement computed before any write); staged through merge-tool.mjs stage (prettier left all three unchanged, 48 unmerged left). Working/mcomp-33-00r21/check.mjs: 0 syntax diagnostics, no markers, every seam count at least the larger side. agent-args.test plus launch and lift-env suites 170/170 (upstream Standard-mode skip cases and HEAD managed ceiling cases both pass); process handler, agent-spawner and process-manager suites that load: 621/621.",
+				"hunks": {
+					"src/shared/maestro-lib/launch/agent-args.ts": [
+						"Hunk 1 (batch args): HEAD body kept (managed filterYoloArgs under a ceiling or with standardModeArgs, and the ManagedPermissionModeError refusal for a provider with no qualified bounded standard mode) with upstream's skipBatchModeArgsInStandardMode added as a first branch: a Standard turn named by the user on a provider flagged to skip (Codex, Qwen3 Coder, Hermes, Factory Droid, Grok) gets no batch args, but only when there is NO managedCeiling, since a managed turn never reaches upstream's native approval broker (see 00R13). Under a ceiling the HEAD filter and refusal decide unchanged. HEAD standardModeArgs are still appended after this block, so unmanaged Codex Standard now runs --sandbox workspace-write without --skip-git-repo-check (upstream's own expectation)."
+					],
+					"src/shared/maestro-lib/launch/env.ts": [
+						"Hunk 1 (imports): HEAD isSecretEnvKey (still used) plus upstream CALLER_RUN_PROOF_FILE_ENV_VAR alongside the caller id vars.",
+						"Hunk 2 (terminal env deletes): both: HEAD delete of MANAGED_DELEGATION_ENV_VAR and upstream delete of CALLER_RUN_PROOF_FILE_ENV_VAR.",
+						"Hunk 3 (STRIPPED_ENV_VARS): both: upstream CALLER_RUN_PROOF_FILE_ENV_VAR then HEAD MANAGED_DELEGATION_ENV_VAR with its comment. applyManagedEnvCeiling and managedArgsProblems are outside the hunks and untouched."
+					],
+					"src/shared/maestro-lib/agents/consult.ts": [
+						"Hunk 1 (ConsultRunner.start): returns GroupChatTurnStart & { unknown?: boolean }: keeps HEAD's managed refusal state/code (GroupChatTurnStart.managed) and upstream's unknown flag that retains supervision of a possible child; the doc comment states both. The upstream caller (!success && !unknown releases) is unchanged and already outside the hunk."
+					]
+				},
+				"outsideHunks": [
+					"src/main/ipc/handlers/process/handle-spawn.ts (resolved in 00R14): git kept the generateUUID import twice (both sides added it at different lines), a parse error that blocked every suite importing it; the second copy was removed by Working/mcomp-33-00r21/dedup-import.mjs and the file re-staged. ts.transpileModule does not flag duplicate imports, which is why the 00R14 check passed."
+				],
+				"semanticConflictsForC": [
+					"GroupChatTurnStart (groupchat/types.ts, merged) has no unknown field; the consult runner type intersects it. 00C confirms the desktop consult runner (cross-agent/consult-runner.ts, 00R22) and runtime/background-turns.ts satisfy the intersected return type.",
+					"Unmanaged Codex Standard turns no longer carry --skip-git-repo-check (upstream behaviour); a managed Codex Standard turn keeps it through the HEAD filter."
+				],
+				"notes": "No case, field or guard dropped. consult.test cannot load until crossAgentTypes.ts (00R22).",
+				"unmergedAfter": 48
 			}
 		}
 	}
