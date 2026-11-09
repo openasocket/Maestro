@@ -601,10 +601,12 @@ describe('sink classification by source', () => {
 			times: 2,
 		},
 		{
+			// The free-port probe is the shared `availableLocalPort()` since upstream
+			// rc 919d28a66 moved it into maestro-lib (it binds 127.0.0.1 to read a port).
 			file: 'src/main/lite/tunnel.ts',
 			kind: 'ssh-tunnel',
 			call: "holdListener({ kind: 'ssh-tunnel', bind: '127.0.0.1', port: preferredPort ?? 0 })",
-			before: 'await availablePort(',
+			before: 'await availableLocalPort(',
 		},
 		{
 			file: 'src/main/lite/control-server.ts',

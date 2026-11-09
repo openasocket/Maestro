@@ -320,9 +320,20 @@ function stringsIn(
  */
 const SYSTEM_PROMPT_TEMP_SUFFIX = /(maestro-sysprompt-[A-Za-z0-9_-]+-\d+-)[0-9a-f]{8}(\.txt)/g;
 
+/**
+ * The random folder of the caller run proof every local AI tab spawn is issued
+ * (`MAESTRO_CALLER_RUN_PROOF_FILE`, a `mkdtemp` under `plugin-tool-run-proofs`).
+ * Each spawn gets its own whatever the export says, so only the random part is
+ * taken out: the variable, its folder and the file name are still compared.
+ */
+const CALLER_RUN_PROOF_DIR = /([\\/]plugin-tool-run-proofs[\\/]run-)[A-Za-z0-9]{6}(?=[\\/]proof$)/;
+
 /** `value` with what differs between any two spawns taken out, at any depth. */
 function withoutSpawnNoise(value: unknown): unknown {
-	if (typeof value === 'string') return value.replace(SYSTEM_PROMPT_TEMP_SUFFIX, '$1<random>$2');
+	if (typeof value === 'string')
+		return value
+			.replace(SYSTEM_PROMPT_TEMP_SUFFIX, '$1<random>$2')
+			.replace(CALLER_RUN_PROOF_DIR, '$1<random>');
 	if (Array.isArray(value)) return value.map(withoutSpawnNoise);
 	if (
 		value !== null &&
