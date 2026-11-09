@@ -21,11 +21,13 @@ import { createEnterpriseIdentityStore } from '../../../main/enterprise/identity
 import type { Anchor } from '../../../main/utils/keyring-anchor';
 import { fakeAnchor, fakeSeal } from '../../main/enterprise/fakeCustody';
 import {
+	createMaestroRuntime,
 	createManagedHostAdapter,
 	createWsMaestroClient,
 	readCliServerInfoFrom,
 	requestHostStatus,
 	requestHostStop,
+	startRuntimeServer,
 	writeCliServerInfoTo,
 	type ManagedEnrollmentStatus,
 	type ManagedIdentityView,
@@ -561,6 +563,114 @@ describe('startRuntimeHost', () => {
 			await host.stop();
 			expect(lines).toContain('Stopping Cue failed: db closed');
 			expect(fs.existsSync(path.join(dir, 'maestro-runtime.lock'))).toBe(false);
+		});
+	});
+	describe('the round parent custody a host composes (MCOMP-17-03CC)', () => {
+		// A host adapter whose custody reads `status`: ok is an enrolled installation, none is not.
+		const hostManaged = (status: 'ok' | 'none') => ({
+			host: (installation: Parameters<typeof createManagedHostAdapter>[0]['installation']) => {
+				const view: ManagedIdentityView =
+					status === 'none'
+						? { status: 'none', reason: null, message: null, record: null }
+						: {
+								status: 'ok',
+								reason: null,
+								message: null,
+								record: {
+									version: 1,
+									installationId: installation.installationId,
+									tenantId: 'tenant-1',
+									orgId: 'org-1',
+									enrollmentId: 'enr-1',
+									endpoint: {
+										socketPath: '/tmp/endpoint.sock',
+										bindingDigest: 'a'.repeat(64),
+										trustRootDigest: null,
+									},
+									management: 'enrolled',
+									registration: null,
+									policy: { desiredRevision: 2, appliedRevision: 2, observedAt: null },
+									enrolledAt: '2026-10-22T12:00:00.000Z',
+									updatedAt: '2026-10-22T12:00:00.000Z',
+								},
+							};
+				return createManagedHostAdapter({
+					installation,
+					identity: { read: () => view },
+					endpoint: null,
+					status: () => ({
+						identity: view,
+						connection: null,
+						endpoint: null,
+						authority: 'none',
+						reason: 'not attached in this process',
+						pendingApproval: null,
+						lastDenial: null,
+					}),
+				});
+			},
+		});
+
+		async function startWith(
+			managed: NonNullable<Parameters<typeof createMaestroRuntime>[0]['managed']>
+		) {
+			const createRuntime = vi.fn(createMaestroRuntime);
+			const startServer = vi.fn(startRuntimeServer);
+			const host = await startRuntimeHost(
+				{ ...options(), managed },
+				{ ...noCue, createRuntime, startServer }
+			);
+			running.push(host);
+			return {
+				host,
+				runtimeManaged: createRuntime.mock.calls[0][0].managed!,
+				roundParents: startServer.mock.calls[0][0].roundParents,
+			};
+		}
+
+		it('serves one custody to the handler and gives the runtime its lookup on an enrolled host', async () => {
+			const managed = hostManaged('ok');
+			const { host, runtimeManaged, roundParents } = await startWith(managed);
+			expect(host.runtime.managedBinding.state().state).toBe('enrolled');
+			// The standing the caller composed reaches the runtime whole.
+			expect(runtimeManaged.host).toBe(managed.host);
+			expect(host.runtime.managedHost).not.toBeNull();
+
+			expect(roundParents).toBeDefined();
+			const lookup = runtimeManaged.backgroundParentContext;
+			expect(typeof lookup).toBe('function');
+			// One stable function: a round that started with it can tell when it goes away.
+			expect(runtimeManaged.backgroundParentContext).toBe(lookup);
+
+			// The lookup the runtime holds is the custody the handler runs rounds in.
+			const inRound = await roundParents!.run(async () => lookup!('room-turn-1'));
+			expect(inRound).toMatchObject({ ok: true });
+			expect(inRound.ok && inRound.context.installation.installationId).toBe(
+				host.runtime.installation.installationId
+			);
+			// Bound to its round, the process still finds its parent after the round returns.
+			expect(lookup!('room-turn-1')).toMatchObject({ ok: true });
+			// A process no round of this host started has no parent.
+			expect(lookup!('stray-turn')).toMatchObject({ ok: false, code: 'unauthenticated' });
+		});
+
+		it('gives the runtime no lookup while the binding is standalone, and runs a round with no parent', async () => {
+			const { host, runtimeManaged, roundParents } = await startWith(hostManaged('none'));
+			expect(host.runtime.managedBinding.state().state).toBe('standalone');
+			expect('backgroundParentContext' in runtimeManaged).toBe(true);
+			expect(runtimeManaged.backgroundParentContext).toBeUndefined();
+			expect(roundParents).toBeDefined();
+			await expect(roundParents!.run(async () => 'ran')).resolves.toBe('ran');
+		});
+
+		it('keeps a lookup the caller supplies and composes no custody of its own', async () => {
+			const own = vi.fn(() => ({ ok: false, code: 'unauthenticated', problems: ['own'] }) as const);
+			const { runtimeManaged, roundParents } = await startWith({
+				...hostManaged('ok'),
+				backgroundParentContext: own,
+			});
+			expect(runtimeManaged.backgroundParentContext).toBe(own);
+			expect(roundParents).toBeUndefined();
 		});
 	});
 });

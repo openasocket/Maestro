@@ -26,6 +26,11 @@ import {
 	type RuntimeServer,
 } from '../../shared/maestro-lib';
 import {
+	createRoundParentCustody,
+	runtimeManagedScope,
+	type RoundParentCustody,
+} from '../../shared/maestro-lib/runtime/server-requests';
+import {
 	createTelemetryClient,
 	TELEMETRY_HOST_IDLE_POLL_MS,
 	type TelemetryClient,
@@ -176,15 +181,52 @@ export async function startRuntimeHost(
 	const managedUnavailable =
 		composition && !composition.composed ? composition.reason : options.managedUnavailable;
 
+	// The parent a group chat round runs under on this host's standing (MCOMP-17-03CC). The
+	// runtime is built before the custody can be (the custody reads the runtime's scope), so the
+	// runtime is handed the lookup as a getter it re-reads on every access. The getter answers only
+	// once the custody exists and while the binding is not `standalone`: on a standalone host any
+	// parent lookup would make every room turn refuse, and a round there runs with no parent. The
+	// lookup is one stable function, so a round that started with it is refused if it goes away.
+	// A caller that supplies its own lookup keeps it, and no custody is composed.
+	let roundParents: RoundParentCustody | undefined;
+	let bindingState: (() => string) | undefined;
+	const lookupRoundParent = (processId: string) => {
+		if (!roundParents) throw new Error('The round parent custody is not composed yet.');
+		return roundParents.lookup(processId);
+	};
+	const composesRoundParents = !!managed && !('backgroundParentContext' in managed);
+	// Copied by descriptor, never spread: a getter on the composed standing stays live.
+	const runtimeManaged: typeof managed =
+		managed && composesRoundParents
+			? Object.defineProperties(
+					{},
+					{
+						...Object.getOwnPropertyDescriptors(managed),
+						backgroundParentContext: {
+							enumerable: true,
+							configurable: true,
+							get: () =>
+								roundParents && bindingState && bindingState() !== 'standalone'
+									? lookupRoundParent
+									: undefined,
+						},
+					}
+				)
+			: managed;
+
 	const started = await deps.createRuntime({
 		dataDir: paths.userDataDir,
 		productionDataDir: paths.productionDataDir,
 		mode: 'host',
 		turns: resolveRuntimeTurnOptions(options.moduleDirectory),
-		...(managed ? { managed } : {}),
+		...(runtimeManaged ? { managed: runtimeManaged } : {}),
 	});
 	if (!started.ok) throw new HostStartError(started.refusal);
 	const { runtime } = started;
+	if (composesRoundParents) {
+		roundParents = createRoundParentCustody(runtimeManagedScope(runtime));
+		bindingState = () => runtime.managedBinding.state().state;
+	}
 
 	let cue: HostCue = {
 		state: () => ({ state: 'disabled' }),
@@ -282,6 +324,7 @@ export async function startRuntimeHost(
 			cliSecret,
 			port: options.port,
 			onStopRequested: () => void stop(),
+			...(roundParents ? { roundParents } : {}),
 			describe: () => ({
 				cue: cue.state(),
 				cueRuns: cue.activeRuns(),
