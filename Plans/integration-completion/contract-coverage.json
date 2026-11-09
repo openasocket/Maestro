@@ -181,7 +181,8 @@
 			"consumerPort": "src/shared/maestro-lib/managed/commands.ts",
 			"binding": "pending",
 			"pairedVerification": ["MCOMP-30-01"],
-			"note": "Signed command correlation exists; v1 cancel/refresh/status cannot carry v2 pause/resume acquisition and settlement. MCOMP-29 binds existing commands.ts journal; no operator_prompt authority."
+			"note": "Signed command correlation exists; v1 cancel/refresh/status cannot carry v2 pause/resume acquisition and settlement. MCOMP-29 binds existing commands.ts journal; no operator_prompt authority.",
+			"localConsumer": "MCOMP-29-01: readCommandRequestV2/commandReceiptV2Of in src/shared/maestro-lib/managed/commands.ts and CommandService.receiveV2 in src/main/enterprise/commands.ts read a pinned commandRequestV2 into the existing typed executor and ledger (envelope digest and registration challenge kept per record; a re-signed duplicate is a replay) and answer commandReceiptV2 with the correlation echoed exactly. receiveV2 answers unsupported_version unless the host reports protocol 2 with command-correlation-v2 negotiated; production accepts endpoint protocol [1] only, so no v2 capability is advertised. No signature or envelope digest is verified locally (endpoint port duty); no operator_prompt port is composed on the desktop."
 		},
 		{
 			"family": "notices",
@@ -453,6 +454,17 @@
 			"missing": "The requirement itself (optional vs mandatory, per source), the approved scorer destinations and credential reference, threshold bounds, and an operator override rule under a mandatory requirement. Until delivered a managed headless engine holds every scorable item it cannot score, which with the egress ceiling also undelivered is every scorable item.",
 			"implementationTasks": ["MCOMP-21-02"],
 			"pairedVerification": ["MCOMP-22-01"]
+		},
+		{
+			"id": "COMMAND-COOPERATIVE-PAUSE/1",
+			"status": "proposed-not-negotiated",
+			"owner": "mega-maestro",
+			"version": "additive fields for command-correlation-v2 (commandReceiptV2) and the local denied reason enum; protocol 2",
+			"operations": "No new operation. Propose a pause-mode label on pause_run/resume_run receipts and settlements, and stale_run/approval_required reasons on the local denied union.",
+			"missing": "commandReceiptV2 cannot say that a pause_run is cooperative (takes effect at the run's next task boundary, task in flight finishes, no OS process suspension) or that a resume withdrew a pause before it took effect; commandExecutionSettlement carries no facts beyond the evidence digest. The local denied enum has no stale_run or approval_required, so Maestro answers both as policy_denied on the wire while its ledger keeps the exact refusal.",
+			"localConsumer": "MCOMP-29-01: createCooperativePauseGate (COOPERATIVE_PAUSE_MODE = 'cooperative-task-boundary', facts osSuspension:false) composed by CommandService when cooperativePause is set; a pause answers accepted and settles completed at the boundary, no-effect if withdrawn or the run ends first; cancel releases a parked run with stop. The desktop composition (service.ts) does not set cooperativePause, so pause/resume stay unsupported_capability there until a run owner tracks runs (MCOMP-29-01A).",
+			"implementationTasks": ["MCOMP-29-01", "MCOMP-29-01A"],
+			"pairedVerification": ["MCOMP-30-01"]
 		}
 	],
 	"localTestBoundary": {

@@ -394,6 +394,21 @@ export interface CommandLedgerRecord {
 	evidenceDigest: string | null;
 	/** Why it is uncertain, or a port's safe detail. Never command text. */
 	detail: string | null;
+	/**
+	 * The v2 delivery that first carried the command (MCOMP-29-01): the envelope digest a later
+	 * delivery must repeat, and the registration challenge it was addressed to. Null for a v1 or
+	 * local command; absent on a record an earlier build wrote, read as null.
+	 */
+	delivery?: CommandDelivery | null;
+}
+
+/** What a v2 `command` delivery binds beyond the payload; references only, never authority. */
+export interface CommandDelivery {
+	requestId: string;
+	attemptId: string;
+	/** sha256 over the WHOLE signed envelope (approval, key metadata and signature included). */
+	envelopeDigest: string;
+	challengeId: string;
 }
 
 export interface CommandLedgerDocument {
@@ -414,7 +429,8 @@ export interface CommandLedger {
 	readonly file: string | null;
 	/** Read the file; an `accepted` record from an earlier process becomes `unknown`. Once, first. */
 	load(): Promise<CommandLedgerLoad>;
-	accept(command: ManagedRuntimeCommand): Promise<CommandAcceptance>;
+	/** A delivery whose envelope differs from the first one's is a replay of the id. */
+	accept(command: ManagedRuntimeCommand, delivery?: CommandDelivery): Promise<CommandAcceptance>;
 	markDispatched(commandId: string): Promise<CommandLedgerRecord | null>;
 	settle(
 		commandId: string,
@@ -436,6 +452,24 @@ export interface CommandLedgerDeps {
 }
 
 const DEFAULT_MAX_COMMANDS = 2_000;
+
+/**
+ * Whether a second sight of an id is the same command: the same payload and, when either sight
+ * came as a v2 delivery, the same whole envelope. A re-signed envelope or a v1 sight of a v2 id
+ * (or the reverse) consumed nothing new and answers as a replay.
+ */
+export function sameDelivery(
+	record: CommandLedgerRecord,
+	command: Pick<ManagedRuntimeCommand, 'payloadDigest'>,
+	delivery?: CommandDelivery | null
+): boolean {
+	if (record.payloadDigest !== command.payloadDigest) return false;
+	const first = record.delivery ?? null;
+	if (first === null || !delivery) return first === null && !delivery;
+	return (
+		first.envelopeDigest === delivery.envelopeDigest && first.challengeId === delivery.challengeId
+	);
+}
 const SETTLED: readonly CommandLedgerState[] = [
 	'completed',
 	'failed',
@@ -498,12 +532,12 @@ export function createCommandLedger(deps: CommandLedgerDeps): CommandLedger {
 			return { ok: true, commands: doc.commands.length, recoveredUnknown };
 		},
 
-		async accept(command) {
+		async accept(command, delivery) {
 			if (!loaded) throw new Error('The command ledger was not loaded.');
 			const prior = byId.get(command.commandId);
 			if (prior) {
 				return {
-					disposition: prior.payloadDigest === command.payloadDigest ? 'duplicate' : 'replay',
+					disposition: sameDelivery(prior, command, delivery) ? 'duplicate' : 'replay',
 					record: prior,
 				};
 			}
@@ -530,6 +564,7 @@ export function createCommandLedger(deps: CommandLedgerDeps): CommandLedger {
 				refusal: null,
 				evidenceDigest: null,
 				detail: null,
+				delivery: delivery ? { ...delivery } : null,
 			};
 			doc.commands.push(record);
 			byId.set(record.commandId, record);
@@ -618,7 +653,7 @@ export type CommandExecution =
 export interface CommandExecutor {
 	/** The `command-<action>` capabilities the composed ports execute. */
 	capabilities(): readonly string[];
-	execute(raw: unknown): Promise<CommandExecution>;
+	execute(raw: unknown, delivery?: CommandDelivery): Promise<CommandExecution>;
 	/** A port's requested effect ended: settle the accepted record. */
 	settle(
 		commandId: string,
@@ -768,7 +803,7 @@ export function createCommandExecutor(deps: CommandExecutorDeps): CommandExecuto
 	return {
 		capabilities,
 
-		async execute(raw) {
+		async execute(raw, delivery) {
 			const problems = managedCommandProblems(raw);
 			const commandId = isRecord(raw) && isId(raw.commandId) ? raw.commandId : null;
 			if (problems.length > 0) {
@@ -784,12 +819,12 @@ export function createCommandExecutor(deps: CommandExecutorDeps): CommandExecuto
 			// nothing new, whatever the standing is now.
 			const prior = deps.ledger.get(command.commandId);
 			if (prior) {
-				if (prior.payloadDigest !== command.payloadDigest) {
+				if (!sameDelivery(prior, command, delivery)) {
 					return {
 						status: 'denied',
 						commandId: command.commandId,
 						reason: 'replay',
-						detail: 'the command id was consumed by another payload',
+						detail: 'the command id was consumed by another payload or envelope',
 					};
 				}
 				return stateOf(prior, true);
@@ -806,7 +841,7 @@ export function createCommandExecutor(deps: CommandExecutorDeps): CommandExecuto
 			if (refused) return { status: 'denied', commandId: command.commandId, ...refused };
 			let accepted: CommandAcceptance;
 			try {
-				accepted = await deps.ledger.accept(command);
+				accepted = await deps.ledger.accept(command, delivery);
 			} catch (error) {
 				return {
 					status: 'unavailable',
@@ -827,5 +862,385 @@ export function createCommandExecutor(deps: CommandExecutorDeps): CommandExecuto
 		},
 
 		settle: (commandId, effect, detail) => deps.ledger.settle(commandId, effect, detail ?? null),
+	};
+}
+
+// ---------------------------------------------------------------------------
+// The v2 `command` delivery (MCOMP-29-01): commandRequestV2 in, commandReceiptV2 out
+// ---------------------------------------------------------------------------
+
+/**
+ * The local endpoint's v2 `command` request, transcribed structurally from the pinned
+ * `@mega-maestro/contracts` 0.1.0 `./protocol` (`commandRequestV2`): the signed envelope embedded
+ * unchanged plus its correlation. Parsing here checks shape and the registration it addresses; it
+ * never verifies the signature or the envelope digest (the endpoint port does, before delivery),
+ * and nothing in it is authority. Only `pause_run`, `resume_run`, `cancel_run` and
+ * `operator_prompt` travel this way: status and refresh stay v1 socket actions.
+ */
+export interface CommandCorrelationV2 {
+	registration: {
+		tenantId: string;
+		enrollmentId: string;
+		installationId: string;
+		runtimeId: string;
+		processEpoch: string;
+		bindingDigest: string;
+		challengeId: string;
+		[key: string]: unknown;
+	};
+	requestId: string;
+	attemptId: string;
+	envelopeDigest: string;
+	[key: string]: unknown;
+}
+
+/** The receipt a v2 delivery answers, or the local endpoint's `denied`. */
+export type CommandReceiptV2 =
+	| {
+			outcome: 'accepted' | 'completed' | 'unknown';
+			commandId: string;
+			runId: string;
+			processEpoch: string;
+			/** The request's correlation, echoed exactly: `localExchangeV2` refuses anything else. */
+			correlation: CommandCorrelationV2;
+	  }
+	| { outcome: 'denied'; reason: LocalCommandDenial };
+
+/** The local endpoint's published `denied` reasons this consumer answers with. */
+export type LocalCommandDenial =
+	| 'unsupported_version'
+	| 'unsupported_capability'
+	| 'unauthenticated'
+	| 'policy_denied'
+	| 'expired'
+	| 'replay'
+	| 'unavailable'
+	| 'invalid_request';
+
+/**
+ * Refusal to the published local reason. The local `denied` enum has no `stale_run` and no
+ * `approval_required`: both answer `policy_denied` here, and the gap is recorded in
+ * `Plans/integration-completion/contract-coverage.json`. The ledger keeps the exact refusal.
+ */
+export const LOCAL_DENIAL_OF: Readonly<Record<CommandRefusal, LocalCommandDenial>> = {
+	'invalid-input': 'invalid_request',
+	unauthenticated: 'unauthenticated',
+	'stale-run': 'policy_denied',
+	'policy-denied': 'policy_denied',
+	expired: 'expired',
+	'unsupported-capability': 'unsupported_capability',
+	'approval-required': 'policy_denied',
+	replay: 'replay',
+};
+
+const V2_ACTIONS: readonly ManagedCommandKind[] = [
+	'pause-run',
+	'resume-run',
+	'cancel-run',
+	'operator-prompt',
+];
+
+export type CommandRequestV2Reading =
+	| {
+			ok: true;
+			command: ManagedRuntimeCommand;
+			delivery: CommandDelivery;
+			correlation: CommandCorrelationV2;
+	  }
+	| { ok: false; problems: string[] };
+
+/** Read a delivered `commandRequestV2` into the typed command this runtime executes. */
+export function readCommandRequestV2(raw: unknown): CommandRequestV2Reading {
+	const fail = (...problems: string[]): CommandRequestV2Reading => ({ ok: false, problems });
+	if (!isRecord(raw)) return fail('the request is not an object');
+	const { command: signed, correlation } = raw;
+	if (!isRecord(signed) || !isRecord(signed.payload))
+		return fail('command.payload is not an object');
+	if (!isRecord(correlation) || !isRecord(correlation.registration)) {
+		return fail('correlation.registration is not an object');
+	}
+	const p = signed.payload;
+	const reg = correlation.registration;
+	const recipient = isRecord(p.recipient) ? p.recipient : {};
+	const pre = isRecord(p.preconditions) ? p.preconditions : {};
+	const action = isRecord(p.action) ? p.action : {};
+	const kind = commandKindOfAction(action.kind);
+	const problems: string[] = [];
+	if (kind === null || !V2_ACTIONS.includes(kind)) {
+		problems.push(`action.kind "${String(action.kind)}" is not a v2 command action`);
+	}
+	for (const key of ['requestId', 'attemptId'] as const) {
+		if (!isId(correlation[key])) problems.push(`correlation.${key} is not an id`);
+	}
+	if (!isDigest(correlation.envelopeDigest))
+		problems.push('correlation.envelopeDigest is not a digest');
+	if (!isId(reg.challengeId)) problems.push('correlation.registration.challengeId is not an id');
+	if (!isId(recipient.runId)) problems.push('recipient.runId is not an id');
+	if (!isDigest(pre.policyDigest) || !isDigest(pre.bindingDigest)) {
+		problems.push('preconditions.policyDigest and bindingDigest are required digests');
+	}
+	if (
+		reg.tenantId !== p.tenantId ||
+		reg.enrollmentId !== recipient.enrollmentId ||
+		reg.installationId !== recipient.installationId ||
+		reg.runtimeId !== recipient.runtimeId ||
+		reg.processEpoch !== recipient.processEpoch ||
+		reg.bindingDigest !== pre.bindingDigest
+	) {
+		problems.push('the command does not address the referenced registration');
+	}
+	const approval = isRecord(signed.approval) ? signed.approval : {};
+	const typedAction: unknown =
+		kind === 'operator-prompt'
+			? { kind, text: action.text, agentInput: action.agentInput }
+			: { kind: kind ?? String(action.kind) };
+	const command = {
+		commandId: p.commandId,
+		tenantId: p.tenantId,
+		issuerId: p.issuerId,
+		recipient: {
+			actorId: recipient.actorId,
+			enrollmentId: recipient.enrollmentId,
+			installationId: recipient.installationId,
+			runtimeId: recipient.runtimeId,
+			processEpoch: recipient.processEpoch,
+			runId: recipient.runId,
+		},
+		action: typedAction,
+		preconditions: {
+			policyRevision: pre.policyRevision,
+			requiredCapability: pre.requiredCapability,
+			policyDigest: pre.policyDigest,
+			bindingDigest: pre.bindingDigest,
+		},
+		approval:
+			approval.kind === 'policy_not_required'
+				? { kind: 'policy-not-required', policyRevision: approval.policyRevision }
+				: approval.kind === 'approved'
+					? {
+							kind: 'approved',
+							approvalId: approval.approvalId,
+							approverId: approval.approverId,
+							payloadDigest: approval.payloadDigest,
+							expiresAt: approval.expiresAt,
+						}
+					: { kind: String(approval.kind) },
+		issuedAt: p.issuedAt,
+		expiresAt: p.expiresAt,
+		nonce: p.nonce,
+		idempotencyKey: p.idempotencyKey,
+		payloadDigest: signed.payloadDigest,
+		releaseId: null,
+	};
+	problems.push(...managedCommandProblems(command));
+	if (problems.length > 0) return { ok: false, problems };
+	return {
+		ok: true,
+		command: command as ManagedRuntimeCommand,
+		delivery: {
+			requestId: correlation.requestId as string,
+			attemptId: correlation.attemptId as string,
+			envelopeDigest: correlation.envelopeDigest as string,
+			challengeId: reg.challengeId as string,
+		},
+		correlation: structuredClone(correlation) as CommandCorrelationV2,
+	};
+}
+
+/**
+ * The receipt a v2 delivery answers. A settled `failed` or `no-effect` is still `completed` on
+ * the wire (the command ran to its end; the outcome is the settlement's), `accepted` stays
+ * accepted until `settle`, and `unknown` is never rounded to either.
+ */
+export function commandReceiptV2Of(
+	execution: CommandExecution,
+	reading: Extract<CommandRequestV2Reading, { ok: true }>
+): CommandReceiptV2 {
+	if (execution.status === 'denied') {
+		return { outcome: 'denied', reason: LOCAL_DENIAL_OF[execution.reason] };
+	}
+	if (execution.status === 'unavailable') return { outcome: 'denied', reason: 'unavailable' };
+	const outcome =
+		execution.status === 'accepted' || execution.status === 'unknown'
+			? execution.status
+			: 'completed';
+	return {
+		outcome,
+		commandId: reading.command.commandId,
+		runId: reading.command.recipient.runId as string,
+		processEpoch: reading.command.recipient.processEpoch,
+		correlation: structuredClone(reading.correlation),
+	};
+}
+
+// ---------------------------------------------------------------------------
+// Cooperative task-boundary pause (MCOMP-29-01)
+// ---------------------------------------------------------------------------
+
+/**
+ * The one pause this runtime honours: a run that executes in tasks checks in at each task
+ * boundary, and a pause takes effect there, never inside a task. Nothing suspends, signals or
+ * freezes a process; a turn already running finishes its task first. Every answer carries this
+ * label in its facts so a receipt can never be read as an OS process suspension.
+ */
+export const COOPERATIVE_PAUSE_MODE = 'cooperative-task-boundary';
+
+export type BoundaryVerdict = 'continue' | 'stop';
+
+/** A run's own handle: the owner calls `atBoundary` between tasks and `end` once, when it ends. */
+export interface CooperativeRun {
+	/** Resolves at once unless a pause is pending, in which case it parks until resume or stop. */
+	atBoundary(): Promise<BoundaryVerdict>;
+	end(): Promise<void>;
+}
+
+export interface CooperativePauseGate {
+	track(runId: string): CooperativeRun;
+	state(runId: string): 'running' | 'pause-requested' | 'paused' | 'stopping' | null;
+	pause(runId: string, command: ManagedRuntimeCommand): Promise<CommandPortAnswer>;
+	resume(runId: string, command: ManagedRuntimeCommand): Promise<CommandPortAnswer>;
+	/** A cancel's half: the run's next (or current) boundary answers `stop`. False if untracked. */
+	stop(runId: string): boolean;
+}
+
+export interface CooperativePauseDeps {
+	/** The ledger's settle: a pause is `accepted` until its run reaches a boundary. */
+	settle(commandId: string, effect: CommandEffect, detail?: string | null): Promise<unknown>;
+	now(): number;
+}
+
+interface GateRun {
+	state: 'running' | 'pause-requested' | 'paused' | 'stopping';
+	pauseCommandId: string | null;
+	pausedAt: number | null;
+	release: ((verdict: BoundaryVerdict) => void) | null;
+}
+
+export function createCooperativePauseGate(deps: CooperativePauseDeps): CooperativePauseGate {
+	const runs = new Map<string, GateRun>();
+	const label = { mode: COOPERATIVE_PAUSE_MODE, osSuspension: false };
+
+	const settlePause = async (
+		run: GateRun,
+		runId: string,
+		outcome: CommandSettledOutcome,
+		detail: string
+	): Promise<void> => {
+		const commandId = run.pauseCommandId;
+		run.pauseCommandId = null;
+		if (commandId === null) return;
+		const facts = { runId, ...label };
+		await deps.settle(
+			commandId,
+			{
+				state: 'settled',
+				outcome,
+				evidenceDigest: commandEvidenceDigest({ commandId, kind: 'pause-run', outcome, facts }),
+			},
+			detail
+		);
+	};
+
+	const wake = (run: GateRun, verdict: BoundaryVerdict): void => {
+		const release = run.release;
+		run.release = null;
+		release?.(verdict);
+	};
+
+	return {
+		track(runId) {
+			if (runs.has(runId)) throw new Error(`Run ${runId} is already tracked.`);
+			const run: GateRun = {
+				state: 'running',
+				pauseCommandId: null,
+				pausedAt: null,
+				release: null,
+			};
+			runs.set(runId, run);
+			return {
+				async atBoundary() {
+					if (runs.get(runId) !== run || run.state === 'stopping') return 'stop';
+					if (run.state !== 'pause-requested') return 'continue';
+					run.state = 'paused';
+					run.pausedAt = deps.now();
+					const parked = new Promise<BoundaryVerdict>((resolve) => {
+						run.release = resolve;
+					});
+					await settlePause(run, runId, 'completed', `run ${runId} paused at a task boundary`);
+					return parked;
+				},
+				async end() {
+					if (runs.get(runId) !== run) return;
+					runs.delete(runId);
+					wake(run, 'stop');
+					await settlePause(
+						run,
+						runId,
+						'no-effect',
+						`run ${runId} ended before it reached a task boundary`
+					);
+				},
+			};
+		},
+
+		state: (runId) => runs.get(runId)?.state ?? null,
+
+		async pause(runId, command) {
+			const run = runs.get(runId);
+			const facts = { runId, ...label };
+			if (!run) {
+				return {
+					outcome: 'failed',
+					detail: `run ${runId} does not execute in tasks this host can pause between; nothing suspends a process`,
+					facts,
+				};
+			}
+			if (run.state !== 'running') {
+				return { outcome: 'no-effect', detail: `run ${runId} is already ${run.state}`, facts };
+			}
+			run.state = 'pause-requested';
+			run.pauseCommandId = command.commandId;
+			return {
+				outcome: 'accepted',
+				detail: `run ${runId} pauses at its next task boundary; the task in flight finishes first`,
+				facts,
+			};
+		},
+
+		async resume(runId, command) {
+			const run = runs.get(runId);
+			const facts: Record<string, unknown> = { runId, ...label };
+			if (!run || run.state === 'running' || run.state === 'stopping') {
+				return { outcome: 'no-effect', detail: `run ${runId} is not paused`, facts };
+			}
+			if (run.state === 'pause-requested') {
+				facts.withdrew = run.pauseCommandId;
+				run.state = 'running';
+				await settlePause(
+					run,
+					runId,
+					'no-effect',
+					`withdrawn by ${command.commandId} before the run reached a task boundary`
+				);
+				return {
+					outcome: 'completed',
+					detail: `the pending pause of run ${runId} was withdrawn`,
+					facts,
+				};
+			}
+			facts.pausedMs = run.pausedAt === null ? null : deps.now() - run.pausedAt;
+			run.state = 'running';
+			run.pausedAt = null;
+			wake(run, 'continue');
+			return { outcome: 'completed', detail: `run ${runId} resumed at its task boundary`, facts };
+		},
+
+		stop(runId) {
+			const run = runs.get(runId);
+			if (!run) return false;
+			run.state = 'stopping';
+			wake(run, 'stop');
+			return true;
+		},
 	};
 }

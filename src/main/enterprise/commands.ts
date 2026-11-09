@@ -21,10 +21,14 @@
  *     endpoint applies with the one the command desired: `completed` when
  *     they agree, `failed` with both named when they do not or the re-attach
  *     did not complete.
- *   - `pause_run` and `resume_run` are not composed: the desktop has no
- *     main-process pause of a running turn, so the capability is not
- *     advertised and a command naming it is refused `unsupported-capability`
- *     by name (`DESKTOP_UNCOMPOSED_COMMANDS`), never approximated by a stop.
+ *   - `pause_run` and `resume_run` are the cooperative task-boundary pause
+ *     (MCOMP-29-01, `COOPERATIVE_PAUSE_MODE`), composed only when the host
+ *     hands `cooperativePause` in because a run owner checks in between its
+ *     tasks through `runControl.track`. A pause answers `accepted` and
+ *     settles when the run reaches its next boundary; the task in flight
+ *     finishes first and no process is suspended. Uncomposed, both are refused
+ *     `unsupported-capability` by name (`DESKTOP_UNCOMPOSED_COMMANDS`),
+ *     never approximated by a stop.
  *   - `operator_prompt` is composed only when the host hands a `prompt` port
  *     in. Nothing here writes to a composer, a queue or a model.
  *
@@ -37,9 +41,13 @@
  * standing, or a policy observation admission is not possible under, makes a
  * command `unavailable` rather than decided.
  *
- * `receive()` is the one inbound entry. No producer delivers a command to a
- * Maestro runtime yet: the sibling's local socket serves no `command`
- * operation (CP-02, owner mega-maestro). `createEnterpriseService` composes
+ * `receive()` is the typed inbound entry; `receiveV2()` (MCOMP-29-01) reads a
+ * pinned `commandRequestV2` delivery into it and answers the exact
+ * `commandReceiptV2`, only when the host reports the v2 command correlation
+ * negotiated (`commandWire`) and the delivery addresses the registration
+ * challenge the sealed record holds now. Nothing negotiates v2 in production
+ * yet (accepted endpoint protocols are [1]), so it answers
+ * `unsupported_version` there. `createEnterpriseService` composes
  * this in MRC-11-05; nothing here reaches Electron or the IPC layer.
  *
  * `issueLocal()` (MRC2-07-02) is the local operator's path, `maestro-cli
@@ -58,8 +66,14 @@ import { canonicalJson } from '../../shared/canonicalJson';
 import { sha256Hex } from '../../shared/maestro-lib/managed/authority';
 import {
 	commandCapability,
+	commandReceiptV2Of,
+	COOPERATIVE_PAUSE_MODE,
 	createCommandExecutor,
 	createCommandLedger,
+	createCooperativePauseGate,
+	readCommandRequestV2,
+	type CommandReceiptV2,
+	type CooperativePauseGate,
 	type CommandBinding,
 	type CommandExecution,
 	type CommandExecutor,
@@ -143,7 +157,13 @@ export interface CommandServiceDeps {
 	/** The one path an operator prompt reaches a run by. Absent: `command-operator_prompt` is not advertised. */
 	prompt?: CommandPorts['prompt'];
 	dispatchWindowMs?: number;
+	/** Compose pause/resume over the cooperative task-boundary gate (a run owner will track runs). */
+	cooperativePause?: boolean;
+	/** What the attachment negotiated for commands; absent or not v2 refuses every v2 delivery. */
+	commandWire?: () => { protocol: number; features: readonly string[] } | null;
 }
+
+export const COMMAND_CORRELATION_FEATURE = 'command-correlation-v2';
 
 export interface UncomposedCommand {
 	kind: ManagedCommandKind;
@@ -184,6 +204,10 @@ export interface CommandService {
 	unsupported(): readonly UncomposedCommand[];
 	/** The one inbound entry: a value a verified endpoint port delivered, answered with the published disposition. */
 	receive(raw: unknown): Promise<CommandExecution>;
+	/** A v2 `command` delivery in, its exact receipt (or the local `denied`) out. */
+	receiveV2(raw: unknown): Promise<CommandReceiptV2>;
+	/** The cooperative pause gate a run owner tracks its runs in; null when not composed. */
+	readonly runControl: CooperativePauseGate | null;
 	/** A local operator's command (`maestro-cli managed command`), through the same executor and ledger. */
 	issueLocal(action: LocalCommandAction): Promise<CommandExecution>;
 	/** A port's requested effect ended (a `prompt` port that answered `accepted`): settle the record. */
@@ -223,8 +247,17 @@ export function createCommandService(deps: CommandServiceDeps): CommandService {
 		? null
 		: { ok: true, commands: 0, recoveredUnknown: 0 };
 
+	const gate = deps.cooperativePause
+		? createCooperativePauseGate({
+				settle: (id, effect, detail) => ledger.settle(id, effect, detail),
+				now,
+			})
+		: null;
+
 	function runState(runId: string): 'live' | 'ended' | 'unknown' {
 		if (deps.dispatch.authority.live().some((lease) => lease.runId === runId)) return 'live';
+		// A run parked at a task boundary holds no lease between tasks, and is still live.
+		if (gate?.state(runId)) return 'live';
 		if (deps.dispatch.receipts?.().some((receipt) => receipt.runId === runId)) return 'ended';
 		return 'unknown';
 	}
@@ -254,6 +287,22 @@ export function createCommandService(deps: CommandServiceDeps): CommandService {
 
 	async function cancel(runId: string, command: ManagedRuntimeCommand): Promise<CommandPortAnswer> {
 		const live = deps.dispatch.authority.live().filter((lease) => lease.runId === runId);
+		// A tracked run answers `stop` at its next (or current, if parked) task boundary.
+		const boundaryStop = gate?.stop(runId) ?? false;
+		if (live.length === 0 && boundaryStop) {
+			return {
+				outcome: 'completed',
+				detail: `run ${runId} holds no live lease; it stops at its task boundary`,
+				facts: {
+					runId,
+					revoked: [],
+					stillLive: [],
+					ended: [],
+					boundaryStop,
+					mode: COOPERATIVE_PAUSE_MODE,
+				},
+			};
+		}
 		if (live.length === 0) {
 			const ended = (deps.dispatch.receipts?.() ?? [])
 				.filter((receipt) => receipt.runId === runId)
@@ -272,7 +321,7 @@ export function createCommandService(deps: CommandServiceDeps): CommandService {
 			.live()
 			.filter((lease) => lease.runId === runId)
 			.map((lease) => lease.leaseId);
-		const facts = { runId, revoked, stillLive, ended: [] };
+		const facts = { runId, revoked, stillLive, ended: [], boundaryStop };
 		if (stillLive.length > 0) {
 			return {
 				outcome: 'failed',
@@ -377,6 +426,7 @@ export function createCommandService(deps: CommandServiceDeps): CommandService {
 		cancel,
 		report,
 		refresh,
+		...(gate ? { pause: gate.pause, resume: gate.resume } : {}),
 		...(deps.prompt ? { prompt: deps.prompt } : {}),
 	};
 	const executor = createCommandExecutor({
@@ -389,13 +439,13 @@ export function createCommandService(deps: CommandServiceDeps): CommandService {
 
 	const unsupported = (): UncomposedCommand[] => {
 		const composed = executor.capabilities();
-		const named = (Object.keys(DESKTOP_UNCOMPOSED_COMMANDS) as ManagedCommandKind[]).map(
-			(kind) => ({
+		const named = (Object.keys(DESKTOP_UNCOMPOSED_COMMANDS) as ManagedCommandKind[])
+			.filter((kind) => !composed.includes(commandCapability(kind)))
+			.map((kind) => ({
 				kind,
 				capability: commandCapability(kind),
 				reason: DESKTOP_UNCOMPOSED_COMMANDS[kind as keyof typeof DESKTOP_UNCOMPOSED_COMMANDS],
-			})
-		);
+			}));
 		if (!composed.includes(commandCapability('operator-prompt'))) {
 			named.push({
 				kind: 'operator-prompt',
@@ -481,8 +531,37 @@ export function createCommandService(deps: CommandServiceDeps): CommandService {
 		return executor.execute(command);
 	}
 
+	/**
+	 * A v2 delivery: negotiated first, then read against the pinned shape, then bound to the
+	 * registration challenge the sealed record holds now (a delivery for an earlier or another
+	 * registration is `unauthenticated`, nothing recorded), then the same executor and ledger as
+	 * `receive`, with the envelope kept so a re-signed duplicate is a replay.
+	 */
+	async function receiveV2(raw: unknown): Promise<CommandReceiptV2> {
+		const wire = deps.commandWire?.() ?? null;
+		if (
+			wire === null ||
+			wire.protocol !== 2 ||
+			!wire.features.includes(COMMAND_CORRELATION_FEATURE)
+		) {
+			return { outcome: 'denied', reason: 'unsupported_version' };
+		}
+		const reading = readCommandRequestV2(raw);
+		if (!reading.ok) return { outcome: 'denied', reason: 'invalid_request' };
+		const standing = deps.lifecycle.status();
+		const registration =
+			standing.identity.status === 'ok' ? standing.identity.record?.registration : null;
+		if (!registration || registration.challengeId !== reading.delivery.challengeId) {
+			return { outcome: 'denied', reason: 'unauthenticated' };
+		}
+		const execution = await executor.execute(reading.command, reading.delivery);
+		return commandReceiptV2Of(execution, reading);
+	}
+
 	return {
 		ledger,
+		runControl: gate,
+		receiveV2,
 		async load() {
 			load = await ledger.load();
 			return load;
