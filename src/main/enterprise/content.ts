@@ -17,20 +17,24 @@
  * the rule ids that made it.
  *
  * A bounded hold keeps admitted bytes in memory until an endpoint capture
- * takes them. No endpoint operation of this build carries content
+ * takes them. No PUBLISHED endpoint operation carries content
  * (`LOCAL_ENDPOINT_OPERATIONS` names none; `telemetry` refuses a content
- * reference; CP-01), so `contentDeliveryStanding()` says so, every record
- * stays `pending_upload`, and shed, revoked or oversize bytes are counted with
- * the record moved to `unavailable` and the reason on it. Not a spool, not a
- * second policy engine, not audit authority.
+ * reference; CP-01). Through an injected `ContentDeliveryPort` (CONTENT-LOCAL/1,
+ * proposed, not negotiated) the source reads the revision's ceiling and the
+ * capture uploads held bytes; without one every record stays `pending_upload`.
+ * Shed, revoked, denied or oversize bytes are counted with the record moved to
+ * `unavailable` and the reason on it. Not a second policy engine, not audit authority.
  */
 
 import { createHash } from 'node:crypto';
 import {
 	LOCAL_ENDPOINT_OPERATIONS,
 	type EndpointCollectionProfile,
+	type LocalEndpointDenialReason,
 	type ManagedEnrollmentStatus,
+	type ManagedIdentityRecord,
 } from '../../shared/maestro-lib/managed/endpoint-port';
+import { canonicalJson } from '../../shared/canonicalJson';
 import { redactSecrets } from '../../shared/redactSecrets';
 import { generateUUID } from '../../shared/uuid';
 
@@ -169,6 +173,77 @@ export function parseContentCollectionCeiling(raw: unknown): ContentCeilingParse
 	};
 }
 
+// ---- Delivery: the CONTENT-LOCAL/1 seam (proposed, not negotiated)
+
+export interface ContentDeliveryBinding {
+	identity: ManagedIdentityRecord;
+	connection: number;
+}
+
+export interface ContentUploadChunk {
+	index: number;
+	offset: number;
+	sha256: string;
+	bytes: Buffer;
+}
+
+export interface ContentUploadRequest {
+	reference: ContentReference;
+	original: { sha256: string; byteLength: number };
+	role: ContentRole;
+	family: string;
+	profile: EndpointCollectionProfile;
+	policyRevision: number;
+	sensitivity: ContentSensitivity;
+	runId: string | null;
+	ruleIds: readonly string[];
+	chunks: readonly ContentUploadChunk[];
+}
+
+export interface ContentUploadAcceptance {
+	uploadReference: string;
+	acceptedAt: string;
+	sha256: string;
+	byteLength: number;
+}
+
+type Refusal = { outcome: 'denied'; reason: LocalEndpointDenialReason } | { outcome: 'unknown' };
+/** `unknown`: the request may have landed; `status` is asked before any resend. */
+export type ContentUploadOutcome = ({ outcome: 'accepted' } & ContentUploadAcceptance) | Refusal;
+export type ContentRevokeOutcome =
+	| { outcome: 'revoked'; referenceIds: readonly string[] }
+	| Refusal;
+
+/**
+ * Local CONTENT-LOCAL/1 consumer seam, NOT a published endpoint operation. Only
+ * a trusted host may install it, after authenticated negotiation; the producer
+ * verifies the ceiling's signature against this identity's trust root,
+ * registration and applied revision before `readCeiling` returns it. Nothing
+ * this port answers is authority beyond the record it settles.
+ */
+export interface ContentDeliveryPort {
+	readonly version: 1;
+	readCeiling(binding: ContentDeliveryBinding): Promise<unknown>;
+	upload(
+		binding: ContentDeliveryBinding,
+		request: ContentUploadRequest
+	): Promise<ContentUploadOutcome>;
+	status(
+		binding: ContentDeliveryBinding,
+		referenceId: string
+	): Promise<ContentUploadOutcome | { outcome: 'absent' }>;
+	revoke(
+		binding: ContentDeliveryBinding,
+		referenceIds: readonly string[],
+		reason: string
+	): Promise<ContentRevokeOutcome>;
+}
+
+/** The largest chunk an upload carries; well under the 1 MiB local request cap with its envelope. */
+export const CONTENT_UPLOAD_CHUNK_BYTES = 256 * 1024;
+/** Denials that say "not now" rather than "never": the bytes stay held and the pass stops. */
+const TRANSIENT_DENIALS: readonly string[] = ['unavailable', 'untrusted_clock', 'budget_exhausted'];
+
 // ---- The standing: profile from the endpoint, ceiling for the applied revision
 
 export type ContentCollectionStanding =
@@ -189,8 +264,16 @@ export type ContentCollectionStanding =
 			ceiling: ContentCollectionCeiling;
 	  };
 
+export type ContentCeilingInstall =
+	| { installed: true; policyRevision: number }
+	| { installed: false; reason: 'unavailable' | 'invalid' | 'changed' | 'stale' };
+
 export interface ContentCollectionSource {
 	standing(): ContentCollectionStanding;
+	/** Read the ceiling for the applied revision through the installed delivery port; a refused read keeps the previous ceiling. */
+	refresh(): Promise<ContentCeilingInstall>;
+	/** The port and binding uploads go through right now, or null: no port, no registration, or no upload permission. */
+	deliveryTarget(): { port: ContentDeliveryPort; binding: ContentDeliveryBinding } | null;
 	/** For a document read over the registered, attached connection. A refused document keeps the previous one. */
 	install(document: unknown): ContentCeilingParse;
 	clear(): void;
@@ -200,9 +283,28 @@ export interface ContentCollectionSource {
 /** Holds at most one ceiling, in memory only (a restart holds none, which is fail-closed), and projects the standing a capture reads. */
 export function createContentCollectionSource(deps: {
 	status: () => ManagedEnrollmentStatus;
+	delivery?: () => ContentDeliveryPort | null;
 }): ContentCollectionSource {
 	let ceiling: ContentCollectionCeiling | null = null;
-	return {
+	let request = 0;
+	const binding = (): { port: ContentDeliveryPort; binding: ContentDeliveryBinding } | null => {
+		const port = deps.delivery?.() ?? null;
+		const standing = deps.status();
+		const record = standing.identity.status === 'ok' ? standing.identity.record : null;
+		if (
+			port?.version !== 1 ||
+			!record ||
+			standing.authority !== 'registered' ||
+			!standing.connection
+		)
+			return null;
+		const binding = {
+			identity: structuredClone(record),
+			connection: standing.connection.connection,
+		};
+		return { port, binding };
+	};
+	const source: ContentCollectionSource = {
 		standing() {
 			const standing = deps.status();
 			const identity = standing.identity;
@@ -227,7 +329,7 @@ export function createContentCollectionSource(deps: {
 				);
 			if (!ceiling)
 				return refuse(
-					'No content ceiling is installed; no endpoint operation of this build carries one (CP-01).'
+					`No content ceiling is installed for revision ${revision}; none is delivered until CONTENT-LOCAL/1 is negotiated (CP-01).`
 				);
 			if (ceiling.policyRevision !== revision)
 				return refuse(
@@ -240,6 +342,44 @@ export function createContentCollectionSource(deps: {
 			if (!ceiling.permissions.capture) return refuse('The ceiling grants no capture.');
 			return { mode: 'managed', ok: true, profile, policyRevision: revision, ceiling };
 		},
+		async refresh() {
+			const attempt = ++request;
+			const target = binding();
+			const live = deps.status().endpoint;
+			if (!target || !live || live.collectionProfile === 'metadata')
+				return { installed: false, reason: 'unavailable' };
+			const before = canonicalJson(deps.status());
+			let raw: unknown;
+			try {
+				raw = structuredClone(await target.port.readCeiling(target.binding));
+			} catch {
+				return { installed: false, reason: 'unavailable' };
+			}
+			if (attempt !== request || before !== canonicalJson(deps.status()))
+				return { installed: false, reason: 'changed' };
+			const parsed = parseContentCollectionCeiling(raw);
+			if (
+				!parsed.ok ||
+				parsed.ceiling.policyRevision !== live.appliedPolicyRevision ||
+				parsed.ceiling.profile !== live.collectionProfile
+			)
+				return { installed: false, reason: 'invalid' };
+			if (
+				ceiling &&
+				(parsed.ceiling.policyRevision < ceiling.policyRevision ||
+					(parsed.ceiling.policyRevision === ceiling.policyRevision &&
+						canonicalJson(parsed.ceiling) !== canonicalJson(ceiling)))
+			)
+				return { installed: false, reason: 'stale' };
+			ceiling = parsed.ceiling;
+			return { installed: true, policyRevision: parsed.ceiling.policyRevision };
+		},
+		deliveryTarget() {
+			const standing = source.standing();
+			if (standing.mode !== 'managed' || !standing.ok || !standing.ceiling.permissions.upload)
+				return null;
+			return binding();
+		},
 		install(document) {
 			const parsed = parseContentCollectionCeiling(document);
 			if (parsed.ok) ceiling = parsed.ceiling;
@@ -250,6 +390,7 @@ export function createContentCollectionSource(deps: {
 		},
 		installed: () => ceiling,
 	};
+	return source;
 }
 
 // ---- The capture: exact references, a bounded hold, a bounded ledger
@@ -285,17 +426,20 @@ export interface ContentFact {
 	transformation: { ruleIds: readonly string[]; at: string } | null;
 	/** Which representation the hold has bytes for right now. */
 	kept: ContentRepresentation | 'none';
-	completeness: 'pending_upload' | 'unavailable';
+	/** `uploaded` only on an endpoint acceptance echoing the exact digest and length. */
+	completeness: 'pending_upload' | 'uploaded' | 'unavailable';
+	/** The endpoint's acceptance, and whether its deletion was asked for and confirmed; null until accepted. */
+	upload: (ContentUploadAcceptance & { revocation: 'none' | 'requested' | 'confirmed' }) | null;
 	/** `verified_locally`: this host computed the digest itself; never central verification. */
 	verification: 'verified_locally';
-	/** Why the bytes are not held, by name: `oversize`, `shed`, `revoked: <reason>`; null while held. */
+	/** Why the bytes are not held, by name: `oversize`, `shed`, `integrity`, `denied: <reason>`, `revoked: <reason>`; null while held or uploaded. */
 	gap: string | null;
 }
 
 /** Every key a fact may carry. A reader refuses a value with any other key, whatever it holds. */
 export const CONTENT_FACT_FIELDS = (
 	'role family profile policyRevision sensitivity permissions at sessionId agentId tabId provider ' +
-	'runId toolName parentToolCallId original derivative transformation kept completeness verification gap'
+	'runId toolName parentToolCallId original derivative transformation kept completeness upload verification gap'
 ).split(' ') as readonly (keyof ContentFact)[];
 const REFERENCE_KEYS = ['referenceId', 'sha256', 'representation', 'byteLength'];
 
@@ -340,8 +484,15 @@ export const CONTENT_REDACTION_RULE_ID = 'maestro.redact-secrets.v1';
 const MAX_TOOL_NAME = 128;
 const sha256 = (bytes: Buffer): string => createHash('sha256').update(bytes).digest('hex');
 
-/** Whether this build can hand content to the endpoint. Read off the operations list, so a build that gains one changes the answer here. */
-export function contentDeliveryStanding(): { available: false; reason: string } {
+export type ContentDeliveryStanding =
+	| { available: true; protocol: 'CONTENT-LOCAL/1' }
+	| { available: false; reason: string };
+
+/** Whether content can reach the endpoint: only through an installed CONTENT-LOCAL/1 port; otherwise read off the published operations list. */
+export function contentDeliveryStanding(
+	target?: { port: ContentDeliveryPort } | null
+): ContentDeliveryStanding {
+	if (target) return { available: true, protocol: 'CONTENT-LOCAL/1' };
 	const operation = (LOCAL_ENDPOINT_OPERATIONS as readonly string[]).find(
 		(name) => name === 'content' || name === 'capture'
 	);
@@ -360,15 +511,26 @@ export interface ContentCaptureStatus {
 	shed: number;
 	revoked: number;
 	notCollected: number;
+	uploaded: number;
+	denied: number;
+	unsettled: number;
 	byRole: Partial<Record<ContentRole, number>>;
-	delivery: ReturnType<typeof contentDeliveryStanding>;
+	delivery: ContentDeliveryStanding;
+}
+
+export interface ContentDeliveryReport {
+	uploaded: number;
+	denied: number;
+	unsettled: number;
+	stopped: string | null;
 }
 
 /** `capture` records under the standing; `take` hands held bytes to an endpoint capture; `revoke` drops every held byte (the records stay, `unavailable`, with the reason). */
 export type ContentCapture = ReturnType<typeof createContentCapture>;
 
 export interface ContentCaptureDeps {
-	source: Pick<ContentCollectionSource, 'standing'>;
+	source: Pick<ContentCollectionSource, 'standing'> &
+		Partial<Pick<ContentCollectionSource, 'deliveryTarget'>>;
 	now?: () => number;
 	newId?: () => string;
 	/** Records the ledger keeps (default 2000) and bytes the hold keeps (default 16 MiB); the oldest goes first, counted. */
@@ -384,7 +546,9 @@ export function createContentCapture(deps: ContentCaptureDeps) {
 	const ledger: ContentFact[] = [];
 	const hold = new Map<string, { bytes: Buffer; fact: ContentFact }>();
 	let heldBytes = 0;
-	const counters = { forgotten: 0, shed: 0, revoked: 0, notCollected: 0 };
+	const counters = { forgotten: 0, shed: 0, revoked: 0, notCollected: 0, uploaded: 0, denied: 0 };
+	const unsettled = new Set<string>();
+	let pass: Promise<ContentDeliveryReport> | null = null;
 	const byRole: Partial<Record<ContentRole, number>> = {};
 
 	const release = (fact: ContentFact, gap: string): void => {
@@ -394,6 +558,7 @@ export function createContentCapture(deps: ContentCaptureDeps) {
 	};
 	const drop = (referenceId: string): void => {
 		const held = hold.get(referenceId);
+		unsettled.delete(referenceId);
 		if (!held) return;
 		hold.delete(referenceId);
 		heldBytes -= held.bytes.byteLength;
@@ -409,7 +574,7 @@ export function createContentCapture(deps: ContentCaptureDeps) {
 		return { outcome: 'not-collected', reason };
 	};
 
-	return {
+	const api = {
 		capture(input: ContentCaptureInput): ContentCaptureOutcome {
 			const standing = deps.source.standing();
 			if (standing.mode === 'standalone')
@@ -441,6 +606,7 @@ export function createContentCapture(deps: ContentCaptureDeps) {
 				transformation: null,
 				kept: admits,
 				completeness: 'pending_upload',
+				upload: null,
 				verification: 'verified_locally',
 				gap: null,
 			};
@@ -471,9 +637,40 @@ export function createContentCapture(deps: ContentCaptureDeps) {
 				counters.forgotten += 1;
 			}
 			byRole[input.role] = (byRole[input.role] ?? 0) + 1;
+			if (fact.kept !== 'none' && deps.source.deliveryTarget?.()) void api.deliver();
 			return { outcome: 'recorded', fact };
 		},
+		/** Upload held bytes oldest first, one at a time, at most `max` per pass; concurrent calls share the pass in flight. Never throws. */
+		deliver(max = 32): Promise<ContentDeliveryReport> {
+			pass ??= runPass(max).finally(() => {
+				pass = null;
+			});
+			return pass;
+		},
+		/** Ask the endpoint to delete what it accepted (after `revoke` dropped what is held); a lost answer stays `requested`. */
+		async revokeUploaded(
+			reason: string
+		): Promise<ContentRevokeOutcome | { outcome: 'unavailable' }> {
+			const facts = ledger.filter((fact) => fact.upload && fact.upload.revocation !== 'confirmed');
+			if (facts.length === 0) return { outcome: 'revoked', referenceIds: [] };
+			const target = deps.source.deliveryTarget?.();
+			if (!target) return { outcome: 'unavailable' };
+			for (const fact of facts) fact.upload!.revocation = 'requested';
+			const ids = facts.map((fact) => (fact.derivative ?? fact.original).referenceId);
+			let answer: ContentRevokeOutcome;
+			try {
+				answer = await target.port.revoke(target.binding, ids, reason);
+			} catch {
+				answer = { outcome: 'unknown' };
+			}
+			if (answer.outcome === 'revoked')
+				for (const fact of facts)
+					if (answer.referenceIds.includes((fact.derivative ?? fact.original).referenceId))
+						fact.upload!.revocation = 'confirmed';
+			return answer;
+		},
 		take(referenceId: string): { bytes: Buffer; fact: ContentFact } | null {
+			if (unsettled.has(referenceId)) return null;
 			const held = hold.get(referenceId);
 			return held ? { bytes: Buffer.from(held.bytes), fact: held.fact } : null;
 		},
@@ -481,6 +678,7 @@ export function createContentCapture(deps: ContentCaptureDeps) {
 			const dropped = hold.size;
 			for (const { fact } of hold.values()) release(fact, `revoked: ${reason}`);
 			hold.clear();
+			unsettled.clear();
 			heldBytes = 0;
 			counters.revoked += dropped;
 			return dropped;
@@ -490,8 +688,95 @@ export function createContentCapture(deps: ContentCaptureDeps) {
 			records: ledger.length,
 			held: { count: hold.size, bytes: heldBytes },
 			...counters,
+			unsettled: unsettled.size,
 			byRole: { ...byRole },
-			delivery: contentDeliveryStanding(),
+			delivery: contentDeliveryStanding(deps.source.deliveryTarget?.() ?? null),
 		}),
 	};
+
+	async function runPass(max: number): Promise<ContentDeliveryReport> {
+		const report: ContentDeliveryReport = { uploaded: 0, denied: 0, unsettled: 0, stopped: null };
+		// Oldest untried first, re-read each step, so bytes captured mid-pass are not left behind.
+		const tried = new Set<string>();
+		for (let step = 0; step < max; step++) {
+			const next = [...hold.entries()].find(([id]) => !tried.has(id));
+			if (!next) break;
+			const [referenceId, { bytes, fact }] = next;
+			tried.add(referenceId);
+			const target = deps.source.deliveryTarget?.() ?? null;
+			const standing = deps.source.standing();
+			if (!target || standing.mode !== 'managed' || !standing.ok) {
+				report.stopped = 'no delivery target';
+				break;
+			}
+			// Revision-bound: bytes captured under an earlier ceiling go only if the current one still admits them the same way.
+			const ref = fact.derivative ?? fact.original;
+			if (
+				!standing.ceiling.roles.includes(fact.role) ||
+				profileAdmits(standing.profile, fact.role) !== ref.representation ||
+				bytes.byteLength > standing.ceiling.maxPayloadBytes
+			) {
+				drop(referenceId);
+				release(fact, `revoked: revision ${standing.policyRevision} no longer admits this record`);
+				counters.revoked += 1;
+				continue;
+			}
+			if (sha256(bytes) !== ref.sha256 || bytes.byteLength !== ref.byteLength) {
+				drop(referenceId);
+				release(fact, 'integrity');
+				continue;
+			}
+			let answer: ContentUploadOutcome | { outcome: 'absent' } = { outcome: 'absent' };
+			try {
+				if (unsettled.has(referenceId))
+					answer = await target.port.status(target.binding, referenceId);
+				if (answer.outcome === 'absent') {
+					const chunks: ContentUploadChunk[] = [];
+					for (let offset = 0, index = 0; offset < bytes.byteLength || index === 0; index++) {
+						const slice = Buffer.from(bytes.subarray(offset, offset + CONTENT_UPLOAD_CHUNK_BYTES));
+						chunks.push({ index, offset, sha256: sha256(slice), bytes: slice });
+						offset += CONTENT_UPLOAD_CHUNK_BYTES;
+					}
+					answer = await target.port.upload(target.binding, {
+						reference: { ...ref },
+						original: { sha256: fact.original.sha256, byteLength: fact.original.byteLength },
+						role: fact.role,
+						family: fact.family,
+						profile: fact.profile,
+						policyRevision: fact.policyRevision,
+						sensitivity: fact.sensitivity,
+						runId: fact.runId,
+						ruleIds: fact.transformation?.ruleIds ?? [],
+						chunks,
+					});
+				}
+			} catch {
+				answer = { outcome: 'unknown' };
+			}
+			if (answer.outcome === 'accepted') {
+				drop(referenceId);
+				if (answer.sha256 !== ref.sha256 || answer.byteLength !== ref.byteLength)
+					release(fact, 'integrity');
+				else {
+					const { outcome: _accepted, ...acceptance } = answer;
+					Object.assign(fact, { kept: 'none', completeness: 'uploaded', gap: null });
+					fact.upload = { ...acceptance, revocation: 'none' };
+					counters.uploaded += 1;
+					report.uploaded += 1;
+				}
+			} else if (answer.outcome === 'denied') {
+				if (TRANSIENT_DENIALS.includes(answer.reason)) {
+					report.stopped = `denied: ${answer.reason}`;
+					break;
+				}
+				drop(referenceId);
+				release(fact, `denied: ${answer.reason}`);
+				counters.denied += 1;
+				report.denied += 1;
+			} else unsettled.add(referenceId);
+		}
+		report.unsettled = unsettled.size;
+		return report;
+	}
+	return api;
 }

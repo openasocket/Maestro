@@ -12,6 +12,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
 	CONTENT_REDACTION_RULE_ID,
+	CONTENT_UPLOAD_CHUNK_BYTES,
 	CONTENT_ROLE_FAMILIES,
 	CONTENT_ROLES,
 	contentDeliveryStanding,
@@ -22,6 +23,8 @@ import {
 	profileAdmits,
 	type ContentCaptureInput,
 	type ContentCollectionCeiling,
+	type ContentDeliveryPort,
+	type ContentUploadRequest,
 } from '../../../main/enterprise/content';
 import type {
 	EndpointCollectionProfile,
@@ -660,5 +663,157 @@ describe('bounded content (MRC-10-08)', () => {
 			outcome: 'recorded',
 			fact: { kept: 'original', original: { byteLength: 0, sha256: sha('') } },
 		});
+	});
+});
+
+// MCOMP-27-02: the CONTENT-LOCAL/1 seam. A fixture port stands in for the negotiated producer.
+describe('ceiling refresh and upload through the CONTENT-LOCAL/1 port (MCOMP-27-02)', () => {
+	type Port = ContentDeliveryPort & { uploads: ContentUploadRequest[]; doc: unknown };
+	function port(answers: Partial<Pick<ContentDeliveryPort, 'upload' | 'status' | 'revoke'>> = {}) {
+		const p: Port = {
+			version: 1,
+			uploads: [],
+			doc: ceiling(),
+			readCeiling: async () => p.doc,
+			upload: async (_binding, request) => {
+				p.uploads.push(request);
+				if (answers.upload) return answers.upload(_binding, request);
+				const bytes = Buffer.concat(request.chunks.map((chunk) => chunk.bytes));
+				return {
+					outcome: 'accepted',
+					uploadReference: `up-${request.reference.referenceId}`,
+					acceptedAt: '2026-10-22T12:00:01.000Z',
+					sha256: createHash('sha256').update(bytes).digest('hex'),
+					byteLength: bytes.byteLength,
+				};
+			},
+			status: answers.status ?? (async () => ({ outcome: 'absent' })),
+			revoke: answers.revoke ?? (async (_b, ids) => ({ outcome: 'revoked', referenceIds: ids })),
+		};
+		return p;
+	}
+	function wired(p: Port | null, profile: EndpointCollectionProfile = 'full', revision = 3) {
+		const state = { profile, revision };
+		const source = createContentCollectionSource({
+			status: () => standing('attached', state.profile, state.revision),
+			delivery: () => p,
+		});
+		let n = 0;
+		const cap = createContentCapture({ source, newId: () => `ref-${++n}` });
+		return { source, capture: cap, state };
+	}
+
+	it('installs the ceiling for the applied revision only, refuses rollback and a same-revision rewrite, and keeps the previous one', async () => {
+		const p = port();
+		const { source, state } = wired(p);
+		expect(await source.refresh()).toEqual({ installed: true, policyRevision: 3 });
+		expect(source.standing()).toMatchObject({ ok: true, policyRevision: 3 });
+		p.doc = { ...ceiling(), roles: ['user.prompt'] };
+		expect(await source.refresh()).toEqual({ installed: false, reason: 'stale' });
+		p.doc = ceiling({ policyRevision: 2 });
+		expect(await source.refresh()).toEqual({ installed: false, reason: 'invalid' });
+		expect(source.installed()).toEqual(ceiling());
+		state.revision = 4;
+		p.doc = ceiling({ policyRevision: 4, roles: ['assistant.output'] });
+		expect(await source.refresh()).toEqual({ installed: true, policyRevision: 4 });
+	});
+
+	it('uploads exact bytes in digest-named chunks and marks a record uploaded only on a matching acceptance', async () => {
+		const p = port();
+		const { source, capture: cap } = wired(p, 'redacted');
+		p.doc = ceiling({ profile: 'redacted', maxPayloadBytes: 8 << 20 });
+		await source.refresh();
+		expect(cap.status().delivery).toEqual({ available: true, protocol: 'CONTENT-LOCAL/1' });
+		const big = 'x'.repeat(CONTENT_UPLOAD_CHUNK_BYTES + 10);
+		const small = cap.capture(input());
+		const large = cap.capture(input({ role: 'assistant.output', text: big }));
+		const report = await cap.deliver();
+		expect(report).toEqual({ uploaded: 2, denied: 0, unsettled: 0, stopped: null });
+		const sent = p.uploads.find((u) => u.role === 'assistant.output')!;
+		expect(sent.chunks).toHaveLength(2);
+		for (const chunk of sent.chunks)
+			expect(chunk.sha256).toBe(createHash('sha256').update(chunk.bytes).digest('hex'));
+		expect(Buffer.concat(sent.chunks.map((c) => c.bytes)).toString('utf8')).toBe(big);
+		const prompt = p.uploads.find((u) => u.role === 'user.prompt')!;
+		const redacted = redactSecrets(input().text, { hexBlobs: true }).text;
+		expect(Buffer.concat(prompt.chunks.map((c) => c.bytes)).toString('utf8')).toBe(redacted);
+		expect(prompt.reference.representation).toBe('derivative');
+		expect(prompt.original.sha256).toBe(sha(input().text));
+		expect(JSON.stringify(prompt.chunks)).not.toContain('sk-ant-api03');
+		if (small.outcome !== 'recorded' || large.outcome !== 'recorded') throw new Error('no');
+		expect(small.fact).toMatchObject({ completeness: 'uploaded', kept: 'none', gap: null });
+		expect(small.fact.upload).toMatchObject({ uploadReference: 'up-ref-2', revocation: 'none' });
+		expect(contentFactProblems(small.fact)).toEqual([]);
+		expect(cap.status()).toMatchObject({ uploaded: 2, held: { count: 0, bytes: 0 } });
+	});
+
+	it('a lost answer is asked about before any resend; a mismatched acceptance is an integrity gap, never uploaded', async () => {
+		let lost = true;
+		const statuses: string[] = [];
+		const p = port({
+			upload: async (_b, request) =>
+				lost
+					? { outcome: 'unknown' }
+					: {
+							outcome: 'accepted',
+							uploadReference: 'up-x',
+							acceptedAt: '2026-10-22T12:00:01.000Z',
+							sha256: '0'.repeat(64),
+							byteLength: request.reference.byteLength,
+						},
+			status: async (_b, id) => {
+				statuses.push(id);
+				return { outcome: 'absent' };
+			},
+		});
+		const { source, capture: cap } = wired(p);
+		await source.refresh();
+		const out = cap.capture(input());
+		await new Promise((r) => setTimeout(r, 0));
+		expect(cap.status()).toMatchObject({ unsettled: 1, held: { count: 1 } });
+		expect(cap.take('ref-1')).toBeNull();
+		lost = false;
+		expect(await cap.deliver()).toMatchObject({ uploaded: 0, unsettled: 0 });
+		expect(statuses).toEqual(['ref-1']);
+		expect(p.uploads).toHaveLength(2);
+		if (out.outcome !== 'recorded') throw new Error('no');
+		expect(out.fact).toMatchObject({ completeness: 'unavailable', gap: 'integrity', upload: null });
+	});
+
+	it('a final denial releases by name, a transient one keeps the bytes, a narrowed revision revokes, and revokeUploaded asks the endpoint to delete', async () => {
+		let reason: 'policy_denied' | 'unavailable' | null = 'unavailable';
+		const p = port({
+			upload: async () => (reason ? { outcome: 'denied', reason } : { outcome: 'unknown' }),
+		});
+		const { source, capture: cap, state } = wired(p);
+		await source.refresh();
+		const first = cap.capture(input());
+		expect(await cap.deliver()).toMatchObject({ stopped: 'denied: unavailable' });
+		expect(cap.status().held.count).toBe(1);
+		reason = 'policy_denied';
+		expect(await cap.deliver()).toMatchObject({ denied: 1 });
+		if (first.outcome !== 'recorded') throw new Error('no');
+		expect(first.fact).toMatchObject({ completeness: 'unavailable', gap: 'denied: policy_denied' });
+
+		// Captured under revision 3 (its answer lost), the ceiling for revision 4 no longer grants the role.
+		reason = null;
+		const second = cap.capture(input());
+		await cap.deliver();
+		state.revision = 4;
+		p.doc = ceiling({ policyRevision: 4, roles: ['assistant.output'] });
+		await source.refresh();
+		await cap.deliver();
+		if (second.outcome !== 'recorded') throw new Error('no');
+		expect(second.fact.gap).toBe('revoked: revision 4 no longer admits this record');
+
+		const ok = wired(port());
+		await ok.source.refresh();
+		ok.capture.capture(input());
+		await ok.capture.deliver();
+		expect(await ok.capture.revokeUploaded('tenant withdrew')).toEqual({
+			outcome: 'revoked',
+			referenceIds: ['ref-1'],
+		});
+		expect(ok.capture.facts()[0].upload?.revocation).toBe('confirmed');
 	});
 });

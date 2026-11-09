@@ -102,6 +102,7 @@ import {
 import {
 	createContentCapture,
 	createContentCollectionSource,
+	type ContentDeliveryPort,
 	type ContentCapture,
 	type ContentCollectionSource,
 } from './content';
@@ -412,6 +413,8 @@ export interface EnterpriseServiceDeps {
 	 * or null when unavailable. The default v1 client has no effect producer.
 	 */
 	effectProducer?(port: EndpointPort): ManagedEffectProducer | null;
+	/** Trusted host injection after authenticated CONTENT-LOCAL/1 negotiation; the v1 client has none. */
+	contentDelivery?(port: EndpointPort): ContentDeliveryPort | null;
 	/** Hears a dispatch ledger write that failed. Default: nothing; `dispatch.persistFailures()` counts them. */
 	onDispatchPersistError?(error: unknown): void;
 	/** Test seam: how an SSH remote is asked for its managed standing. Default: the real probe over ssh. */
@@ -511,9 +514,8 @@ export interface EnterpriseService {
 	/**
 	 * Content collection under the signed profile (MRC-10-05): `content` reads the
 	 * standing (the endpoint's profile, a ceiling for the applied revision, held in
-	 * memory only; no endpoint operation of this build carries one, so nothing
-	 * installs it yet) and `contentCapture` records what the process listener hands
-	 * it, bytes held until an endpoint capture takes them. `vibes()` is the
+	 * memory only, via an injected CONTENT-LOCAL/1 port) and `contentCapture` holds
+	 * what the process listener hands it until that port accepts it. `vibes()` is the
 	 * recorded VIBES graph of what `events` holds right now, gaps named.
 	 */
 	readonly content: ContentCollectionSource;
@@ -625,7 +627,11 @@ export function createEnterpriseService(deps: EnterpriseServiceDeps): Enterprise
 		// holds for this actor is held here without a click, and the listing is the
 		// client's own, fired after the verb and never awaited by it.
 		onAttached: () => {
-			if (!closing) void inbox.refresh();
+			if (closing) return;
+			void inbox.refresh();
+			void content.refresh().then((installed) => {
+				if (installed.installed && !closing) void contentCapture.deliver();
+			});
 		},
 	});
 	const policy = createPolicyStatusService({ lifecycle, now });
@@ -729,9 +735,13 @@ export function createEnterpriseService(deps: EnterpriseServiceDeps): Enterprise
 		intervalMs: TELEMETRY_HOST_IDLE_POLL_MS,
 	});
 	// The content standing is the lifecycle's standing read at each capture; the
-	// ceiling it needs has no endpoint operation yet (CP-01), so an enrolled desktop
-	// refuses every capture by name and a standalone one never follows a process.
-	const content = createContentCollectionSource({ status: () => lifecycle.status() });
+	// ceiling comes only through an injected CONTENT-LOCAL/1 port (no published
+	// operation carries one, CP-01), so without one an enrolled desktop refuses every
+	// capture by name and a standalone one never follows a process.
+	const content = createContentCollectionSource({
+		status: () => lifecycle.status(),
+		delivery: () => (port && !closing ? (deps.contentDelivery?.(port) ?? null) : null),
+	});
 	const contentCapture = createContentCapture({ source: content, now });
 	const usage = createUsageCapture({
 		events,
