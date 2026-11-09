@@ -2182,6 +2182,43 @@
 				"semanticConflictsForC": [],
 				"notes": "No case, field or guard dropped. A listener denial short-circuits auto-recovery because fail() clears autoRecover.",
 				"unmergedAfter": 32
+			},
+			"MCOMP-33-00R29": {
+				"resolvedAt": "2026-11-09",
+				"resolvedBy": "Maestro-Claude",
+				"files": [
+					"src/main/web-server/WebServer.ts",
+					"src/main/web-server/types.ts",
+					"src/main/web-server/routes/wsRoute.ts",
+					"src/shared/pianola/pianola-dispatch.ts"
+				],
+				"method": "Twelve hunks resolved by a shape-asserting script (Working/mcomp-33-00r29/resolve.mjs, both sides read in full, every replacement computed before any write); staged through merge-tool.mjs stage (29 unmerged left). src/shared/pianola/pianola-dispatch.ts is upstream-added and was not unmerged: it received the integration params of the NewAITabWithPromptCallback type upstream moved there. Working/mcomp-33-00r29/check.mjs: 0 syntax diagnostics, no markers; the only LOW seam counts are the two params of the moved callback type, present in the shared file. wsRoute + pianola-new-tab-dispatch + pianola-dispatch-admission: 126/126. WebServer.test and WebServer.listenerPolicy cannot load until bridgeHandlers.ts (00R31).",
+				"positionalOrder": "Upstream's new trailing params keep their slots and the integration's delegation, dispatchTicket are appended after them: executeCommand (..., mentionRouting, requireDeliveryReceipt, pianolaDispatchId, delegation, dispatchTicket); newAITabWithPrompt (..., mentionRouting, control, delegation, dispatchTicket); enqueueCommand (..., mentionRouting, dispatchCallback, control, delegation, dispatchTicket). Reason: the already-merged upstream main callers (pianola-decisions, pianola-new-tab-dispatch, WebServer.enqueueCommandFromMain) pass the upstream params positionally, while every integration caller sits in a still-unmerged file. Trailing integration args are omitted when both are absent, so upstream's omit-unused-trailing-arguments call shape is unchanged.",
+				"hunks": {
+					"src/main/web-server/WebServer.ts": [
+						"Hunks 1-2 (executeCommand forward): params requireDeliveryReceipt, pianolaDispatchId, then delegation, dispatchTicket; forward keeps upstream trailing omission, extended: all four when delegation or dispatchTicket is set, else upstream's shape. Doc comment names the appended context and ticket.",
+						"Hunks 3-4 (newAITabWithPrompt forward): control, then delegation, dispatchTicket (spread only when set).",
+						"Hunks 5-6 (enqueueCommand forward): dispatchCallback, control, then delegation, dispatchTicket (spread only when set)."
+					],
+					"src/main/web-server/types.ts": [
+						"Hunk 1 (imports): union, HEAD AgentConfigWrite types and upstream PianolaQueueControl.",
+						"Hunk 2 (ExecuteCommandCallback): upstream requireDeliveryReceipt, pianolaDispatchId, then HEAD documented delegation, dispatchTicket.",
+						"Hunk 3 (NewAITabWithPrompt types): took upstream's move to src/shared/pianola/pianola-dispatch.ts (re-export); HEAD's delegation and dispatchTicket params re-applied on the moved callback after control, HEAD's result fields already present there (upstream adds unknown).",
+						"Hunk 4 (EnqueueCommandCallback): upstream dispatchCallback, control, then HEAD delegation, dispatchTicket.",
+						"Hunk 5 (CreateSessionConfig): both fields, HEAD operation and upstream harnessControlMode."
+					],
+					"src/main/web-server/routes/wsRoute.ts": [
+						"Hunk 1 (WebClient): HEAD pairing admission field (admission: auth.method) kept, then upstream isAuthorized(context) which rechecks host admission first and resolves auth with the context."
+					]
+				},
+				"outsideHunks": [
+					"src/shared/pianola/pianola-dispatch.ts: NewAITabWithPromptCallback gains delegation?: ManagedDelegationContext and dispatchTicket?: string after control (type import from maestro-lib/managed/delegation)."
+				],
+				"semanticConflictsForC": [
+					"Positional order above binds the continuations: CallbackRegistry (00R31), the web server callbacks (00R30) and the message handler types and commands/queue/tabs callers (00R32/00R33) must place delegation, dispatchTicket after the upstream params, padding upstream slots with undefined where an integration caller sets them. The preload IPC wire (00R34) is a separate order (HEAD delegation, dispatchTicket, receiptChannel; upstream receiptChannel, pianolaDispatchId) and is settled there."
+				],
+				"notes": "No case, field or guard dropped. resolveTransportAdmission is not used in wsRoute on either side; the route's admission (host admission recheck, pairing admission field, Web Login recheck) is kept whole.",
+				"unmergedAfter": 29
 			}
 		}
 	}
