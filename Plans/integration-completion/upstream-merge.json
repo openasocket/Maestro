@@ -2295,6 +2295,29 @@
 				],
 				"notes": "No param, guard, handler or case dropped.",
 				"unmergedAfter": 23
+			},
+			"MCOMP-33-00R32": {
+				"resolvedAt": "2026-11-09",
+				"resolvedBy": "Maestro-Claude",
+				"files": [
+					"src/main/web-server/handlers/messageHandlers/WebSocketMessageHandler.ts",
+					"src/main/web-server/handlers/messageHandlers/commands.ts",
+					"src/main/web-server/handlers/messageHandlers/types.ts"
+				],
+				"method": "Six hunks resolved by a shape-asserting script (Working/mcomp-33-00r32/resolve.mjs, both sides read in full, every replacement computed before any write); staged through merge-tool.mjs stage (20 unmerged left; prettier left all three unchanged). Working/mcomp-33-00r32/check.mjs: 0 syntax diagnostics, every HEAD and MERGE_HEAD seam count kept.",
+				"positionalOrder": "R29: executeCommand ..., mentionRouting, requireDeliveryReceipt, pianolaDispatchId, delegation, dispatchTicket; newAITabWithPrompt ..., mentionRouting, control, delegation, dispatchTicket -> NewAITabWithPromptResult; enqueueCommand ..., mentionRouting, dispatchCallback, control, delegation, dispatchTicket.",
+				"hunks": {
+					"types.ts": "Three hunks (executeCommand, newAITabWithPrompt, enqueueCommand callback types): upstream's trailing params keep their slots, HEAD's documented delegation and dispatchTicket follow; newAITabWithPrompt returns upstream's NewAITabWithPromptResult (a superset of HEAD's inline shape: success, tabId, queued, error, plus unknown).",
+					"WebSocketMessageHandler.ts": "Header doc: HEAD's managed_* message lines then upstream's federation_command line. Switch: HEAD's managed case group (managed_status through managed_run, handleManagedMessage) with its own break, then upstream's list_agent_models case (handleListAgentModels) on the shared break.",
+					"commands.ts": "The force comment: upstream's description (per-tab busy guard lives in the renderer, gated CLI-side by allowConcurrentSend) followed by HEAD's statement that force is a scheduling hint, not authority, admitted at the spawn sink (MRC-08-01)."
+				},
+				"outsideHunks": "commands.ts: the auto-merged executeCommand call kept HEAD's fixed slots (mentionRouting, delegation, dispatchTicket); padded upstream's requireDeliveryReceipt and pianolaDispatchId with undefined so delegation and the dispatch ticket land in their merged slots.",
+				"semanticConflictsForC": [
+					"src/main/web-server/handlers/messageHandlers/queue.ts (auto-merged, not a target here) passes routingField.routing, delegation, dispatchTicket to enqueueCommand on HEAD's slots; it must pad upstream's dispatchCallback and control with undefined (tsc flags delegation in the boolean slot).",
+					"src/main/web-server/handlers/messageHandlers/tabs.ts newAITabWithPrompt caller (R33 target) must pass undefined for control before delegation and dispatchTicket."
+				],
+				"notes": "The messageHandlers suites (messageHandlers, messageHandlers.managed, federationCommand, liveCommand, maestroRun) cannot load until tabs.ts and sessions.ts merge (R33): PARSE_ERROR on the diff markers in tabs.ts. listAgentModelsHandler 4/4.",
+				"unmergedAfter": 20
 			}
 		}
 	}
