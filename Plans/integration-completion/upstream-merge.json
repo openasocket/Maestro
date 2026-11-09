@@ -2415,6 +2415,28 @@
 				"outsideHunks": "onRemoteCommand consult-first, unknown-session and forwarded receipts moved to slot 8; the MRC-07-04C delegation case to receipt 8 / delegation 10 and the MRC-08-01B ticket case to receipt 8 / ticket 11 (comments updated); the MRC-07-04D new-tab delegation case to slot 7 (slot 6 is upstream control) via the slash-command queue path; the MRC-07-04D enqueue delegation case to slot 11.",
 				"semanticFor00C": [],
 				"tests": "useRemoteIntegration.test.ts 156/156 in the worktree."
+			},
+			"MCOMP-33-00R38": {
+				"resolvedAt": "2026-11-09",
+				"resolvedBy": "Maestro-Claude",
+				"files": [
+					"src/renderer/components/NewInstanceModal/types.ts",
+					"src/renderer/components/NewInstanceModal/EditAgentModal.tsx",
+					"src/renderer/components/NewInstanceModal/NewInstanceModal.tsx"
+				],
+				"method": "Four hunks resolved by a shape-asserting script (Working/mcomp-33-00r38/resolve.mjs, both sides read in full, every replacement computed before any write); one auto-merged collision outside the hunks fixed in EditAgentModal.tsx; staged through merge-tool.mjs stage (5 unmerged left; prettier left all three unchanged). Working/mcomp-33-00r38/check.mjs: 0 syntax diagnostics, every HEAD and MERGE_HEAD seam count kept. The auto-merged HEAD NewInstanceModal suite was re-slotted onto the merged onCreate order by fix-suite.mjs and staged.",
+				"hunks": {
+					"types.ts imports (1)": "kept both: HEAD AgentCommitRefusal and upstream HarnessControlMode.",
+					"types.ts onCreate tail (1)": "merged order codexTransport, harnessControlMode, operation, policy, returning HEAD's void | Promise<NewAgentFormOutcome | void> (matches the R36 createNewSession order).",
+					"EditAgentModal.tsx imports (1)": "kept both: HEAD ManagedChoicesNotice, useManagedAgentOptions, AgentCommitRefusedError/AgentCommitRefusal (the managed lock display) and upstream HarnessControlMode.",
+					"NewInstanceModal.tsx submit (1)": "HEAD's awaited create with the creating flag, inline refusal and stale refresh; upstream's trailing conditional spread became the positional harnessControlMode ('native' or undefined) because HEAD's operation and policy follow it."
+				},
+				"outsideHunks": "EditAgentModal.tsx: upstream shifted the translation arguments to slots 24-27 (harnessControlMode at 23) while HEAD's auto-merged policy write still used slot 27, overwriting convertProviderHistory; moved the policy to slot 28, which is where EditAgentModalProps.onSave and useSessionLifecycle.handleSaveEditAgent (both auto-merged) declare it. NewInstanceModal.test.tsx (auto-merged, HEAD-only changes): ten onCreate expectations gain the harnessControlMode slot (undefined) before operation and the two index reads of policy move from 23 to 24.",
+				"semanticFor00C": [
+					"R39 AppSessionModals.tsx: take HEAD's onCreateSession: NewInstanceModalProps['onCreate'] (it now carries harnessControlMode), and onSaveEditAgent must carry the full EditAgentModalProps['onSave'] tail (harnessControlMode, the four translation args, policy at slot 28) and return void | Promise<void>; the auto-merged declaration stops at harnessControlMode.",
+					"R39 EditAgentModal.test.tsx: HEAD cases that read the policy or the translation arguments by index must use the merged slots (harnessControlMode 23, acceptTranslationLimitations 24, selectedUserResources 25, migrationPlanId 26, convertProviderHistory 27, policy 28)."
+				],
+				"tests": "NewInstanceModal.test 95/95; with AgentPickerGrid, AgentCotExportSection, useModalHandlers and AgentSelectionScreen utils 286/286 before the index fix (2 failing then, both fixed). EditAgentModal.test is unmerged (R39)."
 			}
 		}
 	}
