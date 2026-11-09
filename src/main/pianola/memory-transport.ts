@@ -5,6 +5,8 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { isMainThread, threadId, workerData } from 'node:worker_threads';
 import { execFileNoThrow, needsWindowsShell } from '../utils/execFile';
+import { holdEgress, isEgressDeniedError } from '../utils/fetchWithTimeout';
+import type { EgressClass } from '../enterprise/egress-policy';
 import {
 	admitSupervisorChild,
 	type SupervisedChildLifetime,
@@ -747,7 +749,8 @@ type MemoryCliAdmissionAnswer =
 type MemoryCliAdmissionMessage =
 	| { kind: 'admit'; id: number; spec: MemoryCliLaunchSpec }
 	| { kind: 'exited'; id: number; exitCode: number | null }
-	| { kind: 'withdrawn'; id: number; message: string };
+	| { kind: 'withdrawn'; id: number; message: string }
+	| { kind: 'egress'; id: number; url: string };
 
 /** The slice of a worker_threads MessagePort both ends use. */
 export interface MemoryCliAdmissionChannel {
@@ -779,6 +782,8 @@ export function memoryCliAdmissionClient(channel: MemoryCliAdmissionChannel): Me
 	let sequence = 0;
 	const pending = new Map<number, (answer: MemoryCliAdmissionAnswer) => void>();
 	channel.on('message', (message) => {
+		// Egress answers share the channel (MCOMP-33-00L2) and carry a kind; launch answers carry none.
+		if ((message as { kind?: unknown } | null)?.kind !== undefined) return;
 		const answer = message as MemoryCliAdmissionAnswer;
 		const settle = pending.get(answer?.id);
 		if (!settle) return;
@@ -833,6 +838,10 @@ export function serveMemoryCliAdmission(
 			else lifetime?.withdraw(message.message);
 			return;
 		}
+		if (message?.kind === 'egress') {
+			channel.postMessage(holdMemoryEgressHere(message.url, message.id));
+			return;
+		}
 		if (message?.kind !== 'admit') return;
 		void admitMemoryCli(managedPort, message.spec, message.id).then(({ answer, lifetime }) => {
 			if (lifetime) live.set(message.id, lifetime);
@@ -883,6 +892,112 @@ async function admitMemoryCli(
 	// The worker spawns on this answer and nothing else: the protected lifetime begins.
 	admission.lifetime.spawned({ pid: undefined });
 	return { answer: { id, state: 'admitted' }, lifetime: admission.lifetime };
+}
+
+// The hosted memory providers under management (MCOMP-33-00L2). Extraction,
+// relevance and rerank send private memory evidence over HTTP from the memory
+// worker thread, which holds no egress authority (the ceiling is installed on
+// the main thread's chokepoint). So the worker asks the main thread over the
+// same admission channel before EVERY physical request, retries included, and
+// the main thread holds the URL with `holdEgress()`. The class is `content`,
+// the nearest closed class (no published ceiling names model inference; the
+// gap is recorded in contract-coverage.json). A refusal is a
+// MemoryTransportError named `managed-<code>` raised before the permit opens:
+// nothing was sent. With no authority installed (standalone) the hold admits
+// and the request leaves exactly as before; with no channel (the main thread,
+// a test) the local chokepoint is consulted directly.
+
+/** The egress class every hosted memory request is held as. */
+export const MEMORY_EGRESS_CLASS: EgressClass = 'content';
+
+/** The main thread's answer to one egress hold. */
+type MemoryEgressAnswer =
+	| { kind: 'egress'; id: number; allowed: true }
+	| { kind: 'egress'; id: number; allowed: false; code: string; message: string };
+
+export type MemoryEgressHolder = (
+	url: string
+) => Promise<{ allowed: true } | { allowed: false; code: string; message: string }>;
+
+let memoryEgressHolder: MemoryEgressHolder | null | undefined;
+
+/** Install (or clear, with null) the holder a hosted request asks. `undefined` re-reads workerData. */
+export function setMemoryEgressHolder(holder: MemoryEgressHolder | null | undefined): void {
+	memoryEgressHolder = holder;
+}
+
+function currentMemoryEgressHolder(): MemoryEgressHolder | null {
+	if (memoryEgressHolder === undefined) {
+		const channel = isMainThread
+			? undefined
+			: (workerData as { memoryCliAdmission?: MemoryCliAdmissionChannel } | null)
+					?.memoryCliAdmission;
+		memoryEgressHolder = channel ? memoryEgressClient(channel) : null;
+	}
+	return memoryEgressHolder;
+}
+
+/** The worker's end: ask the main thread to hold each hosted request's URL. */
+export function memoryEgressClient(channel: MemoryCliAdmissionChannel): MemoryEgressHolder {
+	let sequence = 0;
+	const pending = new Map<number, (answer: MemoryEgressAnswer) => void>();
+	channel.on('message', (message) => {
+		const answer = message as MemoryEgressAnswer;
+		if (answer?.kind !== 'egress') return;
+		const settle = pending.get(answer.id);
+		if (!settle) return;
+		pending.delete(answer.id);
+		settle(answer);
+	});
+	channel.unref?.();
+	return (url) =>
+		new Promise((resolve) => {
+			const id = ++sequence;
+			const timer = setTimeout(() => {
+				if (!pending.delete(id)) return;
+				resolve({
+					allowed: false,
+					code: 'outcome-unknown',
+					message: "The managed host's egress answer was lost. Nothing was sent.",
+				});
+			}, MEMORY_CLI_ADMISSION_TIMEOUT_MS);
+			timer.unref?.();
+			pending.set(id, (answer) => {
+				clearTimeout(timer);
+				resolve(
+					answer.allowed
+						? { allowed: true }
+						: { allowed: false, code: answer.code, message: answer.message }
+				);
+			});
+			channel.postMessage({ kind: 'egress', id, url } satisfies MemoryCliAdmissionMessage);
+		});
+}
+
+/** Hold one URL on THIS thread's chokepoint; a refusal is recorded in its ledger by `holdEgress()`. */
+function holdMemoryEgressHere(url: string, id: number): MemoryEgressAnswer {
+	try {
+		holdEgress(url, MEMORY_EGRESS_CLASS);
+		return { kind: 'egress', id, allowed: true };
+	} catch (error) {
+		if (isEgressDeniedError(error))
+			return { kind: 'egress', id, allowed: false, code: error.code, message: error.message };
+		return {
+			kind: 'egress',
+			id,
+			allowed: false,
+			code: 'outcome-unknown',
+			message: `The egress hold failed: ${error instanceof Error ? error.message : String(error)}. Nothing was sent.`,
+		};
+	}
+}
+
+/** Hold one hosted request before it is sent; throws `managed-<code>` and sends nothing on a refusal. */
+async function holdMemoryEgress(url: string): Promise<void> {
+	const holder = currentMemoryEgressHolder();
+	const verdict = holder ? await holder(url) : holdMemoryEgressHere(url, 0);
+	if (!verdict.allowed)
+		throw new MemoryTransportError('managed-' + verdict.code, null, 'absent', 'not-started');
 }
 
 /** Build the expanded spawn PATH and apply account overrides and blank unsets in order. */
@@ -1022,6 +1137,10 @@ export class MemoryTransportScope {
 		timeoutMs: number,
 		operation: string
 	): Promise<{ status: number; ok: boolean; data: unknown }> {
+		if (this.open || this.ended) throw new Error('Transport scope is not available');
+		// Held against the egress ceiling before the permit opens: a refusal sends
+		// nothing, so nothing is uncertain (MCOMP-33-00L2).
+		await holdMemoryEgress(url);
 		if (this.open || this.ended) throw new Error('Transport scope is not available');
 		const request = this.controller.startRequest(this.id, operation, this.authority);
 		this.open = true;

@@ -9,10 +9,15 @@ import { MemoryDatabase } from '../../../main/pianola/memory-database';
 import {
 	MemoryTransportScope,
 	PIANOLA_MEMORY_SERVICE,
+	MEMORY_EGRESS_CLASS,
 	memoryCliAdmissionClient,
+	memoryEgressClient,
 	serveMemoryCliAdmission,
 	setMemoryCliAdmitter,
+	setMemoryEgressHolder,
 } from '../../../main/pianola/memory-transport';
+import { heldEgress, setEgressAuthority } from '../../../main/utils/fetchWithTimeout';
+import { denyingEgressAuthority, managedEgressAuthority } from '../../helpers/egressAuthority';
 import { fakeSpawnPort, type FakeSpawnPort } from '../../helpers/managedSpawnPort';
 import { execFileNoThrow } from '../../../shared/maestro-lib/launch/exec-file';
 import type { MemoryTransportActivation } from '../../../shared/pianola/memory';
@@ -847,6 +852,115 @@ describe('memory CLI admission on a managed host', () => {
 		await expect(item.scope.cli(invocation, 1000, 'cli-extract')).resolves.toBe('{}');
 		expect(port.asked).toHaveLength(0);
 		expect(execFileNoThrow).toHaveBeenCalledTimes(1);
+		release(f.db, item);
+	});
+});
+
+// The hosted memory providers under management (MCOMP-33-00L2). The worker asks
+// the main thread over a real MessageChannel; the main end holds the URL on the
+// REAL fetch chokepoint behind an installed egress authority.
+describe('hosted memory egress on a managed host', () => {
+	const channels: MessageChannel[] = [];
+	const nan = 'https://api.nan.builders/v1/chat/completions';
+	afterEach(() => {
+		setEgressAuthority(null);
+		setMemoryEgressHolder(null);
+		for (const channel of channels.splice(0)) {
+			channel.port1.close();
+			channel.port2.close();
+		}
+	});
+	function holdThroughChannel() {
+		const channel = new MessageChannel();
+		channels.push(channel);
+		serveMemoryCliAdmission(channel.port1, () => null);
+		setMemoryEgressHolder(memoryEgressClient(channel.port2));
+	}
+
+	it('refuses a hosted request by name before the permit opens, and sends nothing', async () => {
+		const f = await fixture(1);
+		const item = stage(f.db, f.runtime, 'egress-denied')!;
+		const ceiling = denyingEgressAuthority('unavailable');
+		setEgressAuthority(ceiling.authority);
+		holdThroughChannel();
+		const send = vi.spyOn(globalThis, 'fetch');
+		await expect(item.scope.json(nan, {}, 1000, 'hosted-chat')).rejects.toThrow(
+			'managed-unavailable'
+		);
+		expect(send).not.toHaveBeenCalled();
+		expect(ceiling.requests).toEqual([{ url: nan, class: MEMORY_EGRESS_CLASS }]);
+		expect(heldEgress()).toEqual([
+			expect.objectContaining({ class: 'content', code: 'unavailable' }),
+		]);
+		// Nothing was sent, so nothing is uncertain and the permit is released normally.
+		expect(f.db.db.prepare('SELECT COUNT(*) n FROM memory_transport_requests').get()).toEqual({
+			n: 0,
+		});
+		release(f.db, item);
+	});
+
+	it('holds every physical retry, and a destination the ceiling lists leaves', async () => {
+		const f = await fixture(1);
+		const item = stage(f.db, f.runtime, 'egress-admitted')!;
+		const ceiling = managedEgressAuthority([
+			{ class: 'content', destinations: ['api.nan.builders'] },
+		]);
+		setEgressAuthority(ceiling.authority);
+		holdThroughChannel();
+		const send = vi
+			.spyOn(globalThis, 'fetch')
+			.mockResolvedValueOnce(new Response('{}', { status: 429 }))
+			.mockResolvedValueOnce(
+				new Response('{"ok":true}', { headers: { 'content-type': 'application/json' } })
+			);
+		// One real 500ms backoff: the hold answers cross a real MessageChannel.
+		await expect(item.scope.json(nan, {}, 1000, 'hosted-chat')).resolves.toMatchObject({
+			status: 200,
+			data: { ok: true },
+		});
+		expect(send).toHaveBeenCalledTimes(2);
+		expect(ceiling.requests).toHaveLength(2);
+		release(f.db, item);
+	});
+
+	it('refuses a destination the ceiling does not list', async () => {
+		const f = await fixture(1);
+		const item = stage(f.db, f.runtime, 'egress-elsewhere')!;
+		setEgressAuthority(
+			managedEgressAuthority([{ class: 'content', destinations: ['api.openai.com'] }]).authority
+		);
+		holdThroughChannel();
+		const send = vi.spyOn(globalThis, 'fetch');
+		await expect(item.scope.json(nan, {}, 1000, 'hosted-chat')).rejects.toThrow(
+			'managed-destination-denied'
+		);
+		expect(send).not.toHaveBeenCalled();
+		release(f.db, item);
+	});
+
+	it('holds on the local chokepoint when no channel was handed over', async () => {
+		const f = await fixture(1);
+		const item = stage(f.db, f.runtime, 'egress-local')!;
+		setEgressAuthority(denyingEgressAuthority().authority);
+		const send = vi.spyOn(globalThis, 'fetch');
+		await expect(item.scope.json(nan, {}, 1000, 'hosted-chat')).rejects.toThrow(
+			'managed-class-denied'
+		);
+		expect(send).not.toHaveBeenCalled();
+		release(f.db, item);
+	});
+
+	it('asks nothing of a standalone host and sends as before', async () => {
+		const f = await fixture(1);
+		const item = stage(f.db, f.runtime, 'egress-standalone')!;
+		holdThroughChannel();
+		const send = vi
+			.spyOn(globalThis, 'fetch')
+			.mockResolvedValue(new Response('{}', { headers: { 'content-type': 'application/json' } }));
+		await expect(item.scope.json(nan, {}, 1000, 'hosted-chat')).resolves.toMatchObject({
+			status: 200,
+		});
+		expect(send).toHaveBeenCalledTimes(1);
 		release(f.db, item);
 	});
 });
