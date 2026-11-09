@@ -18,13 +18,28 @@
  * controls, edit/clone/import and live policy (MCOMP-33-02C), offline and
  * restart, isolation and keyboard, and the credential route (MCOMP-33-02D),
  * Auto Run lineage, Cue prompt/shell/CLI and the delegated consult
- * (MCOMP-33-02E); the remaining Electron cases are authored by MCOMP-33-02F.
+ * (MCOMP-33-02E), and secondary effects, fleet evidence and commands and
+ * notices (MCOMP-33-02F); the plugin and browser relay halves of the
+ * secondary-effects case are MCOMP-33-02G.
  */
+import { execFile, execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { promisify } from 'node:util';
 import type { ElectronApplication, Locator, Page } from '@playwright/test';
 import { ENTERPRISE_IDENTITY_FILE_NAME } from '../src/main/enterprise/identity-store';
+import {
+	MANAGED_INBOX_RECEIPTS_FILE_NAME,
+	type InboxReceiptRecord,
+} from '../src/main/enterprise/inbox';
+import {
+	MANAGED_COMMAND_LEDGER_FILE_NAME,
+	type CommandExecution,
+	type CommandLedgerRecord,
+} from '../src/shared/maestro-lib/managed/commands';
+import { MANAGED_EVENT_JOURNAL_FILE_NAME } from '../src/shared/maestro-lib/managed/event-journal';
+import type { EndpointTelemetryEvent as EndpointReport } from '../src/shared/maestro-lib/managed/host-adapter';
 import { MANAGED_BINDING_FILE_NAME } from '../src/shared/maestro-lib/runtime/data-dir-lock';
 import { parseManagedSpawnRefusal, type ManagedSpawnRefusal } from '../src/shared/processErrors';
 import { generateUUID } from '../src/shared/uuid';
@@ -328,6 +343,7 @@ function heldWorkflows(dataDir: string): HeldWorkflowOwnership[] {
 
 type LedgerRecord = {
 	leaseId: string;
+	runId?: string;
 	requestId: string;
 	attemptId: string;
 	effect?: { state?: string };
@@ -415,6 +431,108 @@ async function settledCueRuns(page: Page, names: string[]) {
 		.toBe(true);
 	return read();
 }
+
+/** One store document the desktop wrote into its data dir, read off disk; an absent file is `empty`. */
+function readStore<T>(dataDir: string, name: string, empty: T): T {
+	const file = path.join(dataDir, name);
+	return fs.existsSync(file) ? (JSON.parse(fs.readFileSync(file, 'utf8')) as T) : empty;
+}
+
+type JournalEntry = {
+	eventId: string;
+	delivery: 'pending' | 'uncertain' | 'received';
+	receipt: { at: string } | null;
+	event: {
+		kind: string;
+		sequence: number;
+		occurredAt: string;
+		installation: { processEpoch: string };
+		run?: { runId: string };
+		decision?: { leaseId: string };
+	};
+};
+
+/** The managed event journal's entries, read off disk. */
+const journalEntries = (dataDir: string) =>
+	readStore<{ entries?: JournalEntry[] }>(dataDir, MANAGED_EVENT_JOURNAL_FILE_NAME, {}).entries ??
+	[];
+/** The command ledger's records, read off disk. */
+const commandRecords = (dataDir: string) =>
+	readStore<{ commands?: CommandLedgerRecord[] }>(dataDir, MANAGED_COMMAND_LEDGER_FILE_NAME, {})
+		.commands ?? [];
+/** The inbox receipt ledger's records, read off disk. */
+const inboxReceipts = (dataDir: string) =>
+	readStore<{ receipts?: InboxReceiptRecord[] }>(dataDir, MANAGED_INBOX_RECEIPTS_FILE_NAME, {})
+		.receipts ?? [];
+
+/** An observation read from a named store rather than the filesystem at large. */
+const observeStore = (
+	by: string,
+	detail: Record<string, unknown>,
+	checks: Record<string, boolean>
+) => ({ ...observeOnDisk(detail, checks), by }) as AcceptanceObservation;
+
+/**
+ * One `maestro-cli ... --json` call against this desktop (its data dir), the
+ * path an operator takes: its JSON answer, refused or not. Asynchronous, so
+ * the app keeps answering while the CLI waits on it.
+ */
+async function maestroCli(dataDir: string, args: string[]) {
+	const cli = path.join(__dirname, '../dist/cli/maestro-cli.js');
+	if (!fs.existsSync(cli))
+		throw new Error(`maestro-cli is not built at ${cli} (npm run build:cli).`);
+	const run = await promisify(execFile)(process.execPath, [cli, ...args, '--json'], {
+		encoding: 'utf8',
+		timeout: 60_000,
+		env: {
+			...process.env,
+			MAESTRO_DATA_DIR: dataDir,
+			MAESTRO_DEMO_DIR: dataDir,
+			MAESTRO_USER_DATA: dataDir,
+		},
+	}).catch((error: { stdout?: string; stderr?: string }) => error);
+	const line = (run.stdout ?? '').trim().split('\n').at(-1) ?? '';
+	try {
+		return JSON.parse(line) as { success: boolean; execution?: CommandExecution; error?: string };
+	} catch {
+		throw new Error(`maestro-cli ${args.join(' ')} answered no JSON: ${run.stderr ?? line}`);
+	}
+}
+
+/** A git repository under the project whose `origin` is `origin`, with one uncommitted file. */
+function gitRepo(projectDir: string, name: string, origin: string) {
+	const dir = path.join(projectDir, name);
+	fs.mkdirSync(dir);
+	const git = (...args: string[]) => execFileSync('git', args, { cwd: dir, stdio: 'pipe' });
+	git('init', '-q');
+	git('config', 'commit.gpgsign', 'false');
+	git('config', 'user.email', 'e2e@maestro.invalid');
+	git('config', 'user.name', 'Maestro E2E');
+	git('remote', 'add', 'origin', origin);
+	fs.writeFileSync(path.join(dir, 'change.txt'), `${name}\n`);
+	return dir;
+}
+
+/** Commits and staged paths of a repository, read with git itself. */
+function gitFacts(dir: string) {
+	const read = (...args: string[]) => {
+		try {
+			return execFileSync('git', args, { cwd: dir, encoding: 'utf8' }).trim();
+		} catch {
+			return '';
+		}
+	};
+	return {
+		commits: read('log', '--oneline').split('\n').filter(Boolean).length,
+		staged: read('diff', '--cached', '--name-only').split('\n').filter(Boolean),
+	};
+}
+
+const NOTICE = {
+	campaignId: '33333333-3333-4333-8333-333333333333',
+	messageId: '44444444-4444-4444-8444-444444444444',
+	body: 'Acceptance notice: planned maintenance.',
+};
 
 test.describe(`Electron acceptance cases (${MANAGED_MODE} mode)`, () => {
 	acceptance('electron.enrollment-revoke', async (ctx) => {
@@ -1195,5 +1313,288 @@ test.describe(`Electron acceptance cases (${MANAGED_MODE} mode)`, () => {
 			expect(roomReceipt.problems).toEqual([]);
 		}
 		expect(effect.problems).toEqual([]);
+	});
+
+	acceptance('electron.secondary-effects', async (ctx) => {
+		const { page } = ctx;
+		const inputs =
+			MANAGED_MODE === 'endpoint'
+				? requireInputs(readRunEndpointInputs(), ['inScopeRepository', 'outOfScopeRepository'])
+				: null;
+		// Repository effects through the shared git executor: one origin the ceiling names, one it does not.
+		const inScope = gitRepo(
+			ctx.projectDir,
+			'in-scope',
+			inputs?.inScopeRepository ?? 'https://example.invalid/e2e/in-scope.git'
+		);
+		const outOfScope = gitRepo(
+			ctx.projectDir,
+			'out-of-scope',
+			inputs?.outOfScopeRepository ?? 'https://example.invalid/e2e/out-of-scope.git'
+		);
+		await enroll(
+			page,
+			inputs?.socketPath ?? (await ctx.fixtureEndpoint()).socketPath,
+			inputs ?? undefined
+		);
+		const commitAll = (dir: string) =>
+			page.evaluate((cwd) => window.maestro.git.commitAll(cwd, 'acceptance commit'), dir);
+		const inResult = await commitAll(inScope);
+		const outResult = await commitAll(outOfScope);
+		// A read is never held: the same repository still answers.
+		const read = await page.evaluate((cwd) => window.maestro.git.isRepo(cwd), outOfScope);
+		const refusedByName = (r: { success: boolean; error?: string }) =>
+			!r.success && /^\[managed-[a-z-]+\]/.test(r.error ?? '');
+		const [inFacts, outFacts] = [gitFacts(inScope), gitFacts(outOfScope)];
+		const checks: Record<string, boolean> = {
+			'the out-of-scope write was refused by name': refusedByName(outResult),
+			'nothing was committed or staged out of scope':
+				outFacts.commits === 0 && outFacts.staged.length === 0,
+			'a git read is not held': read === true,
+			...(inputs
+				? { 'the in-scope commit landed': inResult.committed === true && inFacts.commits === 1 }
+				: {
+						// No ceiling is installed on the fixture: an enrolled host holds every write.
+						'the write the fixture names no ceiling for was refused by name':
+							refusedByName(inResult),
+						'nothing was committed or staged in scope':
+							inFacts.commits === 0 && inFacts.staged.length === 0,
+					}),
+		};
+		// The plugin and browser relay halves of this case are MCOMP-33-02G.
+		const effect = observeOnDisk(
+			{ inResult, outResult, repositories: { inScope: inFacts, outOfScope: outFacts } },
+			checks
+		);
+		ctx.observe('effect', effect);
+		expect(effect.problems).toEqual([]);
+	});
+
+	acceptance('electron.fleet-evidence', async (ctx) => {
+		const { page } = ctx;
+		const inputs = MANAGED_MODE === 'endpoint' ? readRunEndpointInputs() : null;
+		if (!inputs) await expectStubProvider(page, ctx.stub);
+		const provider = inputs?.approvedProvider ?? FIXTURE_PROVIDER;
+		const agent = await createAgent(page, provider, 'E2E Accept Fleet', ctx.projectDir);
+		const endpoint = inputs ? null : await ctx.fixtureEndpoint();
+		await enroll(page, inputs?.socketPath ?? endpoint!.socketPath, inputs ?? undefined);
+		let checks: Record<string, boolean>;
+		if (inputs) {
+			const run = await approvedTurn(ctx, agent);
+			// The run's events: the decision under its lease, then everything of the same run.
+			const ofRun = () => {
+				const entries = journalEntries(ctx.dataDir);
+				const decision = entries.find((e) => e.event.decision?.leaseId === run.leaseId);
+				const runId = decision?.event.run?.runId;
+				return runId ? entries.filter((e) => e.event.run?.runId === runId) : [];
+			};
+			const settled = () => ofRun().length > 1 && ofRun().every((e) => e.delivery === 'received');
+			await expect.poll(settled, { timeout: 120_000 }).toBe(true);
+			const entries = ofRun();
+			checks = {
+				'every event of the run carries the endpoint receipt': entries.every((e) => !!e.receipt),
+				'the run settled a usage event': entries.some((e) => e.event.kind === 'usage'),
+				'the run ended in the dispatch ledger': observeLedgerReceipt(
+					ledgerFile(ctx.dataDir),
+					run.leaseId
+				).observed,
+			};
+		} else {
+			const prompt = 'fleet evidence turn';
+			await expectRefusedSend(ctx, agent, prompt);
+			// Give the telemetry client its passes over what the refusal journaled.
+			await page.waitForTimeout(5_000);
+			const entries = journalEntries(ctx.dataDir);
+			const sent = endpoint!.calls
+				.map((c) => c.body as { operation?: string; payload?: EndpointReport })
+				.filter((b) => b.operation === 'telemetry')
+				.map((b) => b.payload!);
+			const source = (r: EndpointReport) =>
+				entries.find(
+					(e) =>
+						e.eventId === r.eventId &&
+						e.event.sequence === r.sequence &&
+						e.event.occurredAt === r.occurredAt &&
+						e.event.installation.processEpoch === r.bootId
+				);
+			checks = {
+				'every sent report is a journal event with its sequence, time and boot': sent.every(
+					(r) => source(r) !== undefined && source(r)!.event.kind !== 'inventory'
+				),
+				'no report carries content or a content reference': sent.every(
+					(r) => r.contentReferences.length === 0 && r.completeness.content === 'unavailable'
+				),
+				'no event is received without a durable receipt': entries.every(
+					(e) => e.delivery !== 'received'
+				),
+				'the refused prompt is in no report and no event':
+					!JSON.stringify(sent).includes(prompt) && !JSON.stringify(entries).includes(prompt),
+			};
+		}
+		const journal = journalEntries(ctx.dataDir);
+		const receipt = observeStore(
+			'event-journal',
+			{ events: journal.length, received: journal.filter((e) => e.delivery === 'received').length },
+			checks
+		);
+		ctx.observe('receipt', receipt);
+		expect(receipt.problems).toEqual([]);
+	});
+
+	acceptance('electron.commands-notices', async (ctx) => {
+		const inputs =
+			MANAGED_MODE === 'endpoint'
+				? requireInputs(readRunEndpointInputs(), ['publishNotice', 'readNoticeReceipts'])
+				: null;
+		const endpoint = inputs ? null : await ctx.fixtureEndpoint();
+		if (endpoint) {
+			// The fixture lists one notice and records each act, as managed-communications does.
+			endpoint.options.operations = {
+				...endpoint.options.operations,
+				noticeList: () => ({
+					outcome: 'notices',
+					items: [
+						{
+							...NOTICE,
+							expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
+							kind: 'notice',
+							agentInput: false,
+						},
+					],
+					nextOffset: null,
+				}),
+				inbox: (payload) => {
+					const act = payload as { messageId: string; action: { kind: string } };
+					return {
+						outcome: 'recorded',
+						messageId: act.messageId,
+						receiptId: `rcpt-${act.action.kind}`,
+						state: act.action.kind,
+					};
+				},
+			};
+		} else await expectStubProvider(ctx.page, ctx.stub);
+		const provider = inputs?.approvedProvider ?? FIXTURE_PROVIDER;
+		const agent = await createAgent(ctx.page, provider, 'E2E Accept Commands', ctx.projectDir);
+		await enroll(ctx.page, inputs?.socketPath ?? endpoint!.socketPath, inputs ?? undefined);
+
+		// Commands, through maestro-cli: the operator's path into the same executor and ledger.
+		let runId = 'e2e-accept-unknown-run';
+		let lease: string | null = null;
+		if (inputs) {
+			await sendTurn(ctx.page, agent.name, inputs.longPrompt);
+			const run = runState(ctx.page);
+			await expect(run.root).toHaveAttribute('data-run-word', 'running', { timeout: 60_000 });
+			lease = (await activeTabManaged(ctx.page, agent.id)).managedRun!.leaseId;
+			runId = ledgerRecords(ctx.dataDir).find((r) => r.leaseId === lease)?.runId ?? runId;
+		}
+		const pause = (await maestroCli(ctx.dataDir, ['managed', 'command', 'pause-run', runId]))
+			.execution;
+		const resume = (await maestroCli(ctx.dataDir, ['managed', 'command', 'resume-run', runId]))
+			.execution;
+		const cancel = (await maestroCli(ctx.dataDir, ['managed', 'command', 'cancel-run', runId]))
+			.execution;
+		if (inputs)
+			await expect(runState(ctx.page).root).not.toHaveAttribute(
+				'data-run-word',
+				/^(admitted|running)$/,
+				{ timeout: 60_000 }
+			);
+
+		// Notices: listed (delivered), read and acknowledged, each one receipt.
+		let notice = NOTICE;
+		if (inputs) {
+			const [cmd, ...args] = inputs.publishNotice;
+			const published = JSON.parse(execFileSync(cmd, args, { encoding: 'utf8' }));
+			notice = { ...NOTICE, campaignId: '', ...published };
+		}
+		await ctx.page.evaluate(() => window.maestro.enterprise.inboxRefresh());
+		for (const kind of ['read', 'acknowledged'] as const) {
+			await ctx.page.evaluate(
+				({ messageId, campaignId, kind }) =>
+					window.maestro.enterprise.inboxAct({
+						messageId,
+						...(campaignId ? { campaignId } : {}),
+						action: { kind },
+					} as Parameters<typeof window.maestro.enterprise.inboxAct>[0]),
+				{ ...notice, kind }
+			);
+		}
+		const ofNotice = () =>
+			inboxReceipts(ctx.dataDir).filter((r) => r.messageId === notice.messageId);
+		const commandsBefore = commandRecords(ctx.dataDir).map((r) => r.commandId);
+		const receiptsBefore = ofNotice().map((r) => `${r.idempotencyKey}:${r.state}`);
+		const inboxCalls = () =>
+			endpoint?.calls.filter((c) => (c.body as { operation?: string }).operation === 'inbox')
+				.length ?? 0;
+		const callsBefore = inboxCalls();
+
+		// Restart: every receipt and command record stands, nothing is resent on its own.
+		await ctx.restart();
+		await register(ctx.page, inputs ?? undefined);
+		await ctx.page.waitForTimeout(5_000);
+		const commands = commandRecords(ctx.dataDir);
+		const receipts = ofNotice();
+		const refusedUnrecorded = (e?: CommandExecution) =>
+			!!e && (e.status === 'denied' || e.status === 'unavailable') && e.commandId === null;
+		const effectChecks: Record<string, boolean> = {
+			'pause and resume were refused by name with nothing recorded':
+				refusedUnrecorded(pause) &&
+				refusedUnrecorded(resume) &&
+				!commands.some((r) => r.kind === 'pause-run' || r.kind === 'resume-run'),
+			'each recorded command is one ledger record under its id': [pause, resume, cancel].every(
+				(e) => !e?.commandId || commands.filter((r) => r.commandId === e.commandId).length === 1
+			),
+			'no command was recorded after the restart':
+				JSON.stringify(commands.map((r) => r.commandId)) === JSON.stringify(commandsBefore),
+			...(lease
+				? {
+						'the cancel completed and revoked the lease':
+							cancel?.status === 'completed' &&
+							(
+								observeLedgerReceipt(ledgerFile(ctx.dataDir), lease).detail as {
+									effect?: { state?: string };
+								}
+							)?.effect?.state === 'revoked',
+					}
+				: {
+						'the cancel of a run this host never admitted ran nothing':
+							cancel?.status !== 'completed',
+					}),
+		};
+		const kinds = ['delivered', 'read', 'acknowledged'];
+		const receiptChecks: Record<string, boolean> = {
+			'delivered, read and acknowledged are one recorded receipt each': kinds.every(
+				(k) => receipts.filter((r) => r.action === k && r.state === 'recorded').length === 1
+			),
+			'three distinct idempotency keys': new Set(receipts.map((r) => r.idempotencyKey)).size === 3,
+			'the receipts stand unchanged after the restart':
+				JSON.stringify(receipts.map((r) => `${r.idempotencyKey}:${r.state}`)) ===
+				JSON.stringify(receiptsBefore),
+			...(endpoint ? { 'nothing was resent after the restart': inboxCalls() === callsBefore } : {}),
+		};
+		if (inputs) {
+			const [cmd, ...args] = inputs.readNoticeReceipts;
+			const custody = JSON.parse(
+				execFileSync(cmd, [...args, notice.messageId], { encoding: 'utf8' })
+			) as { state: string; idempotencyKey: string }[];
+			receiptChecks['the endpoint custody holds exactly the three receipts'] =
+				custody.length === 3 &&
+				custody.every((c) => receipts.some((r) => r.idempotencyKey === c.idempotencyKey));
+		}
+		const effect = observeStore(
+			'command-ledger',
+			{ pause, resume, cancel, commands: commands.map((r) => [r.kind, r.state]) },
+			effectChecks
+		);
+		const receipt = observeStore(
+			'inbox-receipt-ledger',
+			{ receipts: receipts.map((r) => [r.action, r.state]) },
+			receiptChecks
+		);
+		ctx.observe('effect', effect);
+		ctx.observe('receipt', receipt);
+		expect(effect.problems).toEqual([]);
+		expect(receipt.problems).toEqual([]);
 	});
 });

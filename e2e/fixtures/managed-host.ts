@@ -62,6 +62,19 @@ export interface ManagedRunEndpointInputs {
 	 */
 	takeOffline?: string[];
 	restoreOnline?: string[];
+	/**
+	 * The secondary-effects case only: a repository origin the signed repository
+	 * ceiling admits, and one it does not name.
+	 */
+	inScopeRepository?: string;
+	outOfScopeRepository?: string;
+	/**
+	 * The commands and notices case only: argv that publishes a notice to this
+	 * installation and prints `{"messageId","body"}`, and argv that takes the
+	 * messageId and prints the endpoint's receipt custody `[{"state","idempotencyKey"}]`.
+	 */
+	publishNotice?: string[];
+	readNoticeReceipts?: string[];
 }
 
 export const MANAGED_MODE = resolveManagedMode(process.env.MAESTRO_E2E_MANAGED_MODE);
