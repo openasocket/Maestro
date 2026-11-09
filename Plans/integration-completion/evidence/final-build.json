@@ -1,0 +1,489 @@
+{
+	"schemaVersion": 1,
+	"schema": "maestro-integration-build/1",
+	"artifactId": "MAESTRO-FINAL-CONSUMERS-BUILD",
+	"owner": "maestro",
+	"proofClass": "implementation-input",
+	"status": "complete-local-consumer-build",
+	"producerDocument": "MCOMP-33",
+	"task": "MCOMP-33-04",
+	"stage": "S18",
+	"backlog": [
+		"VERIFY-01",
+		"BASE-02"
+	],
+	"recordedAt": "2026-11-09T19:48:15.473Z",
+	"standing": "Compiled and locally tested inputs published at the content-addressed paths below. Grants no execution authority and proves no paired, native, GUI or real-provider support.",
+	"grants": {
+		"authority": "none",
+		"lease": "none",
+		"policy": "none"
+	},
+	"qualification": {
+		"paired": false,
+		"provider": false,
+		"native": false,
+		"desktopGui": false
+	},
+	"implementationRevision": "6e2232a4cb2010993166b708297bb2482bea27aa",
+	"observedRevision": "b508ce2cad2a44b176e3bb7b125d47d890e53c90",
+	"inputDigest": "b63ca065e556bf4a745457540497cda35fbf4823351e271ca4384e86a267b037",
+	"snapshot": {
+		"implementationClean": true,
+		"checkoutClean": false,
+		"implementationDigest": "316cc98c949ee1c778d28abad3e188fd8c657446ee61b111bcbb8c668316d7ec",
+		"implementationFiles": 7362,
+		"inputMap": {
+			"path": ".maestro/playbooks/Working/MCOMP-33-04/input-map.json",
+			"sha256": "999c2ceaa8859e0e6ac4c9ac02550aad50f9521501ea5d20dccc7f0237f1a236"
+		},
+		"inputDigestEncoding": "sha256(canonicalJson(inputMap.inputs))",
+		"implementationMap": "/Users/dr3/dev-shit/Maestro/dist/mega-maestro-runtime/0.37.0/17062250db843f62b00b37fa4c005170522142a8880eaa878f39fd563f4f9614/runtime.tgz#package/source/implementation.json",
+		"libraryInputMap": "/Users/dr3/dev-shit/Maestro/dist/mega-maestro-runtime/0.37.0/17062250db843f62b00b37fa4c005170522142a8880eaa878f39fd563f4f9614/runtime.tgz#package/source/library-inputs.json",
+		"changeRange": {
+			"from": "762804a15 (MCOMP-33-00 second upstream/rc selection, parent excluded)",
+			"to": "6e2232a4c (MCOMP-33-03C)",
+			"implementationRevision": "6e2232a4cb2010993166b708297bb2482bea27aa",
+			"upstream": "919d28a66 (v1.1.0-RC-823) merged as b01db5c08, landed 58bad53dc",
+			"commits": 105,
+			"milestones": [
+				"b01db5c08 (00C merge of upstream/rc 919d28a66 after 40 conflict groups 00R01..00R40)",
+				"347654584..5db2b18ee (00E..00H1 semantic carries: install-dir sync pin, native spawn snapshot, actor through queue release, Pianola memory CLI admission)",
+				"7454045b1, 85218010c (00S5, 00S6 managed Standard gate, supervised existing-tab ticket)",
+				"58bad53dc (00L landing)",
+				"db3a95641, b8e291c01, 89ffc1280 (00L1..00L3 Federation forward held, Pianola memory egress held, sandbox runner refused)",
+				"3dc7755e9 (00P re-pin)",
+				"a45414969..e72a91a03 (01, 02, 02A handoff format 2 and the 19 acceptance rows)",
+				"bdedb557f..25443080a (02B..02G Electron acceptance cases)",
+				"cf3129125, ba40d43da (03, 03A standalone journey, PREPARED/1 producer for the pair doubles)",
+				"2cae42bb6 (03B persistence baseline event shape)",
+				"6e2232a4c (03C acceptance spec type errors)"
+			],
+			"manifestReconcile": "d86f6127c and b508ce2ca (add the 73 continuations to program.json; coordination only)",
+			"changedFiles": {
+				"path": ".maestro/playbooks/Working/MCOMP-33-04/checked-files.json",
+				"sha256": "6c737bdd0c8bd0ed2b82c3e90eb223c3a1684c84417c03591d4e0b44180be137"
+			}
+		},
+		"inputs": "All tracked implementation source, prompts, templates and schemas; package and lockfiles; main/renderer/library/test/lint/format configuration; the upstream merge record, the contracts pin, the handoff and the Playwright configuration; packaged README and SDK metadata; coverage and archive plans; imported contracts and exact dependencies; all installed dependency bytes including compiler/native tools; verification harnesses and Node executable. Build override variables and renderer .env inputs were absent.",
+		"installedDependencyFiles": 86465,
+		"importedContractFiles": 891,
+		"testCoordinationInput": {
+			"path": "Plans/integration-completion/program.json",
+			"sha256": "8d5cb6f2ddc44038ada919c688725861910417a24c2f90384e3e0cc20ba64c3f",
+			"committedSha256": "e3836affe3df9a6576172bcdfe51698cd21b8f44cfa1f0ad717882e35491709f",
+			"role": "Uncommitted coordination manifest read only to validate task IDs; excluded from production source cleanliness claim"
+		},
+		"preservedDiff": {
+			"path": ".maestro/playbooks/Working/MCOMP-33-04/initial-planning.patch",
+			"sha256": "f78dfabf50e6af0fceaad3f49c777eea16c3b5f74efb2eefaa7f66c29d62e572"
+		},
+		"exclusions": "Existing planning amendments, checklist/coordination receipts, SlopTimize state and graph output are not application/build inputs. program.json is explicitly hashed as an uncommitted test coordination input. The full checkout and full test input set are not claimed committed. No private sibling implementation is loaded."
+	},
+	"dependencies": [
+		{
+			"artifactId": "MAESTRO-CONTRACT-INPUTS-BUILD",
+			"path": "Plans/integration-completion/evidence/contract-inputs-build.json",
+			"sha256": "206664f3ab7605927bbf9964597da12f4607da34bac5f601ce18e19fffca34c2",
+			"implementationRevision": "dc5938509be17742adcca713cca07c0176af6fe6",
+			"inputDigest": "115a3223b356e0975ca73b9a53c4b6e25031437915888b5534bcfd955f6116b5"
+		},
+		{
+			"artifactId": "MAESTRO-DESKTOP-APP-BUILD",
+			"path": "Plans/integration-completion/evidence/interactive-build.json",
+			"sha256": "716491936338c1379ffd17b237a87f5fe96e3f3e6556d668f62c9eb6b3104e34",
+			"implementationRevision": "3541f561cd4e7b27dda6222a769164fb3324be3e",
+			"inputDigest": "e4bd4e66c99b9119ef5b04f6bab5c2821dbbf3fcdac6ff84dcd18665d91f4318"
+		},
+		{
+			"artifactId": "MAESTRO-PROVIDER-ROUTES-BUILD",
+			"path": "Plans/integration-completion/evidence/routes-build.json",
+			"sha256": "382c196970fcf504a5654e3c7cf3bdbd54a8d3e094779894f3a452afe8c704c8",
+			"implementationRevision": "8adcfce0b3f361a036a12ee80e3cf54888286cbb",
+			"inputDigest": "7c17f27236767c09bd23820f887eeed9c990d4c1de7b8a0ff6f0c55497a6bc3a"
+		},
+		{
+			"artifactId": "MAESTRO-WORKFLOW-CONSUMERS-BUILD",
+			"path": "Plans/integration-completion/evidence/workflow-build.json",
+			"sha256": "9f1105a55d036d31724b7e7960e4f77c56812ebce2bf3c3f23600bf332c08bec",
+			"implementationRevision": "59ea7a5309eecc8d7befafd56e6dd599b2fe3b11",
+			"inputDigest": "5b64f9ca421d985cb18538ffe720cccba91bbf18d46960bfe03876402b64ed2c"
+		}
+	],
+	"archives": {
+		"runtime": {
+			"path": "/Users/dr3/dev-shit/Maestro/dist/mega-maestro-runtime/0.37.0/17062250db843f62b00b37fa4c005170522142a8880eaa878f39fd563f4f9614/runtime.tgz",
+			"sha256": "17062250db843f62b00b37fa4c005170522142a8880eaa878f39fd563f4f9614",
+			"sha512": "291c5d38ab85f4bd0d3e9babfde144047f6d0313bba73e1ac1198ab27cbece73f5103b7e1d966200ebb35dc3cfb0fa5115eef9b2ab4d5351df687be9eff1b99f",
+			"bytes": 2796900,
+			"manifest": {
+				"path": "/Users/dr3/dev-shit/Maestro/dist/mega-maestro-runtime/0.37.0/17062250db843f62b00b37fa4c005170522142a8880eaa878f39fd563f4f9614/artifact.json",
+				"sha256": "447bf937285f34035030b3fdf0b9e142e9dfba433fc215a7538f58f1ca87b83f"
+			},
+			"sidecar": {
+				"path": "/Users/dr3/dev-shit/Maestro/dist/mega-maestro-runtime/0.37.0/17062250db843f62b00b37fa4c005170522142a8880eaa878f39fd563f4f9614/runtime.tgz.sha256",
+				"sha256": "a2c777b110317c65593a5f4506a8bb5d9726a848a5441215448fbfb055855930"
+			},
+			"payloadFiles": 337,
+			"payloadDigest": "20eb21d6d3ea9a576e95f40357f4c4408ec3b498432f1768807fa5b3f8191ed5",
+			"payloadMap": "/Users/dr3/dev-shit/Maestro/dist/mega-maestro-runtime/0.37.0/17062250db843f62b00b37fa4c005170522142a8880eaa878f39fd563f4f9614/artifact.json#/payloadSha256"
+		},
+		"desktopCompiled": {
+			"path": "/Users/dr3/dev-shit/Maestro/dist/mega-maestro-final-desktop/1/000969dcfaf4e505842705e98ab8437d5275decd5e0e741a2a2623f01b08f5ad/desktop-compiled.tgz",
+			"sha256": "000969dcfaf4e505842705e98ab8437d5275decd5e0e741a2a2623f01b08f5ad",
+			"sha512": "96e6cf7c4917f212600639580054a0ce5e767213ead35a4ae95568259b24afd993e5d0889ae63f78551b09a1b5f545e44191f995a6b8a4efbb756d87b1e32d2e",
+			"bytes": 20451700,
+			"manifest": {
+				"path": "/Users/dr3/dev-shit/Maestro/dist/mega-maestro-final-desktop/1/000969dcfaf4e505842705e98ab8437d5275decd5e0e741a2a2623f01b08f5ad/artifact.json",
+				"sha256": "664f654274a3fd707b776890d8d18eec066409e3a4d5f3738d64dc13d0b6d5cb"
+			},
+			"sidecar": {
+				"path": "/Users/dr3/dev-shit/Maestro/dist/mega-maestro-final-desktop/1/000969dcfaf4e505842705e98ab8437d5275decd5e0e741a2a2623f01b08f5ad/desktop-compiled.tgz.sha256",
+				"sha256": "3d7804f89a71f0fa669e147bb62d400daa6e4d1752319b6e5d69e12396c9a4f6"
+			},
+			"payloadFiles": 2306,
+			"payloadDigest": "10e48928268ad5c8e0470d2cf518a9e1721713fdb06815b32448a93a658e5213",
+			"payloadMap": "/Users/dr3/dev-shit/Maestro/dist/mega-maestro-final-desktop/1/000969dcfaf4e505842705e98ab8437d5275decd5e0e741a2a2623f01b08f5ad/artifact.json#/payloadSha256"
+		},
+		"publicContracts": {
+			"name": "@mega-maestro/contracts",
+			"version": "0.1.0",
+			"path": "/Users/dr3/dev-shit/mega-maestro/artifacts/enterprise/0.1.0/c34e6cd0590fdce90cd2ace60f8f43ee278f6d24d62d4b6caab2bb4f720ab177/contracts.tgz",
+			"sha256": "c34e6cd0590fdce90cd2ace60f8f43ee278f6d24d62d4b6caab2bb4f720ab177",
+			"integrity": "sha512-MNZe6OgdHh5LwxRVY85zDkudqUFJjyQHdW/IgfuzH3S0cGnN1lKLaAV4dT1Z4hpyXzMbhIYiKQjpECt9RWNhTA==",
+			"manifest": {
+				"path": "/Users/dr3/dev-shit/mega-maestro/artifacts/enterprise/0.1.0/c34e6cd0590fdce90cd2ace60f8f43ee278f6d24d62d4b6caab2bb4f720ab177/artifact.json",
+				"sha256": "6c346c4fa4a7b7d4ec41b1624c7b155715128ec04c877bf0830910fd49aa127d"
+			},
+			"sidecar": {
+				"path": "/Users/dr3/dev-shit/mega-maestro/artifacts/enterprise/0.1.0/c34e6cd0590fdce90cd2ace60f8f43ee278f6d24d62d4b6caab2bb4f720ab177/contracts.tgz.sha256",
+				"sha256": "36b351059a4fc51fda3c278dc87d892fa098ac8ad8517972cec0f82f01a88fd6"
+			},
+			"payloadFiles": 46,
+			"payloadDigest": "12976943661224f30e6461430332d1fefb36f4133bd38e93cb02f006d52296fd"
+		}
+	},
+	"builds": {
+		"libraryProvenance": {
+			"path": ".maestro/playbooks/Working/MCOMP-33-04/library/provenance.json",
+			"sha256": "8ae0b9d64db4d8455990b08bb78d241f7a0785db829094da9703140bc7581f31"
+		},
+		"desktopPayloadMap": {
+			"path": ".maestro/playbooks/Working/MCOMP-33-04/main-build-payload.json",
+			"sha256": "0489e33f8108e2679aed0272d1ba2defcaa7e02eac838b12bb8bcc9045f62aba"
+		},
+		"libraryEntrySha256": "0da112ad1128d9342edc41317a33017ec9e8bed0cadf47d56a943ce4fb3445c2",
+		"committedPin": {
+			"path": "Plans/integration-completion/runtime-conformance.json",
+			"sha256": "adcfc13ca544f4a70108993571551cf090e21b7e2ab11fe76a80d9ff3136d99c",
+			"archiveSha256": "137b8b16fff351a8e428bd7bb8243279fee91e5839536a1ccdd39ea34d909e55",
+			"libraryEntryMatches": true
+		},
+		"scope": "Runtime library 0.37.0, Electron main/shared/preload and renderer compiled locally. The library entry bytes equal the committed MAESTRO-M0-RUNTIME pin; the runtime archive here differs from the pinned archive only by the implementation snapshot it carries. Desktop archive contains compiled inputs with external Electron/Node/native dependencies (dist/cli is not in it), not an installable native app."
+	},
+	"archiveValidation": {
+		"integrity": {
+			"path": ".maestro/playbooks/Working/MCOMP-33-04/archive-validation.json",
+			"sha256": "913a20b9e562f7214daa22442a5e4cf227d7ff6d76a7e100076ed0cb258f0a2a"
+		},
+		"importTrace": {
+			"path": ".maestro/playbooks/Working/MCOMP-33-04/archive-redirects.log",
+			"sha256": "4a8be6ed6688f21c8100700577e401aa7ff716c5ddab8b464facd45dbc939df2"
+		},
+		"runtimeInput": {
+			"path": ".maestro/playbooks/Working/MCOMP-33-04/runtime-input-validation.json",
+			"sha256": "4d4177f6183c2dcb7e7eacfc2614cdcee4fd72d3b8ea6c80a880633922ca3d6c"
+		},
+		"desktopRedirects": 7,
+		"runtimeRedirects": 20,
+		"scope": "SHA-256/SHA-512, sidecars, manifests, member sets, safe paths and every payload hash verified before extraction. Every relative import of the library index, the managed host adapter (PREPARED/1) and the managed authority was redirected to the public runtime bundle, and every import of the Federation forward hold (main/federation) and its state siblings (listener gate and policy, ssh-remote-manager, the shared ssh-forward manager) to the compiled desktop archive; four suites (standalone, full-pair, offline-recovery, federation-managed-hold) ran on those bytes. Suites whose doubles are vi.mock of electron or fs (system.managed) or that need dist/cli stay source-only. Public declaration checks and a plain Node load of both archives (library 0.37.0, a refused fence carries no epoch, Federation forward standalone proceeds and a listener ceiling refuses it by name before the remote is asked, an unpinned Storage Location restores nothing, the Pianola memory admission and egress seams) passed."
+	},
+	"tests": {
+		"source": {
+			"files": 91,
+			"passed": 5827,
+			"failed": 0,
+			"skipped": 8,
+			"skippedCases": [
+				"src/__tests__/cli/commands/pianola-orchestrate.test.ts :: real WSL oracle argument boundary preserves quotes, whitespace, and metacharacters through 'exec'",
+				"src/__tests__/cli/commands/pianola-orchestrate.test.ts :: real WSL oracle argument boundary preserves quotes, whitespace, and metacharacters through 'short exec'",
+				"src/__tests__/cli/commands/pianola-orchestrate.test.ts :: real WSL oracle argument boundary preserves quotes, whitespace, and metacharacters through 'no shell'",
+				"src/__tests__/cli/commands/pianola-orchestrate.test.ts :: real WSL oracle argument boundary preserves quotes, whitespace, and metacharacters through 'default shell'",
+				"src/__tests__/cli/commands/pianola-orchestrate.test.ts :: real WSL oracle argument boundary preserves quotes, whitespace, and metacharacters through 'login shell'",
+				"src/__tests__/integration/mega-maestro/full-pair.test.ts :: full pair: the real endpoint through the harness script runs the full pair against the packaged runtime: every journey passed, both source digests recorded (blo",
+				"src/__tests__/shared/maestro-lib/run/start-turn.test.ts :: applyWindowsShellRules starts a .cmd shim under a path with spaces and delivers the prompt intact",
+				"src/__tests__/shared/maestro-lib/run/start-turn.test.ts :: applyWindowsShellRules delivers lone % signs through a .cmd shim unchanged"
+			],
+			"results": {
+				"path": ".maestro/playbooks/Working/MCOMP-33-04/source-tests.json",
+				"sha256": "86e3f01730d676313f3c2d2ca2d88b9affe67d3ee568b9b464012021d3899c5a"
+			}
+		},
+		"memory": {
+			"files": 1,
+			"passed": 36,
+			"failed": 0,
+			"skipped": 3,
+			"skippedCases": [
+				"src/__tests__/main/pianola/memory-transport.test.ts :: quotes a Windows shim and escapes fixed arguments without touching stdin",
+				"src/__tests__/main/pianola/memory-transport.test.ts :: refuses prompt argv that cmd.exe cannot preserve",
+				"src/__tests__/main/pianola/memory-transport.test.ts :: rejects an oversized positional prompt before submission"
+			],
+			"results": {
+				"path": ".maestro/playbooks/Working/MCOMP-33-04/memory-tests.json",
+				"sha256": "51ed7a009ae2eb5133b6e9dac968de7222179931ab9e6729d75748a14f619a6d"
+			}
+		},
+		"archived": {
+			"files": 4,
+			"passed": 30,
+			"failed": 0,
+			"skipped": 1,
+			"skippedCases": [
+				"src/__tests__/integration/mega-maestro/full-pair.test.ts :: full pair: the real endpoint through the harness script runs the full pair against the packaged runtime: every journey passed, both source digests recorded (blo"
+			],
+			"results": {
+				"path": ".maestro/playbooks/Working/MCOMP-33-04/archive-tests.json",
+				"sha256": "bc8a3b293dc7426bb235eb3c8f2c8dd11908cbc6dac3d44d75e8a28c11e96e91"
+			}
+		},
+		"memoryRunner": "memory-transport suite under ELECTRON_RUN_AS_NODE=1 (better-sqlite3 is built for the Electron ABI in this checkout).",
+		"boundary": "Local typed-port and public-schema fixtures, labeled PREPARED/1 local producers in the pair doubles, temporary data directories and recording sinks only. No signed production receipt, trusted verifier, real provider, native peer or live endpoint supplied authority."
+	},
+	"behavior": [
+		"The integration line carries upstream/rc 919d28a66 (v1.1.0-RC-823) with every managed seam kept on the upstream paths it touched (plugins, process manager, spawners, CLI host and runtime server, consults and cross-agent routing, capture, Cue, permission relay, Pianola, Lite, web server and preload remotes, agent modals); library 0.37.0.",
+		"Paths upstream added are held on a managed host: the Federation SSH forward and its remote discovery (listener ssh-tunnel and remote probe before any byte), the Pianola memory CLI child (admitted as pianola-memory) and its hosted transport egress (content class), the Pianola sandbox validation runner (refused, managed-unavailable), a managed Storage Location pin inside the install directory (refused, folder kept).",
+		"Native harness launch fields are bound into the spawn snapshot; a queued consult or hand-off releases as the actor its dispatch was admitted for; a supervised existing-tab release carries its ticket and delegation; a managed Standard turn under a lent route passes the approval-channel gate only without a launch permission ceiling.",
+		"A host-committed new, cloned or imported agent is registered as the persistence baseline in the merged event shape (03B; before it every commit threw in the listener).",
+		"The handoff is format 2 (pinned runtime archive, pending native archives, fixtures); the 19 mandatory acceptance rows are bound to 5 pair, 2 CLI and 16 Electron declared cases with assessAcceptance; the pair doubles admit through a labeled local PREPARED/1 producer and a host without one refuses runtime-unavailable by name."
+	],
+	"contractMappings": {
+		"pin": {
+			"path": "vendor/mega-maestro/contracts.pin.json",
+			"sha256": "8343292d926cf3ed7b67a3c6f34a88eecedf85045dddb187d0357deae3daf3f4"
+		},
+		"coverage": {
+			"path": "Plans/integration-completion/contract-coverage.json",
+			"sha256": "8d6c30ffc12268f732022d0c0faf1c0acc8506f1f236232c939af242f79cfd31"
+		},
+		"endpointProtocolsAccepted": [
+			1
+		],
+		"liveNegotiationPerformed": false,
+		"extensions": [
+			"pianolaMemoryEgressClass (contract-coverage.json extensionProposals[4]): proposed-not-negotiated",
+			"pianolaSandboxRoute (contract-coverage.json extensionProposals[4]): proposed-not-negotiated",
+			"NATIVE-ENDPOINT/1: proposed-not-negotiated, no production producer"
+		],
+		"remaining": "No model-inference egress class and no confined shell route are published, so hosted memory rides the content class and the sandbox runner is refused under management; PREPARED/1 and delegation/workflow v2 negotiation have no production producer here. Production actions still require authenticated negotiated authority."
+	},
+	"checks": [
+		{
+			"name": "archive-tests",
+			"command": "st node node_modules/vitest/vitest.mjs run --config .maestro/playbooks/Working/MCOMP-33-04/vitest.archive.config.mts src/__tests__/integration/mega-maestro/standalone.test.ts src/__tests__/integration/mega-maestro/full-pair.test.ts src/__tests__/integration/mega-maestro/offline-recovery.test.ts src/__tests__/main/federation/federation-managed-hold.test.ts --reporter=default --reporter=json --outputFile=.maestro/playbooks/Working/MCOMP-33-04/archive-tests.json",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-33-04/archive-tests.log",
+				"sha256": "0407f92bc1c32d58375ccd6eccbef75fc368b449de31828179c1ff543b901091"
+			}
+		},
+		{
+			"name": "build-library",
+			"command": "st node scripts/build-maestro-lib.mjs --out-dir .maestro/playbooks/Working/MCOMP-33-04/library",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-33-04/build-library.log",
+				"sha256": "4eda3a4898a6a0bcdbe8c11f1b97b12549c41a1b7f210095fe1218bd4ea00782"
+			}
+		},
+		{
+			"name": "build-main",
+			"command": "st npm run build:main",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-33-04/build-main.log",
+				"sha256": "bc2bb632e48616e1a3845fc517d821b5bb0b78280527a034611d03f2b2208072"
+			}
+		},
+		{
+			"name": "build-renderer",
+			"command": "st npm run build:renderer",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-33-04/build-renderer.log",
+				"sha256": "b97a8c742c9ff226442826729ec23ad24833f999701542bfd8200fd067dcc1f0"
+			}
+		},
+		{
+			"name": "contract-vectors",
+			"command": "st node .maestro/playbooks/Working/MCOMP-00-03/exact-dependency-vectors.mjs",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-33-04/contract-vectors.log",
+				"sha256": "e15ef2fcaa677666d1461af0a5a760e956fee6ca69c90a14e15ea37d2443d295"
+			}
+		},
+		{
+			"name": "contracts",
+			"command": "st node .maestro/playbooks/Working/MCOMP-00-01/verify-inputs.mjs",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-33-04/contracts.log",
+				"sha256": "36eef50e024c7307bd9a3e4832a63c265dcb6df7b15878eb105b99f0b2f989a9"
+			}
+		},
+		{
+			"name": "dash-lint",
+			"command": "st node node_modules/eslint/bin/eslint.js -c eslint.dashes.config.mjs .gitignore CLAUDE-CUE.md CLAUDE-IPC.md CLAUDE-SETTINGS.md CLAUDE.md Plans/integration-completion/contract-coverage.json Plans/integration-completion/runtime-conformance.json Plans/integration-completion/upstream-merge.json Plans/mega-maestro/evidence/handoff.json docs/agent-guides/CANONICAL-UTILITIES.md docs/agent-guides/CLI-HEADLESS.md docs/agent-guides/CLI-UI-PARITY.md docs/agent-guides/IPC-PATTERNS.md docs/agent-guides/WEB-MOBILE.md docs/maestro-lib.md e2e/fixtures/acceptance-evidence.ts e2e/fixtures/managed-host.ts e2e/fixtures/plugin-harness.ts e2e/managed-full-journey.spec.ts e2e/standalone-agent.spec.ts package.json scripts/build-cli.mjs scripts/mega-maestro-pair.mjs scripts/package-mega-maestro-runtime.mjs scripts/write-mega-maestro-handoff.mjs src/__tests__/cli/commands/ask.test.ts src/__tests__/cli/commands/create-ssh-remote.test.ts src/__tests__/cli/commands/dispatch.test.ts src/__tests__/cli/commands/host.test.ts src/__tests__/cli/commands/managed.test.ts src/__tests__/cli/commands/pianola-orchestrate.test.ts src/__tests__/cli/commands/update-ssh-remote.test.ts src/__tests__/cli/services/agent-spawner.test.ts src/__tests__/cli/services/host-cue.test.ts src/__tests__/cli/services/peer-resolver.test.ts src/__tests__/cli/services/runtime-host.test.ts src/__tests__/integration/mega-maestro/full-pair.test.ts src/__tests__/integration/mega-maestro/journeys.ts src/__tests__/integration/mega-maestro/offline-recovery.test.ts src/__tests__/integration/mega-maestro/standalone.test.ts src/__tests__/main/agent-run/capture-service.test.ts src/__tests__/main/agents/codex-usage-sampler.test.ts src/__tests__/main/agents/detector.test.ts src/__tests__/main/cot-export/invisibility.test.ts src/__tests__/main/cue-bundle-service.test.ts src/__tests__/main/cue/bundle/cue-bundle-exporter.test.ts src/__tests__/main/cue/cue-spawn-builder.test.ts src/__tests__/main/enterprise/listener-policy.test.ts src/__tests__/main/federation/federation-managed-hold.test.ts src/__tests__/main/ipc/handlers/agents.test.ts src/__tests__/main/ipc/handlers/git.test.ts src/__tests__/main/ipc/handlers/persistence.test.ts src/__tests__/main/ipc/handlers/process.test.ts src/__tests__/main/ipc/handlers/process/handle-spawn-native.test.ts src/__tests__/main/ipc/handlers/process/handle-spawn.managed.test.ts src/__tests__/main/ipc/handlers/ssh-remote.test.ts src/__tests__/main/ipc/handlers/system.managed.test.ts src/__tests__/main/ipc/plugins-handlers.test.ts src/__tests__/main/lite/tailnet-relay.test.ts src/__tests__/main/permission-relay/relay-core.test.ts src/__tests__/main/pianola/memory-transport.test.ts src/__tests__/main/pianola/pianola-legacy-migration.test.ts src/__tests__/main/pianola/pianola-lifecycle.managed.test.ts src/__tests__/main/pianola/pianola-scope-host.test.ts src/__tests__/main/pianola/pianola-supervisor.managed.test.ts src/__tests__/main/plugins/authorization-ledger.test.ts src/__tests__/main/plugins/plugin-headless-agent-runner.test.ts src/__tests__/main/plugins/plugin-host-deps-wiring.test.ts src/__tests__/main/plugins/plugin-host-handlers.test.ts src/__tests__/main/plugins/plugin-primitives-security.test.ts src/__tests__/main/preload/process/browserTabRemote.test.ts src/__tests__/main/preload/process/commandRemote.test.ts src/__tests__/main/preload/process/queueRemote.test.ts src/__tests__/main/process-manager/CodexAppServerSpawner.test.ts src/__tests__/main/process-manager/ProcessManager.nativeSnapshot.managed.test.ts src/__tests__/main/process-manager/spawners/ChildProcessSpawner.test.ts src/__tests__/main/process-manager/utils/envBuilder.test.ts src/__tests__/main/quick-chat/quick-chat-controller.managed.test.ts src/__tests__/main/utils/ssh-spawn-wrapper.test.ts src/__tests__/main/web-server/handlers/bridgeHandlers.test.ts src/__tests__/main/web-server/handlers/messageHandlers.managed.test.ts src/__tests__/main/web-server/handlers/messageHandlers.test.ts src/__tests__/main/web-server/managers/CallbackRegistry.test.ts src/__tests__/main/web-server/new-tab-supervision.test.ts src/__tests__/main/web-server/web-server-factory.test.ts src/__tests__/renderer/components/NewInstanceModal.test.tsx src/__tests__/renderer/components/NewInstanceModal/EditAgentModal.test.tsx src/__tests__/renderer/components/Settings/searchableSettings.test.ts src/__tests__/renderer/components/shared/AgentConfigPanel.test.tsx src/__tests__/renderer/hooks/session/useSessionLifecycleSync.test.tsx src/__tests__/renderer/hooks/useInputProcessing.test.ts src/__tests__/renderer/hooks/useRemoteHandlers.test.ts src/__tests__/renderer/hooks/useRemoteIntegration.test.ts src/__tests__/renderer/hooks/useSessionCrud.test.ts src/__tests__/renderer/hooks/useSessionLifecycle.test.ts src/__tests__/renderer/hooks/useWizardHandlers.test.ts src/__tests__/renderer/services/agentCommit.test.ts src/__tests__/renderer/services/crossAgentAsk.test.ts src/__tests__/renderer/services/queuedPrompt.test.ts src/__tests__/renderer/stores/agentStore.test.ts src/__tests__/renderer/stores/retryStore.test.ts src/__tests__/renderer/turns/assemble-parity.test.ts src/__tests__/scripts/mega-maestro-pair.test.ts src/__tests__/setup.ts src/__tests__/shared/encoreFeatures.test.ts src/__tests__/shared/maestro-lib/client/ssh-forward.test.ts src/__tests__/shared/maestro-lib/launch/launch-plan.test.ts src/__tests__/shared/maestro-lib/run/start-turn.test.ts src/__tests__/shared/uiSurfaces.test.ts src/cli/commands/ask.ts src/cli/commands/computer-history.ts src/cli/commands/create-ssh-remote.ts src/cli/commands/dispatch.ts src/cli/commands/host.ts src/cli/commands/pianola-orchestrate.ts src/cli/commands/update-ssh-remote.ts src/cli/index.ts src/cli/services/agent-spawner.ts src/cli/services/cue-standalone-engine.ts src/cli/services/host-cue.ts src/cli/services/peer-resolver.ts src/cli/services/runtime-host.ts src/cli/services/storage.ts src/maestro-p/index.ts src/maestro-p/tui-driver.ts src/main/agent-run/capture-service.ts src/main/agent-run/setup-capture-listener.ts src/main/agents/codex-usage-sampler.ts src/main/agents/model-discovery.ts src/main/cross-agent/consult-runner.ts src/main/cross-agent/cross-agent-router.ts src/main/cue-bundle-service.ts src/main/cue/bundle/cue-bundle-exporter.ts src/main/cue/bundle/cue-bundle-importer.ts src/main/cue/cue-cli-executor.ts src/main/cue/cue-engine.ts src/main/cue/cue-github-poller.ts src/main/cue/cue-process-lifecycle.ts src/main/cue/cue-run-manager.ts src/main/cue/cue-run-router.ts src/main/cue/cue-spawn-builder.ts src/main/federation/index.ts src/main/group-chat/spawnGroupChatAgent.ts src/main/index.ts src/main/ipc/bootstrap/index.ts src/main/ipc/bootstrap/types.ts src/main/ipc/handlers/agents.ts src/main/ipc/handlers/aiCommand.ts src/main/ipc/handlers/cross-agent.ts src/main/ipc/handlers/cue-bundle.ts src/main/ipc/handlers/groupChat.ts src/main/ipc/handlers/index.ts src/main/ipc/handlers/persistence.ts src/main/ipc/handlers/plugins.ts src/main/ipc/handlers/process.ts src/main/ipc/handlers/process/apply-local-interactive-spawn.ts src/main/ipc/handlers/process/handle-spawn.ts src/main/ipc/handlers/process/spawn-types.ts src/main/ipc/handlers/ssh-remote.ts src/main/ipc/handlers/system.ts src/main/ipc/handlers/web.ts src/main/lite/index.ts src/main/lite/tailnet-relay.ts src/main/lite/tunnel.ts src/main/opencode-server/OpencodeServerManager.ts src/main/permission-relay/PermissionRelayServer.ts src/main/permission-relay/integration.ts src/main/pianola/memory-host.ts src/main/pianola/memory-transport.ts src/main/pianola/pianola-lifecycle.ts src/main/pianola/pianola-new-tab-dispatch.ts src/main/pianola/pianola-queue-routing.ts src/main/pianola/pianola-supervisor.ts src/main/plugins/authorization-ledger.ts src/main/plugins/consent-minter.ts src/main/plugins/plugin-headless-agent-runner.ts src/main/plugins/plugin-host-handlers.ts src/main/plugins/plugin-manager-singleton.ts src/main/plugins/plugin-manager.ts src/main/plugins/plugin-media-tools.ts src/main/preload/index.ts src/main/preload/process/browserTabRemote.ts src/main/preload/process/commandRemote.ts src/main/preload/process/core.ts src/main/preload/process/queueRemote.ts src/main/preload/settings.ts src/main/preload/system.ts src/main/process-manager/ProcessManager.ts src/main/process-manager/spawners/ChildProcessSpawner.ts src/main/process-manager/spawners/CodexAppServerSpawner.ts src/main/process-manager/spawners/OpencodeServerSpawner.ts src/main/process-manager/types.ts src/main/utils/context-groomer.ts src/main/web-server/WebServer.ts src/main/web-server/callbacks/browserTabCallbacks.ts src/main/web-server/callbacks/commandCallbacks.ts src/main/web-server/callbacks/queueCallbacks.ts src/main/web-server/handlers/bridgeDenyList.ts src/main/web-server/handlers/bridgeHandlers.ts src/main/web-server/handlers/messageHandlers/WebSocketMessageHandler.ts src/main/web-server/handlers/messageHandlers/commands.ts src/main/web-server/handlers/messageHandlers/queue.ts src/main/web-server/handlers/messageHandlers/sessions.ts src/main/web-server/handlers/messageHandlers/tabs.ts src/main/web-server/handlers/messageHandlers/types.ts src/main/web-server/managers/CallbackRegistry.ts src/main/web-server/routes/wsRoute.ts src/main/web-server/types.ts src/main/web-server/web-server-factory.ts src/renderer/components/AgentCreationDialog.tsx src/renderer/components/AppModals/AppSessionModals.tsx src/renderer/components/AppStandaloneModals.tsx src/renderer/components/MainPanel/MainPanelContent.tsx src/renderer/components/NewInstanceModal/EditAgentModal.tsx src/renderer/components/NewInstanceModal/NewInstanceModal.tsx src/renderer/components/NewInstanceModal/types.ts src/renderer/components/NotificationsPanel.tsx src/renderer/components/PianolaDashboard/PianolaDashboard.tsx src/renderer/components/Settings/Extensions/ExtensionDetails.tsx src/renderer/components/Settings/Extensions/ExtensionsView.tsx src/renderer/components/Settings/SettingsModal.tsx src/renderer/components/Settings/searchableSettingsEncore.ts src/renderer/components/Settings/searchableSettingsGeneral.ts src/renderer/components/Settings/tabs/EncoreTab/EncoreTab.tsx src/renderer/components/Settings/tabs/GeneralTab/components/PrivacySection.tsx src/renderer/components/shared/AgentConfigPanel.tsx src/renderer/global.d.ts src/renderer/hooks/agent/useAgentExecution.ts src/renderer/hooks/agent/useCrossAgentDispatch.ts src/renderer/hooks/input/useInputProcessing.ts src/renderer/hooks/remote/useAppRemoteEventListeners.ts src/renderer/hooks/remote/useRemoteHandlers.ts src/renderer/hooks/remote/useRemoteIntegration.ts src/renderer/hooks/session/useSessionCrud.ts src/renderer/hooks/session/useSessionLifecycle.ts src/renderer/hooks/ui/useIdleNotification.ts src/renderer/hooks/utils/useDebouncedPersistence.ts src/renderer/hooks/wizard/useWizardHandlers.ts src/renderer/services/agentCommit.ts src/renderer/services/process.ts src/renderer/services/queuedPrompt.ts src/renderer/services/quickChatRouter.ts src/renderer/stores/agentStore.ts src/renderer/stores/notificationStore.ts src/renderer/stores/settingsStore.ts src/renderer/types/index.ts src/shared/crossAgentTypes.ts src/shared/cue-bundle-types.ts src/shared/encoreFeatureDefaults.ts src/shared/lite-control.ts src/shared/maestro-lib/__tests__/built-entry.test.ts src/shared/maestro-lib/agents/consult.ts src/shared/maestro-lib/agents/repository.ts src/shared/maestro-lib/client/__tests__/ws-client.test.ts src/shared/maestro-lib/client/host-control.ts src/shared/maestro-lib/client/ssh-forward.ts src/shared/maestro-lib/client/types.ts src/shared/maestro-lib/client/ws-client.ts src/shared/maestro-lib/groupchat/__tests__/spawn.test.ts src/shared/maestro-lib/groupchat/router.ts src/shared/maestro-lib/groupchat/spawn.ts src/shared/maestro-lib/index.ts src/shared/maestro-lib/launch/agent-args.ts src/shared/maestro-lib/launch/env.ts src/shared/maestro-lib/launch/launch-plan.ts src/shared/maestro-lib/launch/ssh-spawn-wrapper.ts src/shared/maestro-lib/providers/capabilities.ts src/shared/maestro-lib/providers/definitions.ts src/shared/maestro-lib/run/start-turn.ts src/shared/maestro-lib/runtime/__tests__/server-requests.test.ts src/shared/maestro-lib/runtime/__tests__/server.test.ts src/shared/maestro-lib/runtime/__tests__/turns.test.ts src/shared/maestro-lib/runtime/client.ts src/shared/maestro-lib/runtime/server-requests.ts src/shared/maestro-lib/runtime/server.ts src/shared/maestro-lib/runtime/turns.ts src/shared/maestro-lib/version.ts src/shared/pianola/pianola-dispatch.ts src/shared/sessionPersistenceMerge.ts src/shared/settingsMetadataConnectivity.ts src/shared/settingsMetadataCore.ts src/shared/settingsMetadataFeatures.ts src/shared/types.ts src/shared/uiSurfaces.ts vitest.config.mts",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-33-04/dash-lint.log",
+				"sha256": "24283ffb1bba20ba0112546af6e49057cc7853d80f0c496bfb06e7fa7c50f3a7"
+			}
+		},
+		{
+			"name": "dependencies",
+			"command": "st node .maestro/playbooks/Working/MCOMP-33-04/verify-dependencies.mjs",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-33-04/dependencies.log",
+				"sha256": "8177360f57294cbedac6bb3edf36c82b717b54f25e4dd763451cab464350f030"
+			}
+		},
+		{
+			"name": "docs",
+			"command": "st npm run docs:verify",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-33-04/docs.log",
+				"sha256": "44357f6293fc03587424968258ed9155d9ea5cd787f678e2bd216414c62f4cab"
+			}
+		},
+		{
+			"name": "e2e-typecheck",
+			"command": "st node node_modules/typescript/bin/tsc -p .maestro/playbooks/Working/MCOMP-33-04/tsconfig.e2e.json",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-33-04/e2e-typecheck.log",
+				"sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+			}
+		},
+		{
+			"name": "eslint",
+			"command": "st node node_modules/eslint/bin/eslint.js e2e/fixtures/acceptance-evidence.ts e2e/fixtures/managed-host.ts e2e/fixtures/plugin-harness.ts e2e/managed-full-journey.spec.ts e2e/standalone-agent.spec.ts src/__tests__/integration/mega-maestro/journeys.ts src/__tests__/setup.ts src/cli/commands/ask.ts src/cli/commands/computer-history.ts src/cli/commands/create-ssh-remote.ts src/cli/commands/dispatch.ts src/cli/commands/host.ts src/cli/commands/pianola-orchestrate.ts src/cli/commands/update-ssh-remote.ts src/cli/index.ts src/cli/services/agent-spawner.ts src/cli/services/cue-standalone-engine.ts src/cli/services/host-cue.ts src/cli/services/peer-resolver.ts src/cli/services/runtime-host.ts src/cli/services/storage.ts src/maestro-p/index.ts src/maestro-p/tui-driver.ts src/main/agent-run/capture-service.ts src/main/agent-run/setup-capture-listener.ts src/main/agents/codex-usage-sampler.ts src/main/agents/model-discovery.ts src/main/cross-agent/consult-runner.ts src/main/cross-agent/cross-agent-router.ts src/main/cue-bundle-service.ts src/main/cue/bundle/cue-bundle-exporter.ts src/main/cue/bundle/cue-bundle-importer.ts src/main/cue/cue-cli-executor.ts src/main/cue/cue-engine.ts src/main/cue/cue-github-poller.ts src/main/cue/cue-process-lifecycle.ts src/main/cue/cue-run-manager.ts src/main/cue/cue-run-router.ts src/main/cue/cue-spawn-builder.ts src/main/federation/index.ts src/main/group-chat/spawnGroupChatAgent.ts src/main/index.ts src/main/ipc/bootstrap/index.ts src/main/ipc/bootstrap/types.ts src/main/ipc/handlers/agents.ts src/main/ipc/handlers/aiCommand.ts src/main/ipc/handlers/cross-agent.ts src/main/ipc/handlers/cue-bundle.ts src/main/ipc/handlers/groupChat.ts src/main/ipc/handlers/index.ts src/main/ipc/handlers/persistence.ts src/main/ipc/handlers/plugins.ts src/main/ipc/handlers/process.ts src/main/ipc/handlers/process/apply-local-interactive-spawn.ts src/main/ipc/handlers/process/handle-spawn.ts src/main/ipc/handlers/process/spawn-types.ts src/main/ipc/handlers/ssh-remote.ts src/main/ipc/handlers/system.ts src/main/ipc/handlers/web.ts src/main/lite/index.ts src/main/lite/tailnet-relay.ts src/main/lite/tunnel.ts src/main/opencode-server/OpencodeServerManager.ts src/main/permission-relay/PermissionRelayServer.ts src/main/permission-relay/integration.ts src/main/pianola/memory-host.ts src/main/pianola/memory-transport.ts src/main/pianola/pianola-lifecycle.ts src/main/pianola/pianola-new-tab-dispatch.ts src/main/pianola/pianola-queue-routing.ts src/main/pianola/pianola-supervisor.ts src/main/plugins/authorization-ledger.ts src/main/plugins/consent-minter.ts src/main/plugins/plugin-headless-agent-runner.ts src/main/plugins/plugin-host-handlers.ts src/main/plugins/plugin-manager-singleton.ts src/main/plugins/plugin-manager.ts src/main/plugins/plugin-media-tools.ts src/main/preload/index.ts src/main/preload/process/browserTabRemote.ts src/main/preload/process/commandRemote.ts src/main/preload/process/core.ts src/main/preload/process/queueRemote.ts src/main/preload/settings.ts src/main/preload/system.ts src/main/process-manager/ProcessManager.ts src/main/process-manager/spawners/ChildProcessSpawner.ts src/main/process-manager/spawners/CodexAppServerSpawner.ts src/main/process-manager/spawners/OpencodeServerSpawner.ts src/main/process-manager/types.ts src/main/utils/context-groomer.ts src/main/web-server/WebServer.ts src/main/web-server/callbacks/browserTabCallbacks.ts src/main/web-server/callbacks/commandCallbacks.ts src/main/web-server/callbacks/queueCallbacks.ts src/main/web-server/handlers/bridgeDenyList.ts src/main/web-server/handlers/bridgeHandlers.ts src/main/web-server/handlers/messageHandlers/WebSocketMessageHandler.ts src/main/web-server/handlers/messageHandlers/commands.ts src/main/web-server/handlers/messageHandlers/queue.ts src/main/web-server/handlers/messageHandlers/sessions.ts src/main/web-server/handlers/messageHandlers/tabs.ts src/main/web-server/handlers/messageHandlers/types.ts src/main/web-server/managers/CallbackRegistry.ts src/main/web-server/routes/wsRoute.ts src/main/web-server/types.ts src/main/web-server/web-server-factory.ts src/renderer/components/AgentCreationDialog.tsx src/renderer/components/AppModals/AppSessionModals.tsx src/renderer/components/AppStandaloneModals.tsx src/renderer/components/MainPanel/MainPanelContent.tsx src/renderer/components/NewInstanceModal/EditAgentModal.tsx src/renderer/components/NewInstanceModal/NewInstanceModal.tsx src/renderer/components/NewInstanceModal/types.ts src/renderer/components/NotificationsPanel.tsx src/renderer/components/PianolaDashboard/PianolaDashboard.tsx src/renderer/components/Settings/Extensions/ExtensionDetails.tsx src/renderer/components/Settings/Extensions/ExtensionsView.tsx src/renderer/components/Settings/SettingsModal.tsx src/renderer/components/Settings/searchableSettingsEncore.ts src/renderer/components/Settings/searchableSettingsGeneral.ts src/renderer/components/Settings/tabs/EncoreTab/EncoreTab.tsx src/renderer/components/Settings/tabs/GeneralTab/components/PrivacySection.tsx src/renderer/components/shared/AgentConfigPanel.tsx src/renderer/global.d.ts src/renderer/hooks/agent/useAgentExecution.ts src/renderer/hooks/agent/useCrossAgentDispatch.ts src/renderer/hooks/input/useInputProcessing.ts src/renderer/hooks/remote/useAppRemoteEventListeners.ts src/renderer/hooks/remote/useRemoteHandlers.ts src/renderer/hooks/remote/useRemoteIntegration.ts src/renderer/hooks/session/useSessionCrud.ts src/renderer/hooks/session/useSessionLifecycle.ts src/renderer/hooks/ui/useIdleNotification.ts src/renderer/hooks/utils/useDebouncedPersistence.ts src/renderer/hooks/wizard/useWizardHandlers.ts src/renderer/services/agentCommit.ts src/renderer/services/process.ts src/renderer/services/queuedPrompt.ts src/renderer/services/quickChatRouter.ts src/renderer/stores/agentStore.ts src/renderer/stores/notificationStore.ts src/renderer/stores/settingsStore.ts src/renderer/types/index.ts src/shared/crossAgentTypes.ts src/shared/cue-bundle-types.ts src/shared/encoreFeatureDefaults.ts src/shared/lite-control.ts src/shared/maestro-lib/agents/consult.ts src/shared/maestro-lib/agents/repository.ts src/shared/maestro-lib/client/host-control.ts src/shared/maestro-lib/client/ssh-forward.ts src/shared/maestro-lib/client/types.ts src/shared/maestro-lib/client/ws-client.ts src/shared/maestro-lib/groupchat/router.ts src/shared/maestro-lib/groupchat/spawn.ts src/shared/maestro-lib/index.ts src/shared/maestro-lib/launch/agent-args.ts src/shared/maestro-lib/launch/env.ts src/shared/maestro-lib/launch/launch-plan.ts src/shared/maestro-lib/launch/ssh-spawn-wrapper.ts src/shared/maestro-lib/providers/capabilities.ts src/shared/maestro-lib/providers/definitions.ts src/shared/maestro-lib/run/start-turn.ts src/shared/maestro-lib/runtime/client.ts src/shared/maestro-lib/runtime/server-requests.ts src/shared/maestro-lib/runtime/server.ts src/shared/maestro-lib/runtime/turns.ts src/shared/maestro-lib/version.ts src/shared/pianola/pianola-dispatch.ts src/shared/sessionPersistenceMerge.ts src/shared/settingsMetadataConnectivity.ts src/shared/settingsMetadataCore.ts src/shared/settingsMetadataFeatures.ts src/shared/types.ts src/shared/uiSurfaces.ts",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-33-04/eslint.log",
+				"sha256": "7bee856f58d0cd8f61d0d520485071af0f666abfeb1d014bd931059c049f548a"
+			}
+		},
+		{
+			"name": "extract-all",
+			"command": "st python3 .maestro/playbooks/Working/MCOMP-33-04/extract.py",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-33-04/extract-all.log",
+				"sha256": "913a20b9e562f7214daa22442a5e4cf227d7ff6d76a7e100076ed0cb258f0a2a"
+			}
+		},
+		{
+			"name": "format",
+			"command": "st node node_modules/prettier/bin/prettier.cjs --check .gitignore CLAUDE-CUE.md CLAUDE-IPC.md CLAUDE-SETTINGS.md CLAUDE.md Plans/integration-completion/contract-coverage.json Plans/integration-completion/runtime-conformance.json Plans/integration-completion/upstream-merge.json Plans/mega-maestro/evidence/handoff.json docs/agent-guides/CANONICAL-UTILITIES.md docs/agent-guides/CLI-HEADLESS.md docs/agent-guides/CLI-UI-PARITY.md docs/agent-guides/IPC-PATTERNS.md docs/agent-guides/WEB-MOBILE.md docs/maestro-lib.md e2e/fixtures/acceptance-evidence.ts e2e/fixtures/managed-host.ts e2e/fixtures/plugin-harness.ts e2e/managed-full-journey.spec.ts e2e/standalone-agent.spec.ts package.json scripts/build-cli.mjs scripts/mega-maestro-pair.mjs scripts/package-mega-maestro-runtime.mjs scripts/write-mega-maestro-handoff.mjs src/__tests__/cli/commands/ask.test.ts src/__tests__/cli/commands/create-ssh-remote.test.ts src/__tests__/cli/commands/dispatch.test.ts src/__tests__/cli/commands/host.test.ts src/__tests__/cli/commands/managed.test.ts src/__tests__/cli/commands/pianola-orchestrate.test.ts src/__tests__/cli/commands/update-ssh-remote.test.ts src/__tests__/cli/services/agent-spawner.test.ts src/__tests__/cli/services/host-cue.test.ts src/__tests__/cli/services/peer-resolver.test.ts src/__tests__/cli/services/runtime-host.test.ts src/__tests__/integration/mega-maestro/full-pair.test.ts src/__tests__/integration/mega-maestro/journeys.ts src/__tests__/integration/mega-maestro/offline-recovery.test.ts src/__tests__/integration/mega-maestro/standalone.test.ts src/__tests__/main/agent-run/capture-service.test.ts src/__tests__/main/agents/codex-usage-sampler.test.ts src/__tests__/main/agents/detector.test.ts src/__tests__/main/cot-export/invisibility.test.ts src/__tests__/main/cue-bundle-service.test.ts src/__tests__/main/cue/bundle/cue-bundle-exporter.test.ts src/__tests__/main/cue/cue-spawn-builder.test.ts src/__tests__/main/enterprise/listener-policy.test.ts src/__tests__/main/federation/federation-managed-hold.test.ts src/__tests__/main/ipc/handlers/agents.test.ts src/__tests__/main/ipc/handlers/git.test.ts src/__tests__/main/ipc/handlers/persistence.test.ts src/__tests__/main/ipc/handlers/process.test.ts src/__tests__/main/ipc/handlers/process/handle-spawn-native.test.ts src/__tests__/main/ipc/handlers/process/handle-spawn.managed.test.ts src/__tests__/main/ipc/handlers/ssh-remote.test.ts src/__tests__/main/ipc/handlers/system.managed.test.ts src/__tests__/main/ipc/plugins-handlers.test.ts src/__tests__/main/lite/tailnet-relay.test.ts src/__tests__/main/permission-relay/relay-core.test.ts src/__tests__/main/pianola/memory-transport.test.ts src/__tests__/main/pianola/pianola-legacy-migration.test.ts src/__tests__/main/pianola/pianola-lifecycle.managed.test.ts src/__tests__/main/pianola/pianola-scope-host.test.ts src/__tests__/main/pianola/pianola-supervisor.managed.test.ts src/__tests__/main/plugins/authorization-ledger.test.ts src/__tests__/main/plugins/plugin-headless-agent-runner.test.ts src/__tests__/main/plugins/plugin-host-deps-wiring.test.ts src/__tests__/main/plugins/plugin-host-handlers.test.ts src/__tests__/main/plugins/plugin-primitives-security.test.ts src/__tests__/main/preload/process/browserTabRemote.test.ts src/__tests__/main/preload/process/commandRemote.test.ts src/__tests__/main/preload/process/queueRemote.test.ts src/__tests__/main/process-manager/CodexAppServerSpawner.test.ts src/__tests__/main/process-manager/ProcessManager.nativeSnapshot.managed.test.ts src/__tests__/main/process-manager/spawners/ChildProcessSpawner.test.ts src/__tests__/main/process-manager/utils/envBuilder.test.ts src/__tests__/main/quick-chat/quick-chat-controller.managed.test.ts src/__tests__/main/utils/ssh-spawn-wrapper.test.ts src/__tests__/main/web-server/handlers/bridgeHandlers.test.ts src/__tests__/main/web-server/handlers/messageHandlers.managed.test.ts src/__tests__/main/web-server/handlers/messageHandlers.test.ts src/__tests__/main/web-server/managers/CallbackRegistry.test.ts src/__tests__/main/web-server/new-tab-supervision.test.ts src/__tests__/main/web-server/web-server-factory.test.ts src/__tests__/renderer/components/NewInstanceModal.test.tsx src/__tests__/renderer/components/NewInstanceModal/EditAgentModal.test.tsx src/__tests__/renderer/components/Settings/searchableSettings.test.ts src/__tests__/renderer/components/shared/AgentConfigPanel.test.tsx src/__tests__/renderer/hooks/session/useSessionLifecycleSync.test.tsx src/__tests__/renderer/hooks/useInputProcessing.test.ts src/__tests__/renderer/hooks/useRemoteHandlers.test.ts src/__tests__/renderer/hooks/useRemoteIntegration.test.ts src/__tests__/renderer/hooks/useSessionCrud.test.ts src/__tests__/renderer/hooks/useSessionLifecycle.test.ts src/__tests__/renderer/hooks/useWizardHandlers.test.ts src/__tests__/renderer/services/agentCommit.test.ts src/__tests__/renderer/services/crossAgentAsk.test.ts src/__tests__/renderer/services/queuedPrompt.test.ts src/__tests__/renderer/stores/agentStore.test.ts src/__tests__/renderer/stores/retryStore.test.ts src/__tests__/renderer/turns/assemble-parity.test.ts src/__tests__/scripts/mega-maestro-pair.test.ts src/__tests__/setup.ts src/__tests__/shared/encoreFeatures.test.ts src/__tests__/shared/maestro-lib/client/ssh-forward.test.ts src/__tests__/shared/maestro-lib/launch/launch-plan.test.ts src/__tests__/shared/maestro-lib/run/start-turn.test.ts src/__tests__/shared/uiSurfaces.test.ts src/cli/commands/ask.ts src/cli/commands/computer-history.ts src/cli/commands/create-ssh-remote.ts src/cli/commands/dispatch.ts src/cli/commands/host.ts src/cli/commands/pianola-orchestrate.ts src/cli/commands/update-ssh-remote.ts src/cli/index.ts src/cli/services/agent-spawner.ts src/cli/services/cue-standalone-engine.ts src/cli/services/host-cue.ts src/cli/services/peer-resolver.ts src/cli/services/runtime-host.ts src/cli/services/storage.ts src/maestro-p/index.ts src/maestro-p/tui-driver.ts src/main/agent-run/capture-service.ts src/main/agent-run/setup-capture-listener.ts src/main/agents/codex-usage-sampler.ts src/main/agents/model-discovery.ts src/main/cross-agent/consult-runner.ts src/main/cross-agent/cross-agent-router.ts src/main/cue-bundle-service.ts src/main/cue/bundle/cue-bundle-exporter.ts src/main/cue/bundle/cue-bundle-importer.ts src/main/cue/cue-cli-executor.ts src/main/cue/cue-engine.ts src/main/cue/cue-github-poller.ts src/main/cue/cue-process-lifecycle.ts src/main/cue/cue-run-manager.ts src/main/cue/cue-run-router.ts src/main/cue/cue-spawn-builder.ts src/main/federation/index.ts src/main/group-chat/spawnGroupChatAgent.ts src/main/index.ts src/main/ipc/bootstrap/index.ts src/main/ipc/bootstrap/types.ts src/main/ipc/handlers/agents.ts src/main/ipc/handlers/aiCommand.ts src/main/ipc/handlers/cross-agent.ts src/main/ipc/handlers/cue-bundle.ts src/main/ipc/handlers/groupChat.ts src/main/ipc/handlers/index.ts src/main/ipc/handlers/persistence.ts src/main/ipc/handlers/plugins.ts src/main/ipc/handlers/process.ts src/main/ipc/handlers/process/apply-local-interactive-spawn.ts src/main/ipc/handlers/process/handle-spawn.ts src/main/ipc/handlers/process/spawn-types.ts src/main/ipc/handlers/ssh-remote.ts src/main/ipc/handlers/system.ts src/main/ipc/handlers/web.ts src/main/lite/index.ts src/main/lite/tailnet-relay.ts src/main/lite/tunnel.ts src/main/opencode-server/OpencodeServerManager.ts src/main/permission-relay/PermissionRelayServer.ts src/main/permission-relay/integration.ts src/main/pianola/memory-host.ts src/main/pianola/memory-transport.ts src/main/pianola/pianola-lifecycle.ts src/main/pianola/pianola-new-tab-dispatch.ts src/main/pianola/pianola-queue-routing.ts src/main/pianola/pianola-supervisor.ts src/main/plugins/authorization-ledger.ts src/main/plugins/consent-minter.ts src/main/plugins/plugin-headless-agent-runner.ts src/main/plugins/plugin-host-handlers.ts src/main/plugins/plugin-manager-singleton.ts src/main/plugins/plugin-manager.ts src/main/plugins/plugin-media-tools.ts src/main/preload/index.ts src/main/preload/process/browserTabRemote.ts src/main/preload/process/commandRemote.ts src/main/preload/process/core.ts src/main/preload/process/queueRemote.ts src/main/preload/settings.ts src/main/preload/system.ts src/main/process-manager/ProcessManager.ts src/main/process-manager/spawners/ChildProcessSpawner.ts src/main/process-manager/spawners/CodexAppServerSpawner.ts src/main/process-manager/spawners/OpencodeServerSpawner.ts src/main/process-manager/types.ts src/main/utils/context-groomer.ts src/main/web-server/WebServer.ts src/main/web-server/callbacks/browserTabCallbacks.ts src/main/web-server/callbacks/commandCallbacks.ts src/main/web-server/callbacks/queueCallbacks.ts src/main/web-server/handlers/bridgeDenyList.ts src/main/web-server/handlers/bridgeHandlers.ts src/main/web-server/handlers/messageHandlers/WebSocketMessageHandler.ts src/main/web-server/handlers/messageHandlers/commands.ts src/main/web-server/handlers/messageHandlers/queue.ts src/main/web-server/handlers/messageHandlers/sessions.ts src/main/web-server/handlers/messageHandlers/tabs.ts src/main/web-server/handlers/messageHandlers/types.ts src/main/web-server/managers/CallbackRegistry.ts src/main/web-server/routes/wsRoute.ts src/main/web-server/types.ts src/main/web-server/web-server-factory.ts src/renderer/components/AgentCreationDialog.tsx src/renderer/components/AppModals/AppSessionModals.tsx src/renderer/components/AppStandaloneModals.tsx src/renderer/components/MainPanel/MainPanelContent.tsx src/renderer/components/NewInstanceModal/EditAgentModal.tsx src/renderer/components/NewInstanceModal/NewInstanceModal.tsx src/renderer/components/NewInstanceModal/types.ts src/renderer/components/NotificationsPanel.tsx src/renderer/components/PianolaDashboard/PianolaDashboard.tsx src/renderer/components/Settings/Extensions/ExtensionDetails.tsx src/renderer/components/Settings/Extensions/ExtensionsView.tsx src/renderer/components/Settings/SettingsModal.tsx src/renderer/components/Settings/searchableSettingsEncore.ts src/renderer/components/Settings/searchableSettingsGeneral.ts src/renderer/components/Settings/tabs/EncoreTab/EncoreTab.tsx src/renderer/components/Settings/tabs/GeneralTab/components/PrivacySection.tsx src/renderer/components/shared/AgentConfigPanel.tsx src/renderer/global.d.ts src/renderer/hooks/agent/useAgentExecution.ts src/renderer/hooks/agent/useCrossAgentDispatch.ts src/renderer/hooks/input/useInputProcessing.ts src/renderer/hooks/remote/useAppRemoteEventListeners.ts src/renderer/hooks/remote/useRemoteHandlers.ts src/renderer/hooks/remote/useRemoteIntegration.ts src/renderer/hooks/session/useSessionCrud.ts src/renderer/hooks/session/useSessionLifecycle.ts src/renderer/hooks/ui/useIdleNotification.ts src/renderer/hooks/utils/useDebouncedPersistence.ts src/renderer/hooks/wizard/useWizardHandlers.ts src/renderer/services/agentCommit.ts src/renderer/services/process.ts src/renderer/services/queuedPrompt.ts src/renderer/services/quickChatRouter.ts src/renderer/stores/agentStore.ts src/renderer/stores/notificationStore.ts src/renderer/stores/settingsStore.ts src/renderer/types/index.ts src/shared/crossAgentTypes.ts src/shared/cue-bundle-types.ts src/shared/encoreFeatureDefaults.ts src/shared/lite-control.ts src/shared/maestro-lib/__tests__/built-entry.test.ts src/shared/maestro-lib/agents/consult.ts src/shared/maestro-lib/agents/repository.ts src/shared/maestro-lib/client/__tests__/ws-client.test.ts src/shared/maestro-lib/client/host-control.ts src/shared/maestro-lib/client/ssh-forward.ts src/shared/maestro-lib/client/types.ts src/shared/maestro-lib/client/ws-client.ts src/shared/maestro-lib/groupchat/__tests__/spawn.test.ts src/shared/maestro-lib/groupchat/router.ts src/shared/maestro-lib/groupchat/spawn.ts src/shared/maestro-lib/index.ts src/shared/maestro-lib/launch/agent-args.ts src/shared/maestro-lib/launch/env.ts src/shared/maestro-lib/launch/launch-plan.ts src/shared/maestro-lib/launch/ssh-spawn-wrapper.ts src/shared/maestro-lib/providers/capabilities.ts src/shared/maestro-lib/providers/definitions.ts src/shared/maestro-lib/run/start-turn.ts src/shared/maestro-lib/runtime/__tests__/server-requests.test.ts src/shared/maestro-lib/runtime/__tests__/server.test.ts src/shared/maestro-lib/runtime/__tests__/turns.test.ts src/shared/maestro-lib/runtime/client.ts src/shared/maestro-lib/runtime/server-requests.ts src/shared/maestro-lib/runtime/server.ts src/shared/maestro-lib/runtime/turns.ts src/shared/maestro-lib/version.ts src/shared/pianola/pianola-dispatch.ts src/shared/sessionPersistenceMerge.ts src/shared/settingsMetadataConnectivity.ts src/shared/settingsMetadataCore.ts src/shared/settingsMetadataFeatures.ts src/shared/types.ts src/shared/uiSurfaces.ts vitest.config.mts",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-33-04/format.log",
+				"sha256": "17aa973d3f004560237d9a95171210b0671deff23d61628eecf7322ff5938f20"
+			}
+		},
+		{
+			"name": "memory-tests",
+			"command": "st node_modules/electron/dist/Electron.app/Contents/MacOS/Electron node_modules/vitest/vitest.mjs run src/__tests__/main/pianola/memory-transport.test.ts --reporter=default --reporter=json --outputFile=.maestro/playbooks/Working/MCOMP-33-04/memory-tests.json",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-33-04/memory-tests.log",
+				"sha256": "4bcfdba05107e614898c5f05deeb3a5d397248e0529dd0f95da4da2fa832dd81"
+			}
+		},
+		{
+			"name": "package",
+			"command": "st node .maestro/playbooks/Working/MCOMP-33-04/package.mjs",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-33-04/package.log",
+				"sha256": "75f30e22611bc3d092d49b81feb5ecfd69829c6397cf4b0dc9c4164208904f47"
+			}
+		},
+		{
+			"name": "package-desktop",
+			"command": "st node .maestro/playbooks/Working/MCOMP-33-04/package-desktop.mjs",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-33-04/package-desktop.log",
+				"sha256": "5217e8f0a002bfb27c6fc1288eca76565b33928427d1ea2f3a5287cc029b5ceb"
+			}
+		},
+		{
+			"name": "plain-node-load",
+			"command": "st node .maestro/playbooks/Working/MCOMP-33-04/load.mjs",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-33-04/plain-node-load.log",
+				"sha256": "e0e53f0f6087a3e538f5806b85bc446cfb77ee20fbe4ee5faac2f659a962ed23"
+			}
+		},
+		{
+			"name": "public-types",
+			"command": "st node node_modules/typescript/bin/tsc --ignoreConfig --noEmit --strict --target es2022 --module esnext --moduleResolution bundler --skipLibCheck --esModuleInterop .maestro/playbooks/Working/MCOMP-33-04/consumer.ts",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-33-04/public-types.log",
+				"sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+			}
+		},
+		{
+			"name": "runtime-input",
+			"command": "st node .maestro/playbooks/Working/MCOMP-33-04/verify-runtime.mjs",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-33-04/runtime-input.log",
+				"sha256": "e484de55cc2c81fdea3925934f76536e7ed4250da69c78fc6d678f223e5bf767"
+			}
+		},
+		{
+			"name": "schemas",
+			"command": "st node .maestro/playbooks/Working/MCOMP-00-01/load-schemas.mjs",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-33-04/schemas.log",
+				"sha256": "b5948d1f375bddd6ecbf9e871653e313413adbb7b5a4d25b063d3f2e153a443d"
+			}
+		},
+		{
+			"name": "source-tests",
+			"command": "st node node_modules/vitest/vitest.mjs run src/__tests__/cli/commands/ask.test.ts src/__tests__/cli/commands/create-ssh-remote.test.ts src/__tests__/cli/commands/dispatch.test.ts src/__tests__/cli/commands/host.test.ts src/__tests__/cli/commands/managed.test.ts src/__tests__/cli/commands/pianola-orchestrate.test.ts src/__tests__/cli/commands/update-ssh-remote.test.ts src/__tests__/cli/services/agent-spawner.test.ts src/__tests__/cli/services/host-cue.test.ts src/__tests__/cli/services/peer-resolver.test.ts src/__tests__/cli/services/runtime-host.test.ts src/__tests__/integration/mega-maestro/conformance.test.ts src/__tests__/integration/mega-maestro/full-pair.test.ts src/__tests__/integration/mega-maestro/offline-recovery.test.ts src/__tests__/integration/mega-maestro/standalone.test.ts src/__tests__/main/agent-run/capture-service.test.ts src/__tests__/main/agents/codex-usage-sampler.test.ts src/__tests__/main/agents/detector.test.ts src/__tests__/main/cot-export/invisibility.test.ts src/__tests__/main/cue-bundle-service.test.ts src/__tests__/main/cue/bundle/cue-bundle-exporter.test.ts src/__tests__/main/cue/cue-spawn-builder.test.ts src/__tests__/main/enterprise/listener-policy.test.ts src/__tests__/main/federation/federation-managed-hold.test.ts src/__tests__/main/ipc/handlers/agents.test.ts src/__tests__/main/ipc/handlers/git.test.ts src/__tests__/main/ipc/handlers/persistence.test.ts src/__tests__/main/ipc/handlers/process.test.ts src/__tests__/main/ipc/handlers/process/handle-spawn-native.test.ts src/__tests__/main/ipc/handlers/process/handle-spawn.managed.test.ts src/__tests__/main/ipc/handlers/ssh-remote.test.ts src/__tests__/main/ipc/handlers/system.managed.test.ts src/__tests__/main/ipc/plugins-handlers.test.ts src/__tests__/main/lite/tailnet-relay.test.ts src/__tests__/main/permission-relay/relay-core.test.ts src/__tests__/main/pianola/pianola-legacy-migration.test.ts src/__tests__/main/pianola/pianola-lifecycle.managed.test.ts src/__tests__/main/pianola/pianola-scope-host.test.ts src/__tests__/main/pianola/pianola-supervisor.managed.test.ts src/__tests__/main/plugins/authorization-ledger.test.ts src/__tests__/main/plugins/plugin-headless-agent-runner.test.ts src/__tests__/main/plugins/plugin-host-deps-wiring.test.ts src/__tests__/main/plugins/plugin-host-handlers.test.ts src/__tests__/main/plugins/plugin-primitives-security.test.ts src/__tests__/main/preload/process/browserTabRemote.test.ts src/__tests__/main/preload/process/commandRemote.test.ts src/__tests__/main/preload/process/queueRemote.test.ts src/__tests__/main/process-manager/CodexAppServerSpawner.test.ts src/__tests__/main/process-manager/ProcessManager.nativeSnapshot.managed.test.ts src/__tests__/main/process-manager/spawners/ChildProcessSpawner.test.ts src/__tests__/main/process-manager/utils/envBuilder.test.ts src/__tests__/main/quick-chat/quick-chat-controller.managed.test.ts src/__tests__/main/utils/ssh-spawn-wrapper.test.ts src/__tests__/main/web-server/handlers/bridgeHandlers.test.ts src/__tests__/main/web-server/handlers/messageHandlers.managed.test.ts src/__tests__/main/web-server/handlers/messageHandlers.test.ts src/__tests__/main/web-server/managers/CallbackRegistry.test.ts src/__tests__/main/web-server/new-tab-supervision.test.ts src/__tests__/main/web-server/web-server-factory.test.ts src/__tests__/renderer/components/NewInstanceModal.test.tsx src/__tests__/renderer/components/NewInstanceModal/EditAgentModal.test.tsx src/__tests__/renderer/components/Settings/searchableSettings.test.ts src/__tests__/renderer/components/shared/AgentConfigPanel.test.tsx src/__tests__/renderer/hooks/session/useSessionLifecycleSync.test.tsx src/__tests__/renderer/hooks/useInputProcessing.test.ts src/__tests__/renderer/hooks/useRemoteHandlers.test.ts src/__tests__/renderer/hooks/useRemoteIntegration.test.ts src/__tests__/renderer/hooks/useSessionCrud.test.ts src/__tests__/renderer/hooks/useSessionLifecycle.test.ts src/__tests__/renderer/hooks/useWizardHandlers.test.ts src/__tests__/renderer/services/agentCommit.test.ts src/__tests__/renderer/services/crossAgentAsk.test.ts src/__tests__/renderer/services/queuedPrompt.test.ts src/__tests__/renderer/stores/agentStore.test.ts src/__tests__/renderer/stores/retryStore.test.ts src/__tests__/renderer/turns/assemble-parity.test.ts src/__tests__/scripts/mega-maestro-handoff.test.ts src/__tests__/scripts/mega-maestro-pair.test.ts src/__tests__/scripts/package-mega-maestro-runtime.test.ts src/__tests__/shared/encoreFeatures.test.ts src/__tests__/shared/maestro-lib/client/ssh-forward.test.ts src/__tests__/shared/maestro-lib/launch/launch-plan.test.ts src/__tests__/shared/maestro-lib/managed/contracts.test.ts src/__tests__/shared/maestro-lib/run/start-turn.test.ts src/__tests__/shared/uiSurfaces.test.ts src/shared/maestro-lib/__tests__/built-entry.test.ts src/shared/maestro-lib/client/__tests__/ws-client.test.ts src/shared/maestro-lib/groupchat/__tests__/spawn.test.ts src/shared/maestro-lib/runtime/__tests__/server-requests.test.ts src/shared/maestro-lib/runtime/__tests__/server.test.ts src/shared/maestro-lib/runtime/__tests__/turns.test.ts --reporter=default --reporter=json --outputFile=.maestro/playbooks/Working/MCOMP-33-04/source-tests.json",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-33-04/source-tests.log",
+				"sha256": "9e2e41ba38f4219e349bff4edf7011281c0c84a587eda82d716e2fd5632d0ccc"
+			}
+		},
+		{
+			"name": "typecheck",
+			"command": "st npm run lint",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-33-04/typecheck.log",
+				"sha256": "ed9e886b2a647f29f520344068302948b8558e4b83a448690f8259049c5af0b3"
+			}
+		}
+	],
+	"limitations": [
+		"This BUILD supplies local compiled inputs only; the paired, native, provider and GUI qualification of the 19 acceptance rows remains in the separate qualification documents.",
+		"The Electron acceptance specs (e2e/managed-full-journey.spec.ts, e2e/standalone-agent.spec.ts) were type-checked only: the macOS screen was locked (CGSSessionScreenIsLocked), so Electron opens no window; no e2e result is claimed.",
+		"Skipped cases are named in tests.*.skippedCases: WSL and Windows platform gates, and the real-endpoint full pair, which is blocked by design on CP-01, CP-02, CP-03, the Linux runtime probe and registration approval.",
+		"The remote-host status|start CLI verb and the Federation forward on a standalone host stay unheld by design (no authority to ask).",
+		"Renderer build exited zero; its warnings are retained in the log. Compilation is not GUI/runtime qualification.",
+		"Archives and detailed evidence are workspace-local handoff artifacts. No remote artifact registry, native application archive, CI matrix qualification or production release is claimed."
+	],
+	"imagesAnalyzed": 0
+}
