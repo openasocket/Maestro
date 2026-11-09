@@ -24,7 +24,7 @@
  * - a standalone host is unchanged: no admission, still classified.
  */
 import * as os from 'os';
-import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
 
 vi.mock('electron', () => ({
 	ipcMain: { handle: vi.fn(), on: vi.fn(), removeHandler: vi.fn() },
@@ -105,6 +105,7 @@ import {
 	runAsTransport,
 	type TransportAdmission,
 } from '../../../main/web-server/auth/transport-actor';
+import { WebSocket } from 'ws';
 import { WebSocketMessageHandler } from '../../../main/web-server/handlers/messageHandlers';
 import type { WebClient } from '../../../main/web-server/handlers/messageHandlers';
 import {
@@ -152,7 +153,7 @@ function makeController(settingsAgentId = AGENT) {
 /** A socket as the upgrade admitted it: the CLI secret, a Web Login account, or a paired device. */
 function client(extra: Partial<WebClient> = {}): WebClient {
 	return {
-		socket: { send: vi.fn() } as unknown as WebClient['socket'],
+		socket: { readyState: WebSocket.OPEN, send: vi.fn() } as unknown as WebClient['socket'],
 		id: 'client-1',
 		connectedAt: 0,
 		...extra,
@@ -203,6 +204,13 @@ function payload(overrides: Partial<SpawnProcessConfig> = {}): SpawnProcessConfi
 	};
 }
 
+/**
+ * Managers a harness built this case. The spawn handler holds the provider
+ * session writer of a turn until its process exits, and the replaced `spawn`
+ * never exits, so `afterEach` ends each turn the way the manager would.
+ */
+const harnessManagers: ProcessManager[] = [];
+
 /** The real spawn handler over the real manager and the port given, `spawn` replaced last. */
 function spawnHarness(port: FakeSpawnPort | ReturnType<typeof createProcessSpawnAuthority>) {
 	const definition = getAgentDefinition('codex');
@@ -214,6 +222,7 @@ function spawnHarness(port: FakeSpawnPort | ReturnType<typeof createProcessSpawn
 		capabilities: getAgentCapabilities('codex'),
 	};
 	const processManager = new ProcessManager(() => true, { spawnAuthority: () => port });
+	harnessManagers.push(processManager);
 	const errors: string[] = [];
 	processManager.on('agent-error', (_sessionId: string, error: { message: string }) => {
 		errors.push(error.message);
@@ -276,6 +285,12 @@ function groomHandler(): GroomHandler {
 	const call = (ipcMain.handle as Mock).mock.calls.find(([c]) => c === 'context:groomContext');
 	return call![1] as GroomHandler;
 }
+
+afterEach(async () => {
+	for (const manager of harnessManagers.splice(0)) manager.emit('exit', PROCESS, 0);
+	// The writer is released on a microtask after the exit.
+	await Promise.resolve();
+});
 
 beforeEach(() => {
 	vi.clearAllMocks();

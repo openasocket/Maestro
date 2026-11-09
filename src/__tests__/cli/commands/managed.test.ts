@@ -74,6 +74,7 @@ import {
 	managedInboxRecover,
 	managedRun,
 } from '../../../cli/commands/managed-inbox';
+import { WebSocket } from 'ws';
 import { openModal } from '../../../cli/commands/open-modal';
 import { resolveUiSurface } from '../../../shared/uiSurfaces';
 import { NO_MANAGED_SETTING_LOCKS } from '../../../shared/managedSettingsLock';
@@ -228,7 +229,7 @@ describe('maestro-cli managed over the real bridge and facade (MRC2-07-08)', () 
 			id: 'cli-1',
 			connectedAt: 0,
 			cli: true,
-			socket: { send: vi.fn() },
+			socket: { readyState: WebSocket.OPEN, send: vi.fn() },
 		} as unknown as WebClient;
 		handler.handleMessage(client, { requestId: 'req-1', ...payload } as never);
 		const send = client.socket.send as ReturnType<typeof vi.fn>;
