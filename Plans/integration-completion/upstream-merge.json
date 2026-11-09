@@ -1442,8 +1442,8 @@
 		"rules": "the rules of the first selection apply unchanged (no forced reset, checkout loss, history rewrite or signing change; landing only on feature/mega-maestro-v1.1.0-rc by a merge commit; enterprise guards and standalone semantics survive; the desktop host stays Electron)",
 		"tool": ".maestro/playbooks/Working/mcomp-33-00/merge-tool.mjs (the MCOMP-01-03 driver with the second worktree and selection; not in git)",
 		"status": {
-			"state": "landed on the feature branch at 58bad53dc and pushed; integration worktree removed; continuations MCOMP-33-00L1..L3 open ahead of the re-pin MCOMP-33-00P",
-			"updatedBy": "MCOMP-33-00L"
+			"state": "landed on the feature branch at 58bad53dc and pushed; MCOMP-33-00L1 done (db3a95641); continuations MCOMP-33-00L2..L3 open ahead of the re-pin MCOMP-33-00P",
+			"updatedBy": "MCOMP-33-00L1"
 		},
 		"progress": {
 			"MCOMP-33-00R01": {
@@ -3224,6 +3224,41 @@
 				"worktreeRemoved": "node_modules deleted with fs.rmSync (lstat: the electron/dist link was unlinked, the main checkout dist untouched), the untracked SlopTimize scratch .sloptimize/ removed, git worktree remove exit 0; worktree agent 6ad3b46d removed with maestro-cli remove-agent. Branch integrate/upstream-rc-919d28a kept (it is the landing second parent).",
 				"continuations": ["MCOMP-33-00L1", "MCOMP-33-00L2", "MCOMP-33-00L3"],
 				"tools": "Working/mcomp-33-00l: land.mjs (merge|commit), merge-msg.txt, build-list.mjs, run-suites.mjs, sinks.mjs, handoffs.mjs, scan.mjs, remove-worktree.mjs, record.mjs"
+			},
+			"MCOMP-33-00L1": {
+				"completedAt": "2026-11-09",
+				"completedBy": "Maestro-Claude",
+				"commit": "db3a95641",
+				"authoredFiles": [
+					"src/shared/maestro-lib/client/ssh-forward.ts",
+					"src/main/federation/index.ts",
+					"src/cli/services/peer-resolver.ts"
+				],
+				"holds": {
+					"forwardManager": "SshForwardManagerOptions.admit (default: the process-wide setSshForwardAdmission(), read per attempt) is awaited at the top of every attempt, before the remote discovery ssh (discoverRemoteHost exec), the availableLocalPort probe and the ssh -L spawn; a refusal is the attempt error (state down, backoff, asked again on retry) and nothing is dialed.",
+					"desktop": "holdFederationForward() in src/main/federation/index.ts, installed by the Federation lifecycle reconcile before the PeerMirrorService starts: holdListener({ kind: 'ssh-tunnel', bind: '127.0.0.1', port: 0 }) (the Lite tunnel and paired relay kind) then holdRemoteAccess({ class: 'probe', operation: 'federation-forward' }) under the managed remote identity, which is the peer egress hold (the peer bytes leave over ssh, which the http(s)-only egress ceiling cannot name). With no ceiling the listener refuses [managed-unavailable] by name first; standalone neither gate has an authority. A refusal reaches the mirror as forward-failed through peerForwardError, not Sentry.",
+					"cli": "connectPeer() refuses with PeerResolveError code managed-unavailable ([managed-unavailable] ..., ExitCode.GeneralError) when the data dir has a managed binding (dataDirHasManagedBinding(), the managed-desktop-write rule), after the Encore and opt-in checks and before acquireForward: a bare CLI holds no listener or remote authority. Covers every peer:agent verb, list --peer and lift, which all open through connectPeer."
+				},
+				"tests": {
+					"suites": [
+						"src/__tests__/shared/maestro-lib/client/ssh-forward.test.ts (+3)",
+						"src/__tests__/main/federation/federation-managed-hold.test.ts (new, 5)",
+						"src/__tests__/cli/services/peer-resolver.test.ts (+2)",
+						"src/__tests__/main/enterprise/listener-policy.test.ts (sink entry for src/main/federation/index.ts + the forward-manager order case)"
+					],
+					"related": "shared client, cli peer/lift/list/federation/remote-host, main enterprise, lite, federation, ipc federation, federation command handler: 74 + 8 files, all passed",
+					"mutation": [
+						"src/shared/maestro-lib/client/ssh-forward.ts: drop `await this.options.admit(remote);` -> killed (Tests  4 failed | 18 passed (22))",
+						"src/main/federation/index.ts: drop `setSshForwardAdmission(holdFederationForward);` -> killed (Tests  1 failed | 4 passed (5))",
+						"src/main/federation/index.ts: drop `holdListener({ kind: 'ssh-tunnel', bind: '127.0.0.1', port: 0 });` -> killed (Tests  2 failed | 3 passed (5))",
+						"src/main/federation/index.ts: drop `if (held) throw new Error(held.message);` -> killed (Tests  1 failed | 4 passed (5))",
+						"src/cli/services/peer-resolver.ts: drop `if (deps.isManagedDataDir()) {` -> killed (Tests  2 failed | 34 passed (36))"
+					],
+					"typecheck": "tsc -p tsconfig.lint.json, tsconfig.main.json, tsconfig.cli.json: 0 errors; ad hoc tsconfig over the four suites: 0 errors",
+					"lint": "eslint 0 errors on the sources (suites are eslint-ignored); prettier --check clean"
+				},
+				"notCovered": "maestro-cli remote-host status|start (src/cli/commands/remote-host.ts) still calls discoverRemoteHost / startRemoteHost directly with no managed refusal; outside the named paths of this task (the forward, its discovery, the peer connection). Candidate for a follow-up continuation or MCOMP-33-03.",
+				"tools": "Working/mcomp-33-00l1: edit-*.mjs, mutate.mjs (mutate.json), check.mjs (check.json), record.mjs"
 			}
 		}
 	}
