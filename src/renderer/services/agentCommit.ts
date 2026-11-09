@@ -21,6 +21,7 @@ import { logger } from '../utils/logger';
 import {
 	prepareSessionForPersistence,
 	SESSION_PERSISTENCE_BASELINE_EVENT,
+	type SessionPersistenceBaseline,
 } from '../hooks/utils/useDebouncedPersistence';
 
 /** Mirrors `AgentCommitRequest` in src/main/ipc/handlers/persistence.ts. */
@@ -126,7 +127,9 @@ export function sessionFromCommittedRecord(
 	options: { keepDraftRows?: boolean } = {}
 ): Session {
 	window.dispatchEvent(
-		new CustomEvent(SESSION_PERSISTENCE_BASELINE_EVENT, { detail: [structuredClone(record)] })
+		new CustomEvent<SessionPersistenceBaseline>(SESSION_PERSISTENCE_BASELINE_EVENT, {
+			detail: { sessions: [structuredClone(record) as unknown as Session] },
+		})
 	);
 	if (options.keepDraftRows) {
 		// The canonical configuration over the draft's own rows: persistence caps a

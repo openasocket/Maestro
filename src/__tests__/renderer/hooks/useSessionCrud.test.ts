@@ -700,7 +700,7 @@ describe('useSessionCrud', () => {
 			expect(outcome).toEqual({ ok: true, sessionId: inserted.id });
 			expect(useSessionStore.getState().activeSessionId).toBe(inserted.id);
 			// The committed record is the persistence baseline, so the next flush is a merge.
-			expect(baselines).toEqual([[expect.objectContaining({ id: inserted.id })]]);
+			expect(baselines).toEqual([{ sessions: [expect.objectContaining({ id: inserted.id })] }]);
 		});
 
 		it('inserts nothing and returns the typed refusal when the host refuses', async () => {
