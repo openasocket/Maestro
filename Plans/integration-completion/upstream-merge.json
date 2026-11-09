@@ -2318,6 +2318,28 @@
 				],
 				"notes": "The messageHandlers suites (messageHandlers, messageHandlers.managed, federationCommand, liveCommand, maestroRun) cannot load until tabs.ts and sessions.ts merge (R33): PARSE_ERROR on the diff markers in tabs.ts. listAgentModelsHandler 4/4.",
 				"unmergedAfter": 20
+			},
+			"MCOMP-33-00R33": {
+				"resolvedAt": "2026-11-09",
+				"resolvedBy": "Maestro-Claude",
+				"files": [
+					"src/main/web-server/handlers/messageHandlers/sessions.ts",
+					"src/main/web-server/handlers/messageHandlers/tabs.ts"
+				],
+				"method": "Two hunks resolved by a shape-asserting script (Working/mcomp-33-00r33/resolve.mjs plus owner.mjs, both sides read in full, every replacement computed before any write); staged through merge-tool.mjs stage (18 unmerged left; prettier left both unchanged). Working/mcomp-33-00r33/check.mjs: 0 syntax diagnostics, every HEAD and MERGE_HEAD seam count kept.",
+				"hunks": {
+					"sessions.ts": "create_session config: HEAD's clone operation (MCOMP-23-02C) then upstream's harnessControlMode (native or current); independent fields, both kept.",
+					"tabs.ts": "handleNewAITabWithPrompt: upstream's dispatch supervision first (dispatchId, dispatchSupervision, its refusal answered before any ticket exists), then HEAD's dispatch ticket issued for the agent from the transport that admitted the client, then upstream's managed (Pianola-supervised) branch carrying the ticket: the ticket and delegation are bound by dispatch id for the life of the run, withdrawn on a rejected or not-started receipt or a thrown run, and dropped in finally; a retried dispatch id does not own the binding and withdraws its own unused ticket."
+				},
+				"outsideHunks": "tabs.ts: (1) the unmanaged newAITabWithPrompt call kept HEAD's fixed slots; padded upstream's control with undefined so delegation and the dispatch ticket land in their merged slots (closes the R32 note). (2) newTabAdmission's renderer transport (upstream newTab: (...args) => callbacks.newAITabWithPrompt(...args)) now names its six params and, on the release phase only, appends the bound delegation and ticket, so the supervised turn binds the CLI or device that dispatched it the same as the unmanaged path; the prepare phase (empty tab, no spawn) carries none. (3) module map newTabDispatchBindings and the ManagedDelegationContext type import.",
+				"semanticConflictsForC": [
+					"src/__tests__/main/web-server/handlers/messageHandlers.test.ts (auto-merged): 28 cases fail on HEAD's fixed positional expectations for executeCommand and newAITabWithPrompt (want the R29 merged order: requireDeliveryReceipt, pianolaDispatchId before delegation/dispatchTicket; control before delegation/dispatchTicket) and the ticketSent() helper reads the ticket by HEAD's index; update the expectations and the helper, drop no case.",
+					"src/__tests__/main/web-server/handlers/messageHandlers.managed.test.ts (auto-merged): 8 cases fail because upstream's sendBounded (services/socket-send.ts) refuses a socket whose readyState is not OPEN and HEAD's createClient double has no readyState; give the double readyState: WebSocket.OPEN.",
+					"src/main/pianola/pianola-new-tab-dispatch.ts runExisting (existing-tab supervised path, upstream-added, auto-merged) calls executeCommand without delegation or dispatchTicket; the existing-tab handler that drives it must bind them the way tabs.ts now does for new tabs.",
+					"queue.ts enqueueCommand padding (from R32) still open."
+				],
+				"notes": "messageHandlers suites now load (tabs.ts merged). createSessionBackground, createSessionProvenance, federationCommand, liveCommand, maestroRun, listAgentModels pass; messageHandlers 28 and messageHandlers.managed 8 fail as named above (36/549).",
+				"unmergedAfter": 18
 			}
 		}
 	}
