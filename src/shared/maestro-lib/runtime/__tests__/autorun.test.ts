@@ -1130,8 +1130,14 @@ describe('runtime Auto Run', () => {
 			});
 
 			describe('a nested launch (MCOMP-17-03BV)', () => {
-				/** A verified parent that owns no workflow (a room turn), on the source's own verification. */
-				function roomParent(source: ManagedAuthenticatedContext): ContextVerification {
+				/**
+				 * A verified parent on the source's own verification. By default it owns no workflow (a
+				 * room turn); `owned` keeps the source's workflow (a room a Cue run started).
+				 */
+				function roomParent(
+					source: ManagedAuthenticatedContext,
+					owned = false
+				): ContextVerification {
 					const { verification, ...context } = source;
 					const parent = createContextVerifier({
 						...verification,
@@ -1144,7 +1150,7 @@ describe('runtime Auto Run', () => {
 							runId: 'room-run',
 							rootRunId: 'room-root',
 						},
-						workflow: null,
+						workflow: owned ? structuredClone(context.workflow) : null,
 						actor: { kind: 'agent', id: 'room-participant' },
 						delegation: { chain: [{ kind: 'human', id: 'room-human' }], grantRef: 'room-grant' },
 					});
@@ -1230,6 +1236,30 @@ describe('runtime Auto Run', () => {
 						expect(runLaunches).toHaveLength(1);
 					}
 				);
+
+				it('refuses at launch a parent that owns a workflow (MCOMP-17-03BY)', async () => {
+					const { runtime, file, asked, claim } = await liveSource();
+					const parent = roomParent(asked[0].context, true);
+					if (!parent.ok || !parent.context.workflow) throw new Error('unreachable');
+					const parentContext = vi.fn(() => parent);
+					const agentId = await beta(runtime);
+					const launched = await service.launchNested(
+						agentId,
+						{ documents: [{ file }] },
+						parentContext
+					);
+					expect(errorOf(launched)).toMatchObject({
+						code: 'rejected',
+						message: expect.stringContaining(
+							`owns workflow "${parent.context.workflow.workflowId}"`
+						),
+					});
+					expect(parentContext).toHaveBeenCalledTimes(1);
+					expect(service.holds(agentId)).toBe(false);
+					expect(asked).toHaveLength(1);
+					expect(claim).toHaveBeenCalledTimes(1);
+					expect(runLaunches).toHaveLength(1);
+				});
 
 				it('refuses the next dispatch once the parent is withdrawn after launch', async () => {
 					const { runtime, file, asked } = await liveSource();

@@ -219,7 +219,8 @@ export interface RuntimeAutoRun {
 	 * attempt and again before dispatch, so the run carries the parent's chain, grant and root run
 	 * and stops dispatching once the parent is withdrawn or changes. The run still needs its own
 	 * workflow owner fence. Refused before anything starts when this runtime admits no turns, or
-	 * when the parent is not verified at launch.
+	 * when the parent is not verified at launch, or when the parent owns a workflow of its own
+	 * (MCOMP-17-03BY: the run mints its own, which such a parent's attempts can never match).
 	 */
 	launchNested(
 		agentId: string,
@@ -838,7 +839,12 @@ export function createRuntimeAutoRun(options: RuntimeAutoRunOptions): RuntimeAut
 		}
 		try {
 			const source = parentContext();
-			if (source.ok && isVerifiedContext(source.context)) return null;
+			if (source.ok && isVerifiedContext(source.context)) {
+				// A nested run mints its own workflow, and a parent that owns one must own every
+				// attempt's (MCOMP-17-03BU), so the runner would refuse each attempt: start nothing.
+				if (source.context.workflow === null) return null;
+				return `The nested Auto Run parent owns workflow "${source.context.workflow.workflowId}"; a nested run mints its own workflow, so it cannot run under that parent.`;
+			}
 			return source.ok
 				? 'The nested Auto Run parent is not verified.'
 				: `The nested Auto Run parent is refused: ${source.problems.join('; ')}`;
