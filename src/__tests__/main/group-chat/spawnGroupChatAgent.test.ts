@@ -770,9 +770,10 @@ describe('spawnGroupChatAgent', () => {
 		/**
 		 * The enrolled desktop, as it stands (CP-03): the real host adapter over the
 		 * real socket client and the fake endpoint daemon. A room turn's context
-		 * carries the room's chain, the adapter describes no chain to the endpoint
-		 * and strips none, so the turn is refused unavailable before the endpoint
-		 * is asked anything, and nothing runs.
+		 * carries the room's chain, and this endpoint negotiates no prepared
+		 * execution authority (PREPARED/1), so the adapter neither drops the chain
+		 * nor treats a broker receipt as a launch permit: the turn is refused
+		 * unavailable before the endpoint is asked anything, and nothing runs.
 		 */
 		it('is refused unavailable on an enrolled desktop, unasked at the endpoint, with nothing spawned (CP-03)', async () => {
 			const INSTALLATION = {
@@ -871,8 +872,8 @@ describe('spawnGroupChatAgent', () => {
 					success: false,
 					managed: { state: 'unavailable' },
 				});
-				expect(result.error).toContain('a delegation chain of 2');
-				expect(result.error).toContain('CP-03');
+				expect(result.error).toContain('PREPARED/1');
+				expect(result.error).toContain('delegation authority cannot be dropped');
 				expect(cli).not.toHaveBeenCalled();
 				expect(executions).toBe(0);
 				expect(

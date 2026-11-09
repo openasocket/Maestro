@@ -5203,6 +5203,19 @@
 					"id": "MCOMP-19-06A"
 				},
 				{
+					"label": "Repair the stale CP-03 refusal assertion in the group chat spawn suite",
+					"kind": "TEST",
+					"targets": [
+						"Plans/integration-completion/program.json",
+						"src/__tests__/main/group-chat/spawnGroupChatAgent.test.ts"
+					],
+					"outcome": "Continuation of MCOMP-19-06A inserted during execution. Targets: `src/__tests__/main/group-chat/spawnGroupChatAgent.test.ts`, `Plans/integration-completion/program.json`. MCOMP-19-07 ran the changed-module suites and found one failure: the enrolled-desktop room-turn case (MRC-07-08, CP-03) still expects the pre-de92137bb refusal text (\"a delegation chain of 2\", \"CP-03\"), but since de92137bb the real host adapter refuses any launch without a negotiated PREPARED/1 prepared-execution port first (\"workflow and delegation authority cannot be dropped\"). The behavior the case pins is unchanged (refused unavailable, the endpoint never asked to execute, no lease, no spawn), so update only the two text assertions and the doc comment to the current refusal. No source change, no skipped or weakened guard. Required inputs: `MAESTRO-CONTRACT-INPUTS-BUILD`. Backlog: M-05.",
+					"backlog": ["M-05"],
+					"requires": ["MAESTRO-CONTRACT-INPUTS-BUILD"],
+					"produces": [],
+					"id": "MCOMP-19-06B"
+				},
+				{
 					"label": "Verify and publish implementation inputs",
 					"kind": "VERIFY",
 					"targets": ["Plans/integration-completion/evidence/residual-build.json"],
@@ -5217,7 +5230,7 @@
 			"produces": ["MAESTRO-RESIDUAL-EFFECTS-BUILD"],
 			"id": "MCOMP-19",
 			"path": ".maestro/playbooks/2026-10-29-Maestro-Integration-Completion/MCOMP-19.md",
-			"taskCount": 16,
+			"taskCount": 17,
 			"stage": "S12"
 		},
 		{
@@ -6858,7 +6871,7 @@
 				"PAIR-DIRECT-EVIDENCE"
 			],
 			"nativeInputs": false,
-			"taskCount": 54
+			"taskCount": 55
 		},
 		{
 			"id": "S13",
@@ -7015,8 +7028,8 @@
 			"taskCount": 1
 		}
 	],
-	"taskCount": 416,
-	"taskCounts": { "IMPLEMENT": 307, "TEST": 49, "VERIFY": 60 },
+	"taskCount": 417,
+	"taskCounts": { "IMPLEMENT": 307, "TEST": 50, "VERIFY": 60 },
 	"artifacts": {
 		"MEGA-CONTRACTS-FOUNDATION-BUILD": {
 			"producerDocument": "GCOMP-01",
@@ -7904,6 +7917,7 @@
 			"MCOMP-19-05A",
 			"MCOMP-19-06",
 			"MCOMP-19-06A",
+			"MCOMP-19-06B",
 			"MCOMP-19-07",
 			"MCOMP-20-01",
 			"MCOMP-21-01",
