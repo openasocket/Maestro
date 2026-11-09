@@ -26,6 +26,11 @@
  *     is attached; whether this host is managed is decided by the enrollment
  *     lifecycle from the status, the registration and its own custody.
  *
+ * On macOS and Windows (`createPlatformEndpointClient`) every new connection
+ * is used only once a host-injected `EndpointNativePort` has named its server
+ * as the same service principal as the first; with no port, no client. Linux
+ * keeps the socket rule it always had.
+ *
  * Nothing here is logged: the registration nonce passes through `challenge`
  * once, to the caller, and nowhere else. No Electron import, so the same
  * client serves `maestro-cli host`.
@@ -33,6 +38,7 @@
 
 import { randomUUID } from 'node:crypto';
 import * as http from 'node:http';
+import * as net from 'node:net';
 import type { Socket } from 'node:net';
 import * as path from 'node:path';
 
@@ -47,7 +53,10 @@ import {
 	LOCAL_ENDPOINT_REGISTRATION_REDEEM_PATH,
 	LOCAL_ENDPOINT_TIMEOUT_MS,
 	endpointAttachmentRequestProblems,
+	endpointAddressProblem,
 	endpointCompatibilityResultProblems,
+	endpointNativePortProblem,
+	endpointServerVerificationProblems,
 	endpointRegistrationApprovalProblems,
 	endpointStatusProblems,
 	frameLocalEndpointRequest,
@@ -58,10 +67,12 @@ import {
 	type EndpointCompatibilityResult,
 	type EndpointConnectionState,
 	type EndpointInvokeOutcome,
+	type EndpointNativePort,
 	type EndpointPort,
 	type EndpointRegistrationApproval,
 	type EndpointRegistrationPhase,
 	type EndpointRegistrationReceipt,
+	type EndpointServerIdentity,
 	type EndpointStatus,
 	type LocalEndpointOperation,
 } from '../../shared/maestro-lib/managed/endpoint-port';
@@ -78,6 +89,14 @@ export interface LocalEndpointClientDeps {
 	newCorrelationId?: () => string;
 	/** Test seam: the function that opens a request. Defaults to `http.request`. */
 	request?: typeof http.request;
+	/**
+	 * The platform whose endpoint transport this client speaks. Absent (and no
+	 * `native`), the Unix socket rule this client always applied; present, the
+	 * platform's own address rule and native-port requirement.
+	 */
+	platform?: string;
+	/** Names the process behind each new connection; required on macOS and Windows. */
+	native?: EndpointNativePort;
 }
 
 type Unavailable = Extract<EndpointInvokeOutcome<never>, { status: 'unavailable' }>;
@@ -103,6 +122,13 @@ export function endpointSocketPathProblem(socketPath: string): string | null {
 	return null;
 }
 
+class PeerUnverified extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = 'PeerUnverified';
+	}
+}
+
 class RequestTimeout extends Error {
 	constructor() {
 		super('The endpoint did not answer in time.');
@@ -111,7 +137,13 @@ class RequestTimeout extends Error {
 }
 
 export function createLocalEndpointClient(deps: LocalEndpointClientDeps): EndpointPort {
-	const problem = endpointSocketPathProblem(deps.socketPath);
+	const native = deps.native;
+	const platform = deps.platform ?? (native ? process.platform : undefined);
+	const problem =
+		platform === undefined
+			? endpointSocketPathProblem(deps.socketPath)
+			: (endpointAddressProblem(platform, deps.socketPath) ??
+				endpointNativePortProblem(platform, native));
 	if (problem) throw new Error(`Endpoint socket refused: ${problem}`);
 	const timeoutMs = deps.timeoutMs ?? LOCAL_ENDPOINT_TIMEOUT_MS + TIMEOUT_SLACK_MS;
 	const newCorrelationId = deps.newCorrelationId ?? randomUUID;
@@ -125,6 +157,74 @@ export function createLocalEndpointClient(deps: LocalEndpointClientDeps): Endpoi
 	let registration: EndpointRegistrationPhase = 'none';
 	let closed = false;
 	let chain: Promise<unknown> = Promise.resolve();
+	/** The server the native port named for the current connection, and the principal every connection must share. */
+	let server: EndpointServerIdentity | null = null;
+	let boundPrincipal: string | null = null;
+	const verified = new WeakMap<Socket, EndpointServerIdentity>();
+
+	if (native) {
+		// Every new connection is verified once connected and before the agent
+		// hands it to a request, so nothing is written to an unnamed server.
+		const verifiedConnection = (
+			_options: unknown,
+			oncreate: (error: Error | null, socket?: Socket) => void
+		): undefined => {
+			const candidate = net.createConnection({ path: deps.socketPath });
+			const controller = new AbortController();
+			let settled = false;
+			const settle = (error: Error | null): void => {
+				if (settled) return;
+				settled = true;
+				clearTimeout(timer);
+				if (error) {
+					controller.abort();
+					candidate.destroy();
+					oncreate(error);
+					return;
+				}
+				oncreate(null, candidate);
+			};
+			const timer = setTimeout(() => settle(new RequestTimeout()), timeoutMs);
+			candidate.once('error', (error) => settle(error));
+			/** Why the verified server may not serve this client, or null. */
+			const refusalOf = (verification: unknown): string | null => {
+				if (candidate.destroyed) return 'The connection closed while its server was being named.';
+				const problems = endpointServerVerificationProblems(verification);
+				if (problems.length > 0)
+					return `The endpoint server is not verified: ${problems.join('; ')}`;
+				const { principal } = (verification as { server: EndpointServerIdentity }).server;
+				return boundPrincipal === null || principal === boundPrincipal
+					? null
+					: `The endpoint server runs as ${principal}, not ${boundPrincipal} as before.`;
+			};
+			candidate.once('connect', () => {
+				new Promise<unknown>((resolve) =>
+					resolve(
+						native.verifyServer({
+							address: deps.socketPath,
+							handle: candidate,
+							signal: controller.signal,
+						})
+					)
+				).then(
+					(verification) => {
+						if (settled) return;
+						const refusal = refusalOf(verification);
+						if (refusal) return settle(new PeerUnverified(refusal));
+						const identity = (verification as { server: EndpointServerIdentity }).server;
+						boundPrincipal ??= identity.principal;
+						verified.set(candidate, { ...identity });
+						settle(null);
+					},
+					(error: unknown) =>
+						settle(new PeerUnverified(`The native endpoint port failed: ${String(error)}`))
+				);
+			});
+			return undefined;
+		};
+		(agent as unknown as { createConnection: typeof verifiedConnection }).createConnection =
+			verifiedConnection;
+	}
 
 	const serialized = <T>(work: () => Promise<T>): Promise<T> => {
 		const next = chain.then(work, work);
@@ -139,6 +239,7 @@ export function createLocalEndpointClient(deps: LocalEndpointClientDeps): Endpoi
 	function connectionLost(lost: Socket): void {
 		if (socket !== lost) return;
 		socket = null;
+		server = null;
 		attached = false;
 		status = null;
 		if (registration === 'challenged') registration = 'none';
@@ -148,6 +249,7 @@ export function createLocalEndpointClient(deps: LocalEndpointClientDeps): Endpoi
 		if (socket === next) return;
 		if (socket) connectionLost(socket);
 		socket = next;
+		server = verified.get(next) ?? null;
 		connection += 1;
 		attached = false;
 		status = null;
@@ -223,6 +325,7 @@ export function createLocalEndpointClient(deps: LocalEndpointClientDeps): Endpoi
 		const message = error instanceof Error ? error.message : String(error);
 		if (effectful && sent) return { status: 'unknown', message };
 		if (error instanceof RequestTimeout) return unavailable('timeout', message);
+		if (error instanceof PeerUnverified) return unavailable('peer-unverified', message);
 		if (message === 'oversized') {
 			return unavailable('oversized', 'The endpoint answered with more than the response bound.');
 		}
@@ -291,7 +394,14 @@ export function createLocalEndpointClient(deps: LocalEndpointClientDeps): Endpoi
 
 	const port: EndpointPort = {
 		socketPath: deps.socketPath,
-		state: (): EndpointConnectionState => ({ connection, attached, status, registration, closed }),
+		state: (): EndpointConnectionState => ({
+			connection,
+			attached,
+			status,
+			registration,
+			closed,
+			...(native ? { server: server ? { ...server } : null } : {}),
+		}),
 
 		compatibility: (req) =>
 			serialized(async (): Promise<EndpointInvokeOutcome<EndpointCompatibilityResult>> => {
@@ -400,4 +510,15 @@ export function createLocalEndpointClient(deps: LocalEndpointClientDeps): Endpoi
 			}),
 	};
 	return port;
+}
+
+/**
+ * The client for this host's platform: the platform's address rule, and on
+ * macOS and Windows the native port the host injected, or no client at all.
+ * Throws `Endpoint socket refused: ...` like `createLocalEndpointClient`.
+ */
+export function createPlatformEndpointClient(
+	deps: LocalEndpointClientDeps & { platform?: string }
+): EndpointPort {
+	return createLocalEndpointClient({ ...deps, platform: deps.platform ?? process.platform });
 }

@@ -347,7 +347,9 @@ export type EndpointUnavailableReason =
 	| 'oversized'
 	| 'malformed'
 	| 'closed'
-	| 'http-status';
+	| 'http-status'
+	/** The native port could not name, or refused, the process serving a new connection. */
+	| 'peer-unverified';
 
 /**
  * How one call ended. `denied` is the endpoint's own refusal (its reason),
@@ -372,6 +374,129 @@ export interface EndpointConnectionState {
 	/** This process's actor registration as this client observed it; lost with the process, not the connection. */
 	registration: EndpointRegistrationPhase;
 	closed: boolean;
+	/** The endpoint process the native port verified for the CURRENT connection; absent when no native port is installed. */
+	server?: EndpointServerIdentity | null;
+}
+
+// NATIVE-ENDPOINT/1, a local consumer seam. The contract says how the endpoint
+// authenticates THIS process, not how a client knows it dialed the endpoint.
+// Linux keeps its rule (a socket in the service directory). On macOS and Windows
+// an address proves nothing (creatable socket path, squattable pipe), so a host
+// port names each connection server from the OS (audit token and signature,
+// pipe server pid and Authenticode). None is installed: those stay unavailable.
+
+export const ENDPOINT_NATIVE_PORT_VERSION = 1 as const;
+
+/** How the endpoint is reached: a Unix domain socket, or a local Windows named pipe. */
+export type EndpointNativeTransport = 'unix-socket' | 'named-pipe';
+
+/** The process serving one connection, as the OS reported it for that connection. */
+export interface EndpointServerIdentity {
+	pid: number;
+	/** Pid plus start time, so a reused pid is another process. */
+	processBirthDigest: string;
+	executableDigest: string;
+	/** The service account, SID or code-signing requirement the OS names. */
+	principal: string;
+}
+
+export type EndpointServerVerification =
+	| { status: 'verified'; server: EndpointServerIdentity }
+	| { status: 'refused'; reason: string }
+	| { status: 'unavailable'; reason: string };
+
+export interface EndpointNativePort {
+	readonly version: typeof ENDPOINT_NATIVE_PORT_VERSION;
+	/** The platform this port reads the OS of; it must be the host's. */
+	readonly platform: string;
+	readonly transport: EndpointNativeTransport;
+	/** Name the process serving the connected `handle` and check it is the endpoint service; anything else keeps it unused. */
+	verifyServer(connection: {
+		address: string;
+		handle: unknown;
+		signal: AbortSignal;
+	}): Promise<EndpointServerVerification>;
+}
+
+/** The endpoint transport of `platform`, or null where the endpoint ships none. */
+export function endpointTransportOf(platform: string): EndpointNativeTransport | null {
+	if (platform === 'linux' || platform === 'darwin') return 'unix-socket';
+	if (platform === 'win32') return 'named-pipe';
+	return null;
+}
+
+/** The longest Unix socket path every supported kernel accepts (`sun_path` less the terminator). */
+export const ENDPOINT_MAX_SOCKET_PATH_BYTES = 103;
+const PRINCIPAL = /^[\x21-\x7e](?:[\x20-\x7e]{0,254}[\x21-\x7e])?$/;
+/** A LOCAL pipe only; a `\\host\pipe\` name crosses SMB, where no OS peer is known. */
+const LOCAL_PIPE = /^\\\\\.\\pipe\\[A-Za-z0-9._-]{1,200}$/;
+
+/** Why `address` is not an endpoint address on `platform`, or null. Pure. */
+export function endpointAddressProblem(platform: string, address: string): string | null {
+	const transport = endpointTransportOf(platform);
+	if (transport === null) return `The endpoint has no transport on ${platform}.`;
+	if (typeof address !== 'string' || address.length === 0) return 'The endpoint address is empty.';
+	if (/^[a-z][a-z0-9+.-]*:\/\//i.test(address) || /^(localhost|127\.|\[::1\])/i.test(address)) {
+		return 'The endpoint is reached over a local socket or pipe only; a URL, host or port is not accepted.';
+	}
+	if (transport === 'named-pipe') {
+		return LOCAL_PIPE.test(address)
+			? null
+			: 'On Windows the endpoint is a local named pipe (\\\\.\\pipe\\<name>); a remote pipe or a file path is not accepted.';
+	}
+	if (!address.startsWith('/')) return 'The socket path must be absolute.';
+	if (new TextEncoder().encode(address).length > ENDPOINT_MAX_SOCKET_PATH_BYTES) {
+		return `The socket path is longer than ${ENDPOINT_MAX_SOCKET_PATH_BYTES} bytes.`;
+	}
+	return null;
+}
+
+/**
+ * Why `native` cannot authenticate the endpoint on `platform`, or null. Linux
+ * needs none (its socket directory is the service's); macOS and Windows need a
+ * port of this version, for this platform and its transport. Pure.
+ */
+export function endpointNativePortProblem(
+	platform: string,
+	native: EndpointNativePort | undefined
+): string | null {
+	const transport = endpointTransportOf(platform);
+	if (transport === null) return `The endpoint has no transport on ${platform}.`;
+	if (!native) {
+		return platform === 'linux'
+			? null
+			: `No native endpoint port is installed for ${platform}, so the process behind the ${transport} cannot be named; the endpoint is unavailable.`;
+	}
+	if (native.version !== ENDPOINT_NATIVE_PORT_VERSION) {
+		return `The native endpoint port speaks version ${String(native.version)}, not ${ENDPOINT_NATIVE_PORT_VERSION}.`;
+	}
+	if (native.platform !== platform) {
+		return `The native endpoint port reads ${native.platform}, not this host's ${platform}.`;
+	}
+	if (native.transport !== transport) {
+		return `The native endpoint port verifies a ${native.transport}; ${platform} reaches the endpoint over a ${transport}.`;
+	}
+	return typeof native.verifyServer === 'function' ? null : 'The native port cannot verify.';
+}
+
+/** What is wrong with a verification the native port returned (a verified one must name a whole identity). Pure. */
+export function endpointServerVerificationProblems(value: unknown): string[] {
+	if (!isRecord(value)) return ['the verification is not an object'];
+	if (value.status === 'refused' || value.status === 'unavailable') {
+		return [
+			`the native port answered ${value.status}: ${typeof value.reason === 'string' ? value.reason : 'no reason'}`,
+		];
+	}
+	if (value.status !== 'verified') return ['the verification has no known status'];
+	const server = value.server;
+	if (!isRecord(server)) return ['a verified answer names no server'];
+	const checks: Array<[boolean, string]> = [
+		[Number.isSafeInteger(server.pid) && (server.pid as number) > 0, 'pid is not a process id'],
+		[isEndpointDigest(server.processBirthDigest), 'processBirthDigest is not a digest'],
+		[isEndpointDigest(server.executableDigest), 'executableDigest is not a digest'],
+		[typeof server.principal === 'string' && PRINCIPAL.test(server.principal), 'bad principal'],
+	];
+	return checks.filter(([ok]) => !ok).map(([, problem]) => `server.${problem}`);
 }
 
 /**
