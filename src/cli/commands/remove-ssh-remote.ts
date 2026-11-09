@@ -1,19 +1,20 @@
 // Remove SSH remote command - delete an SSH remote configuration
 
+import { readSshRemotes, resolveSshRemoteId, readSettingValue } from '../services/storage';
 import {
-	readSshRemotes,
-	writeSshRemotes,
-	resolveSshRemoteId,
-	readSettingValue,
-	writeSettingValue,
-} from '../services/storage';
+	reportDesktopWriteFailure,
+	writeSettingThroughHost,
+} from '../services/managed-desktop-write';
 import { formatError, formatSuccess } from '../output/formatter';
 
 interface RemoveSshRemoteOptions {
 	json?: boolean;
 }
 
-export function removeSshRemote(remoteId: string, options: RemoveSshRemoteOptions): void {
+export async function removeSshRemote(
+	remoteId: string,
+	options: RemoveSshRemoteOptions
+): Promise<void> {
 	// Resolve partial ID
 	let resolvedId: string;
 	try {
@@ -43,12 +44,17 @@ export function removeSshRemote(remoteId: string, options: RemoveSshRemoteOption
 
 	const removedName = remotes[index].name;
 	remotes.splice(index, 1);
-	writeSshRemotes(remotes);
-
-	// Clear default if it was the deleted remote
-	const defaultId = readSettingValue('defaultSshRemoteId') as string | null;
-	if (defaultId === resolvedId) {
-		writeSettingValue('defaultSshRemoteId', null);
+	// Through the host boundary like create and update: a held list write is
+	// refused before the file, and a refused list write never clears the default.
+	try {
+		await writeSettingThroughHost('sshRemotes', remotes, options.json);
+		// Clear default if it was the deleted remote
+		const defaultId = readSettingValue('defaultSshRemoteId') as string | null;
+		if (defaultId === resolvedId) {
+			await writeSettingThroughHost('defaultSshRemoteId', null, options.json);
+		}
+	} catch (error) {
+		return reportDesktopWriteFailure(error, options.json, `remove SSH remote "${removedName}"`);
 	}
 
 	if (options.json) {

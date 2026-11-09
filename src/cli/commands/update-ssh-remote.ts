@@ -1,11 +1,10 @@
 // Update SSH remote command - edit an existing SSH remote configuration
 
+import { readSshRemotes, resolveSshRemoteId } from '../services/storage';
 import {
-	readSshRemotes,
-	writeSshRemotes,
-	resolveSshRemoteId,
-	writeSettingValue,
-} from '../services/storage';
+	reportDesktopWriteFailure,
+	writeSettingThroughHost,
+} from '../services/managed-desktop-write';
 import { formatError, formatSuccess } from '../output/formatter';
 import { parseCliBool } from '../utils/parse';
 import type { SshRemoteConfig } from '../../shared/types';
@@ -90,7 +89,10 @@ function applyParkChanges(
 	config[parkedField] = pair.parked;
 }
 
-export function updateSshRemote(remoteId: string, options: UpdateSshRemoteOptions): void {
+export async function updateSshRemote(
+	remoteId: string,
+	options: UpdateSshRemoteOptions
+): Promise<void> {
 	let resolvedId: string;
 	try {
 		resolvedId = resolveSshRemoteId(remoteId);
@@ -187,11 +189,18 @@ export function updateSshRemote(remoteId: string, options: UpdateSshRemoteOption
 		options.enableSshOption
 	);
 
+	// Both keys are ones a managed policy can hold, so the write goes through the
+	// running desktop (the same hold the Settings pane meets); the file only when
+	// the data dir is standalone with no desktop. A refused list write never
+	// reaches the default.
 	remotes[index] = updated;
-	writeSshRemotes(remotes);
-
-	if (options.setDefault) {
-		writeSettingValue('defaultSshRemoteId', updated.id);
+	try {
+		await writeSettingThroughHost('sshRemotes', remotes, options.json);
+		if (options.setDefault) {
+			await writeSettingThroughHost('defaultSshRemoteId', updated.id, options.json);
+		}
+	} catch (error) {
+		return reportDesktopWriteFailure(error, options.json, `update SSH remote "${updated.name}"`);
 	}
 
 	if (options.json) {
