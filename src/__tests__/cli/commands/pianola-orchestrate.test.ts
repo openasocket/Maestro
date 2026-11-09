@@ -42,7 +42,10 @@ const {
 	readAgentRunsMock: vi.fn(),
 }));
 
-vi.mock('../../../cli/services/storage', () => ({ readSettingValue: vi.fn() }));
+vi.mock('../../../cli/services/storage', () => ({
+	readSettingValue: vi.fn(),
+	dataDirHasManagedBinding: vi.fn(() => false),
+}));
 vi.mock('../../../cli/services/pianola-store', () => ({
 	readPianolaPlans: vi.fn(() => []),
 	getPianolaPlan: vi.fn(),
@@ -86,7 +89,7 @@ import {
 	resolveExistingPianolaAgentType,
 	resolvePianolaSandboxRunner,
 } from '../../../cli/commands/pianola-orchestrate';
-import { readSettingValue } from '../../../cli/services/storage';
+import { dataDirHasManagedBinding, readSettingValue } from '../../../cli/services/storage';
 import {
 	getPianolaPlan,
 	readPianolaPlans,
@@ -1130,6 +1133,63 @@ describe('pianola validate CLI', () => {
 			}
 		} finally {
 			process.exitCode = oldExitCode;
+			fs.rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it('refuses the sandbox runner by name on a managed data dir and starts nothing (MCOMP-33-00L3)', async () => {
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pianola-runner-'));
+		const runner = path.join(dir, 'runner.cjs');
+		const marker = path.join(dir, 'ran');
+		let run: AgentRun | undefined;
+		const oldExitCode = process.exitCode;
+		const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+		try {
+			fs.writeFileSync(
+				runner,
+				'require("fs").writeFileSync(' +
+					JSON.stringify(marker) +
+					', "1"); console.log(JSON.stringify({observed:true,returncode:0,stdout:"",stderr:"",timedOut:false,error:null}));'
+			);
+			vi.mocked(readSettingValue).mockImplementation((key) =>
+				key === 'encoreFeatures' ? { pianola: true } : [process.execPath, runner]
+			);
+			vi.mocked(getPianolaPlan).mockReturnValue({
+				...PLAN,
+				tasks: [
+					{
+						id: 'task-1',
+						title: 'T',
+						prompt: 'p',
+						dependsOn: [],
+						status: 'running',
+						cwd: '/work',
+						validation: { command: ['true'], target: '/work' },
+					},
+				],
+			});
+			getAgentRunMock.mockImplementation(() => run);
+			upsertAgentRunMock.mockImplementation((next: AgentRun) => {
+				run = next;
+				return next;
+			});
+			vi.mocked(dataDirHasManagedBinding).mockReturnValue(true);
+			await pianolaValidate('plan-1', 'task-1', { json: true });
+			const refused = JSON.parse(log.mock.lastCall![0] as string);
+			expect(refused.verdict).toBe('unknown');
+			expect(refused.reason).toContain('[managed-unavailable]');
+			expect(refused.check.status).toBe('error');
+			expect(fs.existsSync(marker)).toBe(false);
+
+			// Standalone (no managed binding) the same runner starts exactly as before.
+			vi.mocked(dataDirHasManagedBinding).mockReturnValue(false);
+			await pianolaValidate('plan-1', 'task-1', { json: true });
+			expect(JSON.parse(log.mock.lastCall![0] as string).verdict).toBe('verified');
+			expect(fs.existsSync(marker)).toBe(true);
+		} finally {
+			vi.mocked(dataDirHasManagedBinding).mockReturnValue(false);
+			process.exitCode = oldExitCode;
+			log.mockRestore();
 			fs.rmSync(dir, { recursive: true, force: true });
 		}
 	});

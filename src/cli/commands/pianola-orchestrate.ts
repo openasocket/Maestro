@@ -19,7 +19,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { spawn } from 'child_process';
 import { killProcessTreeNow } from '../../main/utils/processTree';
-import { readSettingValue } from '../services/storage';
+import { dataDirHasManagedBinding, readSettingValue } from '../services/storage';
 import { isEncoreEnabled, requireEncore } from '../utils/encore-gate';
 import {
 	readPianolaPlans,
@@ -307,11 +307,33 @@ export function sandboxLaunchOptions(
 	};
 }
 
+/**
+ * Why the sandbox runner never starts on a managed data dir, or null when it may (MCOMP-33-00L3).
+ * The runner executes the lead's validation command through `python` or `wsl.exe` with this
+ * terminal's environment: a shell command no confinement producer qualifies (the same reason
+ * `cueShellRouteSupport()` reads managed `unsupported`), and maestro-cli holds no authority that
+ * could admit it, so it is refused by name before anything spawns. Standalone is unchanged.
+ */
+export function pianolaSandboxManagedRefusal(): string | null {
+	if (!dataDirHasManagedBinding()) return null;
+	return '[managed-unavailable] under management maestro-cli cannot run the Pianola sandbox validation runner from this terminal: no confinement route admits its shell command. Nothing was started.';
+}
+
 async function runSandbox(
 	task: PianolaTask,
 	trustedRoot: string
 ): Promise<PianolaSandboxObservation> {
 	const spec = task.validation!;
+	const managedRefusal = pianolaSandboxManagedRefusal();
+	if (managedRefusal)
+		return {
+			observed: false,
+			returncode: null,
+			stdout: '',
+			stderr: '',
+			timedOut: false,
+			error: managedRefusal,
+		};
 	const prefix = sandboxRunnerPrefix();
 	const runnerArgs = [
 		'--workspace',
