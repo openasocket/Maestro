@@ -2123,6 +2123,45 @@
 				"semanticConflictsForC": [],
 				"notes": "No case, field or guard dropped. No semantic conflict left for 00C from these files.",
 				"unmergedAfter": 36
+			},
+			"MCOMP-33-00R27": {
+				"resolvedAt": "2026-11-09",
+				"resolvedBy": "Maestro-Claude",
+				"files": [
+					"src/main/pianola/pianola-lifecycle.ts",
+					"src/main/pianola/pianola-supervisor.ts",
+					"src/__tests__/main/pianola/pianola-supervisor.managed.test.ts"
+				],
+				"method": "Ten hunks resolved by a shape-asserting script (Working/mcomp-33-00r27/resolve.mjs, both sides read in full, every replacement computed before any write); staged through merge-tool.mjs stage (34 unmerged left). Working/mcomp-33-00r27/check.mjs: 0 syntax diagnostics, no markers, every seam count at least the larger side except spawnAuthority in the lifecycle (4 to 3, the deliberate removal of the re-learn's CLI mine call). Pianola supervisor (plain, stale, managed) and re-learn (job, scheduler) suites: 5 files, 56/56.",
+				"hunks": {
+					"src/main/pianola/pianola-lifecycle.ts": [
+						"Hunk 1 (imports): union. HEAD termination, admitSupervisorChild and its types, DispatchSpecLike, ProcessSpawnAuthorityPort (still used by the exported, admitted mineDecisionPairsViaCli); upstream readSuggestions, readDecisions, onHumanDecisionSettled and settledDecisionPairs.",
+						"Hunk 2 (re-learn mine): upstream. Upstream deliberately stopped learning from raw CLI transcripts (their user-role author is unauthenticated) and mines settled, transport-attributed owner decisions in-process, with minSamples and the staged suggestions; no child is spawned, so nothing needs admission. HEAD's admitted mineDecisionPairsViaCli stays exported with its admission unchanged; the spawnAuthority doc now says only the supervised children and an explicit mine caller are admitted."
+					],
+					"src/main/pianola/pianola-supervisor.ts": [
+						"Hunk 1 (imports): HEAD host-adapter admission imports and DispatchSpecLike, then upstream compactDispatchArtifacts heading the store import.",
+						"Hunk 2 (SupervisedChild): both, admitting and managed (HEAD) beside legacyProof (upstream).",
+						"Hunk 3 (reconcile comment): both.",
+						"Hunk 4 (reconcile spawn condition): no entry, OR denied (HEAD: a reconcile asks the authority again), OR stopped with an unfinished plan (upstream revised-plan resume).",
+						"Hunk 5 (isAlive doc): upstream orchestrate/unfinished-plan sentence plus HEAD admission-in-flight and denied sentences.",
+						"Hunk 6 (spawnChild call): HEAD's admitted launch spec (launch.command, launch.args, launch.env, launch.cwd); upstream's env additions moved into buildLaunch so the spec the lease digests is the spec that spawns.",
+						"Hunk 7 (spawn throw): both, lifetime.spawnFailed then legacyProof dispose.",
+						"Hunk 8 (child exit): both, unsubscribe and lifetime.exited, then legacyProof dispose."
+					]
+				},
+				"outsideHunks": [
+					"pianola-supervisor.ts: upstream's legacy-watch proof issue (hostCallerRuns.issue) moved from launch() into spawn() after the admitting guard and BEFORE buildLaunch: its run-token file is CALLER_RUN_PROOF_FILE_ENV_VAR in the env, which buildDispatchSnapshot digests, so the proof must exist before admission.",
+					"pianola-supervisor.ts: buildLaunch(cliScriptPath, args, target, proofFile) carries upstream's env (CALLER_RUN_PROOF_FILE_ENV_VAR, MAESTRO_AGENT_ID = managerAgentId for watch-scope).",
+					"pianola-supervisor.ts: refuse() and the admitThenLaunch withdraw path dispose the legacy proof, so a proof issued for a child that never starts is released.",
+					"pianola-supervisor.ts: admission attribution names upstream's new target kinds (watch-scope as pianola-scope:<id>, program as pianola-program:<programId>); watch and orchestrate unchanged.",
+					"pianola-supervisor.managed.test.ts (HEAD-only suite, auto-merged): its pianola-store-main mock updated to upstream's store surface (compactDispatchArtifacts, readSupervisorTarget, removeSupervisorTargetAsync, updateSupervisorTargetsAsync, readPrograms, readPlans); every case unchanged."
+				],
+				"semanticConflictsForC": [
+					"Upstream's Pianola memory backfill (memory-transport.ts, execFileNoThrow of provider CLIs, reached from initializePianolaMemory in the lifecycle) spawns provider CLIs with no supervisor-child or spawn admission: under management it must be admitted (admitSupervisorChild as a pianola-memory service, or refused) before the merge commits.",
+					"Upstream added the sqlite-vec dependency (memory-database.ts); the worktree's node_modules symlink to the main checkout lacks it, so memory-eligibility and suites importing the memory database cannot load until an install."
+				],
+				"notes": "No case, field or guard dropped.",
+				"unmergedAfter": 34
 			}
 		}
 	}
