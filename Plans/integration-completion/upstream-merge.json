@@ -1666,6 +1666,23 @@
 				],
 				"notes": "No guard dropped. agentStore.ts command-branch spawn (auto-merged) still notes the managed run before and after.",
 				"unmergedAfter": 75
+			},
+			"MCOMP-33-00R11": {
+				"resolvedAt": "2026-11-09",
+				"resolvedBy": "Maestro-Claude",
+				"files": ["src/main/process-manager/types.ts"],
+				"method": "One hunk (lines 13-445, 433 conflict lines) resolved by a shape-asserting script (Working/mcomp-33-00r11/resolve.mjs, both sides read in full); staged through merge-tool.mjs stage (prettier exit 0 unchanged, 74 unmerged left). TypeScript transpile: 0 syntax diagnostics; no duplicated member in any interface. Coverage asserted by the script: every export of HEAD and MERGE_HEAD present in the result, and every ProcessConfig / ManagedProcess / SpawnResult field of either side present. git diff MERGE_HEAD: +510 -0; git diff HEAD: +28 -0 (upstream imports and fields only). Seam counts identical to HEAD (spawnOriginOf, requestedPermissionMode, managedPermissionModeRefusal, managedCommandRefusal, ProcessSpawnAuthorityPort, boundUtilityRoute, utilityLineageOf). The three suites that exercise these helpers (permission-ceiling, context-groomer.managed, quick-chat-controller.managed) cannot load yet: they reach src/shared/maestro-lib/launch/env.ts, still unmerged (00R21).",
+				"hunks": {
+					"src/main/process-manager/types.ts": [
+						"import list plus the managed-admission section: upstream added one import (HarnessControlHandle from shared/harness-control/types, used by its new ProcessConfig.harnessControl field); HEAD added the managed imports and the whole 'Managed admission at the process sink' section (ProcessSpawnActor, spawnOriginOf, SpawnPermissionMode, requestedPermissionMode, ManagedPermissionCeiling, managedPermissionModeRefusal, UtilityTurnLineage, utilityLineageOf, UtilityRouteRequest/Answer, boundUtilityRoute, ProcessSpawnContextInput, ProcessSpawnAuthorityPort, ProcessSpawnAdmission, ManagedCommandContext, managedCommandRefusal, ProcessSpawnAdmissionOutcome). Both kept: upstream's import joins the import list, followed by HEAD's block verbatim."
+					]
+				},
+				"semanticConflictsForC": [
+					"Upstream added launch-relevant ProcessConfig fields (permissionMode, appendSystemPrompt, promptFileArgs, modelId, effort, harnessControlMode, nativeAcpArgs, nativeRpcProtocol, nativeRpcArgs, sessionAdditionalDirectories, harnessControl). The admission request snapshot (buildSpawnRequestSnapshot in ProcessManager.ts, 00R12) must bind the ones that change what runs (at least nativeAcpArgs, nativeRpcArgs, appendSystemPrompt, permissionMode, harnessControlMode), or a native ACP/RPC route launches with arguments the lease never covered; the managed route/args ceiling must reach the native argument lists too.",
+					"Upstream's ProcessConfig.permissionMode is the literal 'full' | 'standard' | 'readonly'; the integration's SpawnPermissionMode is LaunchPermissionMode. 00C should confirm they are the same union (or type the field as SpawnPermissionMode) and that requestedPermissionMode() and managedPermissionModeRefusal() read the same field the native spawners obey."
+				],
+				"notes": "No guard dropped; no hunk took one whole side.",
+				"unmergedAfter": 74
 			}
 		}
 	}
