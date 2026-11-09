@@ -1434,13 +1434,16 @@
 			"MCOMP-33-00C": "Commit the second upstream/rc merge in the integration worktree and type-check the merged tree",
 			"MCOMP-33-00S": "Run the suites the second upstream/rc merge touched in the integration worktree",
 			"MCOMP-33-00L": "Land the second integration on the feature branch and rescan the effect and credential paths",
-			"MCOMP-33-00P": "Re-pin MAESTRO-M0-RUNTIME after the second upstream/rc merge and close the refresh"
+			"MCOMP-33-00P": "Re-pin MAESTRO-M0-RUNTIME after the second upstream/rc merge and close the refresh",
+			"MCOMP-33-00L1": "Hold the Federation SSH forward and remote discovery on a managed host",
+			"MCOMP-33-00L2": "Hold the Pianola memory hosted transport egress",
+			"MCOMP-33-00L3": "Refuse the Pianola sandbox validation runner on a managed data dir"
 		},
 		"rules": "the rules of the first selection apply unchanged (no forced reset, checkout loss, history rewrite or signing change; landing only on feature/mega-maestro-v1.1.0-rc by a merge commit; enterprise guards and standalone semantics survive; the desktop host stays Electron)",
 		"tool": ".maestro/playbooks/Working/mcomp-33-00/merge-tool.mjs (the MCOMP-01-03 driver with the second worktree and selection; not in git)",
 		"status": {
-			"state": "merge started, 97 files unmerged; resolution groups MCOMP-33-00R01..R40 open",
-			"updatedBy": "MCOMP-33-00"
+			"state": "landed on the feature branch at 58bad53dc and pushed; integration worktree removed; continuations MCOMP-33-00L1..L3 open ahead of the re-pin MCOMP-33-00P",
+			"updatedBy": "MCOMP-33-00L"
 		},
 		"progress": {
 			"MCOMP-33-00R01": {
@@ -3171,6 +3174,56 @@
 					"prettier": "exit 0, clean"
 				},
 				"tools": "Working/mcomp-33-00s/suites.mjs full <wt> s10 (full-s10.summary.json), Working/mcomp-33-00s10/static.mjs (static.json), record.mjs"
+			},
+			"MCOMP-33-00L": {
+				"completedAt": "2026-11-09",
+				"completedBy": "Maestro-Claude",
+				"landing": {
+					"commit": "58bad53dc",
+					"parents": {
+						"feature": "1974132c9",
+						"integration": "6ebc358e7"
+					},
+					"how": "git merge --no-ff --no-commit integrate/upstream-rc-919d28a in the main checkout, then commit (no reset, no rebase); no conflict. The feature side moved 59 commits since the cut at 40ec42bab, all records under Plans/integration-completion; the merge touches none of the four uncommitted Plans edits in the main checkout (EXECUTION-RULES.md, README.md, RUN-ORDER.md, program.json; someone else's, left as found). The landed tree equals the worktree tree 6ebc358e7 plus the record file only (git diff 6ebc358e7 58bad53dc).",
+					"pushed": "origin feature/mega-maestro-v1.1.0-rc at 58bad53dc (Working/mcomp-01-03q/push.mjs)",
+					"mainCheckoutInstall": "npm install --ignore-scripts --no-audit --no-fund: added 102, changed 8 (luxon and the other upstream packages); the key-order-only package-lock.json rewrite (sqlite-vec-linux-arm64 optional entry dropped) restored with git checkout. better-sqlite3 build left as it was."
+				},
+				"rescan": {
+					"suites": "Working/mcomp-33-00l/rescan-suites.json: the 03S rescan and runtime lists (120) plus every suite in the landed tree named for a hold, sink, leak guard, canary, policy or managed case, integration config excluded: 163 files, 4772 tests, 4758 passed, 11 failed, 3 skipped.",
+					"failures": {
+						"src/__tests__/integration/mega-maestro/full-pair.test.ts": "9, feature branch baseline (as 00S10)",
+						"src/__tests__/shared/maestro-lib/managed/contracts.test.ts": "1, the committed runtime pin, MCOMP-33-00P",
+						"src/shared/maestro-lib/runtime/__tests__/autorun-turns.test.ts": "1, intermittent, pre-existing feature-side race, not a merge defect: \"keeps a late unknown admission diagnostic and cleans the prompt file after cancellation\" reads the temp dir synchronously while removeTempFiles() (run/pipe-spawn.ts) unlinks fire-and-forget; alone 2/3 passed; neither the suite nor pipe-spawn.ts nor run-agent-turn.ts changed in the merge, and it passed in the worktree full run at 00S10 (identical tree). Backlog candidate."
+					},
+					"handoffScan": "buildHandoff over the landed tree: no build error, 0 absolute paths, 0 canaries; library status dirty (rebuilt by 00P); pin app \"app\":\"1.1.1-RC\" \"library\":\"0.36.0\" vs package 1.1.1-RC.",
+					"pairCheck": "node scripts/mega-maestro-pair.mjs check: exit 2 as before (CP-01, CP-03, linux-runtime, registration-approval open); Working/mcomp-33-00l/pair-check.log.",
+					"sinkScan": "Working/mcomp-33-00l/sinks.mjs (spawn, shell, socket/fetch, credential) and handoffs.mjs (OS hand-off, file write) over the non-test lines 58bad53dc^1..58bad53dc added: 43 files / 77 hits and 15 files; sinks.json, handoffs.json.",
+					"classification": {
+						"unheld": {
+							"Federation SSH forward and remote discovery (ssh-forward.ts, remote-discovery.ts, main/federation, cli peer-resolver)": "MCOMP-33-00L1",
+							"Pianola memory hosted transport fetch (memory-transport.ts requestJson, worker thread)": "MCOMP-33-00L2",
+							"Pianola sandbox validation runner (cli pianola-orchestrate runSandbox)": "MCOMP-33-00L3"
+						},
+						"held": {
+							"native spawners (AcpServer, Rpc, HermesApi, ClaudeSdk, CopilotSdk, AntigravitySdk)": "ProcessManager.spawn behind admitSpawn; the native launch is in the request snapshot (00F), checked at the sink",
+							"OpencodeServerSpawner": "fetchWithTimeout, the egress chokepoint",
+							"lite/tailnet-relay.ts listen": "holdListener ssh-tunnel before the bind, holdEgress per peer request",
+							"lite/index.ts handshake fetch": "behind liteControlHold and installLiteListenerAuthority (an enrolled host refuses Lite by name)",
+							"maestro-lib/client/local-port.ts": "the tunnel port probe, called after holdListener (00S9)",
+							"pianola memory CLI child": "admitSupervisorChild over the worker MessageChannel (00H, 00H1)"
+						},
+						"notAManagedEffect": {
+							"cli/services/host-sleep-guard.ts": "fixed caffeinate -i -w <host pid> on the host itself, no user input",
+							"cli/services/host-linger.ts": "read-only loginctl show-user probe",
+							"web-desktop/electron-shim.ts WebSocket": "browser build client to its own desktop",
+							"credential hits": "function names containing Entry (journey, dataview, env editor, toc); the Pianola provider env key reads are the hosted transport of 00L2",
+							"file writes": "userData stores and caches (journey, plugins, dataview vault cache, lite last connection, pianola stores), 0600 wx temp files (agent prompt, images), plugin media staging, and CLI --out paths the user names; no new shell.openExternal/openPath/trashItem or clipboard hand-off"
+						}
+					}
+				},
+				"worktreeRemoved": "node_modules deleted with fs.rmSync (lstat: the electron/dist link was unlinked, the main checkout dist untouched), the untracked SlopTimize scratch .sloptimize/ removed, git worktree remove exit 0; worktree agent 6ad3b46d removed with maestro-cli remove-agent. Branch integrate/upstream-rc-919d28a kept (it is the landing second parent).",
+				"continuations": ["MCOMP-33-00L1", "MCOMP-33-00L2", "MCOMP-33-00L3"],
+				"tools": "Working/mcomp-33-00l: land.mjs (merge|commit), merge-msg.txt, build-list.mjs, run-suites.mjs, sinks.mjs, handoffs.mjs, scan.mjs, remove-worktree.mjs, record.mjs"
 			}
 		}
 	}
