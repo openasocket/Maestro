@@ -6,7 +6,12 @@
  * list them again, and per notice the three receipts a person gives (read,
  * acknowledged, a private reply); `delivered` is recorded by the client when
  * a notice is first held, so no control exists for it. The four receipts stay
- * distinct here as they do in the ledger and at the endpoint.
+ * distinct here as they do in the ledger and at the endpoint: each notice lists
+ * delivered, read, acknowledged and reply with this host's receipt state for
+ * each (sending, recorded, refused, answer not seen), read from the durable
+ * ledger, so a restart shows the same receipts once the notice is listed again.
+ * A receipt whose answer was not seen keeps its control enabled: acting again
+ * resends under the same receipt key.
  *
  * An affordance, not enforcement: the endpoint authorizes every inbox effect
  * against the actor it resolves itself, and the main process refuses an act
@@ -19,8 +24,11 @@
  */
 
 import { useState, type ReactNode } from 'react';
-import type { EndpointInboxState } from '../../../shared/maestro-lib/managed/host-adapter';
-import type { NoticeView } from '../../../main/enterprise/inbox';
+import type {
+	EndpointInboxAction,
+	EndpointInboxState,
+} from '../../../shared/maestro-lib/managed/host-adapter';
+import type { InboxReceiptState, NoticeView } from '../../../main/enterprise/inbox';
 import { formatRelativeTime } from '../../../shared/formatters';
 import {
 	useManagedInbox,
@@ -60,7 +68,28 @@ export const INBOX_COPY = {
 	replyHint: 'Sent once to the endpoint and kept nowhere on this desktop.',
 	send: 'Send reply',
 	cancel: 'Cancel',
+	receipts: 'Receipts recorded on this desktop',
+	receiptKind: {
+		delivered: 'Delivered',
+		read: 'Read',
+		acknowledged: 'Acknowledged',
+		reply: 'Reply',
+	} satisfies Record<EndpointInboxAction['kind'], string>,
+	receiptState: {
+		pending: 'sending',
+		recorded: 'recorded',
+		denied: 'refused',
+		uncertain: 'answer not seen; act again to resend',
+	} satisfies Record<InboxReceiptState, string>,
+	noReceipt: 'none',
 } as const;
+
+const RECEIPT_KINDS: readonly EndpointInboxAction['kind'][] = [
+	'delivered',
+	'read',
+	'acknowledged',
+	'reply',
+];
 
 const STATE_RANK: Record<EndpointInboxState, number> = {
 	delivered: 0,
@@ -147,6 +176,29 @@ function Notice({
 				<span>{`${INBOX_COPY.expires} ${formatRelativeTime(notice.expiresAt)}`}</span>
 			</div>
 			<p className="text-xs whitespace-pre-wrap break-words select-text">{notice.body}</p>
+			<div
+				role="group"
+				aria-label={INBOX_COPY.receipts}
+				className="flex flex-wrap gap-x-3 gap-y-0.5 text-2xs"
+			>
+				{RECEIPT_KINDS.map((kind) => {
+					const state = notice.receipts[kind];
+					return (
+						<span
+							key={kind}
+							data-receipt-kind={kind}
+							data-receipt-state={state ?? 'none'}
+							style={
+								state === 'denied' || state === 'uncertain'
+									? { color: theme.colors.warning }
+									: { opacity: state ? 1 : 0.6 }
+							}
+						>
+							{`${INBOX_COPY.receiptKind[kind]}: ${state ? INBOX_COPY.receiptState[state] : INBOX_COPY.noReceipt}`}
+						</span>
+					);
+				})}
+			</div>
 			<div className="flex flex-wrap gap-1.5">
 				<Button
 					theme={theme}

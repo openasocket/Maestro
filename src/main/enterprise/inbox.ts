@@ -30,7 +30,9 @@
 import { canonicalJson } from '../../shared/canonicalJson';
 import { sha256Hex } from '../../shared/maestro-lib/managed/authority';
 import {
+	isEndpointDigest,
 	isEndpointIdentifier,
+	type EndpointInvokeOutcome,
 	type LocalEndpointDenialReason,
 } from '../../shared/maestro-lib/managed/endpoint-port';
 import type {
@@ -160,6 +162,77 @@ export function inboxActionProblem(action: unknown): string | null {
 		default:
 			return 'the action kind is not delivered, read, acknowledged or reply';
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Receipt recovery (RECOVERY-LOCAL/1, proposed, not negotiated)
+// ---------------------------------------------------------------------------
+
+/**
+ * The lookup this host asks for one action whose answer it never saw: the
+ * pinned `deviceInboxRecoveryInput` minus its `registration`, which the
+ * endpoint binds from the authenticated peer as it does for every local
+ * operation. No local endpoint operation carries it yet (RECOVERY-LOCAL/1 in
+ * `contract-coverage.json`), so no production host composes a port for it and
+ * nothing advertises it; the client consumes one when a host hands it over.
+ */
+export interface InboxRecoveryRequest {
+	version: 1;
+	operation: { idempotencyKey: string; campaignId: string; messageId: string };
+	requestDigest: string;
+}
+
+export interface InboxRecoveryPort {
+	recover(request: InboxRecoveryRequest): Promise<EndpointInvokeOutcome<unknown>>;
+}
+
+export type InboxRecoveryAnswer =
+	| { outcome: 'recovered'; receipt: { receiptId: string; state: EndpointInboxState } }
+	| { outcome: 'unavailable' };
+
+/**
+ * The pinned `deviceInboxRecoveryResult` for the record asked about, or null.
+ * A recovered receipt counts only when its custody names this exact action:
+ * the message, campaign, key and request digest sent, the state the action
+ * records, the tenant, and (when this host knew them) the enrollment, the actor
+ * and the registration that sent it. Anything else is not this receipt.
+ */
+export function readInboxRecoveryResult(
+	payload: unknown,
+	record: InboxReceiptRecord
+): InboxRecoveryAnswer | null {
+	if (!isRecord(payload) || payload.version !== 1) return null;
+	if (payload.outcome === 'unavailable') {
+		return payload.reason === 'receipt_missing_or_unbound' ? { outcome: 'unavailable' } : null;
+	}
+	if (payload.outcome !== 'recovered' || !isRecord(payload.receipt)) return null;
+	const receipt = payload.receipt;
+	const custody = receipt.custody;
+	const matches = (value: unknown, expected: string | null): boolean =>
+		expected === null || value === expected;
+	if (
+		receipt.outcome !== 'recorded' ||
+		receipt.messageId !== record.messageId ||
+		!isEndpointIdentifier(receipt.receiptId) ||
+		receipt.state !== INBOX_STATE_OF_ACTION[record.action] ||
+		!isRecord(custody) ||
+		custody.campaignId !== record.campaignId ||
+		custody.idempotencyKey !== record.idempotencyKey ||
+		!isEndpointDigest(custody.requestDigest) ||
+		custody.requestDigest !== record.requestDigest ||
+		custody.tenantId !== record.tenantId ||
+		!matches(custody.enrollmentId, record.enrollmentId) ||
+		!matches(custody.actorId, record.actorId) ||
+		!isRecord(custody.registration) ||
+		custody.registration.challengeId !== record.registrationId ||
+		!isTimestamp(custody.recordedAt)
+	) {
+		return null;
+	}
+	return {
+		outcome: 'recovered',
+		receipt: { receiptId: receipt.receiptId, state: receipt.state as EndpointInboxState },
+	};
 }
 
 // ---------------------------------------------------------------------------
@@ -413,6 +486,26 @@ export type InboxActionOutcome =
 	| { status: 'uncertain'; record: InboxReceiptRecord; detail: string }
 	| { status: 'unavailable'; detail: string };
 
+/**
+ * One `recover()`: every `uncertain` receipt this host holds, asked once of
+ * the endpoint's receipt custody. `recovered` settled as `recorded`;
+ * `missing` the endpoint holds no receipt under that key (the next act or
+ * listing resends under the same key; a private reply is never replayed from
+ * here, its text is kept nowhere); `mismatched` an answer that names another
+ * action; `unbound` a record of another tenant or enrollment, not asked.
+ */
+export interface InboxRecovery {
+	at: string;
+	outcome: 'checked' | 'unsupported' | 'no-standing' | 'not-loaded';
+	reason: string | null;
+	uncertain: number;
+	recovered: number;
+	missing: number;
+	mismatched: number;
+	unbound: number;
+	unavailable: number;
+}
+
 export interface InboxClientStatus {
 	file: string | null;
 	loaded: boolean;
@@ -437,6 +530,8 @@ export interface InboxClient {
 		messageId: string;
 		action: EndpointInboxAction;
 	}): Promise<InboxActionOutcome>;
+	/** Ask the endpoint's receipt custody about every `uncertain` receipt (RECOVERY-LOCAL/1); never resends. */
+	recover(): Promise<InboxRecovery>;
 	/** Every receipt this host holds (digests and states; never a body or a reply's text). */
 	receipts(): readonly InboxReceiptRecord[];
 	status(): InboxClientStatus;
@@ -446,6 +541,8 @@ export interface InboxClientDeps {
 	host: Pick<ManagedHostAdapter, 'inbox' | 'inboxStanding'>;
 	/** The receipt ledger (`createInboxReceiptLedger`); the composer names its file in the data directory. */
 	ledger: InboxReceiptLedger;
+	/** The receipt lookup (RECOVERY-LOCAL/1), read per call; absent or null on every production host today. */
+	recovery?: () => InboxRecoveryPort | null;
 	now?: () => number;
 }
 
@@ -701,6 +798,92 @@ export function createInboxClient(deps: InboxClientDeps): InboxClient {
 		return summary;
 	}
 
+	async function recover(): Promise<InboxRecovery> {
+		const summary: InboxRecovery = {
+			at: iso(),
+			outcome: 'checked',
+			reason: null,
+			uncertain: 0,
+			recovered: 0,
+			missing: 0,
+			mismatched: 0,
+			unbound: 0,
+			unavailable: 0,
+		};
+		if (load?.ok !== true) {
+			return {
+				...summary,
+				outcome: 'not-loaded',
+				reason: 'The inbox receipt ledger is not loaded.',
+			};
+		}
+		const uncertain = ledger.list().filter((r) => r.state === 'uncertain');
+		summary.uncertain = uncertain.length;
+		const port = deps.recovery?.() ?? null;
+		if (!port) {
+			return {
+				...summary,
+				outcome: 'unsupported',
+				reason: 'No receipt recovery operation is negotiated with the endpoint.',
+			};
+		}
+		const standing = host.inboxStanding();
+		if (!standing.ok || !standing.binding.capabilities.inbox) {
+			return {
+				...summary,
+				outcome: 'no-standing',
+				reason: standing.ok
+					? 'The endpoint negotiated no inbox capability on this connection.'
+					: standing.reason,
+			};
+		}
+		const { binding } = standing;
+		for (const entry of uncertain) {
+			if (
+				entry.tenantId !== binding.tenantId ||
+				(entry.enrollmentId !== null &&
+					binding.enrollmentId !== null &&
+					entry.enrollmentId !== binding.enrollmentId)
+			) {
+				summary.unbound += 1;
+				continue;
+			}
+			// One record at a time, between acts: an act that settled it meanwhile is left alone.
+			const result = await serialized(async () => {
+				if (ledger.get(entry.idempotencyKey)?.state !== 'uncertain') return 'skipped' as const;
+				const answer = await port.recover({
+					version: 1,
+					operation: {
+						idempotencyKey: entry.idempotencyKey,
+						campaignId: entry.campaignId,
+						messageId: entry.messageId,
+					},
+					requestDigest: entry.requestDigest,
+				});
+				if (answer.status !== 'ok') return 'unavailable' as const;
+				const read = readInboxRecoveryResult(answer.payload, entry);
+				if (!read) return 'mismatched' as const;
+				if (read.outcome === 'unavailable') {
+					await ledger.settle(
+						entry.idempotencyKey,
+						'uncertain',
+						'the endpoint holds no receipt under this key; act again to resend it'
+					);
+					return 'missing' as const;
+				}
+				await ledger.settle(
+					entry.idempotencyKey,
+					'recorded',
+					'recovered from the endpoint receipt custody',
+					{ receipt: read.receipt, denial: null }
+				);
+				return 'recovered' as const;
+			});
+			if (result !== 'skipped') summary[result] += 1;
+		}
+		return summary;
+	}
+
 	function view(entry: HeldNotice): NoticeView {
 		const receipts: NoticeView['receipts'] = {};
 		let recorded: EndpointInboxState | null = null;
@@ -734,6 +917,7 @@ export function createInboxClient(deps: InboxClientDeps): InboxClient {
 		},
 		notices: () => [...held.values()].map(view),
 		act: (input) => serialized(() => record(input)),
+		recover,
 		receipts: () => ledger.list().map((record) => ({ ...record })),
 		status() {
 			const standing = host.inboxStanding();

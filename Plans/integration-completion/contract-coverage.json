@@ -192,7 +192,8 @@
 			"consumerPort": "src/main/enterprise/inbox.ts",
 			"binding": "pending",
 			"pairedVerification": ["MCOMP-30-01"],
-			"note": "Reuse endpointInboxPort and private receipt journal. Device recovery schemas exist but no local receipt-recovery operation (RECOVERY-LOCAL/1); notices retain agentInput:false."
+			"note": "Reuse endpointInboxPort and private receipt journal. Device recovery schemas exist but no local receipt-recovery operation (RECOVERY-LOCAL/1); notices retain agentInput:false.",
+			"localConsumer": "MCOMP-29-02: noticeList/inbox over endpointInboxPort with the durable receipt ledger (delivered/read/acknowledged/reply distinct; pending becomes uncertain on restart; the next listing resends delivered under the same key); the desktop inbox pane lists the four receipt states per notice. Receipt recovery is RECOVERY-LOCAL/1, consumer only."
 		},
 		{
 			"family": "usage-lifecycle",
@@ -432,7 +433,8 @@
 			"operations": "Propose inbox_recover over the local endpoint; central deviceInboxRecoveryInput/Result already exist.",
 			"missing": "Registration-bound campaign/message/idempotency/requestDigest lookup and receipt custody; missing/unbound returns unavailable. No actor selector or automatic replay of private replies.",
 			"implementationTasks": ["MCOMP-29-02", "MCOMP-29-03"],
-			"pairedVerification": ["MCOMP-30-01"]
+			"pairedVerification": ["MCOMP-30-01"],
+			"localConsumer": "MCOMP-29-02: createInboxClient(...).recover() over an optional InboxClientDeps.recovery port (InboxRecoveryRequest = deviceInboxRecoveryInput minus registration, which the endpoint binds from the authenticated peer). readInboxRecoveryResult() accepts the pinned deviceInboxRecoveryResult only when the custody names the exact action (message, campaign, idempotency key, request digest, action state, tenant, and the enrollment, actor and sending registration challenge this host recorded); recovered settles the uncertain receipt recorded, receipt_missing_or_unbound keeps it uncertain, nothing is resent and a private reply is never replayed. Records of another tenant or enrollment are not asked. No production host composes the port and no capability is advertised; recover() answers unsupported until the operation is published and negotiated."
 		},
 		{
 			"id": "HEADLESS-CUSTODY/1",

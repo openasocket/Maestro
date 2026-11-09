@@ -317,6 +317,37 @@ describe('ManagedStatus', () => {
 });
 
 describe('ManagedInbox', () => {
+	it('lists the four receipts of a notice distinctly, and keeps an unseen answer actionable (MCOMP-29-02)', async () => {
+		inboxState.mockResolvedValue(
+			view([
+				notice({
+					recorded: 'read',
+					receipts: { delivered: 'recorded', read: 'recorded', acknowledged: 'uncertain' },
+				}),
+			])
+		);
+		render(<ManagedInbox theme={mockTheme} />);
+		const group = await screen.findByRole('group', { name: INBOX_COPY.receipts });
+		expect(within(group).getByText('Delivered: recorded')).toBeInTheDocument();
+		expect(within(group).getByText('Read: recorded')).toBeInTheDocument();
+		expect(
+			within(group).getByText(`Acknowledged: ${INBOX_COPY.receiptState.uncertain}`)
+		).toHaveStyle({ color: mockTheme.colors.warning });
+		expect(within(group).getByText('Reply: none')).toBeInTheDocument();
+		// The receipts are not notices: the notice list still holds one item.
+		expect(screen.getAllByRole('listitem')).toHaveLength(1);
+		// Read is reached; the acknowledgement whose answer was not seen can be sent again.
+		expect(screen.getByText(INBOX_COPY.markRead)).toBeDisabled();
+		fireEvent.click(screen.getByText(INBOX_COPY.acknowledge));
+		await waitFor(() =>
+			expect(inboxAct).toHaveBeenCalledWith({
+				campaignId: 'camp-1',
+				messageId: 'msg-1',
+				action: { kind: 'acknowledged' },
+			})
+		);
+	});
+
 	it('is a labelled section: the list under its heading, the counts, bodies as plain text', async () => {
 		render(<ManagedInbox theme={mockTheme} />);
 		const section = screen.getByRole('region', { name: INBOX_COPY.heading });
