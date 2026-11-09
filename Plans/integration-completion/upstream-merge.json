@@ -2672,6 +2672,44 @@
 					"result": "1606 passed, 290 failed",
 					"preExisting": "All 290 failures are pre-existing at 056f51016 (same failing test names with this change stashed, 1603 passed): the memory-* suites (sqlite-vec environment), pianola-legacy-migration 17, pianola-scope-host 4, persistence 136, messageHandlers 34 and messageHandlers.managed 8 (the 00R33 test-wire carries). Left for MCOMP-33-00S."
 				}
+			},
+			"MCOMP-33-00H": {
+				"completedAt": "2026-11-09",
+				"completedBy": "Maestro-Claude",
+				"worktreeCommit": "d58e80e4b",
+				"worktreeParent": "98779678b",
+				"settled": {
+					"00R27": {
+						"finding": "The upstream Pianola memory backfill launches its CLI child in MemoryTransportScope.cli() with execFileNoThrow from the memory worker thread (memory-host.ts spawns memory-worker.js), which cannot hold the host spawn authority, so the child was never admitted on a managed host.",
+						"change": "memory-transport.ts: the worker asks the main thread over a MessageChannel handed in workerData.memoryCliAdmission (memoryCliAdmissionClient, 60s bound, a lost answer is unknown) before every launch. The main end (serveMemoryCliAdmission) admits the exact spawn spec (command, args, cwd, env, stdin, shell false) through admitSupervisorChild as service pianola-memory, re-checks the lease (lifetime.admit), binds it, and answers; the worker reports exited or withdrawn so the lease is released with the child. A refusal is MemoryTransportError managed-<state> raised before the permit opens (no request row, nothing uncertain). No channel, no port or a standalone standing launches as before. memory-host.ts: creates the channel per worker and takes the port as a new optional constructor and initializePianolaMemory argument.",
+						"files": [
+							"src/main/pianola/memory-transport.ts",
+							"src/main/pianola/memory-host.ts",
+							"src/__tests__/main/pianola/memory-transport.test.ts"
+						],
+						"test": "memory-transport.test.ts describe \"memory CLI admission on a managed host\", 4 cases over a real MessageChannel and the real lease authority behind fakeSpawnPort: a denied launch rejects managed-denied with no execFileNoThrow, no request row and no live lease; an admitted launch is bound before the spawn, the snapshot executable and cwd are the spawn, and the lease is released after the exit; a permit that cannot open withdraws the lease; a standalone port asks nobody. Working/mcomp-33-00e/mutate.mjs: dropping the refusal fails 1, skipping the admitter fails 3; all pass with the repair.",
+						"carried": "MCOMP-33-00H1 (inserted ahead of 00S): pianola-lifecycle.ts must pass deps.spawnAuthority as the fourth initializePianolaMemory argument; until then the desktop host hands the worker a channel whose port reads null, so the backfill stays standalone in production. Residual noted, not repaired: a lease revoked mid-run cannot stop the CLI child (execFileNoThrow exposes no handle; the child stays bounded by its timeout)."
+					}
+				},
+				"environment": "npm ci --ignore-scripts (00D) left better-sqlite3 without its native build, so every memory-* suite failed to load; npm rebuild better-sqlite3 in the worktree (Node 26 ABI) fixed it. The main checkout build is Electron ABI (145) and must not be linked in.",
+				"typeCheck": {
+					"tsconfig.lint.json": {
+						"exit": 0,
+						"errors": 0
+					},
+					"tsconfig.main.json": {
+						"exit": 0,
+						"errors": 0
+					},
+					"tsconfig.cli.json": {
+						"exit": 0,
+						"errors": 0
+					}
+				},
+				"suites": {
+					"run": "src/__tests__/main/pianola/memory-{concurrency,attribution,transport,cli-config,recall,eligibility,cli,provenance}.test.ts",
+					"result": "134 passed, 0 failed (memory-transport 31 passed, 3 Windows-only skipped)"
+				}
 			}
 		}
 	}
