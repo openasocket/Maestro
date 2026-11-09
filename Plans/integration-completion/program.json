@@ -6079,6 +6079,50 @@
 					"id": "MCOMP-25-01"
 				},
 				{
+					"label": "The composer records the managed run its send started",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/__tests__/renderer/hooks/useInputProcessing.test.ts",
+						"src/__tests__/renderer/stores/agentStore.test.ts",
+						"src/__tests__/renderer/turns/assemble-parity.test.ts",
+						"src/renderer/global.d.ts",
+						"src/renderer/hooks/input/useInputProcessing.ts",
+						"src/renderer/services/process.ts",
+						"src/renderer/stores/agentStore.ts",
+						"src/renderer/types/index.ts"
+					],
+					"outcome": "Inserted during execution after MCOMP-25-01; landed as 16417d8cc. Read `Plans/integration-completion/EXECUTION-RULES.md`; work only in the owning repository. Add `managedRun?: ManagedRunView` to `ProcessSpawnResult` in `src/renderer/services/process.ts` (type-only import from `src/main/enterprise/dispatch.ts`, as other renderer files import main types). In `src/renderer/hooks/input/useInputProcessing.ts` (direct send) and `src/renderer/stores/agentStore.ts` (`processQueuedItem`, the dequeue path) keep the spawn's `managedRun` on the target AI tab for the turn it started (reuse `updateAiTab()`; the field is cleared when the next send starts, never carried to a retry or resume, which are admitted again), so 25-02 can show it. A managed refusal keeps today's error path (no retry, nothing queued as a collision). Test both paths with the existing renderer test patterns. At most 3 authored files plus their tests, fewer than 500 changed lines. Backlog: M-06.",
+					"backlog": ["M-06"],
+					"requires": ["MAESTRO-CONTRACT-INPUTS-BUILD"],
+					"produces": [],
+					"id": "MCOMP-25-01A"
+				},
+				{
+					"label": "Read a managed run's receipt from the ledger",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"docs/agent-guides/CLI-UI-PARITY.md",
+						"src/__tests__/cli/commands/managed.test.ts",
+						"src/__tests__/main/enterprise/dispatch.test.ts",
+						"src/__tests__/main/ipc/handlers/enterprise.test.ts",
+						"src/__tests__/main/preload/enterprise.test.ts",
+						"src/__tests__/main/web-server/handlers/messageHandlers.managed.test.ts",
+						"src/cli/commands/managed-inbox.ts",
+						"src/cli/index.ts",
+						"src/main/enterprise/dispatch.ts",
+						"src/main/enterprise/service.ts",
+						"src/main/ipc/handlers/enterprise.ts",
+						"src/main/preload/enterprise.ts",
+						"src/main/web-server/handlers/messageHandlers/WebSocketMessageHandler.ts",
+						"src/main/web-server/handlers/messageHandlers/managed.ts"
+					],
+					"outcome": "Inserted during execution after MCOMP-25-01A; landed as c8d7878ef. Read `Plans/integration-completion/EXECUTION-RULES.md`; work only in the owning repository. Expose the dispatch ledger read the composer needs after a turn ends: an `enterprise` IPC read (reuse `src/main/ipc/handlers/enterprise.ts` and the preload enterprise namespace; the service's `BrokerDispatch.receipt(leaseId)`) that answers `managedRunViewOf(admission, receipt)`-shaped data for a lease id (identifiers only; null for an unknown lease or a standalone host), so a stopped, released, revoked or restart-`unknown` run reads back truthfully. Per the constitution, add the matching `maestro-cli` read and its CLI-UI-PARITY.md row, or record the gap in its Open gaps list with the reason if it cannot fit this bound. At most 3 authored files plus tests, fewer than 500 changed lines. Backlog: M-06.",
+					"backlog": ["M-06"],
+					"requires": ["MAESTRO-CONTRACT-INPUTS-BUILD"],
+					"produces": [],
+					"id": "MCOMP-25-01B"
+				},
+				{
 					"label": "Show actionable managed run state and allowed recovery",
 					"kind": "IMPLEMENT",
 					"targets": [
@@ -6091,6 +6135,25 @@
 					"requires": [],
 					"produces": [],
 					"id": "MCOMP-25-02"
+				},
+				{
+					"label": "Mount the managed run state on the AI tab and wire its actions",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/__tests__/renderer/components/Enterprise/AiTabManagedRun.test.tsx",
+						"src/renderer/components/Enterprise/AiTabManagedRun.tsx",
+						"src/renderer/components/MainPanel/MainPanelContent.tsx",
+						"src/renderer/global.d.ts",
+						"src/renderer/hooks/input/useInputProcessing.ts",
+						"src/renderer/services/process.ts",
+						"src/renderer/stores/agentStore.ts",
+						"src/renderer/types/index.ts"
+					],
+					"outcome": "Inserted during execution after MCOMP-25-02; landed as d1adbb7c7. Read `Plans/integration-completion/EXECUTION-RULES.md`; work only in the owning repository. Render `<ManagedRunState>` (`src/renderer/components/Enterprise/ManagedRunState.tsx`) for the active AI tab in the AI Terminal (find the right host near the composer or the tab's output; reuse `useActiveSession()` and `useManagedStatus()`), fed by `AITab.managedRun`, the tab's busy state and the host standing; it draws nothing on a standalone host, so the ordinary Maestro is unchanged. Record a managed spawn refusal (`SpawnResult.managed`, `{ state, code }` with the error message, returned as `success: false` by `ProcessManager.spawnAdmitted`) on the tab beside `managedRun` (reuse `noteTurnManagedRun()` in `src/renderer/services/process.ts`; cleared when the next send starts) so the `denied` / `offline` word shows. Wire `onAction`: `stop` through `interruptTurn()` (`src/renderer/services/turnInterrupt.ts`), `retry` as an ordinary resend of the tab's last user message through the existing queue path (admitted again; never an automatic resend), `refreshPolicy` through `useManagedStatus().run('refreshPolicy')`; pass `handles` for exactly the ones wired. Test the mount and each wired action with existing renderer patterns. At most 3 authored files plus tests, fewer than 500 changed lines. Backlog: M-06.",
+					"backlog": ["M-06"],
+					"requires": ["MAESTRO-CONTRACT-INPUTS-BUILD"],
+					"produces": [],
+					"id": "MCOMP-25-02A"
 				},
 				{
 					"label": "Handle native close restart and mid-run policy loss",
@@ -6117,6 +6180,25 @@
 					"id": "MCOMP-25-04"
 				},
 				{
+					"label": "keep a managed sink refusal through the process:spawn rejection",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/__tests__/main/ipc/handlers/process/handle-spawn.managed.test.ts",
+						"src/__tests__/renderer/components/Enterprise/AiTabManagedRun.test.tsx",
+						"src/__tests__/shared/processErrors.test.ts",
+						"src/main/ipc/handlers/process/handle-spawn.ts",
+						"src/renderer/hooks/input/useInputProcessing.ts",
+						"src/renderer/services/process.ts",
+						"src/renderer/stores/agentStore.ts",
+						"src/shared/processErrors.ts"
+					],
+					"outcome": "Inserted during execution after MCOMP-25-04; landed as 379b48197. `handle-spawn.ts` rejected every failed spawn with the bare reason, so the renderer never saw `SpawnResult.managed` and `AiTabManagedRun` drew nothing for a refused send. Encode it with the existing processErrors pattern and record it on the tab from both send paths. Bounded: 4 source files and 3 test files, under 200 lines. Backlog: M-06.",
+					"backlog": ["M-06"],
+					"requires": ["MAESTRO-CONTRACT-INPUTS-BUILD"],
+					"produces": [],
+					"id": "MCOMP-25-04A"
+				},
+				{
 					"label": "Verify and publish implementation inputs",
 					"kind": "VERIFY",
 					"targets": ["Plans/integration-completion/evidence/interactive-build.json"],
@@ -6131,7 +6213,7 @@
 			"produces": ["MAESTRO-DESKTOP-APP-BUILD"],
 			"id": "MCOMP-25",
 			"path": ".maestro/playbooks/2026-10-29-Maestro-Integration-Completion/MCOMP-25.md",
-			"taskCount": 5,
+			"taskCount": 9,
 			"stage": "S12"
 		},
 		{
@@ -7272,7 +7354,7 @@
 				"PAIR-DIRECT-EVIDENCE"
 			],
 			"nativeInputs": false,
-			"taskCount": 81
+			"taskCount": 85
 		},
 		{
 			"id": "S13",
@@ -7429,8 +7511,8 @@
 			"taskCount": 1
 		}
 	],
-	"taskCount": 443,
-	"taskCounts": { "IMPLEMENT": 327, "TEST": 56, "VERIFY": 60 },
+	"taskCount": 447,
+	"taskCounts": { "IMPLEMENT": 331, "TEST": 56, "VERIFY": 60 },
 	"artifacts": {
 		"MEGA-CONTRACTS-FOUNDATION-BUILD": {
 			"producerDocument": "GCOMP-01",
@@ -8609,9 +8691,13 @@
 			"MCOMP-23-07",
 			"MCOMP-24-01",
 			"MCOMP-25-01",
+			"MCOMP-25-01A",
+			"MCOMP-25-01B",
 			"MCOMP-25-02",
+			"MCOMP-25-02A",
 			"MCOMP-25-03",
 			"MCOMP-25-04",
+			"MCOMP-25-04A",
 			"MCOMP-25-05",
 			"MCOMP-26-01"
 		]
