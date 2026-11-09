@@ -16,6 +16,7 @@ import * as path from 'path';
 import type { ManagedEnrollmentStatus } from '../../shared/maestro-lib';
 
 import { formatDurationHuman } from '../../shared/duration';
+import { isWindows } from '../../shared/platformDetection';
 import {
 	RUNTIME_LOCK_SPEC,
 	createFileLogger,
@@ -28,6 +29,7 @@ import {
 	resolveMaestroPaths,
 	setMaestroLibLogger,
 	type HostCueState,
+	type HostEndpoint,
 	type HostStatusReport,
 	type HostStopReply,
 	type HostWork,
@@ -38,6 +40,12 @@ import {
 import { isListenerDeniedError } from '../../main/enterprise/listener-gate';
 import { ExitCode } from '../exit-codes';
 import { composeHostManaged, type HostManagedComposition } from '../services/host-managed';
+import {
+	checkUserLinger,
+	formatLingerWarning,
+	type LingerOff,
+	type LingerState,
+} from '../services/host-linger';
 import { startRuntimeHost, type RunningHost } from '../services/runtime-host';
 
 export interface HostCommandOptions {
@@ -48,6 +56,11 @@ export interface HostCommandOptions {
 	foreground?: boolean;
 	/** `start` only: a port to listen on. Default: any free one. */
 	port?: string | number;
+	/**
+	 * `start` only: hold the Mac awake while work is in flight (`caffeinate -i`). Commander sets it
+	 * `false` for `--no-prevent-sleep`; absent means on. No effect on other platforms.
+	 */
+	preventSleep?: boolean;
 	/** `stop` only: stop even with a turn, an Auto Run, or a Cue run in flight. */
 	force?: boolean;
 	/**
@@ -104,6 +117,8 @@ export interface HostCommandDeps {
 	now(): number;
 	/** The bundle to re-run as the detached child. */
 	cliScript: string;
+	/** Linux: is lingering off for this user, so the host may stop at logout? */
+	checkLinger(): Promise<LingerState>;
 }
 
 export interface DetachedChild {
@@ -147,6 +162,7 @@ const defaultDeps: HostCommandDeps = {
 	sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
 	now: () => Date.now(),
 	cliScript: process.argv[1] ?? '',
+	checkLinger: () => checkUserLinger(),
 };
 
 function say(options: HostCommandOptions, payload: unknown, human: string): void {
@@ -161,6 +177,15 @@ function fail(options: HostCommandOptions, message: string, code = ExitCode.Gene
 
 function plural(count: number, noun: string): string {
 	return `${count} ${noun}${count === 1 ? '' : 's'}`;
+}
+
+/**
+ * Say that lingering is off, for a human. `--json` carries it as `linger: false` and `lingerFix`
+ * instead (spread `linger ?? {}` into the payload), so a script, or `remote-host status` on the
+ * laptop, can pass it on.
+ */
+function warnLinger(options: HostCommandOptions, linger: LingerState): void {
+	if (linger && !options.json) console.error(formatLingerWarning(linger.lingerFix));
 }
 
 /** A flag's seconds: a finite number of 0 or more, or undefined for anything else. */
@@ -201,15 +226,17 @@ export async function hostStart(
 		return;
 	}
 	const paths = resolveHostPaths(options);
+	const linger = await deps.checkLinger();
 	return options.foreground
-		? runForeground(options, paths, graceSeconds, cliVersion)
-		: startDetached(options, paths, deps);
+		? runForeground(options, paths, graceSeconds, linger, cliVersion)
+		: startDetached(options, paths, deps, linger);
 }
 
 async function startDetached(
 	options: HostCommandOptions,
 	paths: HostPaths,
-	deps: HostCommandDeps
+	deps: HostCommandDeps,
+	linger: LingerState
 ): Promise<void> {
 	const running = liveHost(paths.userDataDir, deps);
 	if (running && running.hostKind !== 'headless') {
@@ -235,9 +262,16 @@ async function startDetached(
 	if (running) {
 		say(
 			options,
-			{ started: false, alreadyRunning: true, pid: running.pid, port: running.port },
+			{
+				started: false,
+				alreadyRunning: true,
+				pid: running.pid,
+				port: running.port,
+				...(linger ?? {}),
+			},
 			`A host is already running (pid ${running.pid}, port ${running.port}).`
 		);
+		warnLinger(options, linger);
 		return;
 	}
 
@@ -252,6 +286,7 @@ async function startDetached(
 		paths.userDataDir,
 		...(options.dev ? ['--dev'] : []),
 		...(options.port !== undefined ? ['--port', String(options.port)] : []),
+		...(options.preventSleep === false ? ['--no-prevent-sleep'] : []),
 		...(options.stopGrace !== undefined ? ['--stop-grace', String(options.stopGrace)] : []),
 	];
 	const child = deps.spawnDetached(
@@ -286,9 +321,11 @@ async function startDetached(
 					...(report ? { cue: report.cue } : {}),
 					...(report?.managed ? { managed: report.managed } : {}),
 					...(report?.managedUnavailable ? { managedUnavailable: report.managedUnavailable } : {}),
+					...(linger ?? {}),
 				},
 				`Host started (pid ${info.pid}, port ${info.port}). Log: ${logFile}\n${lines}`
 			);
+			warnLinger(options, linger);
 			return;
 		}
 		if (child.exited()) {
@@ -305,7 +342,9 @@ async function startDetached(
 }
 
 /** What a signal drain needs from the running host. */
-export type DrainableHost = Pick<RunningHost, 'work' | 'stop' | 'stopped'>;
+export type DrainableHost = Pick<RunningHost, 'work' | 'stop' | 'stopped'> & {
+	cue: Pick<RunningHost['cue'], 'drain' | 'forceStop'>;
+};
 
 export interface SignalDrainDeps {
 	sleep(ms: number): Promise<void>;
@@ -320,6 +359,10 @@ export interface SignalDrainDeps {
  * signal stops at once. Nothing new is turned away while it waits: the runtime has no switch that
  * refuses new work, so a turn that starts during the grace period is waited for too, up to the
  * same deadline.
+ *
+ * Cue is the exception, because its triggers start work on their own: the first signal starts its
+ * drain at once, with the same grace, so no trigger fires while the host waits, and what is queued
+ * is persisted for the next start. The second signal force-stops it before the host stops.
  */
 export function createSignalDrain(
 	host: DrainableHost,
@@ -335,6 +378,10 @@ export function createSignalDrain(
 
 	const drain = async (signal: string): Promise<void> => {
 		const deadline = deps.now() + graceMs;
+		// Its runs count in `work()` below until the drain has let them finish or stopped them.
+		host.cue.drain(graceMs).catch((error: unknown) => {
+			deps.log(`Draining Cue failed: ${error instanceof Error ? error.message : String(error)}`);
+		});
 		let current = host.work();
 		if (hostHasWork(current) && graceMs > 0) {
 			deps.log(
@@ -358,6 +405,7 @@ export function createSignalDrain(
 	return (signal) => {
 		if (draining) {
 			deps.log(`Received ${signal} again: stopping now.`);
+			host.cue.forceStop();
 			stopNow();
 			return;
 		}
@@ -375,6 +423,7 @@ async function runForeground(
 	options: HostCommandOptions,
 	paths: HostPaths,
 	graceSeconds: number,
+	linger: LingerState,
 	cliVersion?: string
 ): Promise<void> {
 	// Everything the runtime and the Cue engine read by environment lands on this directory too.
@@ -399,6 +448,7 @@ async function runForeground(
 			...(cliVersion ? { version: cliVersion } : {}),
 			...(options.port !== undefined ? { port: Number(options.port) } : {}),
 			managedComposition: standing,
+			preventSleep: options.preventSleep !== false,
 			log: (line) => console.log(line),
 		});
 	} catch (error) {
@@ -441,9 +491,12 @@ async function runForeground(
 			port: host.server.port,
 			cue,
 			...(standing.composed ? {} : { managedUnavailable: standing.reason }),
+			...(linger ?? {}),
 		},
 		`Host started (pid ${process.pid}, port ${host.server.port}).\n${describeCueAtStart(cue)}\nManaged: ${managedLine}`
 	);
+	// A systemd user unit needs lingering too, or it stops at logout like any other process.
+	warnLinger(options, linger);
 	await host.stopped;
 	process.exit(ExitCode.Success);
 }
@@ -474,7 +527,7 @@ function describeCue(cue: HostCueState): string {
 		case 'held':
 			return `not running here: ${cue.mode} pid ${cue.pid} holds the Cue lock`;
 		case 'failed':
-			return `failed to start: ${cue.reason}`;
+			return `not running: ${cue.reason}`;
 	}
 }
 
@@ -535,6 +588,7 @@ export function formatHostStatus(report: HostStatusReport): string {
 		`Work: ${describeWork(report.work)}`,
 		`Cue: ${describeCue(report.cue)}`,
 		`Managed: ${describeManaged(report.managed, report.managedUnavailable)}`,
+		...(report.preventingSleep ? ['Sleep: prevented while work is in flight (caffeinate)'] : []),
 	].join('\n');
 }
 
@@ -549,9 +603,11 @@ export async function hostStatus(
 ): Promise<void> {
 	const deps = { ...defaultDeps, ...overrides };
 	const { userDataDir } = resolveHostPaths(options);
+	const linger = await deps.checkLinger();
 	try {
 		const report = await deps.requestStatus(userDataDir);
-		say(options, { running: true, ...report }, formatHostStatus(report));
+		say(options, { running: true, ...report, ...(linger ?? {}) }, formatHostStatus(report));
+		warnLinger(options, linger);
 	} catch (error) {
 		const holder = lockHolder(userDataDir);
 		const reachable = liveHost(userDataDir, deps);
@@ -560,13 +616,94 @@ export async function hostStatus(
 			: 'No host is running.';
 		say(
 			options,
-			{ running: false, reason, lockHolder: holder },
+			{ running: false, reason, lockHolder: holder, ...(linger ?? {}) },
 			holder
 				? `${reason}\nLock: ${holder.mode} pid ${holder.pid}, since ${holder.startedAt}`
 				: reason
 		);
+		warnLinger(options, linger);
 		process.exitCode = ExitCode.NotRunning;
 	}
+}
+
+// ---------------------------------------------------------------------------
+// endpoint
+// ---------------------------------------------------------------------------
+
+/**
+ * What `host endpoint --json` prints: the live bridge of this data directory, or that there is none.
+ * Either form carries `linger: false` and `lingerFix` when lingering is off on a Linux host, so
+ * `remote-host status` on the laptop can pass the warning on (discovery reads them).
+ */
+export type HostEndpointReport = ({ running: false } | ({ running: true } & HostEndpoint)) &
+	Partial<LingerOff>;
+
+/**
+ * Whether only the owner can read the discovery file. The token and the CLI secret in it grant
+ * full control of the host, so `endpoint` hands them out only while the file is as private as the
+ * writer made it (`0600`). Windows has no mode bits; the per-user AppData ACL does that job there.
+ */
+function discoveryFileIsOwnerOnly(file: string): boolean {
+	if (isWindows()) return true;
+	return (fs.statSync(file).mode & 0o077) === 0;
+}
+
+/**
+ * Print the endpoint of the host serving this data directory: its port, path token, CLI secret,
+ * version and pid. Pairing P1 of Federation (#1716): a laptop runs this over SSH on every connect
+ * and keeps the answer in memory, so SSH is the authentication and nothing is stored on the laptop.
+ * The token and the secret go to stdout under `--json` only, never to a log or an error message.
+ */
+export async function hostEndpoint(
+	options: HostCommandOptions,
+	overrides: Partial<HostCommandDeps> = {}
+): Promise<void> {
+	const deps = { ...defaultDeps, ...overrides };
+	const paths = resolveHostPaths(options);
+	const info = liveHost(paths.userDataDir, deps);
+	const linger = await deps.checkLinger();
+	if (!info) {
+		const report: HostEndpointReport = { running: false, ...(linger ?? {}) };
+		say(options, report, 'No host is running.');
+		warnLinger(options, linger);
+		process.exitCode = ExitCode.NotRunning;
+		return;
+	}
+	let ownerOnly: boolean;
+	try {
+		ownerOnly = discoveryFileIsOwnerOnly(paths.cliServerFile);
+	} catch (error) {
+		fail(
+			options,
+			`Could not read the permissions of ${paths.cliServerFile}: ${error instanceof Error ? error.message : String(error)}`
+		);
+		return;
+	}
+	if (!ownerOnly) {
+		fail(
+			options,
+			`${paths.cliServerFile} can be read by other users, so its token is not handed out. ` +
+				`Make it owner-only (chmod 600 "${paths.cliServerFile}"), or restart the host, which rewrites it owner-only.`
+		);
+		return;
+	}
+	const report: HostEndpointReport = {
+		running: true,
+		port: info.port,
+		token: info.token,
+		...(info.cliSecret !== undefined ? { cliSecret: info.cliSecret } : {}),
+		...(info.version !== undefined ? { version: info.version } : {}),
+		pid: info.pid,
+		...(linger ?? {}),
+	};
+	// The human form leaves the token and the secret out: a terminal scrollback is a log.
+	say(
+		options,
+		report,
+		`Host endpoint: pid ${info.pid}, port ${info.port}${info.version ? `, version ${info.version}` : ''}. ` +
+			'Run with --json for the token and the CLI secret.'
+	);
+	warnLinger(options, linger);
 }
 
 // ---------------------------------------------------------------------------

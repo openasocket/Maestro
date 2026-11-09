@@ -4,7 +4,9 @@
 // Re-export agent ID constants and types from the single source of truth
 export { AGENT_IDS, isValidAgentId } from './agentIds';
 export type { AgentId } from './agentIds';
+import type { LiftedToPointer } from './maestro-lib/agents/lift-pointer';
 import type { CodexTransport } from './codexTransport';
+import type { HarnessControlMode } from './maestro-lib/providers/native-control';
 
 /**
  * Union type of all valid agent IDs.
@@ -331,6 +333,8 @@ export interface SessionInfo {
 	 * Resolve with `resolveCodexTransport` in shared/codexTransport.
 	 */
 	codexTransport?: CodexTransport;
+	/** Optional native protocol control mode. Absent means the current transport. */
+	harnessControlMode?: HarnessControlMode;
 	/**
 	 * Agent Resilience: auto-resend the failed prompt on transient upstream
 	 * availability errors (Overloaded / 529 / 5xx / throttling) using exponential
@@ -354,6 +358,12 @@ export interface SessionInfo {
 	codexAutoResetOnExhaustion?: boolean;
 	/** Per-session SSH remote config - when enabled, CLI spawns via SSH. */
 	sessionSshRemoteConfig?: AgentSshRemoteConfig;
+	/**
+	 * Federation: set once this SSH agent was lifted onto its remote's host. The agent keeps every
+	 * tab and transcript, but its sends are refused with a pointer at `peer:agentId`. Read it
+	 * through `readLiftedTo()` / `liftedSendRefusal()` in `src/shared/maestro-lib/agents/lift-pointer.ts`.
+	 */
+	liftedTo?: LiftedToPointer;
 }
 
 // Usage statistics from AI agent CLI (Claude Code, Codex, etc.)
@@ -793,6 +803,9 @@ export interface AgentError {
 	/** The category of error */
 	type: AgentErrorType;
 
+	/** Set only when the host supervisor terminates the turn; overrides a successful process exit. */
+	source?: 'host-supervision';
+
 	/** Human-readable error message for display */
 	message: string;
 
@@ -1003,6 +1016,13 @@ export interface SshRemoteConfig {
 	 */
 	sshOptionsDisabled?: Record<string, string>;
 
+	/**
+	 * Host path at which this remote's filesystem root is also visible locally
+	 * (`\\wsl.localhost\Ubuntu` for a WSL distro, an SMB or sshfs mount). Lets
+	 * host-side readers such as Cue open an agent's remote project root.
+	 */
+	hostMountRoot?: string;
+
 	/** Enable this remote configuration */
 	enabled: boolean;
 
@@ -1018,6 +1038,15 @@ export interface SshRemoteConfig {
 	 * Used for display purposes to show where the config came from.
 	 */
 	sshConfigHost?: string;
+
+	/**
+	 * Opt this remote in to Federation (the `federation` Encore Feature): Maestro
+	 * may look for a `maestro-cli host` on it and forward to that host over SSH.
+	 * Off (absent) by default. Maestro never probes a remote without this flag,
+	 * because dialing every remote at once is an SSH startup storm and tunnelled
+	 * remotes fail under concurrent dials.
+	 */
+	federation?: boolean;
 }
 
 /**
@@ -1205,4 +1234,14 @@ export interface UpdateStatus {
 	error?: string;
 	/** The managed hold that stopped a check, download or install (`held-by-policy`). */
 	held?: UpdateHoldView;
+}
+
+/** Persisted peer access, shared with the native roster resolver. */
+export interface PeerAccess {
+	read: boolean;
+	write: boolean;
+}
+export interface PeerAgent extends PeerAccess {
+	sessionId: string;
+	description?: string;
 }

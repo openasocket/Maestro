@@ -5,6 +5,8 @@
  * OpenCode outputs JSONL with the following message types:
  *
  * - step_start: Beginning of an agent step (contains sessionID, part.type="step-start")
+ * - reasoning: Model reasoning (contains part.text). Only emitted when `run` is
+ *   given `--thinking`; without it OpenCode drops reasoning parts entirely.
  * - text: Text content (contains part.text, streaming response chunks)
  * - tool_use: Tool execution (contains part.tool, part.state with status/input/output)
  * - step_finish: End of step (contains part.reason, part.tokens with usage stats)
@@ -52,7 +54,7 @@ interface OpenCodeErrorObject {
  * Verified from actual OpenCode CLI output (2025-12-16)
  */
 interface OpenCodeRawMessage {
-	type?: 'step_start' | 'text' | 'tool_use' | 'step_finish' | 'error';
+	type?: 'step_start' | 'reasoning' | 'text' | 'tool_use' | 'step_finish' | 'error';
 	timestamp?: number;
 	sessionID?: string;
 	part?: OpenCodePart;
@@ -67,9 +69,9 @@ interface OpenCodePart {
 	id?: string;
 	sessionID?: string;
 	messageID?: string;
-	type?: 'step-start' | 'text' | 'tool' | 'step-finish';
+	type?: 'step-start' | 'reasoning' | 'text' | 'tool' | 'step-finish';
 
-	// For text type
+	// For reasoning and text types
 	text?: string;
 	time?: {
 		start?: number;
@@ -169,6 +171,25 @@ export class OpenCodeOutputParser implements AgentOutputParser {
 			};
 		}
 
+		// Handle reasoning messages (model thinking). Forwarded as a partial text
+		// event tagged isReasoning, which StdoutHandler routes to the Thinking
+		// stream and keeps out of streamedText (the final answer). Like `text`,
+		// OpenCode sends each reasoning part as one complete event.
+		if (msg.type === 'reasoning') {
+			const text = msg.part?.text;
+			if (!text) {
+				return { type: 'system', sessionId: msg.sessionID, raw: msg };
+			}
+			return {
+				type: 'text',
+				text,
+				isPartial: true,
+				isReasoning: true,
+				sessionId: msg.sessionID,
+				raw: msg,
+			};
+		}
+
 		// Handle text messages (final response content)
 		// OpenCode sends text as a single complete event (not streamed chunks) -
 		// time.start === time.end in practice. Emitting as 'result' ensures it flows
@@ -188,6 +209,7 @@ export class OpenCodeOutputParser implements AgentOutputParser {
 			return {
 				type: 'tool_use',
 				toolName: msg.part?.tool,
+				...(msg.part?.callID ? { toolCallId: msg.part.callID } : {}),
 				toolState: msg.part?.state,
 				sessionId: msg.sessionID,
 				raw: msg,
@@ -209,6 +231,7 @@ export class OpenCodeOutputParser implements AgentOutputParser {
 			const usage = this.extractUsageFromRaw(msg);
 			if (usage) {
 				event.usage = usage;
+				if (msg.part?.id) event.usageEventId = msg.part.id;
 			}
 
 			return event;

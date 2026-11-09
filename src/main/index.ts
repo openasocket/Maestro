@@ -1,3 +1,9 @@
+import { createPluginSessionLifecycle } from './plugins/plugin-session-lifecycle';
+import type { ConfirmQueueItem, ReleaseQueueItem } from './stores/queue-item-receipt';
+import { flushPendingSessionWrites } from './stores/instances';
+import { RelayConversations } from './plugins/relay-conversations';
+import { broadcastSessionLifecycle } from './ipc/handlers/persistence';
+import { transcriptMessagesToLogEntries, stripSynopsisTurns } from '../shared/transcriptMessages';
 import { canonicalJson } from '../shared/canonicalJson';
 import { realpathSync, lstatSync } from 'fs';
 import { PluginAuthorityError } from './plugins/plugin-authority';
@@ -6,6 +12,7 @@ import { PluginTlsHost } from './plugins/plugin-tls';
 import { PluginCueEvents } from './plugins/plugin-cue-events';
 import { CueReceiptStore } from './cue/cue-receipt-store';
 import { PluginPrimitives } from './plugins/plugin-primitives';
+import { createRelayMailReader } from './plugins/relay-mail/reader';
 import { PluginConfirmationWindows } from './plugins/plugin-confirmation-window';
 import { configurePluginCueHost } from './cue/triggers/cue-plugin-trigger-source';
 import {
@@ -17,6 +24,7 @@ import {
 	getPluginRunProofProtectedPaths,
 	pluginToolRunIdentity,
 } from './plugins/plugin-tool-run-identity';
+import { hostCallerRuns } from './agent-run/caller-identity';
 import {
 	app,
 	BrowserWindow,
@@ -44,6 +52,8 @@ import { AgentDetector } from './agents';
 import { createAgentConfigLookup } from './agents/agent-config-lookup';
 import { providerProbeManaged } from './agents/provider-probe';
 import { shouldDropSentryEvent } from '../shared/sentryFilters';
+import { sentryUserForInstallation } from '../shared/sentryContext';
+import { v8OomFingerprint } from '../shared/sentryGrouping';
 import { getBuildProvenance } from './utils/build-provenance';
 import {
 	initGlobalHotkey,
@@ -51,9 +61,13 @@ import {
 	disposeGlobalHotkey,
 } from './global-hotkey-manager';
 import { CueEngine } from './cue/cue-engine';
+import { hostVisibleProjectRoot } from '../shared/hostVisibleProjectRoot';
+import type { SshRemoteConfig } from '../shared/types';
 import { createCueSupervisorHooks } from './cue/cue-first-party';
-import { PianolaSupervisor, type AutoWatchSession } from './pianola/pianola-supervisor';
+import { nativeCurrentTurns } from './pianola/current-turn';
+import { PianolaSupervisor } from './pianola/pianola-supervisor';
 import { PianolaRelearnScheduler } from './pianola/pianola-relearn-scheduler';
+import type { PianolaMemoryHost } from './pianola/memory-host';
 import { createPianolaLifecycle } from './pianola/pianola-lifecycle';
 import {
 	getComputerHistoryService,
@@ -63,6 +77,7 @@ import { createComputerHistoryForApp } from './computer-history/bootstrap';
 import { getMaestroRunService } from './maestro-run';
 import { createMaestroRunForApp } from './maestro-run/bootstrap';
 import { createDataviewSupervisorHooks } from './dataview/dataview-service';
+import { createFederationSupervisorHooks, getPeerMirrorService } from './federation';
 import { PluginManager } from './plugins/plugin-manager';
 import { PluginToolRunProofFiles } from './plugins/plugin-tool-run-proof-file';
 import { getRecord, type PluginRecord } from '../shared/plugins/plugin-registry';
@@ -261,7 +276,12 @@ import { initializePrompts, getPrompt, savePrompt } from './prompt-manager';
 import { restoreManagedPromptPins } from './ipc/handlers/prompts';
 import { restoreManagedSyncPath } from './ipc/handlers/system';
 import { restoreManagedRemoteAccess } from './ipc/handlers/web';
-import { captureException } from './utils/sentry';
+import {
+	captureException,
+	attachSentryScopeTags,
+	noteSentryAgentInventory,
+	noteSentryWorkReasons,
+} from './utils/sentry';
 import {
 	resolveToFilePath,
 	configureImageStore,
@@ -282,6 +302,7 @@ import { wireProcessListeners } from './process-listeners-wiring';
 // Phase 2 refactoring - dependency injection
 import { createSafeSend, isWebContentsAvailable } from './utils/safe-send';
 import { capabilitySnapshots, createSnapshotBroadcaster } from './agents/capability-snapshot';
+import { setModelsRefreshedBroadcaster } from './agents/model-discovery';
 import { createWebServerFactory } from './web-server/web-server-factory';
 import { registerBrowserRelayHandlers } from './browser/browser-relay';
 import { isHostBrowserPageWindow } from './browser/browser-pages';
@@ -469,6 +490,7 @@ if (disableGpuAcceleration) {
 // Generate installation ID on first run (one-time generation)
 // This creates a unique identifier per Maestro installation for telemetry differentiation
 const store = getSettingsStore();
+nativeCurrentTurns.setEnabled(resolveEncoreFeatures(store.get('encoreFeatures')).pianola);
 let installationId = store.get('installationId');
 // An installationId already on disk means this settings store existed before
 // this boot, i.e. the app has launched before. Record that once, permanently -
@@ -515,9 +537,32 @@ if (crashReportingEnabled && !isDevelopment && !buildProvenance.sentryDsn) {
 if (crashReportingEnabled && !isDevelopment && buildProvenance.sentryDsn) {
 	const sentryDsn = buildProvenance.sentryDsn;
 	import('@sentry/electron/main')
-		.then(({ init, setTag, IPCMode }) => {
+		.then(({ init, setTags, IPCMode }) => {
+			const version = app.getVersion();
 			init({
 				dsn: sentryDsn,
+				// Identify the install (a random GUID, never anything about the person)
+				// on the scope from the first event, rather than tagging it after init.
+				// `user.id` is what Sentry's Users column, "users affected" alert
+				// conditions, and crash-free-user rates count; without it every issue
+				// read "Users 0". The tags ride `initialScope` for the same reason: an
+				// event captured before the post-init `setTag` calls ran used to miss
+				// them, and a minidump found on the next launch reads this persisted
+				// scope.
+				initialScope: {
+					user: sentryUserForInstallation(installationId),
+					tags: {
+						installationId,
+						// Release channel (rc vs stable): RC builds use a -RC suffix
+						// (e.g., 0.16.1-RC), stable builds use plain semver.
+						channel: version.includes('-RC') ? 'rc' : 'stable',
+						// Distinguish our own release builds from a fork that supplied its
+						// own DSN. Only official builds should ever reach the
+						// smash-labs/maestro project, so an `unofficial` event there means
+						// the provenance gate has a hole in it.
+						build: buildProvenance.official ? 'official' : 'unofficial',
+					},
+				},
 				// Set release version for better debugging
 				release: app.getVersion(),
 				// Use Classic IPC mode to avoid "sentry-ipc:// URL scheme not supported" errors
@@ -544,19 +589,20 @@ if (crashReportingEnabled && !isDevelopment && buildProvenance.sentryDsn) {
 						delete event.user.ip_address;
 						delete event.user.email;
 					}
+					// One issue per process type for V8 OOMs, not one per failing
+					// allocation site. See src/shared/sentryGrouping.ts. The tag lets one
+					// search find every OOM across those per-process issues.
+					const oomFingerprint = v8OomFingerprint(event);
+					if (oomFingerprint) {
+						event.fingerprint = oomFingerprint;
+						event.tags = { ...event.tags, 'native.crash': 'v8-oom' };
+					}
 					return event;
 				},
 			});
-			// Add installation ID to Sentry for error correlation across installations
-			setTag('installationId', installationId);
-			// Tag release channel (rc vs stable) based on version string
-			// RC builds use -RC suffix (e.g., 0.16.1-RC), stable builds use plain semver
-			const version = app.getVersion();
-			setTag('channel', version.includes('-RC') ? 'rc' : 'stable');
-			// Distinguish our own release builds from a fork that supplied its own DSN.
-			// Only official builds should ever reach the smash-labs/maestro project, so an
-			// `unofficial` event there means the provenance gate has a hole in it.
-			setTag('build', buildProvenance.official ? 'official' : 'unofficial');
+			// Auto Run / agent context recorded before Sentry finished loading, and
+			// every change after it (see setSentryScopeTags).
+			attachSentryScopeTags({ setTags });
 
 			// Start memory monitoring for crash diagnostics (MAESTRO-5A/4Y)
 			// Records breadcrumbs with memory state every minute, warns above 1GB heap
@@ -567,6 +613,18 @@ if (crashReportingEnabled && !isDevelopment && buildProvenance.sentryDsn) {
 				.catch((err) => {
 					logger.warn('Failed to start memory monitoring', 'Startup', { error: String(err) });
 				});
+			// Tag the scope with the main heap so a main-process OOM minidump says
+			// how much it was carrying when it died (#1862). Agent and Auto Run
+			// counts are written on change instead (see setSentryScopeTags).
+			import('./utils/heap-guard')
+				.then(({ startCrashContextSampling }) => {
+					startCrashContextSampling();
+				})
+				.catch((err) => {
+					logger.warn('Failed to start crash context sampling', 'Startup', {
+						error: String(err),
+					});
+				});
 		})
 		.catch((err) => {
 			logger.warn('Failed to initialize Sentry', 'Startup', { error: String(err) });
@@ -576,6 +634,17 @@ if (crashReportingEnabled && !isDevelopment && buildProvenance.sentryDsn) {
 // Create local references to stores for use throughout this module
 // These are convenience variables - the actual stores are managed by ./stores module
 const sessionsStore = getSessionsStore();
+
+// Crash-report context: which agent types are configured and what background
+// work is in flight. Both are only counts and agent TYPE ids (never names,
+// paths, or prompts) and are pushed to the Sentry scope only when they change,
+// so an event costs nothing extra. The inventory is refreshed by the sessions
+// persistence handlers; the work context follows the power manager's block
+// reasons, which every Auto Run, agent turn, Cue run, and group chat round
+// registers whether or not sleep prevention is enabled.
+noteSentryAgentInventory(sessionsStore.get('sessions', []));
+noteSentryWorkReasons(powerManager.getStatus().reasons);
+powerManager.onReasonsChanged(noteSentryWorkReasons);
 const groupsStore = getGroupsStore();
 const agentConfigsStore = getAgentConfigsStore();
 const agentCapabilitiesStore = getAgentCapabilitiesStore();
@@ -597,6 +666,7 @@ let agentDetector: AgentDetector | null = null;
 let cueEngine: CueEngine | null = null;
 let pianolaSupervisor: PianolaSupervisor | null = null;
 let pianolaRelearnScheduler: PianolaRelearnScheduler | null = null;
+let pianolaMemoryHost: PianolaMemoryHost | null = null;
 let pluginManager: PluginManager | null = null;
 let pluginStartupToken: object = {};
 let pluginScheduler: PluginSchedulerHost | null = null;
@@ -609,6 +679,9 @@ let pluginEventBus: PluginEventBusImpl | null = null;
 // lifecycle, policy status, host adapter). Null when its composition failed;
 // the enterprise IPC verbs then answer unavailable. See src/main/enterprise/.
 let enterpriseService: EnterpriseService | null = null;
+// Host-only receipt implementation, assigned during IPC bootstrap.
+let releaseQueueItemInPersistence: ReleaseQueueItem | null = null;
+let confirmQueueItemInPersistence: ConfirmQueueItem | null = null;
 // Set by registerPersistenceHandlers (in setupIpcHandlers). Lets the plugin
 // focus verbs record into the persistence layer's `session.activated` dedupe so
 // the two emit paths never desync. Null before IPC setup / when unavailable.
@@ -625,6 +698,9 @@ const safeSend = createSafeSend(() => BrowserWindow.getAllWindows());
 // Hydrate capability snapshots from disk and wire IPC broadcaster so the
 // renderer status pills update live as detection / spawn-error events fire.
 capabilitySnapshots.init(agentCapabilitiesStore, createSnapshotBroadcaster(safeSend));
+
+// A forced model discovery pushes the fresh list to every open model picker.
+setModelsRefreshedBroadcaster(safeSend);
 
 // Create CLI activity watcher with dependency injection (Phase 4 refactoring)
 const cliWatcher = createCliWatcher({
@@ -761,6 +837,8 @@ registerCadenzaIpcHandlers({ getMainWindow: () => mainWindow, settingsStore: sto
 // (Stopping the community-plugin runtime when `plugins` turns off is the
 // plugins hook of the Encore lifecycle below.)
 store.onDidChange('encoreFeatures', (encoreFeatures) => {
+	nativeCurrentTurns.setEnabled(resolveEncoreFeatures(encoreFeatures).pianola);
+	pianolaMemoryHost?.reconcile();
 	if (!resolveEncoreFeatures(encoreFeatures).concerto) closeCadenzaHudWindow();
 	// A switched-off Throughput Gauge leaves no widget window behind.
 	if (!resolveEncoreFeatures(encoreFeatures).throughputGauge) {
@@ -898,6 +976,14 @@ const CUE_DISABLED_MESSAGE =
 
 // Create web server factory with dependency injection (Phase 2 refactoring)
 const createWebServer = createWebServerFactory({
+	releaseQueueItem: (...args) => {
+		if (!releaseQueueItemInPersistence)
+			return Promise.reject(new Error('DispatchQueueDrainUnavailable'));
+		return releaseQueueItemInPersistence(...args);
+	},
+	confirmQueueItem: (request) =>
+		confirmQueueItemInPersistence?.(request) ??
+		Promise.resolve({ durable: false, reason: 'store-unavailable' }),
 	settingsStore: store,
 	sessionsStore,
 	groupsStore,
@@ -1543,9 +1629,15 @@ app
 
 		// dispatch --notify-on-complete. Wired here because it needs the same
 		// web-server handle the CLI round-trips through: the callback is
-		// delivered as a real turn in the caller's live tab via the renderer's
-		// execution queue, not as a fresh headless process.
+		// delivered as a real turn in the caller's tab via the renderer's
+		// execution queue (or in a new tab when it has none), not as a fresh
+		// headless process.
 		initDispatchCallbacks({
+			onDelivered: async ({ entry, status }) => {
+				if (!entry.admissionId || !['completed', 'failed'].includes(status)) return;
+				const { confirmDispatchCallback } = await import('./pianola/pianola-store-main');
+				confirmDispatchCallback(entry.admissionId, entry.callbackId);
+			},
 			enqueue: async (agentId, prompt, tabId) => {
 				const server = webServer;
 				if (!server) return { success: false, error: 'Desktop web server unavailable' };
@@ -1557,6 +1649,14 @@ app
 					// from every other failure and retried at agent level.
 					...(result.reason ? { reason: result.reason } : {}),
 				};
+			},
+			openTab: async (agentId, prompt) => {
+				const server = webServer;
+				if (!server) return { success: false, error: 'Desktop web server unavailable' };
+				const result = await server.newAITabWithPromptFromMain(agentId, prompt);
+				return result.success
+					? { success: true }
+					: { success: false, error: 'Could not open a new tab in the caller agent' };
 			},
 			getTargetOutput: async (agentId, since) => {
 				// Best-effort: the newest history entry the target wrote after the
@@ -1813,13 +1913,22 @@ app
 			getSessions: () => {
 				// Live agents only: a dormant Pianola (flag off) is never watched.
 				const stored = getLiveSessions();
-				return stored.map((s: any) => ({
-					id: s.id,
-					name: s.name,
-					toolType: s.toolType,
-					cwd: s.cwd || s.projectRoot || s.fullPath || os.homedir(),
-					projectRoot: s.projectRoot || s.cwd || s.fullPath || os.homedir(),
-				}));
+				const remotes = (store.get('sshRemotes', []) ?? []) as SshRemoteConfig[];
+				// Translate explicitly mounted remotes; sessions without a host mount keep
+				// the exact project root Cue used before host-mount support.
+				return stored.flatMap((s: any) => {
+					const projectRoot = hostVisibleProjectRoot(s, remotes, os.homedir());
+					if (!projectRoot) return [];
+					return [
+						{
+							id: s.id,
+							name: s.name,
+							toolType: s.toolType,
+							cwd: s.cwd || s.projectRoot || s.fullPath || os.homedir(),
+							projectRoot,
+						},
+					];
+				});
 			},
 			onCueRun: (params) => executeCueRunAction(cueRunDeps, params),
 			onStopCueRun: (runId) => cueRunDeps.stopCueRun(runId),
@@ -1892,6 +2001,8 @@ app
 		const pianolaLifecycle = createPianolaLifecycle({
 			settingsStore: store,
 			sessionsStore,
+			agentConfigsStore,
+			agentDetector,
 			logger,
 			// The enterprise service is composed later in startup; read live so an
 			// enrollment that appears after this point admits every later child.
@@ -1899,6 +2010,13 @@ app
 		});
 		pianolaSupervisor = pianolaLifecycle.supervisor;
 		pianolaRelearnScheduler = pianolaLifecycle.relearnScheduler;
+		pianolaMemoryHost = pianolaLifecycle.memoryHost;
+		// Resume a configured durable queue at boot without waiting for the Memory UI.
+		if (resolveEncoreFeatures(store.get('encoreFeatures')).pianola) {
+			void pianolaMemoryHost
+				.request({ action: 'status' })
+				.catch((error) => logger.error(`Pianola memory failed to resume: ${error}`, 'Startup'));
+		}
 
 		// Computer History: construct the one service (IPC, the CLI's WS writes,
 		// and the first-party hooks all reach it). Started below at boot when its
@@ -2226,6 +2344,9 @@ app
 				stopAll: () => {
 					pianolaSupervisor?.stopAll();
 					pianolaRelearnScheduler?.stop();
+					void pianolaMemoryHost?.stop().catch((error) => {
+						logger.error(`Pianola memory drain failed: ${String(error)}`, '[Pianola]');
+					});
 				},
 			},
 			// [L3MaestroCue] cue engine lifecycle: reconcile (re)starts when the
@@ -2266,6 +2387,14 @@ app
 					),
 				stopAll: () => void stopCoworkingService(),
 			},
+			// Federation: the read-only peer mirror (FED-SSH-05). One SSH forward and
+			// one host client per opted-in remote, dialed one after another, held in
+			// memory only. Off = no service, no store listener, no ssh.
+			federation: createFederationSupervisorHooks({
+				readRemotes: () => (store.get('sshRemotes', []) ?? []) as SshRemoteConfig[],
+				watchRemotes: (onChange) => store.onDidChange('sshRemotes', () => onChange()),
+				safeSend,
+			}),
 			// OpenCode serve: the shared server spawns lazily on the first OpenCode
 			// turn, so there is nothing to start. Off tears down every server.
 			opencodeServer: {
@@ -2525,6 +2654,9 @@ app
 				stored as never
 			);
 			sessionsStore.set('sessions', held as never);
+			// Plugin create/delete changes the agent list without going through the
+			// sessions persistence handlers, so refresh the crash-report inventory here.
+			noteSentryAgentInventory(held);
 		};
 		const pluginTabsList = (sessionId?: string): PluginTabMetadata[] => {
 			const out: PluginTabMetadata[] = [];
@@ -2764,104 +2896,15 @@ app
 		};
 		const pluginSessionsGet = (sessionId: string): PluginSessionMetadata | null =>
 			pluginSessionsList().find((s) => s.id === sessionId) ?? null;
-		const pluginSessionsCreate = async (
-			params: Record<string, unknown>
-		): Promise<PluginSessionMetadata> => {
-			const now = Date.now();
-			const sessionId = typeof params.id === 'string' ? params.id : crypto.randomUUID();
-			const tabId = crypto.randomUUID();
-			const title =
-				typeof params.title === 'string'
-					? params.title
-					: typeof params.name === 'string'
-						? params.name
-						: 'Plugin Session';
-			const toolType =
-				typeof params.agentId === 'string'
-					? params.agentId
-					: typeof params.toolType === 'string'
-						? params.toolType
-						: 'claude-code';
-			const cwd =
-				typeof params.projectPath === 'string'
-					? params.projectPath
-					: typeof params.cwd === 'string'
-						? params.cwd
-						: os.homedir();
-			const session = {
-				id: sessionId,
-				name: title,
-				toolType,
-				state: 'idle',
-				cwd,
-				fullPath: cwd,
-				projectRoot: cwd,
-				createdAt: now,
-				updatedAt: now,
-				aiLogs: [],
-				shellLogs: [],
-				workLog: [],
-				contextUsage: 0,
-				inputMode: 'ai',
-				aiPid: 0,
-				terminalPid: 0,
-				port: 0,
-				isLive: false,
-				changedFiles: [],
-				isGitRepo: false,
-				fileTree: [],
-				fileExplorerExpanded: [],
-				fileExplorerScrollPos: 0,
-				executionQueue: [],
-				activeTimeMs: 0,
-				aiTabs: [
-					{
-						id: tabId,
-						agentSessionId: null,
-						name: null,
-						starred: false,
-						logs: [],
-						inputValue: '',
-						stagedImages: [],
-						createdAt: now,
-						state: 'idle',
-					},
-				],
-				activeTabId: tabId,
-				closedTabHistory: [],
-				filePreviewTabs: [],
-				activeFileTabId: null,
-				browserTabs: [],
-				activeBrowserTabId: null,
-				terminalTabs: [],
-				activeTerminalTabId: null,
-				unifiedTabOrder: [{ type: 'ai', id: tabId }],
-				unifiedClosedTabHistory: [],
-			};
-			const previousSessions = pluginSessionsRaw();
-			setPluginSessionsRaw([...previousSessions, session]);
-			if (!previousSessions.some((existing) => existing.id === sessionId)) {
-				try {
-					pianolaSupervisor?.autoWatchNewSessions(
-						[session],
-						[...previousSessions, session] as AutoWatchSession[],
-						store.get('pianolaAutoWatchNewAgents', false) === true
-					);
-				} catch (error) {
-					logger.error('Could not register new Pianola watch', '[Pianola]', error);
-					void captureException(error, { operation: 'pianola:autoWatchPluginSession' });
-				}
-			}
-			sessionsStore.set('activeSessionId', sessionId);
-			return {
-				id: sessionId,
-				title,
-				agentId: toolType,
-				status: 'idle',
-				createdAt: now,
-				projectPath: cwd,
-			};
-		};
+		const { create: pluginSessionsCreate, remove: pluginSessionsDelete } =
+			createPluginSessionLifecycle({
+				readSessions: pluginSessionsRaw,
+				writeSessions: setPluginSessionsRaw,
+				flush: flushPendingSessionWrites,
+				getActiveSessionId: () => sessionsStore.get('activeSessionId', ''),
+				setActiveSessionId: (id) => sessionsStore.set('activeSessionId', id),
+				getSupervisor: () => pianolaSupervisor,
+			});
 		const pluginSessionsUpdate = async (
 			sessionId: string,
 			patch: Record<string, unknown>
@@ -2882,28 +2925,6 @@ app
 			if (!updated) return null;
 			setPluginSessionsRaw(next);
 			return pluginSessionsGet(sessionId);
-		};
-		const pluginSessionsDelete = async (sessionId: string): Promise<boolean> => {
-			const sessions = pluginSessionsRaw();
-			if (!sessions.some((s) => s.id === sessionId)) return false;
-			const remaining = sessions.filter((s) => s.id !== sessionId);
-			setPluginSessionsRaw(remaining);
-			try {
-				pianolaSupervisor?.autoWatchNewSessions(
-					[],
-					remaining as unknown as AutoWatchSession[],
-					store.get('pianolaAutoWatchNewAgents', false) === true,
-					[sessionId]
-				);
-			} catch (error) {
-				logger.error('Could not retire Pianola watch', '[Pianola]', error);
-				void captureException(error, { operation: 'pianola:retireAutoWatch' });
-			}
-			if (sessionsStore.get('activeSessionId', '') === sessionId) {
-				const nextActive = pluginSessionsRaw()[0]?.id;
-				sessionsStore.set('activeSessionId', typeof nextActive === 'string' ? nextActive : '');
-			}
-			return true;
 		};
 		const pluginListHistoryEntries = async () => {
 			const all = [];
@@ -3045,7 +3066,11 @@ app
 				(getLiveSessions() as SessionInfo[]).find((session) => session.id === agentId),
 			detectAgent: async (type) => {
 				const detected = await agentDetector?.getAgent(type);
-				return { available: detected?.available === true, path: detected?.path };
+				return {
+					available: detected?.available === true,
+					path: detected?.path,
+					customPath: detected?.customPath,
+				};
 			},
 			getAgentConfig: getAgentConfigForAgent,
 			getGlobalEnvVars: () => store.get('shellEnvVars', {}),
@@ -3057,8 +3082,8 @@ app
 			managed: () => enterpriseService?.spawnAuthority ?? null,
 			recordRelayOrigin: markRelaySession,
 			prepareSystemPrompt: prepareMaestroSystemPromptCli,
-			issueRunToken: (agentId, ttlMs, receiptToolId) =>
-				pluginToolRunIdentity.issue(agentId, ttlMs, receiptToolId),
+			issueRunToken: (agentId, ttlMs, receiptToolId, unattended) =>
+				pluginToolRunIdentity.issue(agentId, ttlMs, receiptToolId, unattended),
 			getRunReceipts: (token) => pluginToolRunIdentity.getReceipts(token),
 			hasRunReceiptOverflow: (token) => pluginToolRunIdentity.hasReceiptOverflowed(token),
 			revokeRunToken: (token) => pluginToolRunIdentity.revoke(token),
@@ -3069,6 +3094,56 @@ app
 					'[PluginAudit]'
 				),
 		});
+		const updateRelayAgent = (
+			agentId: string,
+			update: (
+				agent: import('./stores/types').StoredSession
+			) => import('./stores/types').StoredSession
+		): void => {
+			const sessions = sessionsStore.get('sessions', []);
+			const baseline = sessions.find((agent) => agent.id === agentId);
+			if (!baseline) throw new Error('Relay agent no longer exists');
+			const updated = update(baseline);
+			sessionsStore.set(
+				'sessions',
+				sessions.map((agent) => (agent.id === agentId ? updated : agent))
+			);
+			broadcastSessionLifecycle(undefined, {
+				added: [],
+				removedIds: [],
+				updated: [updated],
+				baselines: [baseline],
+			});
+		};
+		const relayConversations = new RelayConversations({
+			baseDir: path.join(app.getPath('userData'), 'relay-conversations'),
+			getAgent: (id) => sessionsStore.get('sessions', []).find((agent) => agent.id === id),
+			updateAgent: updateRelayAgent,
+			flush: flushPendingSessionWrites,
+			run: runHeadlessAgent,
+			loadTranscript: async (agentId, providerSessionId) => {
+				const agent = (sessionsStore.get('sessions', []) as unknown as SessionInfo[]).find(
+					(candidate) => candidate.id === agentId
+				);
+				if (!agent) throw new Error('Relay agent not found');
+				const storage = getSessionStorage(agent.toolType);
+				if (!storage) throw new Error('Relay provider transcript unavailable');
+				const remoteId = agent.sessionSshRemoteConfig?.enabled
+					? agent.sessionSshRemoteConfig.remoteId
+					: null;
+				const ssh = remoteId ? getSshRemoteById(remoteId) : undefined;
+				const transcript = await storage.readSessionMessages(
+					relayProjectPath(agent),
+					providerSessionId,
+					{ offset: 0, limit: 500 },
+					ssh
+				);
+				return transcriptMessagesToLogEntries(stripSynopsisTurns(transcript.messages));
+			},
+		});
+		await relayConversations
+			.reconcileInterrupted()
+			.catch(() => logger.warn('Relay receipts unavailable; continuity remains closed', 'Plugins'));
 		onHeadlessAgentActivityChange(() => {
 			safeSend('process:headlessActivity', getHeadlessAgentActivity());
 		});
@@ -3447,24 +3522,32 @@ app
 					);
 				},
 				providerSessions: pluginProviderSessions,
-				recordRelayTurn: async (agentId, prompt, result) => {
+				relayConversations,
+				recordRelayTurn: async (agentId, prompt, result, beforeWrite) => {
+					beforeWrite?.();
 					const agent = (sessionsStore.get('sessions', []) as SessionInfo[]).find(
 						(session) => session.id === agentId
 					);
 					if (!agent) return;
 					if (result.sessionId) markRelaySession(agent, result.sessionId);
 					const projectPath = relayProjectPath(agent);
-					await getHistoryManager().addEntry(agent.id, projectPath, {
-						id: crypto.randomUUID(),
-						type: 'RELAY',
-						timestamp: Date.now(),
-						summary: (result.response || result.error || prompt).slice(0, 500),
-						fullResponse: result.response || undefined,
+					await getHistoryManager().addEntry(
+						agent.id,
 						projectPath,
-						sessionId: agent.id,
-						agentSessionId: result.sessionId || undefined,
-						success: result.success,
-					});
+						{
+							id: crypto.randomUUID(),
+							type: 'RELAY',
+							timestamp: Date.now(),
+							summary: (result.response || result.error || prompt).slice(0, 500),
+							fullResponse: result.response || undefined,
+							projectPath,
+							sessionId: agent.id,
+							agentSessionId: result.sessionId || undefined,
+							success: result.success,
+						},
+						undefined,
+						beforeWrite
+					);
 				},
 				// Direct plugin dispatch is never user-present, so it requires the
 				// separate unattended consent on TOP of the interactive allowlist grant
@@ -3505,6 +3588,7 @@ app
 		});
 		pluginSandboxHost = sandboxHost;
 		pluginManager = new PluginManager({
+			relayMailReader: createRelayMailReader(pluginPrimitives, pluginBroker),
 			toolIdentity,
 			toolProofFiles,
 			assertToolProofStorageActive,
@@ -3540,10 +3624,14 @@ app
 			},
 			// Complete uninstall (invariant #8): purge the plugin's KV store, its
 			// plugins.<id>.* settings, and its event subscriptions.
-			purgePluginData: (id) => {
+			purgePluginData: async (id) => {
 				authStore.uninstall(id);
 				try {
-					primitiveState.purgePlugin(id);
+					try {
+						primitiveState.purgePlugin(id);
+					} finally {
+						if (id === RELAY_PLUGIN_ID) await relayConversations.purge();
+					}
 				} finally {
 					pluginProviderSessions.purge(id);
 					purgePluginData(id, {
@@ -3687,6 +3775,7 @@ app
 				approved?: unknown;
 				approvedHighRisk?: unknown;
 				unattended?: unknown;
+				originalAudioExport?: unknown;
 			};
 			const pluginId = typeof p.pluginId === 'string' ? p.pluginId : '';
 			const nonce = typeof p.nonce === 'string' ? p.nonce : '';
@@ -3704,6 +3793,7 @@ app
 				approved,
 				approvedHighRisk,
 				unattended,
+				originalAudioExport: p.originalAudioExport === true,
 			});
 			closeConsentWindow();
 			if (outcome.ok) {
@@ -3968,6 +4058,12 @@ app
 			getInstallAuthority: () => installPolicy,
 			getPluginEventBus: () => pluginEventBus,
 			getInteractiveReplayController: () => interactiveReplayController,
+			setReleaseQueueItem: (fn) => {
+				releaseQueueItemInPersistence = fn;
+			},
+			setConfirmQueueItem: (fn) => {
+				confirmQueueItemInPersistence = fn;
+			},
 			setNoteSessionActivated: (fn) => {
 				noteSessionActivatedInPersistence = fn;
 			},
@@ -4100,15 +4196,15 @@ app
 		// Start Cue engine if the Encore Feature flag is enabled
 		if (isEncoreFeatureEnabled(store, 'maestroCue') && cueEngine) {
 			logger.info('Maestro Cue Encore Feature enabled - starting Cue engine', 'Startup');
-			try {
-				cueEngine.start('system-boot');
-			} catch (err) {
+			// start() is async; a failure must reach the same log/Sentry path as
+			// before instead of surfacing as an unhandled rejection.
+			cueEngine.start('system-boot').catch((err: unknown) => {
 				void captureException(err);
 				logger.error(
 					`Cue engine failed to start at boot - will remain available for retry via Settings: ${err}`,
 					'Startup'
 				);
-			}
+			});
 		}
 
 		// Start Computer History when its Encore flag is on. start() re-checks the
@@ -4137,6 +4233,8 @@ app
 		const bootEncoreFeatures = store.get('encoreFeatures');
 		encoreLifecycle.startIfEnabled('pianola', bootEncoreFeatures);
 		encoreLifecycle.startIfEnabled('plugins', bootEncoreFeatures);
+		// Federation's peer mirror dials only remotes with their own `federation` flag on.
+		encoreLifecycle.startIfEnabled('federation', bootEncoreFeatures);
 
 		// Install the application menu (File / Edit / View / Window on macOS,
 		// removed entirely on Windows/Linux). See src/main/app-menu.ts for why the
@@ -4184,6 +4282,13 @@ app
 		// Electron auto-unregisters globalShortcuts on quit, but be explicit so the
 		// behavior survives any future change to that policy.
 		app.on('will-quit', disposeGlobalHotkey);
+		app.on('will-quit', () => {
+			try {
+				hostCallerRuns.stop();
+			} catch (error) {
+				captureException(error, { context: 'caller run shutdown' });
+			}
+		});
 		// Release parquet file descriptors (and their cached scans) on the way
 		// out. The idle reaper would get to them eventually, but a preview tab
 		// left open otherwise holds a descriptor until the process dies.
@@ -4283,6 +4388,9 @@ app
 					void captureException(err, { operation: 'cue.reconcileAfterWake' });
 				}
 			}
+			// Federation: reconnect every mirrored peer in turn and reload its agents.
+			// Idempotent against the several resume events one wake raises.
+			getPeerMirrorService()?.reloadAfterWake();
 		});
 	})
 	.catch(async (err) => {
@@ -4345,6 +4453,9 @@ quitHandler = createQuitHandler({
 		pianolaSupervisor?.stopAll();
 		// Stop the Pianola re-learn cadence.
 		pianolaRelearnScheduler?.stop();
+		void pianolaMemoryHost?.stop().catch((error) => {
+			logger.error(`Pianola memory drain failed: ${String(error)}`, '[Pianola]');
+		});
 		// Stop the Computer History helper (it also exits on stdin EOF) and close
 		// the open segment. If quit outruns the close, the next start indexes it.
 		void getComputerHistoryService()

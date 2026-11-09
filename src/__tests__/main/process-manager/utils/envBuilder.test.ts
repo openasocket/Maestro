@@ -21,6 +21,7 @@ import {
 import {
 	CALLER_AGENT_ID_ENV_VAR,
 	CALLER_TAB_ID_ENV_VAR,
+	CALLER_RUN_PROOF_FILE_ENV_VAR,
 	buildCallerIdentityEnv,
 } from '../../../../shared/agentDelegation';
 import { MANAGED_DELEGATION_ENV_VAR } from '../../../../shared/maestro-lib/managed/delegation';
@@ -33,6 +34,7 @@ describe('envBuilder caller identity', () => {
 			CALLER_AGENT_ID_ENV_VAR,
 			CALLER_TAB_ID_ENV_VAR,
 			MANAGED_DELEGATION_ENV_VAR,
+			CALLER_RUN_PROOF_FILE_ENV_VAR,
 		]) {
 			saved.set(key, process.env[key]);
 		}
@@ -41,6 +43,7 @@ describe('envBuilder caller identity', () => {
 		process.env[CALLER_AGENT_ID_ENV_VAR] = 'launcher-agent';
 		process.env[CALLER_TAB_ID_ENV_VAR] = 'launcher-tab';
 		process.env[MANAGED_DELEGATION_ENV_VAR] = '{"stale":true}';
+		process.env[CALLER_RUN_PROOF_FILE_ENV_VAR] = '/private/launcher-proof';
 	});
 
 	afterEach(() => {
@@ -56,6 +59,7 @@ describe('envBuilder caller identity', () => {
 		expect(env[CALLER_AGENT_ID_ENV_VAR]).toBeUndefined();
 		expect(env[CALLER_TAB_ID_ENV_VAR]).toBeUndefined();
 		expect(env[MANAGED_DELEGATION_ENV_VAR]).toBeUndefined();
+		expect(env[CALLER_RUN_PROOF_FILE_ENV_VAR]).toBeUndefined();
 	});
 
 	it('keeps the identity and record the spawn stamps through the session layer', () => {
@@ -73,5 +77,6 @@ describe('envBuilder caller identity', () => {
 		expect(env[CALLER_AGENT_ID_ENV_VAR]).toBeUndefined();
 		expect(env[CALLER_TAB_ID_ENV_VAR]).toBeUndefined();
 		expect(env[MANAGED_DELEGATION_ENV_VAR]).toBeUndefined();
+		expect(env[CALLER_RUN_PROOF_FILE_ENV_VAR]).toBeUndefined();
 	});
 });

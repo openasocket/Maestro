@@ -32,6 +32,7 @@ import {
 	type StopHandle,
 } from '../../shared/maestro-lib/control/termination';
 import {
+	applyWindowsShellRules,
 	DispatchRefusedError,
 	leaseAdmission,
 	startTurn,
@@ -550,13 +551,22 @@ export async function runProcess(
 	const tuiLaunch = spec.sshRemoteUsed
 		? null
 		: tuiLaunchOf(spec.command, spec.args, spec.env, isMaestroPBinaryPath);
-	const processSpec = {
+	const launchSpec = {
 		command: spec.command,
 		args: spec.args,
 		cwd: spec.cwd,
 		env: tuiLaunch ? (withoutInheritedTuiAdmission(spec.env) as Record<string, string>) : spec.env,
 		stdin,
 	};
+	// A local Windows `.cmd` / `.bat` shim (claude.cmd, codex.cmd) has to
+	// start through cmd.exe: Node refuses it without a shell (spawn EINVAL,
+	// MAESTRO-R0). The launch plan already moved a stdin-capable agent's
+	// prompt to stdin on a Windows host, so cmd.exe never carries it. An SSH
+	// run starts the local ssh client, which needs no shell. Applied here,
+	// before the managed admission below, so the authority admits the shell
+	// flag and escaped arguments that will actually be spawned and the lease
+	// gate inside `startTurn` checks that same final spec.
+	const processSpec = sshRemoteEnabled ? launchSpec : applyWindowsShellRules(launchSpec);
 
 	// Managed admission: everything about the spec is final here, stdin included.
 	// The authority sees the snapshot of exactly what will be spawned (so the

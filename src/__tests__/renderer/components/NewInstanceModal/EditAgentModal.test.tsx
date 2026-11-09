@@ -591,6 +591,7 @@ describe('EditAgentModal', () => {
 			undefined,
 			undefined,
 			undefined,
+			undefined,
 			{ expectedPolicyRevision: null },
 		]);
 	});
@@ -718,7 +719,7 @@ describe('EditAgentModal', () => {
 		await waitFor(() => expect(onSave).toHaveBeenCalled());
 		const args = onSave.mock.calls[0];
 		// acceptTranslationLimitations, resources, plan id, convert flag
-		expect(args.slice(23)).toEqual([true, [], 'plan', true, { expectedPolicyRevision: null }]);
+		expect(args.slice(24)).toEqual([true, [], 'plan', true, { expectedPolicyRevision: null }]);
 	});
 
 	it('switches provider without converting by default', async () => {
@@ -744,6 +745,7 @@ describe('EditAgentModal', () => {
 		expect(args[2]).toBe('codex');
 		// No conversion arguments: the save does a plain switch.
 		expect(args.slice(23)).toEqual([
+			undefined,
 			undefined,
 			undefined,
 			undefined,
@@ -809,6 +811,7 @@ describe('EditAgentModal', () => {
 		const args = onSave.mock.calls[0];
 		expect(args[2]).toBe('codex');
 		expect(args.slice(23)).toEqual([
+			undefined,
 			undefined,
 			undefined,
 			undefined,
@@ -923,6 +926,7 @@ describe('EditAgentModal', () => {
 				undefined, // workingDirectory unchanged
 				false, // codexAutoResetOnExhaustion: off by default
 				'exec', // codexTransport: Standard by default
+				undefined, // harnessControlMode: default
 				undefined, // acceptTranslationLimitations (no conversion)
 				undefined, // selectedUserResources
 				undefined, // migrationPlanId
@@ -1029,6 +1033,7 @@ describe('EditAgentModal', () => {
 			undefined, // workingDirectory unchanged
 			false, // codexAutoResetOnExhaustion: off by default
 			'exec', // codexTransport: Standard by default
+			undefined, // harnessControlMode: default
 			undefined, // acceptTranslationLimitations (no conversion)
 			undefined, // selectedUserResources
 			undefined, // migrationPlanId
@@ -1272,6 +1277,7 @@ describe('EditAgentModal', () => {
 			undefined, // workingDirectory unchanged
 			false, // codexAutoResetOnExhaustion: off by default
 			'exec', // codexTransport: Standard by default
+			undefined, // harnessControlMode: default
 			undefined, // acceptTranslationLimitations (no conversion)
 			undefined, // selectedUserResources
 			undefined, // migrationPlanId
@@ -1355,6 +1361,7 @@ describe('EditAgentModal', () => {
 			undefined, // workingDirectory unchanged
 			false, // codexAutoResetOnExhaustion: off by default
 			'exec', // codexTransport: Standard by default
+			undefined, // harnessControlMode: default
 			undefined, // acceptTranslationLimitations (no conversion)
 			undefined, // selectedUserResources
 			undefined, // migrationPlanId
@@ -1444,6 +1451,7 @@ describe('EditAgentModal', () => {
 			undefined, // workingDirectory unchanged
 			false, // codexAutoResetOnExhaustion: off by default
 			'exec', // codexTransport: Standard by default
+			undefined, // harnessControlMode: default
 			undefined, // acceptTranslationLimitations (no conversion)
 			undefined, // selectedUserResources
 			undefined, // migrationPlanId
@@ -2258,15 +2266,15 @@ describe('EditAgentModal', () => {
 			await save();
 			expect(onSave).toHaveBeenCalledTimes(1);
 			const args = onSave.mock.calls[0];
-			expect(args).toHaveLength(28);
-			expect(args[27]).toEqual({ expectedPolicyRevision: 6 });
+			expect(args).toHaveLength(29);
+			expect(args[28]).toEqual({ expectedPolicyRevision: 6 });
 		});
 
 		it('sends a null revision from a standalone desktop (MCOMP-23-04A)', async () => {
 			managedState.mockResolvedValue({ standing: 'unenrolled', policy: { source: 'none' } });
 			renderEdit();
 			await save();
-			expect(onSave.mock.calls[0][27]).toEqual({ expectedPolicyRevision: null });
+			expect(onSave.mock.calls[0][28]).toEqual({ expectedPolicyRevision: null });
 		});
 
 		it('shows the policy revision and keeps the draft with field reasons when the host refuses', async () => {
@@ -2351,7 +2359,7 @@ describe('EditAgentModal', () => {
 				await save();
 				expect(onSave.mock.calls[0][5]).toBe('/custom/claude');
 				expect(onSave.mock.calls[0][8]).toBe('claude-sonnet');
-				expect(onSave.mock.calls[0][27]).toEqual({ expectedPolicyRevision: 6 });
+				expect(onSave.mock.calls[0][28]).toEqual({ expectedPolicyRevision: 6 });
 			} finally {
 				act(() => useSettingsStore.setState({ managedLocks: previousLocks }));
 			}

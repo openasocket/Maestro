@@ -34,7 +34,7 @@ import { MaestroSettings } from './persistence';
 import { captureException } from '../../utils/sentry';
 import { createSafeSend } from '../../utils/safe-send';
 import type { BootstrapSettings } from '../../stores/types';
-import { isLinux } from '../../../shared/platformDetection';
+import { isLinux, isMacOS } from '../../../shared/platformDetection';
 import {
 	callingLocalEffectActor,
 	holdLocalEffect,
@@ -50,7 +50,11 @@ import {
 	managedSettingPin,
 	type ManagedSettingsPolicyRef,
 } from '../../../shared/managedSettingsLock';
-import { isValidSyncPath } from '../../../shared/syncPath';
+import {
+	INSTALL_DIR_SYNC_PATH_ERROR,
+	isInsideInstallDir,
+	isValidSyncPath,
+} from '../../../shared/syncPath';
 
 /**
  * `shell.openPath` that always settles.
@@ -252,6 +256,19 @@ export function restoreManagedSyncPath(
 }
 
 /**
+ * The directory an update replaces: the folder holding the executable, or on
+ * macOS the `.app` bundle around it (the updater swaps the whole bundle).
+ */
+function getInstallDir(app: App): string {
+	const exeDir = path.dirname(app.getPath('exe'));
+	if (isMacOS()) {
+		const bundle = /^(.*?\.app)(?:\/|$)/.exec(exeDir);
+		if (bundle) return bundle[1];
+	}
+	return exeDir;
+}
+
+/**
  * Decode a data URL into a NativeImage for the clipboard.
  *
  * `nativeImage.createFromDataURL()` trusts the DECLARED media type and accepts
@@ -311,6 +328,35 @@ export function registerSystemHandlers(deps: SystemHandlerDependencies): void {
 			return null;
 		}
 	});
+
+	// File selection stays separate from folder selection: some native dialogs
+	// cannot select both files and directories in one picker.
+	let lastFileDirectory: string | undefined;
+	ipcMain.handle(
+		'dialog:selectFile',
+		async (
+			_event,
+			options: {
+				filters?: Array<{ name: string; extensions: string[] }>;
+				title?: string;
+			} = {}
+		) => {
+			const mainWindow = getMainWindow();
+			if (!mainWindow || mainWindow.isDestroyed()) return null;
+			const result = await dialog.showOpenDialog(mainWindow, {
+				properties: ['openFile'],
+				defaultPath:
+					lastFileDirectory && fsSync.existsSync(lastFileDirectory) ? lastFileDirectory : undefined,
+				filters: options.filters,
+				title: options.title ?? 'Select File',
+			});
+			const selected = result.canceled ? null : (result.filePaths[0] ?? null);
+			if (selected && fsSync.existsSync(selected) && fsSync.lstatSync(selected).isFile()) {
+				lastFileDirectory = path.dirname(selected);
+			}
+			return selected;
+		}
+	);
 
 	// File save dialog
 	ipcMain.handle(
@@ -884,6 +930,12 @@ export function registerSystemHandlers(deps: SystemHandlerDependencies): void {
 		// restoreManagedSyncPath(), the one writer that bypasses the hold.
 		const held = holdManagedKey(SYNC_PATH_LOCK_KEY);
 		if (!held.allowed) return managedRefusal(held, 'Storage location change', 'Sync');
+
+		if (newPath && isInsideInstallDir(newPath, getInstallDir(app))) {
+			logger.warn(`Rejected Storage Location inside the install directory: ${newPath}`, 'Sync');
+			return { success: false, error: INSTALL_DIR_SYNC_PATH_ERROR };
+		}
+
 		return applySyncPath(deps.bootstrapStore, app.getPath('userData'), newPath);
 	});
 

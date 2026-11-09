@@ -3,6 +3,7 @@ import type { AdditionalDirectory, AgentConfig, Session, ToolType, Theme } from 
 import { PICKABLE_AGENT_IDS } from '../../../shared/agentMetadata';
 import type { CodexTransport } from '../../../shared/codexTransport';
 import type { AgentCommitRefusal } from '../../services/agentCommit';
+import type { HarnessControlMode } from '../../../shared/maestro-lib/providers/native-control';
 
 // Maximum character length for nudge message and new session message
 export const NUDGE_MESSAGE_MAX_LENGTH = 1000;
@@ -74,6 +75,8 @@ export interface NewInstanceModalProps {
 		codexAutoResetOnExhaustion?: boolean,
 		/** Codex only: which transport chat turns use. `undefined` means `exec`. */
 		codexTransport?: CodexTransport,
+		/** Native harness control, or `undefined` for the default. */
+		harnessControlMode?: HarnessControlMode,
 		/** `clone` when duplicating `sourceSession`, so the host checks it as a clone. */
 		operation?: 'create' | 'clone',
 		/** The policy revision the approved choices on screen were read from (null: none shown). */
@@ -118,6 +121,7 @@ export interface EditAgentModalProps {
 		codexAutoResetOnExhaustion?: boolean,
 		/** Codex only: which transport chat turns use. `undefined` means `exec`. */
 		codexTransport?: CodexTransport,
+		harnessControlMode?: HarnessControlMode,
 		acceptTranslationLimitations?: boolean,
 		selectedUserResources?: string[],
 		migrationPlanId?: string,
@@ -198,6 +202,8 @@ export interface AgentPickerGridProps {
 	onEnvVarValueChange: (agentId: string, key: string, value: string) => void;
 	onEnvVarRemove: (agentId: string, key: string) => void;
 	onEnvVarAdd: (agentId: string) => void;
+	/** Replace an agent's variables whole (Advanced `.env` mode). */
+	onEnvVarsReplace: (agentId: string, vars: Record<string, string>) => void;
 	onConfigChange: (agentId: string, key: string, value: any) => void;
 	onConfigBlur: (agentId: string, key: string, value: any) => void;
 	onRefreshModels: (agentId: string) => void;
@@ -212,4 +218,7 @@ export interface AgentPickerGridProps {
 	/** Codex transport, per agent id. Defaults to `exec` when absent. */
 	codexTransportByAgent?: Record<string, CodexTransport>;
 	onCodexTransportChange?: (agentId: string, value: CodexTransport) => void;
+	/** Native protocol mode, per agent id. Defaults to current. */
+	harnessControlModeByAgent?: Record<string, HarnessControlMode>;
+	onHarnessControlModeChange?: (agentId: string, value: HarnessControlMode) => void;
 }

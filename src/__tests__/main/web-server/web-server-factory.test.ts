@@ -3,8 +3,10 @@
  * @description Unit tests for web server factory with dependency injection.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ipcMain, type BrowserWindow, type WebContents } from 'electron';
+import { nativeCurrentTurns } from '../../../main/pianola/current-turn';
+import { AgentRunCaptureService } from '../../../main/agent-run/capture-service';
 
 // Mock electron
 vi.mock('electron', () => ({
@@ -55,6 +57,7 @@ vi.mock('../../../main/web-server/WebServer', () => {
 			setStarTabCallback = vi.fn();
 			setSnoozeCommandCallback = vi.fn();
 			setClosedTabCommandCallback = vi.fn();
+			setMessagePinCommandCallback = vi.fn();
 			setAutoRunSteeringCommandCallback = vi.fn();
 			setWindowCommandCallback = vi.fn();
 			setThroughputGaugeCommandCallback = vi.fn();
@@ -82,6 +85,8 @@ vi.mock('../../../main/web-server/WebServer', () => {
 			// MCOMP-17-03BT: and the room participant consult lineage binder.
 			setGroupChatConsultLineageBinder = vi.fn();
 			setNoteAgentDelegationCallback = vi.fn();
+			setReleaseQueueItemCallback = vi.fn();
+			setConfirmQueueItemCallback = vi.fn();
 			setEnqueueCommandCallback = vi.fn();
 			setListQueueCallback = vi.fn();
 			setRemoveQueueItemCallback = vi.fn();
@@ -251,7 +256,6 @@ import {
 	createWebServerFactory,
 	type WebServerFactoryDependencies,
 } from '../../../main/web-server/web-server-factory';
-import { WebServer } from '../../../main/web-server/WebServer';
 import { tunnelManager } from '../../../main/tunnel-manager';
 import { buildWebSettingsSnapshot } from '../../../main/web-server/web-settings-snapshot';
 import { getThemeById } from '../../../main/themes';
@@ -269,6 +273,14 @@ import {
 	bindCrossAgentConsultInitiator,
 	withdrawCrossAgentConsult,
 } from '../../../main/cross-agent/cross-agent-router';
+import {
+	getAutoRunStateTracker,
+	resetAutoRunStateTracker,
+} from '../../../main/autorun/autorun-state-tracker';
+import {
+	pianolaScopeSnapshotFromDesktop,
+	runPianolaScopeCycle,
+} from '../../../shared/pianola/pianola-scope-cycle';
 
 describe('web-server/web-server-factory', () => {
 	let mockSettingsStore: WebServerFactoryDependencies['settingsStore'];
@@ -279,12 +291,14 @@ describe('web-server/web-server-factory', () => {
 	let mockProcessManager: {
 		write: ReturnType<typeof vi.fn>;
 		get: ReturnType<typeof vi.fn>;
+		getAll: ReturnType<typeof vi.fn>;
 	};
 	let deps: WebServerFactoryDependencies;
 
 	beforeEach(() => {
 		vi.clearAllMocks();
 		clearConcertoHtmlDocumentsForTests();
+		resetAutoRunStateTracker();
 		vi.mocked(getSessionIdsBusyWithCli).mockReturnValue(new Set<string>());
 
 		mockSettingsStore = {
@@ -349,6 +363,7 @@ describe('web-server/web-server-factory', () => {
 		mockProcessManager = {
 			write: vi.fn().mockReturnValue(true),
 			get: vi.fn().mockReturnValue(undefined),
+			getAll: vi.fn().mockReturnValue([]),
 		};
 
 		deps = {
@@ -1104,7 +1119,7 @@ describe('web-server/web-server-factory', () => {
 				},
 			]);
 
-			expect(getCallback()()[0].state).toBe('busy');
+			expect(getCallback()().sessions[0].state).toBe('busy');
 		});
 
 		it('overrides stale idle when the tab has a live managed process', () => {
@@ -1121,7 +1136,7 @@ describe('web-server/web-server-factory', () => {
 				id === 'agent-a-ai-tab-a' ? { pid: 123 } : undefined
 			);
 
-			expect(getCallback()()[0].state).toBe('busy');
+			expect(getCallback()().sessions[0].state).toBe('busy');
 		});
 
 		it('keeps an inactive sibling idle when only the active tab is running', () => {
@@ -1141,7 +1156,7 @@ describe('web-server/web-server-factory', () => {
 				id === 'agent-a-ai-tab-a' ? { pid: 123 } : undefined
 			);
 
-			const entries = getCallback()();
+			const entries = getCallback()().sessions;
 			expect(entries.map((entry: { state: string }) => entry.state)).toEqual(['busy', 'idle']);
 		});
 
@@ -1157,8 +1172,265 @@ describe('web-server/web-server-factory', () => {
 			]);
 			vi.mocked(getSessionIdsBusyWithCli).mockReturnValue(new Set(['agent-a']));
 
-			const entries = getCallback()();
+			const entries = getCallback()().sessions;
 			expect(entries.map((entry: { state: string }) => entry.state)).toEqual(['busy', 'unknown']);
+		});
+	});
+
+	describe('native scope census', () => {
+		afterEach(() => nativeCurrentTurns.setEnabled(false));
+		it.each([
+			'stream',
+			'unchanged',
+			'timestamp',
+			'metadata',
+			'risk',
+			'restart',
+			'reorder',
+		] as const)(
+			'consumes native streaming freshness through census and worker: %s',
+			async (mode) => {
+				nativeCurrentTurns.setEnabled(true);
+				const observation = {
+					sourceGeneration: 'fixture-renderer',
+					createdAt: 10,
+					provider: 'codex',
+				};
+				const user = { id: 'user', source: 'user', text: 'Work on this', timestamp: 19 };
+				const stream = {
+					id: 'stream',
+					source: 'ai',
+					text: ['unchanged', 'timestamp', 'metadata'].includes(mode)
+						? 'Should I run tests?'
+						: 'Working.',
+					timestamp: 20,
+				};
+				nativeCurrentTurns.commit({
+					sessionId: 'child',
+					tabId: 'background',
+					field: 'logs',
+					snapshot: true,
+					upserts: [user],
+					removedIds: [],
+					orderIds: ['user'],
+					observation: { ...observation, sequence: 1 },
+				});
+				const capture = new AgentRunCaptureService({
+					getAgentRun: () => undefined,
+					upsertAgentRun: (run) => run,
+					appendAgentRunEvent: (event) => event,
+					findActiveRunBySession: () => undefined,
+				});
+				const run = capture.captureSpawn({
+					sessionId: 'child-ai-background',
+					toolType: 'codex',
+					cwd: '/worktrees/child',
+					transcriptBoundaryId: 'user',
+					nativeTabSession: { agentId: 'child', tabId: 'background', createdAt: 10 },
+				})!;
+				nativeCurrentTurns.begin(run, 'user');
+				nativeCurrentTurns.commit({
+					sessionId: 'child',
+					tabId: 'background',
+					field: 'logs',
+					upserts: [stream],
+					removedIds: [],
+					orderIds: ['user', 'stream'],
+					observation: { ...observation, sequence: 2 },
+				});
+				const sessions = [
+					{ id: 'parent', cwd: '/project', aiTabs: [] },
+					{
+						id: 'child',
+						toolType: 'codex',
+						cwd: '/worktrees/child',
+						parentSessionId: 'parent',
+						activeTabId: 'active',
+						aiTabs: [
+							{
+								id: 'background',
+								state: 'idle',
+								createdAt: 10,
+								logs: [user, stream],
+							},
+						],
+					},
+				];
+				vi.mocked(mockSessionsStore.get).mockReturnValue(sessions);
+				mockProcessManager.get.mockImplementation((id: string) =>
+					id === 'child-ai-background' ? { pid: 1 } : undefined
+				);
+				const server = createWebServerFactory(deps)();
+				const callback = (server.setListDesktopSessionsCallback as ReturnType<typeof vi.fn>).mock
+					.calls[0][0];
+				const readSnapshot = async () =>
+					pianolaScopeSnapshotFromDesktop({ success: true, ...callback() });
+				const snapshot = await readSnapshot();
+				expect(snapshot.owners.map((owner) => owner.id)).toEqual(['parent', 'child']);
+				expect(snapshot.tabs[0]).toMatchObject({ tabId: 'background', busy: true, paused: false });
+				const scopeId = '11111111-1111-4111-8111-111111111111';
+				let checkpoint: any = null;
+				const decisions: any[] = [];
+				const dispatch = vi.fn(async () => ({ status: 'accepted' as const }));
+				const cycleDeps = {
+					store: {
+						readSupervisorTargets: () => [
+							{
+								id: scopeId,
+								kind: 'watch-scope' as const,
+								enabled: true,
+								createdAt: 1,
+								managerAgentId: 'manager',
+								selection: {
+									label: 'parent agent',
+									mode: 'agents-and-groups' as const,
+									agentIds: ['parent'],
+									groupIds: [],
+									excludedAgentIds: [],
+								},
+							},
+						],
+						readScopeCheckpoint: () => structuredClone(checkpoint),
+						writeScopeCheckpoint: (value: any) => {
+							checkpoint = structuredClone(value);
+						},
+						readDecisions: () => decisions,
+					},
+					readSnapshot,
+					readTranscript: async () => ({
+						agentId: 'child',
+						tabId: 'background',
+						currentTurn: nativeCurrentTurns.read({
+							agentId: 'child',
+							tabId: 'background',
+							createdAt: 10,
+							provider: 'codex',
+							agentSessionId: null,
+							open: true,
+						}),
+						messages: sessions[1].aiTabs
+							.map((tab) =>
+								tab.logs!.map((log) => ({
+									id: log.id,
+									role: log.source === 'user' ? ('user' as const) : ('assistant' as const),
+									source: log.source,
+									content: log.text,
+									timestamp: new Date(log.timestamp).toISOString(),
+								}))
+							)
+							.flat(),
+					}),
+					watch: {
+						readRules: () => [
+							{
+								id: 'rule',
+								enabled: true,
+								scope: 'global' as const,
+								match: { kinds: ['question' as const], maxRisk: 'low' as const },
+								action: 'auto_answer' as const,
+								answer: 'Controlled reply.',
+								priority: 1,
+								createdAt: 1,
+								updatedAt: 1,
+							},
+						],
+						recordDecision: (record: any) => {
+							decisions.push(record);
+						},
+						now: () => new Date().toISOString(),
+						genId: () => String(decisions.length + 1),
+						log: () => {},
+					},
+					dispatch,
+				};
+				await runPianolaScopeCycle(scopeId, cycleDeps, { dryRun: false });
+				expect(dispatch).not.toHaveBeenCalled();
+				mockProcessManager.get.mockReturnValue(undefined);
+				stream.text = 'Should I run tests?';
+				if (mode === 'timestamp') stream.timestamp = 999999;
+				if (mode === 'metadata') Object.assign(stream, { metadata: { systemUpdate: true } });
+				if (mode === 'risk') stream.text = 'Delete production data. Should I run tests?';
+				nativeCurrentTurns.commit({
+					sessionId: 'child',
+					tabId: 'background',
+					field: 'logs',
+					upserts: [stream],
+					removedIds: [],
+					orderIds: ['user', 'stream'],
+					observation: {
+						...observation,
+						sourceGeneration: mode === 'restart' ? 'replacement' : observation.sourceGeneration,
+						sequence: 3,
+					},
+				});
+				if (mode === 'reorder') {
+					for (const orderIds of [
+						['stream', 'user'],
+						['user', 'stream'],
+					])
+						nativeCurrentTurns.commit({
+							sessionId: 'child',
+							tabId: 'background',
+							field: 'logs',
+							upserts: [],
+							removedIds: [],
+							orderIds,
+							observation: { ...observation, sequence: orderIds[0] === 'stream' ? 4 : 5 },
+						});
+				}
+				await runPianolaScopeCycle(scopeId, cycleDeps, { dryRun: false });
+				await runPianolaScopeCycle(scopeId, cycleDeps, { dryRun: false });
+				expect(dispatch).toHaveBeenCalledTimes(mode === 'stream' ? 1 : 0);
+				if (mode === 'stream')
+					expect(dispatch.mock.calls[0]).toMatchObject([
+						{ agentId: 'child', tabId: 'background' },
+						'Controlled reply.',
+						{ scopeId, messageId: 'stream' },
+					]);
+			}
+		);
+
+		it.each([
+			{ isRunning: true },
+			{ isRunning: true, errorPaused: true },
+			{ isRunning: true, isStopping: true },
+		])('excludes Auto Run ownership between processes: %j', (state) => {
+			vi.mocked(mockSessionsStore.get).mockReturnValue([
+				{
+					id: 'owner',
+					cwd: '/project',
+					aiTabs: [{ id: 'tab', state: 'idle', createdAt: 1, logs: [] }],
+				},
+			]);
+			getAutoRunStateTracker().update('owner', state);
+			const server = createWebServerFactory(deps)();
+			const callback = (server.setListDesktopSessionsCallback as ReturnType<typeof vi.fn>).mock
+				.calls[0][0];
+			expect(
+				pianolaScopeSnapshotFromDesktop({ success: true, ...callback() }).tabs[0]
+			).toMatchObject({ paused: true, busy: false });
+		});
+
+		it('refuses unavailable liveness and never includes snoozed or closed tab payloads', () => {
+			vi.mocked(mockSessionsStore.get).mockReturnValue([
+				{
+					id: 'owner',
+					cwd: '/project',
+					aiTabs: [],
+					snoozedTabs: [{ type: 'ai', tab: { id: 'parked' } }],
+					closedTabHistory: [{ tab: { id: 'closed' } }],
+				},
+			]);
+			deps.getProcessManager = vi.fn().mockReturnValue(null);
+			const server = createWebServerFactory(deps)();
+			const callback = (server.setListDesktopSessionsCallback as ReturnType<typeof vi.fn>).mock
+				.calls[0][0];
+			const snapshot = callback();
+			expect(snapshot.sessions).toEqual([]);
+			expect(snapshot.owners).toHaveLength(1);
+			expect(() => pianolaScopeSnapshotFromDesktop({ success: true, ...snapshot })).toThrow(
+				'census'
+			);
 		});
 	});
 
@@ -1359,6 +1631,39 @@ describe('web-server/web-server-factory', () => {
 			listener?.({ sender: mockWebContents } as never, { accepted, reason });
 		};
 
+		it('forwards the host dispatch marker and waits for the owning renderer receipt', async () => {
+			const server = createWebServerFactory(deps)();
+			const callback = (server.setExecuteCommandCallback as ReturnType<typeof vi.fn>).mock
+				.calls[0][0];
+			const pending = callback(
+				'session-1',
+				'work',
+				'ai',
+				'tab',
+				false,
+				undefined,
+				true,
+				undefined,
+				true,
+				'dispatch-id'
+			);
+			expect(mockWebContents.send).toHaveBeenCalledWith(
+				'remote:executeCommand',
+				'session-1',
+				'work',
+				'ai',
+				'tab',
+				false,
+				undefined,
+				true,
+				undefined,
+				'dispatch-id',
+				expect.any(String)
+			);
+			answerReceipt(true);
+			await expect(pending).resolves.toBe(true);
+		});
+
 		it('should return false when mainWindow is null', async () => {
 			deps.getMainWindow = vi.fn().mockReturnValue(null);
 			const createWebServer = createWebServerFactory(deps);
@@ -1461,6 +1766,8 @@ describe('web-server/web-server-factory', () => {
 				undefined,
 				true,
 				undefined,
+				undefined,
+				undefined,
 				delegation
 			);
 			answerReceipt(true);
@@ -1470,7 +1777,9 @@ describe('web-server/web-server-factory', () => {
 			const call = [...send.mock.calls]
 				.reverse()
 				.find((c: unknown[]) => c[0] === 'remote:executeCommand') as unknown[];
-			expect(call.slice(1, 10)).toEqual([
+			// Upstream's Pianola dispatch id slot (undefined here) is padded ahead of
+			// the delegation because the integration args follow it.
+			expect(call.slice(1, 11)).toEqual([
 				'session-1',
 				'go',
 				'ai',
@@ -1479,12 +1788,50 @@ describe('web-server/web-server-factory', () => {
 				undefined,
 				true,
 				undefined,
+				undefined,
 				delegation,
 			]);
 			// The dispatch ticket slot (MRC-08-01B) sits between the delegation and
 			// the receipt channel; none was handed in here.
-			expect(call[10]).toBeUndefined();
-			expect(typeof call[11]).toBe('string');
+			expect(call[11]).toBeUndefined();
+			expect(typeof call[12]).toBe('string');
+		});
+
+		it('preserves mention routing while strict native delivery requires a receipt', async () => {
+			vi.useFakeTimers();
+			try {
+				const server = createWebServerFactory(deps)();
+				const callback = vi.mocked(server.setExecuteCommandCallback).mock.calls[0][0];
+				const routing = 'consult-first' as const;
+				const result = callback(
+					'session-1',
+					'test command',
+					'ai',
+					'tab-1',
+					false,
+					undefined,
+					true,
+					routing,
+					true
+				);
+				const rejected = expect(result).rejects.toThrow('Renderer delivery outcome unknown');
+				expect(mockWebContents.send).toHaveBeenCalledWith(
+					'remote:executeCommand',
+					'session-1',
+					'test command',
+					'ai',
+					'tab-1',
+					false,
+					undefined,
+					true,
+					routing,
+					expect.any(String)
+				);
+				await vi.advanceTimersByTimeAsync(3000);
+				await rejected;
+			} finally {
+				vi.useRealTimers();
+			}
 		});
 
 		it('does not log raw command text at info level (info shows length only)', async () => {
@@ -1763,7 +2110,10 @@ describe('web-server/web-server-factory', () => {
 				if (key === 'sessions') return sessions;
 				return defaultValue;
 			}) as any;
-			const originalSettingsGet = mockSettingsStore.get as ReturnType<typeof vi.fn>;
+			const originalSettingsGet = mockSettingsStore.get as (
+				key: string,
+				defaultValue?: unknown
+			) => unknown;
 			mockSettingsStore.get = vi.fn((key: string, defaultValue?: any) => {
 				if (key === 'sshRemotes') return sshRemotes;
 				return originalSettingsGet(key, defaultValue);
@@ -2360,6 +2710,7 @@ describe('web-server/web-server-factory', () => {
 				true,
 				false,
 				'consult-first',
+				undefined,
 				delegation,
 				'tkt-tab-1'
 			);
@@ -2373,13 +2724,16 @@ describe('web-server/web-server-factory', () => {
 				true,
 				false,
 				'consult-first',
+				// upstream's Pianola new-tab control slot
+				undefined,
 				delegation,
 				'tkt-tab-1',
 			]);
 			const respond = vi
-				.mocked(ipcMain.once)
+				.mocked(ipcMain.on)
 				.mock.calls.find((call) => call[0] === request?.[3])?.[1];
-			respond?.({} as any, { success: true, tabId: 'tab-9' });
+			// upstream's listener accepts only the owning window's sender
+			respond?.({ sender: mockWebContents } as any, { success: true, tabId: 'tab-9' });
 			await expect(pending).resolves.toEqual({ success: true, tabId: 'tab-9' });
 		});
 
@@ -2399,13 +2753,15 @@ describe('web-server/web-server-factory', () => {
 				undefined,
 				undefined,
 				undefined,
-				undefined,
 			]);
-			expect(request).toHaveLength(9);
+			// hidden, routing and upstream's control ride; delegation and the ticket
+			// are omitted when unset (MCOMP-33-00R30 wire).
+			expect(request).toHaveLength(8);
 			const respond = vi
-				.mocked(ipcMain.once)
+				.mocked(ipcMain.on)
 				.mock.calls.find((call) => call[0] === request?.[3])?.[1];
-			respond?.({} as any, true);
+			// upstream's listener accepts only the owning window's sender
+			respond?.({ sender: mockWebContents } as any, true);
 			await expect(pending).resolves.toEqual({ success: true });
 		});
 	});
@@ -2429,7 +2785,6 @@ describe('web-server/web-server-factory', () => {
 				undefined,
 				undefined,
 				undefined,
-				undefined,
 				undefined
 			);
 		});
@@ -2448,6 +2803,8 @@ describe('web-server/web-server-factory', () => {
 				true,
 				true,
 				undefined,
+				undefined,
+				undefined,
 				delegation
 			);
 
@@ -2461,6 +2818,9 @@ describe('web-server/web-server-factory', () => {
 				undefined,
 				true,
 				true,
+				undefined,
+				// upstream's dispatchCallback and Pianola queue control slots
+				undefined,
 				undefined,
 				delegation,
 				undefined
@@ -2519,8 +2879,42 @@ describe('web-server/web-server-factory', () => {
 				true,
 				false,
 				'handoff',
-				undefined,
 				undefined
+			);
+		});
+
+		// main's own dispatch-callback delivery marks the item so the renderer never
+		// offers Steer on it; the flag has to survive the hop to the renderer.
+		it('setEnqueueCommandCallback forwards the dispatch-callback mark to the renderer', () => {
+			const createWebServer = createWebServerFactory(deps);
+			const server = createWebServer();
+			const callback = (server.setEnqueueCommandCallback as ReturnType<typeof vi.fn>).mock
+				.calls[0][0];
+
+			void callback(
+				'session-1',
+				'[Maestro dispatch callback]',
+				'ai',
+				'tab-1',
+				undefined,
+				true,
+				undefined,
+				undefined,
+				true
+			);
+
+			expect(mockWebContents.send).toHaveBeenCalledWith(
+				'remote:enqueueCommand',
+				'session-1',
+				'[Maestro dispatch callback]',
+				expect.any(String),
+				'ai',
+				'tab-1',
+				undefined,
+				true,
+				undefined,
+				undefined,
+				true
 			);
 		});
 
@@ -3330,7 +3724,9 @@ describe('web-server/web-server-factory', () => {
 				isDestroyed: vi.fn().mockReturnValue(false),
 				webContents: secondaryWebContents,
 			};
-			deps.getWindowForSession = vi.fn().mockReturnValue(secondaryWindow as BrowserWindow);
+			deps.getWindowForSession = vi
+				.fn()
+				.mockReturnValue(secondaryWindow as unknown as BrowserWindow);
 
 			const server = createWebServerFactory(deps)() as any;
 			const callback = server.setExecuteCommandCallback.mock.calls[0][0];
@@ -3338,7 +3734,6 @@ describe('web-server/web-server-factory', () => {
 
 			expect(mockWebContents.send).not.toHaveBeenCalledWith(
 				'remote:executeCommand',
-				expect.anything(),
 				expect.anything(),
 				expect.anything(),
 				expect.anything(),
@@ -3357,8 +3752,6 @@ describe('web-server/web-server-factory', () => {
 				'hello owner',
 				'ai',
 				'tab-1',
-				undefined,
-				undefined,
 				undefined,
 				undefined,
 				undefined,
@@ -3384,7 +3777,9 @@ describe('web-server/web-server-factory', () => {
 				isDestroyed: vi.fn().mockReturnValue(false),
 				webContents: secondaryWebContents,
 			};
-			deps.getWindowForSession = vi.fn().mockReturnValue(secondaryWindow as BrowserWindow);
+			deps.getWindowForSession = vi
+				.fn()
+				.mockReturnValue(secondaryWindow as unknown as BrowserWindow);
 
 			const createWebServer = createWebServerFactory(deps);
 			const server = createWebServer() as any;
@@ -3462,7 +3857,9 @@ describe('web-server/web-server-factory', () => {
 				isDestroyed: vi.fn().mockReturnValue(false),
 				webContents: secondaryWebContents,
 			};
-			deps.getWindowForSession = vi.fn().mockReturnValue(secondaryWindow as BrowserWindow);
+			deps.getWindowForSession = vi
+				.fn()
+				.mockReturnValue(secondaryWindow as unknown as BrowserWindow);
 
 			const server = createWebServerFactory(deps)() as any;
 			const callback = server.setOpenDocumentGraphCallback.mock.calls[0][0];

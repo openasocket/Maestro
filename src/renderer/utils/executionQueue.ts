@@ -9,7 +9,8 @@
  * taking index 0. A connection hold is an ordering barrier: later items cannot
  * overtake a prompt whose delivery state is still unknown. A consult hold
  * (`awaitingConsult`) is the same barrier scoped to one tab: that tab's turn is
- * not finished until the agents it consulted have replied.
+ * not finished until the agents it consulted have replied. Pending admission
+ * likewise blocks its tab, independently of the user's pause flag.
  */
 
 import type {
@@ -27,6 +28,7 @@ import {
 	steeringTextTooLong,
 } from '../../shared/chatSteering';
 import { resolveCodexTransport } from '../../shared/codexTransport';
+import { supportsNativeSteering } from '../../shared/maestro-lib/providers/native-control';
 import { isSessionRemote } from './sessionHelpers';
 import {
 	getBusyTabs,
@@ -65,7 +67,7 @@ export function applyQueuedItemEdit(
 	}
 ): QueuedItem[] {
 	return queue.map((item) =>
-		item.id === itemId
+		item.id === itemId && !item.pendingAdmissionId
 			? {
 					...item,
 					text: patch.text,
@@ -82,7 +84,9 @@ export function applyQueuedItemEdit(
  * cross-agent consult holds it.
  */
 export function isRunnableQueueItem(item: QueuedItem): boolean {
-	return !item.paused && !item.waitingForConnection && !item.awaitingConsult;
+	return (
+		!item.paused && !item.waitingForConnection && !item.awaitingConsult && !item.pendingAdmissionId
+	);
 }
 
 /**
@@ -112,16 +116,18 @@ export function dropConsultHold(queue: QueuedItem[], tabId: string | undefined):
  * actually run, or -1. The ONE place the dispatch order is decided:
  *
  * - a connection hold is a barrier for the whole queue (delivery state unknown);
- * - a consult hold is a barrier for ITS TAB only: that tab's turn is not done
- *   until the reply lands, while other tabs carry on;
+ * - consult and admission holds are barriers for their tab only;
  * - a paused item is simply skipped.
  */
-function firstRunnableQueueIndex(queue: QueuedItem[]): number {
+function firstRunnableQueueIndex(queue: QueuedItem[], includeAdmission = false): number {
 	const consultBlockedTabs = new Set<string>();
 	for (let index = 0; index < queue.length; index += 1) {
 		const item = queue[index];
 		if (item.waitingForConnection) return -1;
-		if (item.awaitingConsult) {
+		if (
+			item.awaitingConsult ||
+			(item.pendingAdmissionId && (!includeAdmission || item.paused || item.admissionRelease))
+		) {
 			consultBlockedTabs.add(item.tabId);
 			continue;
 		}
@@ -141,6 +147,14 @@ export function releaseConnectionHeldQueueItems(queue: QueuedItem[]): QueuedItem
 /** The first item that would actually run, or undefined if all are held/empty. */
 export function nextRunnableQueueItem(queue: QueuedItem[]): QueuedItem | undefined {
 	const index = firstRunnableQueueIndex(queue);
+	return index >= 0 ? queue[index] : undefined;
+}
+
+/** Candidate for the owning queue consumer only. This projection is a hint to
+ * the host, never a renderer release: ordinary dequeue/force/resume keep their
+ * existing admission barrier. The row stays intact through native admission. */
+export function nextQueueDrainItem(queue: QueuedItem[]): QueuedItem | undefined {
+	const index = firstRunnableQueueIndex(queue, true);
 	return index >= 0 ? queue[index] : undefined;
 }
 
@@ -189,7 +203,11 @@ export function hasWorkAheadOfNewMessage(
 	if (opts.autoRunActive) return true;
 	if (getBusyTabs(session, { includeOrphans: true }).length > 0) return true;
 	return (session.executionQueue ?? []).some(
-		(item) => item.waitingForConnection || !!item.awaitingConsult || isRunnableQueueItem(item)
+		(item) =>
+			item.waitingForConnection ||
+			!!item.awaitingConsult ||
+			!!item.pendingAdmissionId ||
+			isRunnableQueueItem(item)
 	);
 }
 
@@ -226,6 +244,17 @@ export function applyQueuedItemRelease(session: Session, tabId: string | undefin
 					busySource: undefined,
 					thinkingStartTime: undefined,
 				}),
+	};
+}
+
+/** A failed attempt restores the same queue ID as a newer incarnation. */
+export function recoverQueuedItem(item: QueuedItem, existing?: QueuedItem): QueuedItem {
+	return {
+		...item,
+		dispatchRecoveryGeneration: Math.max(
+			(item.dispatchRecoveryGeneration ?? 0) + 1,
+			existing?.dispatchRecoveryGeneration ?? 0
+		),
 	};
 }
 
@@ -287,8 +316,9 @@ export function applyQueuedItemDispatchFailure(
 	const queue = item.crossAgentMention
 		? dropConsultHold(released.executionQueue ?? [], item.tabId)
 		: (released.executionQueue ?? []);
-	const restored: QueuedItem = opts.collision ? item : { ...item, paused: true };
-	const executionQueue = queue.some((i) => i.id === item.id)
+	const existing = queue.find((queued) => queued.id === item.id);
+	const restored = recoverQueuedItem(opts.collision ? item : { ...item, paused: true }, existing);
+	const executionQueue = existing
 		? queue.map((i) => (i.id === item.id ? restored : i))
 		: [restored, ...queue];
 
@@ -421,7 +451,8 @@ export function resetSpawnCollisionsForTest(): void {
  * among themselves and written back to their original slots, so queued items
  * belonging to other tabs keep their absolute positions. Without `tabId` the
  * whole queue is reordered. Out-of-range or no-op moves return the queue
- * unchanged (same reference).
+ * unchanged (same reference). Pending admission holds cannot move or be crossed
+ * by work on their tab: reordering must not let that work bypass the hold.
  */
 export function reorderQueueItem(
 	queue: QueuedItem[],
@@ -437,6 +468,15 @@ export function reorderQueueItem(
 			fromIndex >= len ||
 			toIndex < 0 ||
 			toIndex >= len
+		) {
+			return queue;
+		}
+		const moved = queue[fromIndex];
+		if (
+			moved.pendingAdmissionId ||
+			queue
+				.slice(Math.min(fromIndex, toIndex), Math.max(fromIndex, toIndex) + 1)
+				.some((item) => item.pendingAdmissionId && item.tabId === moved.tabId)
 		) {
 			return queue;
 		}
@@ -459,6 +499,13 @@ export function reorderQueueItem(
 	if (fromIndex === toIndex || fromIndex < 0 || fromIndex >= len || toIndex < 0 || toIndex >= len) {
 		return queue;
 	}
+	if (
+		items
+			.slice(Math.min(fromIndex, toIndex), Math.max(fromIndex, toIndex) + 1)
+			.some((item) => item.pendingAdmissionId)
+	) {
+		return queue;
+	}
 	const reordered = [...items];
 	const [removed] = reordered.splice(fromIndex, 1);
 	reordered.splice(toIndex, 0, removed);
@@ -476,7 +523,12 @@ export function reorderQueueItem(
  * already underway.
  */
 function isMergeableQueueItem(item: QueuedItem): boolean {
-	return item.type === 'message' && !item.crossAgentOnly && !item.awaitingConsult;
+	return (
+		item.type === 'message' &&
+		!item.crossAgentOnly &&
+		!item.awaitingConsult &&
+		!item.pendingAdmissionId
+	);
 }
 
 /**
@@ -522,6 +574,8 @@ export function mergeQueuedItemIntoPrevious(
 	const images = [...(target.images ?? []), ...(item.images ?? [])];
 	const merged: QueuedItem = {
 		...target,
+		// Combining queued data cannot promote automatic/unknown work to a human turn.
+		querySource: target.querySource === 'user' ? item.querySource : target.querySource,
 		text,
 		images: images.length > 0 ? images : undefined,
 		crossAgentMention: target.crossAgentMention || item.crossAgentMention || undefined,
@@ -598,6 +652,7 @@ export function getQueueBusyContext(
 
 /** Why a queued item cannot be force sent right now. */
 export type ForceSendBlockedReason =
+	| 'pending-admission'
 	| 'no-target-tab'
 	| 'target-tab-busy'
 	| 'needs-forced-parallel'
@@ -621,22 +676,24 @@ export interface ForceSendEligibility extends QueueBusyContext {
  */
 export function getForceSendEligibility(
 	session: Session,
-	item: Pick<QueuedItem, 'tabId' | 'awaitingConsult'>,
+	item: Pick<QueuedItem, 'tabId' | 'awaitingConsult' | 'pendingAdmissionId'>,
 	opts: { forcedParallelEnabled: boolean }
 ): ForceSendEligibility {
 	const busy = getQueueBusyContext(session, item);
 	const requiresParallel = busy.otherBusyTabs.length > 0;
 	// A consult hold has nothing to send yet: its text is the reply, which has not
 	// arrived. Forcing it would hand the agent an empty continuation.
-	const blockedReason: ForceSendBlockedReason | undefined = item.awaitingConsult
-		? 'awaiting-consult'
-		: !resolveQueuedItemTarget(session, item)
-			? 'no-target-tab'
-			: busy.targetTabBusy
-				? 'target-tab-busy'
-				: requiresParallel && !opts.forcedParallelEnabled
-					? 'needs-forced-parallel'
-					: undefined;
+	const blockedReason: ForceSendBlockedReason | undefined = item.pendingAdmissionId
+		? 'pending-admission'
+		: item.awaitingConsult
+			? 'awaiting-consult'
+			: !resolveQueuedItemTarget(session, item)
+				? 'no-target-tab'
+				: busy.targetTabBusy
+					? 'target-tab-busy'
+					: requiresParallel && !opts.forcedParallelEnabled
+						? 'needs-forced-parallel'
+						: undefined;
 	return { ...busy, requiresParallel, canForce: !blockedReason, blockedReason };
 }
 
@@ -662,7 +719,8 @@ export function shouldOfferForceSend(
 	return (
 		eligibility.blockedReason !== 'no-target-tab' &&
 		eligibility.blockedReason !== 'target-tab-busy' &&
-		eligibility.blockedReason !== 'awaiting-consult'
+		eligibility.blockedReason !== 'awaiting-consult' &&
+		eligibility.blockedReason !== 'pending-admission'
 	);
 }
 
@@ -678,6 +736,8 @@ export function shouldOfferForceSend(
 export function getForceSendTitle(eligibility: ForceSendEligibility): string {
 	const otherBusyCount = eligibility.otherBusyTabs.length;
 	switch (eligibility.blockedReason) {
+		case 'pending-admission':
+			return 'Waiting for supervision admission';
 		case 'target-tab-busy':
 			return 'This tab is already working - the message runs when the current turn finishes';
 		case 'needs-forced-parallel':
@@ -695,6 +755,7 @@ export function getForceSendTitle(eligibility: ForceSendEligibility): string {
 
 /** Why a queued message cannot be steered into the running turn right now. */
 export type SteerBlockedReason =
+	| 'pending-admission'
 	| 'no-target-tab'
 	| 'tab-not-working'
 	| 'not-claude'
@@ -711,7 +772,8 @@ export type SteerBlockedReason =
 	| 'ssh-remote'
 	| 'steer-in-flight'
 	| 'tui-command-prefix'
-	| 'read-only';
+	| 'read-only'
+	| 'dispatch-callback';
 
 export interface SteerEligibility {
 	canSteer: boolean;
@@ -800,20 +862,38 @@ export function getSteerEligibility(
 		| 'agentContext'
 		| 'paused'
 		| 'waitingForConnection'
+		| 'pendingAdmissionId'
 		| 'readOnlyMode'
+		| 'dispatchCallback'
 	>
 ): SteerEligibility {
+	if (item.pendingAdmissionId) return { canSteer: false, blockedReason: 'pending-admission' };
 	const target = resolveQueuedItemTarget(session, item);
 	if (!target) {
 		return { canSteer: false, blockedReason: 'no-target-tab' };
 	}
+	// A dispatch callback is another agent reporting back. Steering TYPES text
+	// into the running turn as if the user wrote it, so the report (and the
+	// untrusted output fenced inside it) would land mid-thread in a turn about
+	// something else. It waits and runs as its own turn when the tab is idle,
+	// which is the delivery dispatch callbacks were built around.
+	if (item.dispatchCallback) return { canSteer: false, blockedReason: 'dispatch-callback' };
 	// Busy-ness comes from the SAME helper Force Send reads, so the two controls
 	// cannot disagree about whether a tab is mid-turn - which would let a card offer
 	// both, or neither.
 	if (!getQueueBusyContext(session, item).targetTabBusy) {
 		return { canSteer: false, blockedReason: 'tab-not-working' };
 	}
-	if (session.toolType === 'codex') {
+	const claudeTuiActive =
+		session.toolType === 'claude-code' && session.claudeInteractive?.mode === 'interactive';
+	const nativeSteering =
+		!claudeTuiActive &&
+		session.harnessControlMode === 'native' &&
+		supportsNativeSteering(session.toolType);
+	if (nativeSteering) {
+		// Native control is local-only; its adapter owns the in-turn protocol channel.
+		if (isSessionRemote(session)) return { canSteer: false, blockedReason: 'ssh-remote' };
+	} else if (session.toolType === 'codex') {
 		// A Codex turn is steerable only on the opt-in app-server transport, which
 		// accepts `turn/steer` while a turn runs, locally or over SSH (the protocol
 		// rides the ssh client's stdio). `codex exec` (the default) accepts nothing
@@ -844,7 +924,11 @@ export function getSteerEligibility(
 	// leading `!` switches the editor to bash mode. Neither is the message the user
 	// queued, so it waits and dispatches normally. Codex receives `turn/steer` as
 	// plain input, so it is unaffected.
-	if (session.toolType === 'claude-code' && startsWithTuiCommandPrefix(item.text)) {
+	if (
+		session.toolType === 'claude-code' &&
+		!nativeSteering &&
+		startsWithTuiCommandPrefix(item.text)
+	) {
 		return { canSteer: false, blockedReason: 'tui-command-prefix' };
 	}
 	if (item.waitingForConnection) {
@@ -888,34 +972,44 @@ export function getSteerEligibility(
 /**
  * Whether a Steer control should be RENDERED at all, given its eligibility.
  *
- * Same split as {@link shouldOfferForceSend}, for the same reason, and here EVERY
- * blocked reason hides the control rather than dimming it. None of them is
- * something the user can act on from a queued card: a tab that is not working has
- * no turn to steer (and will start this very message shortly), a non-Claude agent
- * can never steer, a Codex agent on `codex exec` cannot be reached mid-turn (the
- * transport is an agent setting, not something to flip from a queued card), and an
- * API-source turn has no PTY. A dimmed button whose
- * tooltip amounts to "not right now" is exactly the dead control the Force Send
- * work was fixing.
+ * Same split as {@link shouldOfferForceSend}, for the same reason: a blocked
+ * reason the user cannot act on from a queued card hides the control rather than
+ * dimming it. A tab that is not working has no turn to steer (and will start this
+ * very message shortly), a non-Claude agent can never steer, a Codex agent on
+ * `codex exec` cannot be reached mid-turn, and an API-source turn has no PTY. A
+ * dimmed button whose tooltip amounts to "not right now" is a dead control.
  *
- * So there is no `visible-but-disabled` case today. Keep this function anyway:
- * it is the seam a future reason with an actionable remedy (the way
- * `needs-forced-parallel` names a setting) would hook into, and both surfaces
- * already call it.
+ * `has-images` is the one exception, and it stays visible (dimmed): it is the
+ * only reason that leaves a card looking exactly like a steerable one, so a
+ * hidden button reads as a bug, and it has a remedy on the card itself (Edit, to
+ * drop the image). It is checked after every agent- and turn-level reason in
+ * {@link getSteerEligibility}, so the dimmed button appears only where removing
+ * the image is all that stands between the user and a steer.
  */
 export function shouldOfferSteer(eligibility: SteerEligibility | null | undefined): boolean {
-	return !!eligibility?.canSteer;
+	if (!eligibility) return false;
+	return eligibility.canSteer || eligibility.blockedReason === 'has-images';
+}
+
+/**
+ * The tooltip a Steer control shows, given its eligibility. Lives with the
+ * decision, like {@link getForceSendTitle}, so a dimmed button always says why.
+ */
+export function getSteerTitle(eligibility: SteerEligibility): string {
+	return eligibility.canSteer
+		? 'Send this into the turn that is running now, so the agent can change course mid-task'
+		: describeSteerBlocked(eligibility.blockedReason);
 }
 
 /**
  * Why a steer was declined, as a sentence for the user. A Record rather than a
  * switch so a new {@link SteerBlockedReason} fails to compile until it is worded.
  *
- * The Steer button never needs this: it is hidden for every blocked reason (see
- * {@link shouldOfferSteer}). A keyboard steer has no control to hide, so it has
- * to say why nothing happened.
+ * Also the tooltip of a dimmed Steer button (see {@link getSteerTitle}). A
+ * keyboard steer has no control to hide, so it has to say why nothing happened.
  */
 const STEER_BLOCKED_DETAILS: Record<SteerBlockedReason, string> = {
+	'pending-admission': 'The message is waiting for supervision admission.',
 	'no-target-tab': 'The tab this message was queued on is gone.',
 	'tab-not-working': 'No turn is running on this tab, so there is nothing to steer.',
 	'not-claude': 'This provider cannot take a message while a turn is running.',
@@ -924,7 +1018,8 @@ const STEER_BLOCKED_DETAILS: Record<SteerBlockedReason, string> = {
 	'api-token-source':
 		'This turn is running on the API token source, which takes no input until it ends.',
 	'nothing-to-type': 'The message has no text to steer with.',
-	'has-images': 'Images cannot be attached to a turn that is already running.',
+	'has-images':
+		'Images cannot be attached to a turn that is already running. Remove the image to steer the text alone.',
 	'awaiting-consult': 'The message is waiting on a consult reply.',
 	'cross-agent-mention': 'An @mention only reaches the other agent on a normal send.',
 	'has-agent-context': 'The message carries consult replies that only a normal send delivers.',
@@ -936,6 +1031,8 @@ const STEER_BLOCKED_DETAILS: Record<SteerBlockedReason, string> = {
 	'tui-command-prefix':
 		'A message that starts with / or ! would run as a command in the running turn.',
 	'read-only': 'The message is read-only and the running turn is not.',
+	'dispatch-callback':
+		'A dispatch result runs as its own turn once this tab is idle, never inside the running one.',
 };
 
 const STEER_BLOCKED_FALLBACK = 'The running turn cannot take this message right now.';
@@ -959,18 +1056,23 @@ export function describeSteerBlocked(reason: string | undefined): string {
  * The target is resolved orphan-aware, so an item queued on a since-closed tab
  * still lands on that tab's background transcript rather than the active one.
  */
-export function applyQueuedItemDispatch(session: Session, item: QueuedItem): Session {
+export function applyQueuedItemDispatch(
+	session: Session,
+	item: QueuedItem,
+	appendUserLog = true
+): Session {
 	if (!session.executionQueue?.some((i) => i.id === item.id)) return session;
 	const target = resolveQueuedItemTarget(session, item);
 	if (!target) return session;
 
+	const markRunning = appendUserLog ? markTabRunningQueuedItem : markTabRunningTurn;
 	const aiTabs = session.aiTabs.map((tab) =>
-		tab.id === target.tabId ? markTabRunningQueuedItem(tab, item, session) : tab
+		tab.id === target.tabId ? markRunning(tab, item, session) : tab
 	);
 	const orphans =
 		target.location === 'orphan' && session.orphanedThinkingTabs
 			? session.orphanedThinkingTabs.map((tab) =>
-					tab.id === target.tabId ? markTabRunningQueuedItem(tab, item, session) : tab
+					tab.id === target.tabId ? markRunning(tab, item, session) : tab
 				)
 			: session.orphanedThinkingTabs;
 

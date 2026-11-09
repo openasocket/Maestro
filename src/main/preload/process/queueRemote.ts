@@ -1,3 +1,4 @@
+import type { PianolaQueueControl } from '../../../shared/pianola/pianola-dispatch';
 import { ipcRenderer } from 'electron';
 import type { QueueSteerResult } from '../../../shared/chatSteering';
 import type { MentionRouting } from '../../../shared/crossAgentContext';
@@ -22,12 +23,18 @@ export function createQueueRemoteApi() {
 				background?: boolean,
 				held?: boolean,
 				mentionRouting?: MentionRouting,
+				dispatchCallback?: boolean,
+				control?: PianolaQueueControl,
 				/** The dispatching operation's context; the renderer stores it on the queued item. */
 				delegation?: ManagedDelegationContext,
 				/** The host-minted dispatch ticket; echoed unread on the spawn or the queued item. */
 				dispatchTicket?: string
 			) => void
 		): (() => void) => {
+			/**
+			 * Forward queue IPC arguments including held state and admission control. On synchronous
+			 * callback failure, send an explicit unsuccessful response and propagate the error.
+			 */
 			const handler = (
 				_: unknown,
 				sessionId: string,
@@ -39,6 +46,8 @@ export function createQueueRemoteApi() {
 				background?: boolean,
 				held?: boolean,
 				mentionRouting?: MentionRouting,
+				dispatchCallback?: boolean,
+				control?: PianolaQueueControl,
 				delegation?: ManagedDelegationContext,
 				dispatchTicket?: string
 			) => {
@@ -53,8 +62,14 @@ export function createQueueRemoteApi() {
 						background,
 						held,
 						mentionRouting,
-						delegation,
-						dispatchTicket
+						dispatchCallback,
+						// Upstream control keeps its slot; the delegation and dispatch ticket
+						// follow it, forwarded only when set, as queueCallbacks.ts sends them.
+						...((delegation || dispatchTicket
+							? [control, delegation, dispatchTicket]
+							: control
+								? [control]
+								: []) as [PianolaQueueControl?, ManagedDelegationContext?, string?])
 					);
 				} catch (error) {
 					ipcRenderer.send(responseChannel, { success: false });

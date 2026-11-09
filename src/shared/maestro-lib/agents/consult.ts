@@ -107,7 +107,8 @@ export interface CrossAgentTargetSession {
 	sshRemoteConfig?: AgentSshRemoteConfig | null;
 }
 
-/** How a runner reports a running consult. Nothing is reported after `stop`. */
+/** How a runner reports a running consult. Hosts may retain native exit observation after
+ * `stop`; the service ignores a later `onEnd` once its display chunk has settled. */
 export interface ConsultObserver {
 	/** Proof of life: output, thinking, a tool call, a usage report. Restarts the silence budget. */
 	onActivity(): void;
@@ -120,25 +121,37 @@ export interface ConsultObserver {
 /** A finished process. The text is read lazily so a parser that throws lands in the service's handling. */
 export interface ConsultEnd {
 	exitCode: number | null;
+	/** A host-supervised failure, even if a signalled launcher reports code zero. */
+	error?: string;
 	readText(): string;
 }
 
 /**
  * Starts and stops the one process a consult is made of. The runner attaches its listeners
- * BEFORE it spawns (no event is missed) and owns their release: a start that fails or throws
- * detaches by itself, so the service never has to guess what a failed start left behind.
+ * BEFORE it spawns (no event is missed) and owns their release. Definite nonstart detaches;
+ * an uncertain acknowledgement retains observation and Stop ownership. Managed hosts may
+ * retain observation after Stop until authentic native exit.
  */
 export interface ConsultRunner {
-	/** Start the process. `success: false` is a refusal: nothing runs and no end will be reported. */
-	start(spawn: GroupChatSpawn, observer: ConsultObserver): Promise<GroupChatTurnStart>;
 	/**
-	 * Kill the process, detach, and answer whatever it had said so far (best effort, `''` when
+	 * Start the process. `success: false` is a refusal or a proven nonstart: nothing runs and
+	 * no end will be reported, unless `unknown` is set, which retains supervision of a
+	 * possible child. A managed refusal also names its state and code (`managed`).
+	 */
+	start(
+		spawn: GroupChatSpawn,
+		observer: ConsultObserver
+	): Promise<GroupChatTurnStart & { unknown?: boolean }>;
+	/**
+	 * Request a kill and answer whatever it had said so far (best effort, `''` when
 	 * unreadable). Idempotent, and safe for an id whose process does not exist yet.
 	 */
 	stop(processId: string): string;
 }
 
 export interface ConsultStartOptions {
+	/** Host-only proof: preparation failed or was canceled before invoking the runner. */
+	onNotStarted?: () => void;
 	runner: ConsultRunner;
 	/** Resolves a provider to the agent definition a spawn needs, or null when it is not installed. */
 	resolveAgent(providerId: string): Promise<AgentConfig | null>;
@@ -259,6 +272,54 @@ export function createConsultService() {
 	 * an error chunk instead of silently running locally.
 	 */
 	async function start(request: CrossAgentRequest, opts: ConsultStartOptions): Promise<void> {
+		let runnerEntered = false;
+		let terminalDelivered = false;
+		// Resolve caller ownership outside provider preparation error handling.
+		const target = opts.getTargetSession(request.targetSessionId);
+		const onChunk = (chunk: CrossAgentResponseChunk) => {
+			if (!runnerEntered && chunk.done && (chunk.error || chunk.canceled)) opts.onNotStarted?.();
+			if (chunk.done) terminalDelivered = true;
+			opts.onChunk(chunk);
+		};
+		try {
+			await startPrepared(request, {
+				...opts,
+				onChunk,
+				getTargetSession: () => target,
+				runner: {
+					start: (spawn, observer) => {
+						runnerEntered = true;
+						return opts.runner.start(spawn, observer);
+					},
+					stop: (id) => opts.runner.stop(id),
+				},
+			});
+		} catch (error) {
+			if (runnerEntered || terminalDelivered) throw error;
+			// Provider/config preparation also precedes the service's supervised spawn block.
+			// No runner invocation means there cannot be a native child to wait for.
+			activeConsults.delete(request.requestId);
+			captureException(error, { operation: 'crossAgent:prepare', requestId: request.requestId });
+			if (!runnerEntered) opts.onNotStarted?.();
+			opts.onChunk({
+				requestId: request.requestId,
+				sourceSessionId: request.sourceSessionId,
+				sourceTabId: request.sourceTabId,
+				targetSessionId: request.targetSessionId,
+				targetTabId: request.targetTabId,
+				targetAgentName: target?.name ?? request.targetSessionId,
+				targetToolType: target?.toolType ?? 'claude-code',
+				chunk: '',
+				done: true,
+				error: error instanceof Error ? error.message : String(error),
+			});
+		}
+	}
+
+	async function startPrepared(
+		request: CrossAgentRequest,
+		opts: ConsultStartOptions
+	): Promise<void> {
 		const { runner, sshStore, getTargetSession, onChunk } = opts;
 		const writable = opts.writable ?? false;
 
@@ -401,11 +462,11 @@ export function createConsultService() {
 			onSessionId: (agentSessionId) => {
 				if (agentSessionId) capturedAgentSessionId = agentSessionId;
 			},
-			onEnd: ({ exitCode, readText }) => {
+			onEnd: ({ exitCode, readText, error }) => {
 				if (settled) return;
 				settled = true;
 				release();
-				const code = exitCode ?? -1;
+				const code = (error && exitCode === 0 ? 1 : exitCode) ?? -1;
 				try {
 					const text = readText().trim();
 					// Only forward a captured provider session id on a SUCCESSFUL consult, so the
@@ -425,7 +486,7 @@ export function createConsultService() {
 							baseChunk({
 								chunk: text,
 								done: true,
-								error: consultExitError(target, code, text),
+								error: error || consultExitError(target, code, text),
 							})
 						);
 					} else if (text) {
@@ -515,6 +576,8 @@ export function createConsultService() {
 		}
 
 		try {
+			const appendSystemPrompt = await opts.getSystemPrompt?.(target);
+			if (settled) return;
 			const spawnResult = await runner.start(
 				{
 					processId: sessionId,
@@ -542,18 +605,17 @@ export function createConsultService() {
 					// The consulted agent is a real Maestro agent: it answers with the same
 					// system prompt its own tabs carry. A resumed consult skips re-embedding
 					// for agents without the native flag (already in that transcript).
-					appendSystemPrompt: await opts.getSystemPrompt?.(target),
+					appendSystemPrompt,
 					isResume: !!request.resumeAgentSessionId && !!agent.resumeArgs,
 					// The runner binds the consult under this record at admission (MRC-07-05).
 					...(opts.delegation ? { delegation: opts.delegation } : {}),
 				},
 				observer
 			);
-			// The spawners CATCH their own failures and return `{ pid: -1, success: false }` rather
-			// than throwing. Such a process emits no end, so without this check the only thing that
-			// ever fires is the timeout - the user waits the full budget for a process that never
-			// existed.
-			if (!spawnResult.success) {
+			// Only a definite nonstart releases ownership here. A lost acknowledgement after the
+			// native boundary may have left a live child: keep Stop, silence/hard budgets and the
+			// observer until authentic terminal evidence arrives. Never infer success or resend.
+			if (!spawnResult.success && !spawnResult.unknown) {
 				if (!settled) {
 					settled = true;
 					release();
@@ -576,11 +638,15 @@ export function createConsultService() {
 				}
 				return;
 			}
-			logger.info(`${LOG_CONTEXT} Dispatched to ${target.name}`, LOG_CONTEXT, {
-				requestId: request.requestId,
-				targetToolType: target.toolType,
-				transcriptEntries: request.transcript.length,
-			});
+			logger.info(
+				`${LOG_CONTEXT} ${spawnResult.unknown ? 'Supervising uncertain start of' : 'Dispatched to'} ${target.name}`,
+				LOG_CONTEXT,
+				{
+					requestId: request.requestId,
+					targetToolType: target.toolType,
+					transcriptEntries: request.transcript.length,
+				}
+			);
 		} catch (err) {
 			// Spawn failed - tear down the supervision and surface a single error chunk.
 			if (!settled) {

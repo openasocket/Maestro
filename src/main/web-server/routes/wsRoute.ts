@@ -17,8 +17,15 @@
 
 import { FastifyInstance, FastifyRequest } from 'fastify';
 import { logger } from '../../utils/logger';
+import { hostCallerRuns } from '../../agent-run/caller-identity';
+import { CALLER_RUN_PROOF_HEADER } from '../../../shared/agentDelegation';
 import { WEB_LOGIN_WS_CLOSE_CODE } from '../../../shared/webLogin';
 import { isWebRequestAuthorized, resolveWebRequestAuth } from '../auth/web-login-policy';
+import {
+	acknowledgeWebSocketChunk,
+	enableWebSocketChunks,
+	sendBounded,
+} from '../services/socket-send';
 import type {
 	Theme,
 	WebClient,
@@ -149,6 +156,7 @@ export class WsRoute {
 
 			// Extract sessionId from query string if provided (for session-specific subscriptions)
 			const url = new URL(request.url || '', `http://${request.headers.host || 'localhost'}`);
+			if (url.searchParams.get('bridgeChunks') === '1') enableWebSocketChunks(socket);
 			const sessionId = url.searchParams.get('sessionId') || undefined;
 
 			// A web-desktop client reconnecting after a dropped socket says where it
@@ -181,12 +189,12 @@ export class WsRoute {
 				// And the pairing credential: a paired device is a transport, not an
 				// account, and the sinks tell it from a login by this field.
 				...(auth.method ? { admission: auth.method } : {}),
-				isAuthorized: () => {
+				isAuthorized: (context) => {
 					if (admission && !admission(request)) {
 						socket.close(4403, 'Host admission expired or revoked');
 						return false;
 					}
-					const currentAuth = resolveWebRequestAuth(request);
+					const currentAuth = resolveWebRequestAuth(request, context);
 					if (!isWebRequestAuthorized(currentAuth)) {
 						socket.close(WEB_LOGIN_WS_CLOSE_CODE, 'Login required');
 						return false;
@@ -195,6 +203,17 @@ export class WsRoute {
 					return true;
 				},
 			};
+			// The upgrade header stays off message echoes, receipts and client serialization.
+			const callerProof = request.headers[CALLER_RUN_PROOF_HEADER];
+			if (callerProof !== undefined) {
+				try {
+					hostCallerRuns.bind(client, callerProof);
+				} catch (error) {
+					if (!(error instanceof Error) || error.message !== 'CallerRunUnavailable') throw error;
+					socket.close(WS_CLOSE_POLICY_VIOLATION, 'CallerRunUnavailable');
+					return;
+				}
+			}
 			const admissionCheck = admission
 				? setInterval(() => client.isAuthorized?.(), 1000)
 				: undefined;
@@ -207,7 +226,8 @@ export class WsRoute {
 			);
 
 			// Send connection confirmation
-			socket.send(
+			sendBounded(
+				socket,
 				JSON.stringify({
 					type: 'connected',
 					clientId,
@@ -222,7 +242,7 @@ export class WsRoute {
 
 			if (replay) {
 				logger.info(`Resumed ${clientId} with ${replay.length} replayed frame(s)`, LOG_CONTEXT);
-				for (const frame of replay) socket.send(frame);
+				for (const frame of replay) sendBounded(socket, frame);
 			}
 
 			// Send initial sessions list (all sessions, not just "live" ones)
@@ -237,7 +257,8 @@ export class WsRoute {
 						isLive: this.callbacks.isSessionLive?.(s.id) || false,
 					};
 				});
-				socket.send(
+				sendBounded(
+					socket,
 					JSON.stringify({
 						type: 'sessions_list',
 						sessions: sessionsWithLiveInfo,
@@ -250,7 +271,8 @@ export class WsRoute {
 			if (this.callbacks.getTheme) {
 				const theme = this.callbacks.getTheme();
 				if (theme) {
-					socket.send(
+					sendBounded(
+						socket,
 						JSON.stringify({
 							type: 'theme',
 							theme,
@@ -262,7 +284,8 @@ export class WsRoute {
 
 			// Send current global Bionify reading-mode setting
 			if (this.callbacks.getBionifyReadingMode) {
-				socket.send(
+				sendBounded(
+					socket,
 					JSON.stringify({
 						type: 'bionify_reading_mode',
 						enabled: this.callbacks.getBionifyReadingMode(),
@@ -274,7 +297,8 @@ export class WsRoute {
 			// Send custom AI commands
 			if (this.callbacks.getCustomCommands) {
 				const customCommands = this.callbacks.getCustomCommands();
-				socket.send(
+				sendBounded(
+					socket,
 					JSON.stringify({
 						type: 'custom_commands',
 						commands: customCommands,
@@ -296,7 +320,8 @@ export class WsRoute {
 							`Sending initial AutoRun state for session ${sid}: tasks=${state.completedTasks}/${state.totalTasks}`,
 							LOG_CONTEXT
 						);
-						socket.send(
+						sendBounded(
+							socket,
 							JSON.stringify({
 								type: 'autorun_state',
 								sessionId: sid,
@@ -313,9 +338,15 @@ export class WsRoute {
 				if (!client.isAuthorized?.()) return;
 				try {
 					const data = JSON.parse(message.toString()) as WebClientMessage;
+					if ((data as { type: string }).type === 'bridge.chunkAck') {
+						if (client.isAuthorized?.() !== false)
+							acknowledgeWebSocketChunk(socket, (data as unknown as { offset: unknown }).offset);
+						return;
+					}
 					this.callbacks.handleMessage?.(clientId, data);
 				} catch {
-					socket.send(
+					sendBounded(
+						socket,
 						JSON.stringify({
 							type: 'error',
 							message: 'Invalid message format',
@@ -325,10 +356,10 @@ export class WsRoute {
 			});
 
 			// Handle disconnection
-			socket.on('close', () => {
+			socket.on('close', (code) => {
 				clearInterval(admissionCheck);
 				this.callbacks.onClientDisconnect?.(clientId);
-				logger.info(`Client disconnected: ${clientId}`, LOG_CONTEXT);
+				logger.info(`Client disconnected: ${clientId} (code: ${code})`, LOG_CONTEXT);
 			});
 
 			// Handle errors

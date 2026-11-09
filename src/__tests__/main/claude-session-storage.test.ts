@@ -57,6 +57,8 @@ vi.mock('../../shared/claudeSessionUsage', async () => {
 	return {
 		readClaudeSubagentTranscripts: vi.fn(async () => []),
 		readClaudeSubagentTranscriptsSync: vi.fn(() => []),
+		listClaudeSubagentTranscriptPaths: vi.fn(async () => []),
+		isAbsentTranscriptError: vi.fn(() => false),
 		computeClaudeUsageWithSubagents: vi.fn(price),
 		computeClaudeSessionUsage: vi.fn(async (_filePath: string, content: string) => price(content)),
 	};
@@ -93,6 +95,11 @@ vi.mock('fs/promises', () => ({
 	},
 }));
 
+// Transcript reads stream; feed them from the readFile stub above.
+vi.mock('../../main/utils/jsonl-stream', async () =>
+	(await import('../helpers/mockJsonlStream')).jsonlStreamFromReadFileMock()
+);
+
 // listSessions now serves unchanged transcripts from the on-disk parse cache,
 // which resolves its location through electron's userData path.
 vi.mock('electron', () => ({
@@ -104,7 +111,6 @@ vi.mock('electron', () => ({
 // ============================================================================
 
 import { ClaudeSessionStorage } from '../../main/storage/claude-session-storage';
-import { computeClaudeUsageCost } from '../../main/utils/pricing';
 import {
 	SessionInfoCache,
 	setSessionInfoCacheForTest,
@@ -386,7 +392,7 @@ describe('ClaudeSessionStorage', () => {
 			expect(sessions[0].cacheCreationTokens).toBe(25); // 10 + 15
 		});
 
-		it('should calculate cost via computeClaudeUsageCost', async () => {
+		it('should price the usage lines into the session cost', async () => {
 			const content = jsonl(
 				userMsg('Hello'),
 				assistantMsg('World'),
@@ -405,9 +411,10 @@ describe('ClaudeSessionStorage', () => {
 			vi.mocked(fs.readFile).mockResolvedValue(content);
 
 			const sessions = await storage.listSessions('/test/project');
-			expect(computeClaudeUsageCost).toHaveBeenCalledWith(content);
 			expect(sessions[0].costUsd).toBeDefined();
-			// Using mock formula: (1000*3 + 500*15 + 200*0.3 + 100*3.75) / 1000000
+			// The transcript is streamed and priced line by line by the shared
+			// accumulator; a model-less line is priced at the default (Sonnet) rates:
+			// (1000*3 + 500*15 + 200*0.3 + 100*3.75) / 1000000
 			const expectedCost = (1000 * 3 + 500 * 15 + 200 * 0.3 + 100 * 3.75) / 1_000_000;
 			expect(sessions[0].costUsd).toBeCloseTo(expectedCost, 10);
 		});
@@ -1295,6 +1302,49 @@ describe('ClaudeSessionStorage', () => {
 			// Only the user message should survive
 			expect(result.messages).toHaveLength(1);
 			expect(result.messages[0].type).toBe('user');
+		});
+
+		// Valid JSON whose shape breaks the conversion: the content filter reads
+		// `b.type` off a null block. One such record must be skipped, not fail the
+		// read and lock the user out of the rest of the conversation.
+		const withDamagedRecord = () =>
+			[
+				JSON.stringify(userMsg('before')),
+				JSON.stringify({ type: 'user', message: { role: 'user', content: [null] } }),
+				JSON.stringify(assistantMsg('after')),
+			].join('\n');
+
+		it('skips a damaged record and keeps the rest of a local transcript', async () => {
+			vi.mocked(fs.readFile).mockResolvedValue(withDamagedRecord());
+
+			const result = await storage.readSessionMessages('/test/project', 'sess-1');
+			expect(result.messages.map((m) => m.content)).toEqual(['before', 'after']);
+			expect(result.total).toBe(2);
+		});
+
+		it('skips a damaged record and keeps the rest of a remote transcript', async () => {
+			const remoteFs = await import('../../main/utils/remote-fs');
+			vi.mocked(remoteFs.readFileRemote).mockResolvedValue({
+				success: true,
+				data: withDamagedRecord(),
+			});
+			const sshConfig = {
+				id: 'r1',
+				name: 'r1',
+				host: 'h',
+				port: 22,
+				username: 'u',
+				privateKeyPath: '~/.ssh/id_ed25519',
+				enabled: true,
+			} as const;
+
+			const result = await storage.readSessionMessages(
+				'/remote/project',
+				'sess-1',
+				undefined,
+				sshConfig
+			);
+			expect(result.messages.map((m) => m.content)).toEqual(['before', 'after']);
 		});
 	});
 

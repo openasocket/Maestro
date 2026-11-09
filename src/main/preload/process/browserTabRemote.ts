@@ -259,12 +259,17 @@ export function createBrowserTabRemoteApi() {
 				background?: boolean,
 				hidden?: boolean,
 				mentionRouting?: MentionRouting,
+				control?: import('../../../shared/pianola/pianola-dispatch').PianolaNewTabControl,
 				/** The dispatching operation's context; the renderer puts it on the new tab's first spawn. */
 				delegation?: ManagedDelegationContext,
 				/** The host-minted dispatch ticket; echoed unread on the spawn or the queued item. */
 				dispatchTicket?: string
 			) => void
 		): (() => void) => {
+			/**
+			 * Forward the new-tab IPC request including admission control to the renderer callback. A
+			 * synchronous callback failure sends a negative response and rethrows the error.
+			 */
 			const handler = (
 				_: unknown,
 				sessionId: string,
@@ -273,10 +278,13 @@ export function createBrowserTabRemoteApi() {
 				background?: boolean,
 				hidden?: boolean,
 				mentionRouting?: MentionRouting,
+				control?: import('../../../shared/pianola/pianola-dispatch').PianolaNewTabControl,
 				delegation?: ManagedDelegationContext,
 				dispatchTicket?: string
 			) => {
 				try {
+					// Upstream control keeps slot 7; the delegation and dispatch ticket follow it,
+					// forwarded only when set, as browserTabCallbacks.ts sends them.
 					callback(
 						sessionId,
 						prompt,
@@ -284,8 +292,11 @@ export function createBrowserTabRemoteApi() {
 						background,
 						hidden,
 						mentionRouting,
-						delegation,
-						dispatchTicket
+						control,
+						...((delegation || dispatchTicket ? [delegation, dispatchTicket] : []) as [
+							ManagedDelegationContext?,
+							string?,
+						])
 					);
 				} catch (error) {
 					ipcRenderer.send(responseChannel, false);

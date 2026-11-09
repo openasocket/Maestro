@@ -73,7 +73,9 @@ import {
 	type GroupUpdateRequest,
 } from '../../../shared/groupAppearance';
 import { isCodexTransport } from '../../../shared/codexTransport';
+import { isHarnessControlMode } from '../../../shared/maestro-lib/providers/native-control';
 import { withAgentInGroup } from '../../../shared/maestro-lib/agents/rules';
+import { liftBusyReason, readLiftedTo } from '../../../shared/maestro-lib/agents/lift-pointer';
 import {
 	TAB_CONTEXT_OP_EVENT,
 	runRemoteTabContextOp,
@@ -85,23 +87,7 @@ import {
 // Group update helpers
 // ============================================================================
 
-/**
- * Write the group list straight to disk and wait for it.
- *
- * The store's own persistence runs from a React effect, so it lands after this
- * listener has already answered the caller. A CLI that verifies its write by
- * reading `maestro-groups.json` back would then see the pre-update list and
- * report a false mismatch. Flushing before responding makes the readback
- * deterministic; the effect's later write is the same data and is idempotent.
- * Same reasoning as the remote session-rename handler above.
- */
-async function flushGroupsToDisk(groups: Group[]): Promise<void> {
-	try {
-		await window.maestro.groups.setAll(groups);
-	} catch (error) {
-		logger.error('[Remote] Failed to persist group change:', undefined, error);
-	}
-}
+import { flushGroupsToDisk } from '../../services/groupPersistence';
 
 /**
  * Apply a validated update to one group. Pure so the ordering rules are
@@ -1638,6 +1624,7 @@ export function useAppRemoteEventListeners(deps: UseAppRemoteEventListenersDeps)
 				}),
 				...(config?.codexAutoResetOnExhaustion === true && { codexAutoResetOnExhaustion: true }),
 				...(config?.codexTransport === 'app-server' && { codexTransport: 'app-server' as const }),
+				...(config?.harnessControlMode === 'native' && { harnessControlMode: 'native' as const }),
 				claudeInteractive: newAgentClaudeInteractive(toolType),
 			};
 
@@ -1881,6 +1868,47 @@ export function useAppRemoteEventListeners(deps: UseAppRemoteEventListenersDeps)
 			return;
 		}
 
+		// Federation lift (`maestro-cli lift`): the host now owns the agent, so this
+		// copy becomes a pointer. Every tab and transcript stays. The queued
+		// messages that moved with the agent leave this queue, by id, so nothing
+		// waits here for a turn that will never start. Refused while a turn runs:
+		// the CLI then removes the host's copy, so the agent has one owner.
+		if ('liftedTo' in patchObj) {
+			const pointer = readLiftedTo(patchObj.liftedTo);
+			const refusal = !pointer
+				? "Invalid value for field 'liftedTo'"
+				: readLiftedTo(session.liftedTo)
+					? 'Agent was already lifted'
+					: liftBusyReason(session);
+			if (refusal || !pointer) {
+				window.maestro.process.sendRemoteUpdateSessionConfigResponse(responseChannel, {
+					success: false,
+					error: refusal ?? "Invalid value for field 'liftedTo'",
+				});
+				return;
+			}
+			const moved = new Set(
+				Array.isArray(patchObj.liftedQueueItemIds)
+					? patchObj.liftedQueueItemIds.filter((id): id is string => typeof id === 'string')
+					: []
+			);
+			const applyLift = (s: Session): Session => ({
+				...s,
+				liftedTo: pointer,
+				executionQueue: (s.executionQueue ?? []).filter((item) => !moved.has(item.id)),
+			});
+			setSessions((prev: Session[]) => prev.map((s) => (s.id === sessionId ? applyLift(s) : s)));
+			try {
+				await window.maestro.sessions.setMany([applyLift(session) as any], []);
+			} catch (persistErr) {
+				logger.error('[Remote] Failed to persist lift pointer:', undefined, persistErr);
+			}
+			window.maestro.process.sendRemoteUpdateSessionConfigResponse(responseChannel, {
+				success: true,
+			});
+			return;
+		}
+
 		// A patch carrying a `tabId` targets one AI tab inside the agent rather
 		// than the agent itself. It rides this message (instead of a new one)
 		// because everything a scriptable write needs is already here: an
@@ -1998,6 +2026,7 @@ export function useAppRemoteEventListeners(deps: UseAppRemoteEventListenersDeps)
 			// Codex transport opt-in (`update-agent --codex-transport`). Validated
 			// below, since an unknown value must never reach the spawner.
 			'codexTransport',
+			'harnessControlMode',
 			// UI state
 			'bookmarked',
 		]);
@@ -2015,6 +2044,17 @@ export function useAppRemoteEventListeners(deps: UseAppRemoteEventListenersDeps)
 					error: `Invalid value for field '${key}'`,
 				});
 				return;
+			}
+			if (key === 'harnessControlMode' && value !== null && !isHarnessControlMode(value)) {
+				window.maestro.process.sendRemoteUpdateSessionConfigResponse(responseChannel, {
+					success: false,
+					error: `Invalid value for field '${key}'`,
+				});
+				return;
+			}
+			if (key === 'harnessControlMode' && value === 'current') {
+				updated.harnessControlMode = undefined;
+				continue;
 			}
 			// `exec` is the default, so it is stored the way the Edit Agent modal
 			// stores it: as an unset field.
@@ -2149,8 +2189,11 @@ export function useAppRemoteEventListeners(deps: UseAppRemoteEventListenersDeps)
 			collapsed: false,
 		};
 		setGroups((prev: Group[]) => [...prev, newGroup]);
-		await flushGroupsToDisk(useSessionStore.getState().groups);
-		window.maestro.process.sendRemoteCreateGroupResponse(responseChannel, { id: newGroupId });
+		const persisted = await flushGroupsToDisk();
+		window.maestro.process.sendRemoteCreateGroupResponse(
+			responseChannel,
+			persisted ? { id: newGroupId } : null
+		);
 	});
 
 	// Handle remote rename group from web interface
@@ -2204,8 +2247,7 @@ export function useAppRemoteEventListeners(deps: UseAppRemoteEventListenersDeps)
 
 		const nextGroups = applyGroupUpdate(currentGroups, groupId, request, clear);
 		setGroups(() => nextGroups);
-		await flushGroupsToDisk(nextGroups);
-		respond(true);
+		respond(await flushGroupsToDisk());
 	});
 
 	// Handle remote delete group from web interface (fire-and-forget)

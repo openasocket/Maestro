@@ -112,6 +112,7 @@ export const AGENT_CAPABILITIES: Record<string, AgentCapabilities> = {
 	codex: {
 		supportsResume: true, // exec resume <id> (v0.30.0+) - Verified
 		supportsReadOnlyMode: true, // --sandbox read-only - Verified
+		supportsStandardPermissionMode: true, // Native app-server approval requests (opt-in transport)
 		supportsJsonOutput: true, // --json flag - Verified
 		supportsSessionId: true, // thread_id in thread.started event - Verified
 		supportsImageInput: true, // -i, --image flag - Documented
@@ -228,7 +229,8 @@ export const AGENT_CAPABILITIES: Record<string, AgentCapabilities> = {
 	 */
 	'qwen3-coder': {
 		supportsResume: true, // --resume <sessionId> headless resume (resumeArgs wired)
-		supportsReadOnlyMode: false, // Prompt-only enforcement via -y
+		supportsReadOnlyMode: true, // CLI-enforced via --approval-mode plan (readOnlyArgs in definitions.ts)
+		supportsStandardPermissionMode: true, // Native ACP approval requests (opt-in transport)
 		supportsJsonOutput: true,
 		supportsSessionId: true,
 		supportsImageInput: false, // No image CLI args wired (imageArgs undefined); enable when wired
@@ -263,6 +265,7 @@ export const AGENT_CAPABILITIES: Record<string, AgentCapabilities> = {
 	 */
 	hermes: {
 		supportsResume: false,
+		supportsStandardPermissionMode: true, // Native Runs API approvals (opt-in transport)
 		supportsReadOnlyMode: false,
 		supportsJsonOutput: false,
 		supportsSessionId: false,
@@ -412,6 +415,7 @@ export const AGENT_CAPABILITIES: Record<string, AgentCapabilities> = {
 	'factory-droid': {
 		supportsResume: true, // -s, --session-id <id> (requires a prompt) - Verified
 		supportsReadOnlyMode: true, // Default mode (no --auto flags) - Verified
+		supportsStandardPermissionMode: true, // Native ACP approval requests (opt-in transport)
 		supportsJsonOutput: true, // -o stream-json - Verified
 		supportsSessionId: true, // UUID in session filenames - Verified
 		supportsImageInput: true, // -f, --file flag - Verified
@@ -491,6 +495,7 @@ export const AGENT_CAPABILITIES: Record<string, AgentCapabilities> = {
 	grok: {
 		supportsResume: true, // Verified: -r/--resume <sessionId>; resume turn preserved the same sessionId in the end event
 		supportsReadOnlyMode: true, // Verified: --permission-mode plan (grok --help v0.2.93)
+		supportsStandardPermissionMode: true, // Native ACP approval requests (opt-in transport)
 		supportsJsonOutput: true, // Verified: --output-format streaming-json emits one JSON object per line
 		supportsSessionId: true, // Verified: camelCase sessionId (UUIDv7) on the final end event (no init event exists)
 		supportsImageInput: true, // Verified (grok 1.0.41): image path in the prompt, opened with read_file

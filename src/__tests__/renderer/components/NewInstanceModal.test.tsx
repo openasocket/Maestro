@@ -884,6 +884,7 @@ describe('NewInstanceModal', () => {
 				undefined, // additionalDirectories
 				false, // codexAutoResetOnExhaustion: off by default
 				'exec', // codexTransport: Standard by default
+				undefined, // harnessControlMode: default (Standard) control
 				'create', // operation
 				{ expectedPolicyRevision: null } // standalone: no approved choices shown
 			);
@@ -943,6 +944,7 @@ describe('NewInstanceModal', () => {
 				undefined, // additionalDirectories
 				false, // codexAutoResetOnExhaustion: off by default
 				'exec', // codexTransport: Standard by default
+				undefined, // harnessControlMode: default (Standard) control
 				'create', // operation
 				{ expectedPolicyRevision: null } // standalone: no approved choices shown
 			);
@@ -1002,6 +1004,7 @@ describe('NewInstanceModal', () => {
 				undefined, // additionalDirectories
 				false, // codexAutoResetOnExhaustion: off by default
 				'exec', // codexTransport: Standard by default
+				undefined, // harnessControlMode: default (Standard) control
 				'create', // operation
 				{ expectedPolicyRevision: null } // standalone: no approved choices shown
 			);
@@ -1062,6 +1065,7 @@ describe('NewInstanceModal', () => {
 				undefined, // additionalDirectories
 				false, // codexAutoResetOnExhaustion: off by default
 				'exec', // codexTransport: Standard by default
+				undefined, // harnessControlMode: default (Standard) control
 				'create', // operation
 				{ expectedPolicyRevision: null } // standalone: no approved choices shown
 			);
@@ -1620,6 +1624,7 @@ describe('NewInstanceModal', () => {
 				undefined, // additionalDirectories
 				false, // codexAutoResetOnExhaustion: off by default
 				'exec', // codexTransport: Standard by default
+				undefined, // harnessControlMode: default (Standard) control
 				'create', // operation
 				{ expectedPolicyRevision: null } // standalone: no approved choices shown
 			);
@@ -1779,6 +1784,7 @@ describe('NewInstanceModal', () => {
 				undefined, // additionalDirectories
 				false, // codexAutoResetOnExhaustion: off by default
 				'exec', // codexTransport: Standard by default
+				undefined, // harnessControlMode: default (Standard) control
 				'create', // operation
 				{ expectedPolicyRevision: null } // standalone: no approved choices shown
 			);
@@ -2441,6 +2447,7 @@ describe('NewInstanceModal', () => {
 				expected.additionalDirectories,
 				expected.codexAutoResetOnExhaustion,
 				expected.codexTransport,
+				undefined, // harnessControlMode: default (Standard) control
 				// A duplicate reaches the host as a clone (MCOMP-23-02B).
 				'clone',
 				{ expectedPolicyRevision: null } // standalone: no approved choices shown
@@ -3026,6 +3033,7 @@ describe('NewInstanceModal', () => {
 				undefined, // additionalDirectories
 				false, // codexAutoResetOnExhaustion: off by default
 				'exec', // codexTransport: Standard by default
+				undefined, // harnessControlMode: default (Standard) control
 				'create', // operation
 				{ expectedPolicyRevision: null } // standalone: no approved choices shown
 			);
@@ -3262,6 +3270,7 @@ describe('NewInstanceModal', () => {
 				undefined, // additionalDirectories
 				false, // codexAutoResetOnExhaustion: off by default
 				'exec', // codexTransport: Standard by default
+				undefined, // harnessControlMode: default (Standard) control
 				'create', // operation
 				{ expectedPolicyRevision: null } // standalone: no approved choices shown
 			);
@@ -3577,6 +3586,7 @@ describe('NewInstanceModal', () => {
 				undefined, // additionalDirectories
 				false, // codexAutoResetOnExhaustion: off by default
 				'exec', // codexTransport: Standard by default
+				undefined, // harnessControlMode: default (Standard) control
 				'clone', // operation: a duplicate is checked as a clone
 				{ expectedPolicyRevision: null } // standalone: no approved choices shown
 			);
@@ -3906,7 +3916,7 @@ describe('NewInstanceModal', () => {
 			await act(async () => {
 				fireEvent.click(screen.getByText('Create Agent'));
 			});
-			expect(onCreate.mock.calls[0][23]).toEqual({ expectedPolicyRevision: null });
+			expect(onCreate.mock.calls[0][24]).toEqual({ expectedPolicyRevision: null });
 			expect(onClose).toHaveBeenCalled();
 		});
 
@@ -3926,7 +3936,7 @@ describe('NewInstanceModal', () => {
 				fireEvent.click(screen.getByText('Create Agent'));
 			});
 			const args = onCreate.mock.calls[0];
-			expect(args[23]).toEqual({ expectedPolicyRevision: 7 });
+			expect(args[24]).toEqual({ expectedPolicyRevision: 7 });
 			// References never become environment values or other record fields.
 			expect(args[7]).toBeUndefined();
 			expect(JSON.stringify(args.slice(0, 23))).not.toMatch(/prov-claude|model-sonnet|ws-project/);

@@ -23,6 +23,7 @@ import {
 import { FALLBACK_CONTEXT_WINDOW } from '../../../shared/agentConstants';
 import { getAgentDisplayName } from '../../../shared/agentMetadata';
 import { isSupersededGeneration } from '../generation';
+import { redactAnswerTail, redactSecrets } from '../../../shared/agent-run/redact';
 import {
 	resolveTurnOutcome,
 	type TurnFacts,
@@ -121,6 +122,10 @@ export class ExitHandler {
 		// the final flush, exit), so a guard placed any lower silently lets some of
 		// this process's output land in the successor's turn.
 		if (this.isSuperseded(sessionId, managedProcess)) {
+			if (managedProcess.tempFiles) {
+				cleanupTempFiles(managedProcess.tempFiles);
+				managedProcess.tempFiles = undefined;
+			}
 			logger.warn(
 				'[ProcessManager] Session re-spawned during exit handling, suppressing all exit side effects',
 				'ProcessManager',
@@ -206,11 +211,19 @@ export class ExitHandler {
 			// envelope, as StdoutHandler runs it on every line, because a failure is
 			// not always typed `error`: Claude Code's failed turn ends on a `result`
 			// flagged `is_error: true`, which would otherwise render as the answer.
+			// A nonfatal `warning` is display-only and never reaches detection.
 			const flushedError =
-				event && !managedProcess.errorEmitted && !managedProcess.interrupted
+				event &&
+				event.type !== 'warning' &&
+				!managedProcess.errorEmitted &&
+				!managedProcess.interrupted
 					? outputParser.detectErrorFromParsed((event.raw as unknown) ?? event)
 					: null;
-			if (event?.type === 'error' || flushedError) {
+			if (event?.type === 'warning') {
+				// Match StdoutHandler when the last diagnostic has no trailing newline.
+				// This is display-only: do not add it to stderrBuffer or the answer.
+				if (event.text) this.emitter.emit('stderr', sessionId, `${event.text}\n`);
+			} else if (event?.type === 'error' || flushedError) {
 				const agentError = flushedError;
 				if (agentError) {
 					agentError.sessionId = sessionId;
@@ -451,6 +464,7 @@ export class ExitHandler {
 		// Remove temporary CLI attachments, including Windows prompt files.
 		if (managedProcess.tempFiles && managedProcess.tempFiles.length > 0) {
 			cleanupTempFiles(managedProcess.tempFiles);
+			managedProcess.tempFiles = undefined;
 		}
 
 		// Emit query-complete for batch mode processes. Listeners flush buffered data
@@ -500,6 +514,20 @@ export class ExitHandler {
 		if (this.processes.get(sessionId) === managedProcess) {
 			this.processes.delete(sessionId);
 		}
+		if (
+			settlement &&
+			(settlement.outcome === 'completed' || settlement.outcome === 'completed-with-warning') &&
+			managedProcess.streamedText?.trim()
+		) {
+			// The renderer can persist its transcript after this event. Consumers
+			// that decide dependency readiness must see the final answer, never an
+			// earlier partial snapshot that happened to look stable for two polls.
+			settlement.answerTail = redactAnswerTail(managedProcess.streamedText);
+			Object.defineProperty(settlement, 'nativeAnswer', {
+				value: redactSecrets(managedProcess.streamedText),
+				enumerable: false,
+			});
+		}
 		this.emitter.emit('exit', sessionId, code, undefined, settlement);
 	}
 
@@ -536,6 +564,7 @@ export class ExitHandler {
 		managedProcess: ManagedProcess
 	): Promise<void> {
 		if (managedProcess.toolType !== 'copilot-cli') return;
+		if (managedProcess.skipCopilotShutdownWait) return;
 		const agentSessionId = managedProcess.agentSessionId;
 		if (!agentSessionId) return;
 
@@ -722,6 +751,7 @@ export class ExitHandler {
 		// Remove temporary CLI attachments on process errors as well.
 		if (managedProcess?.tempFiles && managedProcess.tempFiles.length > 0) {
 			cleanupTempFiles(managedProcess.tempFiles);
+			managedProcess.tempFiles = undefined;
 		}
 
 		this.emitter.emit('data', sessionId, `[error] ${error.message}`);

@@ -16,7 +16,13 @@
  * Contexts: useInlineWizardContext, useWizard, useInputContext
  */
 
+import {
+	isBridgeTransportReady,
+	isExpectedBridgeError,
+	WEB_BRIDGE_STATE_EVENT,
+} from '../../../shared/bridgeError';
 import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useEventListener } from '../utils/useEventListener';
 import type {
 	ToolType,
 	LogEntry,
@@ -47,6 +53,7 @@ import { getSlashCommandDescription } from '../../constants/app';
 import { validateNewSession } from '../../utils/sessionValidation';
 import { getSessionSshRemoteId, isSessionRemote } from '../../utils/sessionHelpers';
 import { parseSynopsis } from '../../../shared/synopsis';
+import { supportsNativeControl } from '../../../shared/maestro-lib/providers/native-control';
 
 let cachedAutorunSynopsisPrompt: string | null = null;
 let wizardHandlersPromptsLoaded = false;
@@ -238,6 +245,9 @@ export function useWizardHandlers(deps: UseWizardHandlersDeps): UseWizardHandler
 	// ========================================================================
 	// Slash command discovery effect
 	// ========================================================================
+	// Keep reconnects on the current effect's cancellable discovery operation.
+	const discoverCommandsRef = useRef<(() => void) | null>(null);
+	useEventListener(WEB_BRIDGE_STATE_EVENT, () => discoverCommandsRef.current?.());
 	useEffect(() => {
 		const currentSession = selectActiveSession(useSessionStore.getState());
 		if (!currentSession) return;
@@ -289,7 +299,7 @@ export function useWizardHandlers(deps: UseWizardHandlersDeps): UseWizardHandler
 					});
 				}
 			} catch (error) {
-				if (!cancelled) {
+				if (!cancelled && !isExpectedBridgeError(error)) {
 					logger.error(
 						'[SlashCommandDiscovery] Failed to fetch custom commands:',
 						undefined,
@@ -336,7 +346,7 @@ export function useWizardHandlers(deps: UseWizardHandlersDeps): UseWizardHandler
 					});
 				}
 			} catch (error) {
-				if (!cancelled) {
+				if (!cancelled && !isExpectedBridgeError(error)) {
 					logger.error(
 						'[SlashCommandDiscovery] Failed to discover agent commands:',
 						undefined,
@@ -346,13 +356,19 @@ export function useWizardHandlers(deps: UseWizardHandlersDeps): UseWizardHandler
 			}
 		};
 
-		if (currentSession.toolType === 'claude-code') {
-			fetchCustomCommands();
-		}
-		discoverAgentCommands();
+		const discover = () => {
+			if (!isBridgeTransportReady()) return;
+			if (currentSession.toolType === 'claude-code') {
+				void fetchCustomCommands();
+			}
+			void discoverAgentCommands();
+		};
+		discoverCommandsRef.current = discover;
+		discover();
 
 		return () => {
 			cancelled = true;
+			discoverCommandsRef.current = null;
 		};
 	}, [
 		activeSessionId,
@@ -1225,6 +1241,7 @@ export function useWizardHandlers(deps: UseWizardHandlersDeps): UseWizardHandler
 				maestroPMode,
 				maestroPPath,
 				codexTransport,
+				harnessControlMode,
 				sessionSshRemoteConfig,
 				autoRunMode,
 			} = wizardState;
@@ -1369,6 +1386,10 @@ export function useWizardHandlers(deps: UseWizardHandlersDeps): UseWizardHandler
 				// Only the opt-in is stored; `exec` is the default.
 				codexTransport:
 					selectedAgent === 'codex' && codexTransport === 'app-server' ? 'app-server' : undefined,
+				harnessControlMode:
+					supportsNativeControl(selectedAgent) && harnessControlMode === 'native'
+						? 'native'
+						: undefined,
 				claudeInteractive:
 					selectedAgent === 'claude-code' ? { mode: 'api', modeReason: 'auto' } : undefined,
 			};

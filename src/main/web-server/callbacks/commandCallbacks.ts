@@ -107,6 +107,8 @@ export function registerCommandCallbacks(
 			images?: string[],
 			background?: boolean,
 			mentionRouting?: MentionRouting,
+			requireDeliveryReceipt?: boolean,
+			pianolaDispatchId?: string,
 			delegation?: ManagedDelegationContext,
 			dispatchTicket?: string
 		) => {
@@ -152,9 +154,11 @@ export function registerCommandCallbacks(
 					fallback: { accepted: false, reason: 'renderer-timeout', timedOut: true },
 					timeoutMs: REMOTE_COMMAND_RECEIPT_TIMEOUT_MS,
 					parse: parseRemoteCommandReceipt,
-					// The `@mention` routing, the dispatching operation's context and the
-					// dispatch ticket ride beside the prompt; the receipt channel is
-					// appended after them by requestFromRenderer.
+					// The `@mention` routing, upstream's optional Pianola dispatch id and
+					// the dispatching operation's context and dispatch ticket ride beside
+					// the prompt; trailing args are omitted when unset (the id is padded
+					// when the integration args follow it), and the receipt channel is
+					// always appended LAST by requestFromRenderer.
 					args: [
 						sessionId,
 						command,
@@ -164,8 +168,11 @@ export function registerCommandCallbacks(
 						images,
 						background,
 						mentionRouting,
-						delegation,
-						dispatchTicket,
+						...(delegation || dispatchTicket
+							? [pianolaDispatchId, delegation, dispatchTicket]
+							: pianolaDispatchId
+								? [pianolaDispatchId]
+								: []),
 					],
 				}
 			);
@@ -176,6 +183,11 @@ export function registerCommandCallbacks(
 						: `[Web → Renderer] Renderer rejected command for session ${sessionId}: ${receiptReasonCode(receipt.reason)}`,
 					'WebServer'
 				);
+			}
+			// A missing/malformed receipt says nothing about delivery. Scoped
+			// callers preserve the durable intent when this throws.
+			if (requireDeliveryReceipt && (receipt.timedOut || receipt.reason === 'malformed-receipt')) {
+				throw new Error('Renderer delivery outcome unknown');
 			}
 			return receipt.accepted;
 		}

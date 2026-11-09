@@ -732,7 +732,8 @@ describe('useSessionCrud', () => {
 
 		it('sends a duplicate to the host as a clone (MCOMP-23-02B)', async () => {
 			const { result } = renderHook(() => useSessionCrud(createDeps()));
-			const args = Array<undefined>(19).fill(undefined);
+			// Positional fill up to `operation`, past upstream harnessControlMode.
+			const args = Array<undefined>(20).fill(undefined);
 
 			await act(async () => {
 				await result.current.createNewSession(
@@ -774,7 +775,7 @@ describe('useSessionCrud', () => {
 					'claude-code',
 					'/test/project',
 					'From Form',
-					...(Array<undefined>(19).fill(undefined) as []),
+					...(Array<undefined>(20).fill(undefined) as []),
 					operation,
 					{ expectedPolicyRevision }
 				);

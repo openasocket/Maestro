@@ -46,6 +46,7 @@ export function AgentSelectionScreen({ theme }: AgentSelectionScreenProps): JSX.
 		setMaestroPMode,
 		setMaestroPPath,
 		setCodexTransport,
+		setHarnessControlMode,
 		setSessionSshRemoteConfig: setWizardSessionSshRemoteConfig,
 		nextStep,
 		canProceedToNext,
@@ -306,6 +307,7 @@ export function AgentSelectionScreen({ theme }: AgentSelectionScreenProps): JSX.
 					onEnvVarValueChange={configPanel.handleEnvVarValueChange}
 					onEnvVarRemove={configPanel.handleEnvVarRemove}
 					onEnvVarAdd={configPanel.handleEnvVarAdd}
+					onEnvVarsReplace={configPanel.handleEnvVarsReplace}
 					onEnvVarsBlur={() => {}}
 					agentConfig={configPanel.agentConfig}
 					onConfigChange={configPanel.handleConfigChange}
@@ -324,6 +326,8 @@ export function AgentSelectionScreen({ theme }: AgentSelectionScreenProps): JSX.
 					detectedMaestroPPath={configPanel.detectedMaestroPPath}
 					codexTransport={state.codexTransport}
 					onCodexTransportChange={setCodexTransport}
+					harnessControlMode={state.harnessControlMode}
+					onHarnessControlModeChange={setHarnessControlMode}
 				/>
 			</>
 		);

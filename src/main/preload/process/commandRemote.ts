@@ -35,8 +35,10 @@ export function createCommandRemoteApi() {
 		 * spawn config unread.
 		 *
 		 * `mentionRouting` is the `@mention` routing `maestro-cli dispatch --routing`
-		 * set; it rides in the slot ahead of them. All three sit BEFORE the receipt
-		 * channel because main appends that channel last.
+		 * set; it rides in the slot ahead of them. On the wire main sends them
+		 * before the receipt channel (appended last); the callback receives the
+		 * receipt channel first, then upstream's Pianola dispatch id, then the
+		 * delegation and the ticket, each trailing group only when set.
 		 */
 		onRemoteCommand: (
 			callback: (
@@ -48,12 +50,18 @@ export function createCommandRemoteApi() {
 				images?: string[],
 				background?: boolean,
 				mentionRouting?: MentionRouting,
+				receiptChannel?: string,
+				pianolaDispatchId?: string,
 				delegation?: ManagedDelegationContext,
-				dispatchTicket?: string,
-				receiptChannel?: string
+				dispatchTicket?: string
 			) => void
 		): (() => void) => {
 			log('Registering onRemoteCommand listener');
+			/**
+			 * Decode legacy receipt-channel arguments and forward remote command delivery metadata.
+			 * Preserve a separate Pianola dispatch ID when provided; log synchronous callback failures
+			 * through the main-process logger.
+			 */
 			const handler = (
 				_: unknown,
 				sessionId: string,
@@ -64,10 +72,21 @@ export function createCommandRemoteApi() {
 				images?: string[],
 				background?: boolean,
 				mentionRouting?: MentionRouting,
-				delegation?: ManagedDelegationContext,
-				dispatchTicket?: string,
-				receiptChannel?: string
+				// After mentionRouting main sends upstream's Pianola dispatch id, then the
+				// integration's delegation and dispatch ticket (all omitted when unset, the
+				// id padded when the integration slots follow it); requestFromRenderer
+				// appends the receipt channel LAST.
+				...trailing: unknown[]
 			) => {
+				const full = trailing.length > 2;
+				const [dispatchOrReceipt, replyChannel] = trailing as [string?, string?];
+				const receiptChannel = full
+					? (trailing[trailing.length - 1] as string | undefined)
+					: (replyChannel ?? dispatchOrReceipt);
+				const pianolaDispatchId = full || replyChannel ? dispatchOrReceipt : undefined;
+				const delegation = full ? (trailing[1] as ManagedDelegationContext | undefined) : undefined;
+				const dispatchTicket =
+					full && typeof trailing[2] === 'string' ? (trailing[2] as string) : undefined;
 				log('Received remote:executeCommand IPC', {
 					sessionId,
 					commandPreview: command?.substring(0, 50),
@@ -91,9 +110,12 @@ export function createCommandRemoteApi() {
 						images,
 						background,
 						mentionRouting,
-						delegation,
-						dispatchTicket,
-						receiptChannel
+						receiptChannel,
+						...((delegation || dispatchTicket
+							? [pianolaDispatchId, delegation, dispatchTicket]
+							: pianolaDispatchId
+								? [pianolaDispatchId]
+								: []) as [string?, ManagedDelegationContext?, string?])
 					);
 				} catch (error) {
 					ipcRenderer.invoke(

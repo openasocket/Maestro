@@ -100,11 +100,10 @@ vi.mock('../../../renderer/stores/retryStore', () => ({
 
 const mockGetActiveTab = vi.fn();
 
-vi.mock('../../../renderer/utils/tabHelpers', () => ({
-	getActiveTab: (...args: unknown[]) => mockGetActiveTab(...args),
+vi.mock('../../../renderer/utils/tabHelpers', () => {
 	// Mirror the real resolver so the dispatch path can be exercised, but route the
 	// active-tab fallback through mockGetActiveTab (tests assert on that call).
-	resolveQueuedItemTarget: (session: any, item: any) => {
+	const resolveQueuedItemTarget = (session: any, item: any) => {
 		if (item?.tabId) {
 			if (session?.aiTabs?.some((t: any) => t.id === item.tabId)) {
 				return { tabId: item.tabId, location: 'aiTab' };
@@ -114,27 +113,40 @@ vi.mock('../../../renderer/utils/tabHelpers', () => ({
 		}
 		const active = mockGetActiveTab(session);
 		return active ? { tabId: active.id, location: 'active' } : null;
-	},
-	markTabRunningQueuedItem: (tab: any, item: any) => {
-		const now = Date.now();
-		const next = { ...tab, state: 'busy', thinkingStartTime: now };
-		if (item?.type === 'message' && item?.text) {
-			next.logs = [
-				...tab.logs,
-				{
-					id: 'mock-log-id',
-					timestamp: now,
-					source: 'user',
-					text: item.text,
-					images: item.images,
-					...(item.forceParallel && { forceParallel: true }),
-					...(item.readOnlyMode && { readOnly: true }),
-				},
-			];
-		}
-		return next;
-	},
-}));
+	};
+	return {
+		getActiveTab: (...args: unknown[]) => mockGetActiveTab(...args),
+		resolveQueuedItemTarget,
+		// Mirrors the real helper over the resolver above.
+		isQueuedItemTargetBusy: (session: any, item: any) => {
+			const target = resolveQueuedItemTarget(session, item);
+			if (!target) return false;
+			const tab =
+				session?.aiTabs?.find((t: any) => t.id === target.tabId) ??
+				session?.orphanedThinkingTabs?.find((t: any) => t.id === target.tabId);
+			return tab?.state === 'busy';
+		},
+		markTabRunningQueuedItem: (tab: any, item: any) => {
+			const now = Date.now();
+			const next = { ...tab, state: 'busy', thinkingStartTime: now };
+			if (item?.type === 'message' && item?.text) {
+				next.logs = [
+					...tab.logs,
+					{
+						id: 'mock-log-id',
+						timestamp: now,
+						source: 'user',
+						text: item.text,
+						images: item.images,
+						...(item.forceParallel && { forceParallel: true }),
+						...(item.readOnlyMode && { readOnly: true }),
+					},
+				];
+			}
+			return next;
+		},
+	};
+});
 
 // ============================================================================
 // Imports (after mocks)
@@ -1769,4 +1781,64 @@ describe('remote observer queue ownership', () => {
 		expect(mockSetSessions).not.toHaveBeenCalled();
 		expect(mockAgentStoreProcessQueuedItem).not.toHaveBeenCalled();
 	});
+});
+
+describe('managed host queue drain', () => {
+	it('keeps a managed row idle and intact, then requests once while IPC is in flight', async () => {
+		vi.useFakeTimers();
+		const item = createQueuedItem({ pendingAdmissionId: 'dispatch' });
+		const session = createSession({ executionQueue: [item] });
+		mockSessionStoreState.sessionsLoaded = true;
+		mockSessionStoreState.sessions = [session];
+		let finish!: () => void;
+		mockAgentStoreProcessQueuedItem.mockImplementation(
+			() =>
+				new Promise<void>((resolve) => {
+					finish = resolve;
+				})
+		);
+		renderHook(() => useQueueProcessing(createDeps()));
+		await act(async () => {
+			vi.advanceTimersByTime(500);
+		});
+		expect(mockAgentStoreProcessQueuedItem).toHaveBeenCalledOnce();
+		expect(session.state).toBe('idle');
+		expect(session.executionQueue).toEqual([item]);
+		expect(mockSetSessions).not.toHaveBeenCalled();
+		await act(async () => {
+			vi.advanceTimersByTime(8000);
+		});
+		expect(mockAgentStoreProcessQueuedItem).toHaveBeenCalledOnce();
+		await act(async () => {
+			finish();
+		});
+	});
+	it.each(['paused', 'predecessor', 'connection', 'busy-tab', 'retry'] as const)(
+		'does not admit a managed row behind %s',
+		async (hold) => {
+			vi.useFakeTimers();
+			const item = createQueuedItem({ pendingAdmissionId: 'dispatch', paused: hold === 'paused' });
+			const tab = createTab({ state: hold === 'busy-tab' ? 'busy' : 'idle' });
+			const predecessor = createQueuedItem({
+				id: 'earlier',
+				waitingForConnection: hold === 'connection',
+			});
+			const session = createSession({
+				aiTabs: [tab],
+				executionQueue:
+					hold === 'predecessor' || hold === 'connection' ? [predecessor, item] : [item],
+			});
+			if (hold === 'retry') pendingRetryTabs.add(tab.id);
+			mockSessionStoreState.sessionsLoaded = true;
+			mockSessionStoreState.sessions = [session];
+			renderHook(() => useQueueProcessing(createDeps()));
+			await act(async () => {
+				vi.advanceTimersByTime(500);
+			});
+			expect(
+				mockAgentStoreProcessQueuedItem.mock.calls.every((call) => call[1].id !== item.id)
+			).toBe(true);
+			expect(session.executionQueue).toContain(item);
+		}
+	);
 });

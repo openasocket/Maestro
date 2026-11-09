@@ -20,6 +20,8 @@ import type {
 } from './types';
 import { maxRisk, rateRisk } from './pianola-risk';
 import { extractOptions, looksLikeAsking } from './pianola-awaiting-detector';
+import { serializedJsonByteLength } from '../jsonUtils';
+import { PIANOLA_DECISION_RECORD_MAX_BYTES } from './storage';
 
 // Re-exported for convenience so callers can pull risk helpers from the classifier.
 export { riskAtMost, maxRisk } from './pianola-risk';
@@ -177,7 +179,7 @@ function classifyHeuristic(message: PianolaMessage): PianolaClassification {
 }
 
 /**
- * Max risk across EVERY assistant message since the last user turn (the whole
+ * Max risk across EVERY assistant, tool and system message since the last user turn (the whole
  * current turn), not just the single message we classify. An agent can split a
  * destructive intent ("I'll drop the prod database.") into an earlier assistant
  * message and leave only an innocuous awaiting question ("Ready to continue?") in
@@ -192,7 +194,8 @@ function currentTurnMaxRisk(messages: readonly PianolaMessage[]): PianolaRisk {
 	for (let i = messages.length - 1; i >= 0; i -= 1) {
 		const m = messages[i];
 		if (m.role === 'user') break;
-		if (isAssistant(m)) risk = maxRisk(risk, rateRisk(m.content ?? ''));
+		if (isAssistant(m) || m.role === 'tool' || m.role === 'system')
+			risk = maxRisk(risk, rateRisk(m.content ?? ''));
 	}
 	return risk;
 }
@@ -212,7 +215,10 @@ export function noneClassification(reason: string): PianolaClassification {
  * Classify the tail of a transcript. Messages must be in chronological order
  * (oldest first), matching `maestro-cli session show --json`.
  */
-export function classifyMessages(messages: readonly PianolaMessage[]): PianolaClassification {
+export function classifyMessages(
+	messages: readonly PianolaMessage[],
+	observedRisk: PianolaRisk = 'low'
+): PianolaClassification {
 	if (messages.length === 0) {
 		return noneClassification('empty transcript');
 	}
@@ -238,5 +244,15 @@ export function classifyMessages(messages: readonly PianolaMessage[]): PianolaCl
 	// destructive intent in an earlier assistant message of this turn still
 	// escalates even when the awaiting question itself reads low-risk. Preserves
 	// the existing kind/topic; only the risk severity incorporates the turn max.
-	return { ...classification, risk: maxRisk(classification.risk, currentTurnMaxRisk(messages)) };
+	// Keep exact text only when it fits a small share of the lifecycle budget.
+	// Omitting oversized text also prevents an exact-question rule from matching
+	// a truncated question. Risk and human evidence use the original transcript.
+	const questionBytes = serializedJsonByteLength(assistant.content);
+	return {
+		...classification,
+		...(questionBytes !== null && questionBytes <= PIANOLA_DECISION_RECORD_MAX_BYTES / 8
+			? { questionText: assistant.content }
+			: {}),
+		risk: maxRisk(observedRisk, maxRisk(classification.risk, currentTurnMaxRisk(messages))),
+	};
 }

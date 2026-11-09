@@ -1,10 +1,11 @@
 import { spawn, execFile } from 'child_process';
 import type { ChildProcess } from 'child_process';
 import { promisify } from 'util';
-import net from 'net';
+import { availableLocalPort, waitForLocalPort } from '../../shared/maestro-lib/client/local-port';
 import { buildSshConnectionArgs, describeSshConnectionError } from '../../shared/sshConnection';
 import type { SshRemoteConfig } from '../../shared/types';
 import { holdListener } from '../enterprise/listener-gate';
+import { HostConnectionError } from './handshake';
 
 export function tunnelArgs(config: SshRemoteConfig, endpoint: URL, localPort: number): string[] {
 	if (!Number.isInteger(localPort) || localPort < 1 || localPort > 65535)
@@ -62,30 +63,21 @@ export class OwnedTunnel {
 	}
 }
 
-async function availablePort(port = 0): Promise<number> {
-	const { promise, resolve, reject } = Promise.withResolvers<number>();
-	const listener = net.createServer();
-	listener.once('error', reject);
-	listener.listen(port, '127.0.0.1', () => {
-		const address = listener.address();
-		listener.close((error) => (error ? reject(error) : resolve((address as net.AddressInfo).port)));
-	});
-	return promise;
-}
-
 export async function openTunnel(
 	config: SshRemoteConfig,
 	endpoint: URL,
 	signal: AbortSignal,
-	onExit: (message: string) => void,
-	preferredPort?: number
+	onExit: (error: HostConnectionError) => void,
+	preferredPort?: number,
+	allowPortFallback = true
 ): Promise<{ tunnel: OwnedTunnel; url: URL }> {
 	// The managed listener ceiling (MRC2-05-06A) holds the loopback forward
 	// `ssh -L` would bind BEFORE the free-port probe, the `ssh -G` resolution
 	// and the spawn: a refusal throws `ListenerDeniedError` and nothing listens.
 	holdListener({ kind: 'ssh-tunnel', bind: '127.0.0.1', port: preferredPort ?? 0 });
-	const port = await availablePort(preferredPort).catch((error: NodeJS.ErrnoException) => {
-		if (preferredPort && error.code === 'EADDRINUSE') return availablePort();
+	const port = await availableLocalPort(preferredPort).catch((error: NodeJS.ErrnoException) => {
+		if (allowPortFallback && preferredPort && error.code === 'EADDRINUSE')
+			return availableLocalPort();
 		throw error;
 	});
 	const args = tunnelArgs(config, endpoint, port);
@@ -114,50 +106,42 @@ export async function openTunnel(
 		shell: false,
 	});
 	const tunnel = new OwnedTunnel(child);
+	let established = false;
 	let stderr = '';
-	let failure: Error | undefined;
+	let failure: HostConnectionError | undefined;
 	child.stderr?.on('data', (data: Buffer) => {
 		stderr = (stderr + data.toString()).slice(-8192);
 	});
 	child.once('error', (error) => {
-		failure = error;
+		failure = new HostConnectionError(error.message, true);
 	});
 	child.once('exit', (code) => {
-		failure = new Error(
+		const message =
 			describeSshConnectionError(stderr) ??
-				`SSH forwarding ended (${code ?? 'signal'}): ${stderr.trim()}`
+			`SSH forwarding ended (${code ?? 'signal'}): ${stderr.trim()}`;
+		failure = new HostConnectionError(
+			message,
+			established || !/host key|authenticity|verification|permission denied/i.test(message)
 		);
-		if (!signal.aborted) onExit(failure.message);
+		if (established && !signal.aborted) onExit(failure);
 	});
 	const stop = () => tunnel.stop();
 	signal.addEventListener('abort', stop, { once: true });
 	child.once('exit', () => signal.removeEventListener('abort', stop));
 	try {
-		const deadline = Date.now() + 15000;
-		while (Date.now() < deadline) {
-			if (signal.aborted) throw new Error('Connection canceled.');
-			if (failure) throw failure;
-			const readiness = Promise.withResolvers<boolean>();
-			const socket = net.connect({ host: '127.0.0.1', port });
-			socket.setTimeout(250);
-			const finish = (ready: boolean) => {
-				socket.destroy();
-				readiness.resolve(ready);
-			};
-			socket.once('connect', () => finish(true));
-			socket.once('error', () => finish(false));
-			socket.once('timeout', () => finish(false));
-			const listening = await readiness.promise;
-			if (listening) {
-				const url = new URL(endpoint);
-				url.hostname = '127.0.0.1';
-				url.port = String(port);
-				return { tunnel, url };
-			}
-			const delay = Promise.withResolvers<void>();
-			setTimeout(delay.resolve, 100);
-			await delay.promise;
+		const listening = await waitForLocalPort(port, {
+			timeoutMs: 15000,
+			shouldStop: () => signal.aborted || failure !== undefined,
+		});
+		if (listening) {
+			const url = new URL(endpoint);
+			url.hostname = '127.0.0.1';
+			url.port = String(port);
+			established = true;
+			return { tunnel, url };
 		}
+		if (signal.aborted) throw new Error('Connection canceled.');
+		if (failure) throw failure;
 		throw new Error(
 			'SSH forwarding did not become ready. Check the SSH host, key/agent, and host Remote Control endpoint.'
 		);

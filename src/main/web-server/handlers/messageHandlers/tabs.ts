@@ -1,3 +1,4 @@
+import { planMentions } from '../../../../shared/maestro-lib/mentions/roster';
 /**
  * Tabs domain WebSocket message handlers.
  *
@@ -7,7 +8,25 @@
  * open_document_graph.
  */
 
+import * as pianolaStore from '../../../pianola/pianola-store-main';
+import {
+	getSettingsStore,
+	getSessionsStore,
+	getGroupsStore,
+	getLiveSessions,
+} from '../../../stores/getters';
+import { storeInlineImage } from '../../../storage/session-image-store';
+import { captureQueuedTurnSettings } from '../../../../shared/queuedTurnSettings';
+import type { AgentRecord } from '../../../../shared/maestro-lib/store/records';
 import path from 'path';
+import { generateUUID } from '../../../../shared/uuid';
+import { dispatchSupervision } from './dispatchSupervision';
+import { PianolaNewTabDispatch } from '../../../pianola/pianola-new-tab-dispatch';
+import { pianolaScopeSnapshotFromDesktop } from '../../../../shared/pianola/pianola-scope-cycle';
+import { createHash } from 'crypto';
+import { canonicalJson } from '../../../../shared/canonicalJson';
+import { captureException } from '../../../utils/sentry';
+
 import { readBackgroundField, readSwitchToAgentField } from '../../../../shared/focusPlacement';
 import { isRemoteMediaUrl, type MediaOpenMode } from '../../../../shared/mediaTypes';
 import { parseMentionRoutingField } from '../../../../shared/crossAgentContext';
@@ -32,6 +51,115 @@ import {
 } from '../../../../shared/uiSurfaces';
 import { resolveEncoreFeatures } from '../../../../shared/encoreFeatureDefaults';
 import { normalizeRenameTabResult } from '../../types';
+import type { ManagedDelegationContext } from '../../../../shared/maestro-lib/managed/delegation';
+
+const newTabAdmissions = new WeakMap<MessageHandlerContext['callbacks'], PianolaNewTabDispatch>();
+/**
+ * The dispatching transport of a supervised new-tab dispatch, by dispatch id, for the
+ * life of its run: the release-phase renderer call carries the ticket and delegation
+ * the unmanaged path passes directly (MRC-08-02).
+ */
+const newTabDispatchBindings = new Map<
+	string,
+	{ delegation: ManagedDelegationContext | undefined; dispatchTicket: string }
+>();
+/**
+ * Reuse one native admission adapter per callback set. Wire current desktop/store state and
+ * main-process queue release; renderer transport responses alone do not establish a durable
+ * admission or native start.
+ */
+export function newTabAdmission(ctx: MessageHandlerContext): PianolaNewTabDispatch {
+	let adapter = newTabAdmissions.get(ctx.callbacks);
+	if (!adapter) {
+		const store = pianolaStore;
+		adapter = new PianolaNewTabDispatch({
+			store,
+			featureEnabled: () => readEncoreFeatures().pianola,
+			snapshot: () =>
+				pianolaScopeSnapshotFromDesktop({
+					...ctx.callbacks.listDesktopSessions?.(),
+					success: true,
+				}),
+			ruleSetRevision: () => {
+				const result = store.readRulesResult();
+				if (result.malformed) throw new Error('PianolaRulesUnavailable');
+				return createHash('sha256').update(canonicalJson(result.rules)).digest('hex');
+			},
+			executeCommand: (...args) => ctx.callbacks.executeCommand!(...args),
+			enqueueCommand: (...args) => ctx.callbacks.enqueueCommand!(...args),
+			releaseQueueItem: (...args) => {
+				if (!ctx.callbacks.releaseQueueItem)
+					return Promise.reject(new Error('DispatchQueueDrainUnavailable'));
+				return ctx.callbacks.releaseQueueItem(...args);
+			},
+			confirmQueueItem: (request) =>
+				ctx.callbacks.confirmQueueItem?.(request) ??
+				Promise.resolve({ durable: false, reason: 'store-unavailable' }),
+			routingSnapshot: () => ({
+				agents: getLiveSessions() as AgentRecord[],
+				groups: getGroupsStore()
+					.get('groups', [])
+					.map((group) => ({ ...group })),
+			}),
+			queueItem: async (request) => {
+				const sessions = getSessionsStore().get('sessions', []) as AgentRecord[];
+				const session = sessions.find((s) => s.id === request.targetAgentId);
+				const tab = session?.aiTabs?.find((t) => t.id === request.targetTabId);
+				if (!session || !tab) throw new Error('DispatchTargetUnavailable');
+				const mentionPlan = planMentions(
+					request.prompt,
+					sessions,
+					getGroupsStore().get('groups', []),
+					session.id
+				);
+				const routing = request.mentionRouting ?? mentionPlan?.routing;
+				return JSON.parse(
+					canonicalJson({
+						id: request.dispatchId,
+						timestamp: Date.now(),
+						type: 'message',
+						text: request.prompt,
+						tabId: tab.id,
+						tabName: tab.name ?? undefined,
+						readOnlyMode: tab.readOnlyMode === true || tab.permissionMode === 'readonly',
+						turnSettings: captureQueuedTurnSettings(tab, session),
+						...(mentionPlan
+							? {
+									crossAgentMention: true,
+									crossAgentOnly: routing === 'only' || routing === 'consult-first',
+									...(request.mentionRouting ? { mentionRouting: request.mentionRouting } : {}),
+								}
+							: {}),
+						...(request.images?.length
+							? { images: await Promise.all(request.images.map(storeInlineImage)) }
+							: {}),
+						...(request.held ? { paused: true } : {}),
+						pendingAdmissionId: request.dispatchId,
+					})
+				);
+			},
+			newTab: (sessionId, prompt, background, hidden, mentionRouting, control) => {
+				const bound =
+					control?.phase === 'release' ? newTabDispatchBindings.get(control.dispatchId) : undefined;
+				return ctx.callbacks.newAITabWithPrompt!(
+					sessionId,
+					prompt,
+					background,
+					hidden,
+					mentionRouting,
+					control,
+					bound?.delegation,
+					bound?.dispatchTicket
+				);
+			},
+			onReconcileError: (error) => {
+				void captureException(error, { area: 'pianola', handler: 'new_tab_reconcile' });
+			},
+		});
+		newTabAdmissions.set(ctx.callbacks, adapter);
+	}
+	return adapter;
+}
 
 /**
  * Handle select_tab message - select a tab within a session
@@ -781,6 +909,21 @@ export function handleNewAITabWithPrompt(
 		return;
 	}
 
+	// Only the host-bound run is authority. Callback recipients confer no management.
+	const dispatchId = typeof message.dispatchId === 'string' ? message.dispatchId : generateUUID();
+	const coverage = dispatchSupervision(ctx, client, sessionId, dispatchId);
+	if (coverage.error) {
+		ctx.send(client, {
+			type: 'new_ai_tab_with_prompt_result',
+			success: false,
+			sessionId,
+			dispatchId,
+			admission: coverage.receipt,
+			error: coverage.error,
+			requestId: message.requestId,
+		});
+		return;
+	}
 	// The prompt spawns from the renderer, now or from the execution queue when
 	// the agent is busy, outside this client's context. The ticket is issued
 	// here for the agent alone (the tab does not exist yet) and the spawn
@@ -791,6 +934,71 @@ export function handleNewAITabWithPrompt(
 	const dispatchTicket = issueDispatchTicket(resolveTransportAdmission(client), {
 		agentId: sessionId,
 	});
+	if (coverage.managed) {
+		// A retried dispatch id re-reads the first run: only the first message binds
+		// its ticket, and a later one withdraws its own unused ticket.
+		const ownsBinding = !newTabDispatchBindings.has(dispatchId);
+		if (ownsBinding) newTabDispatchBindings.set(dispatchId, { delegation, dispatchTicket });
+		void newTabAdmission(ctx)
+			.run(
+				client,
+				{
+					dispatchId,
+					targetAgentId: sessionId,
+					prompt,
+					background,
+					hidden,
+					mentionRouting: routingField.routing,
+				},
+				(tabId) => {
+					const armed = armDispatchCallback(ctx, message, {
+						agentId: sessionId,
+						tabId,
+						prompt,
+						isNewTab: true,
+					});
+					if (armed.error) throw new Error(armed.error);
+					return armed.callbackId;
+				}
+			)
+			.then(({ receipt, callbackId }) => {
+				if (!ownsBinding || receipt.outcome === 'rejected' || receipt.outcome === 'not-started')
+					withdrawDispatchTicket(dispatchTicket);
+				ctx.send(client, {
+					type: 'new_ai_tab_with_prompt_result',
+					success: receipt.outcome === 'accepted',
+					sessionId,
+					tabId: receipt.targetTabId,
+					dispatchId,
+					admission: receipt,
+					...(receipt.outcome === 'unknown' ? { unknown: true } : {}),
+					...(callbackId ? { callbackId } : {}),
+					requestId: message.requestId,
+				});
+				if (receipt.outcome === 'accepted')
+					noteDispatchDelegation(ctx, message, {
+						targetSessionId: sessionId,
+						targetTabId: receipt.targetTabId,
+						prompt,
+						newTab: true,
+					});
+			})
+			.catch((error) => {
+				withdrawDispatchTicket(dispatchTicket);
+				ctx.send(client, {
+					type: 'new_ai_tab_with_prompt_result',
+					success: false,
+					sessionId,
+					dispatchId,
+					error: error instanceof Error ? error.message : 'PianolaAdmissionUnavailable',
+					requestId: message.requestId,
+				});
+			})
+			.finally(() => {
+				if (ownsBinding) newTabDispatchBindings.delete(dispatchId);
+			});
+		return;
+	}
 
 	ctx.callbacks
 		.newAITabWithPrompt(
@@ -799,6 +1007,7 @@ export function handleNewAITabWithPrompt(
 			background,
 			hidden,
 			routingField.routing,
+			undefined,
 			delegation,
 			dispatchTicket
 		)
@@ -825,11 +1034,28 @@ export function handleNewAITabWithPrompt(
 				type: 'new_ai_tab_with_prompt_result',
 				success: result.success,
 				sessionId,
+				...(coverage.receipt
+					? {
+							dispatchId,
+							admission: {
+								...coverage.receipt,
+								targetTabId: result.tabId,
+								outcome: result.unknown
+									? 'unknown'
+									: result.success
+										? result.queued
+											? 'queued'
+											: 'accepted'
+										: 'rejected',
+							},
+						}
+					: {}),
 				...(result.tabId ? { tabId: result.tabId } : {}),
 				// `queued` distinguishes "the turn is running now" from "the agent
 				// was mid-turn, so the prompt is waiting its place in the queue" -
 				// both are successes, and an automated caller wants to know which.
 				...(result.queued ? { queued: true } : {}),
+				...(result.unknown ? { unknown: true } : {}),
 				// Carry the renderer's own reason for a refusal. Without it the CLI
 				// can only see a missing tab id and has to guess why.
 				...(result.error ? { error: result.error } : {}),
@@ -1159,8 +1385,6 @@ export function handleOpenDocumentGraph(
 function readEncoreFeatures(): ReturnType<typeof resolveEncoreFeatures> {
 	let raw: unknown;
 	try {
-		const { getSettingsStore } =
-			require('../../../stores/getters') as typeof import('../../../stores/getters');
 		raw = getSettingsStore().get('encoreFeatures');
 	} catch {
 		raw = undefined;

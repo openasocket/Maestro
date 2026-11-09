@@ -4,6 +4,7 @@ import {
 	useDebouncedPersistence,
 	DEFAULT_DEBOUNCE_DELAY,
 	SESSION_PERSISTENCE_BASELINE_EVENT,
+	rebasePendingSessionChanges,
 } from '../../../../renderer/hooks/utils/useDebouncedPersistence';
 import { MAX_CLOSED_TAB_HISTORY } from '../../../../shared/closedTabHistory';
 import type {
@@ -23,6 +24,7 @@ import {
 	type SessionLifecycleSyncPayload,
 } from '../../../../renderer/hooks/session/useSessionLifecycleSync';
 import { mergeSessionPersistenceChanges } from '../../../../shared/sessionPersistenceMerge';
+import { BridgeTransportError } from '../../../../shared/bridgeError';
 // The renderer sentry module only exports these two helpers, so a full mock is
 // safe and avoids pulling @sentry/electron/renderer into jsdom. Lets us assert
 // what does / doesn't reach Sentry on a failed flush (MAESTRO-QF).
@@ -187,6 +189,67 @@ describe('useDebouncedPersistence', () => {
 	// initialLoadComplete is set in a finally, so it is true either way, and
 	// flushNow with a snapshot skips it altogether. persistInternal is the one
 	// gate every flush path shares, so the refusal lives there.
+	describe('queue synchronization during streaming', () => {
+		it('persists a dequeue promptly while another agent keeps streaming', async () => {
+			const item = { id: 'consumed', type: 'message' as const, text: 'Ja bitte', timestamp: 1 };
+			const owner = makeSession({ id: 'owner', executionQueue: [item] });
+			const other = makeSession({ id: 'streaming' });
+			seedSessions([owner, other]);
+			const stored = mockPersistedSessions([owner, other]);
+			renderPersistence(makeInitialLoadRef(true));
+			act(() => seedSessions([{ ...owner, executionQueue: [] }, other]));
+			for (let i = 0; i < 4; i++) {
+				await act(async () => {
+					await vi.advanceTimersByTimeAsync(500);
+				});
+				act(() =>
+					useSessionStore
+						.getState()
+						.setSessions((prev) =>
+							prev.map((session) =>
+								session.id === other.id ? { ...session, contextUsage: i + 1 } : session
+							)
+						)
+				);
+			}
+			expect(stored().find((session) => session.id === owner.id)?.executionQueue).toEqual([]);
+		});
+
+		it('bounds persistence delay even when ordinary session updates never stop', async () => {
+			const session = makeSession({ id: 'streaming' });
+			seedSessions([session]);
+			const stored = mockPersistedSessions([session]);
+			renderPersistence(makeInitialLoadRef(true));
+			for (let i = 1; i <= 20; i++) {
+				act(() => seedSessions([{ ...session, contextUsage: i }]));
+				await act(async () => {
+					await vi.advanceTimersByTimeAsync(500);
+				});
+			}
+			expect(stored()[0].contextUsage).toBeGreaterThan(0);
+		});
+
+		it('coalesces a synchronous queue burst into one save of the final queue', async () => {
+			const session = makeSession({ id: 'queue' });
+			seedSessions([session]);
+			const stored = mockPersistedSessions([session]);
+			renderPersistence(makeInitialLoadRef(true));
+			const item = { id: 'queued', type: 'message' as const, text: 'new work', timestamp: 1 };
+			act(() => {
+				seedSessions([{ ...session, executionQueue: [item] }]);
+				seedSessions([{ ...session, executionQueue: [{ ...item, paused: true }] }]);
+			});
+			await act(async () => {
+				await vi.advanceTimersByTimeAsync(0);
+			});
+			expect(stored()[0].executionQueue).toEqual([{ ...item, paused: true }]);
+			expect(
+				vi.mocked(window.maestro.sessions.setAll).mock.calls.length +
+					vi.mocked(window.maestro.sessions.setMany).mock.calls.length
+			).toBe(1);
+		});
+	});
+
 	describe('sessionsReadOk gate', () => {
 		it('does not persist on the debounce timer when the read never came back', () => {
 			useSessionStore.setState({ sessionsReadOk: false });
@@ -2887,6 +2950,169 @@ describe('useDebouncedPersistence', () => {
 		});
 	});
 
+	it.each([true, false])(
+		'saves removal of an observed recovery despite an older in-flight save (initially queued=%s)',
+		async (initiallyQueued) => {
+			const item = {
+				id: 'recovered',
+				type: 'message' as const,
+				text: 'work',
+				timestamp: 1,
+				tabId: 'default-tab',
+			};
+			const original = makeSession({
+				id: 'observed-removal',
+				executionQueue: initiallyQueued ? [item] : [],
+			});
+			seedSessions([original]);
+			useSessionStore.setState({ initialLoadComplete: true });
+			let host = structuredClone(original);
+			let releaseSave!: () => void;
+			const gate = new Promise<void>((resolve) => {
+				releaseSave = resolve;
+			});
+			let calls = 0;
+			const save = async (updates: Session[], _removedIds: string[], baselines?: Session[]) => {
+				if (++calls === 1) await gate;
+				for (const update of updates)
+					host = mergeSessionPersistenceChanges(
+						update,
+						host,
+						baselines?.find((s) => s.id === update.id),
+						true
+					);
+				return true;
+			};
+			vi.mocked(window.maestro.sessions.setMany).mockImplementation(save);
+			vi.mocked(window.maestro.sessions.setAll).mockImplementation((updates, baselines) =>
+				save(updates, [], baselines)
+			);
+			const previousListener = window.maestro.sessions.onLifecycleSync;
+			const listeners = new Set<(payload: SessionLifecycleSyncPayload) => void>();
+			window.maestro.sessions.onLifecycleSync = (callback) => {
+				listeners.add(callback);
+				return () => listeners.delete(callback);
+			};
+			const initialLoad = makeInitialLoadRef(true);
+			const view = renderHook(() => {
+				const persistence = useDebouncedPersistence(initialLoad);
+				useSessionLifecycleSync(async (session) => session);
+				return persistence;
+			});
+			try {
+				let first!: Promise<void>;
+				await act(async () => {
+					first = view.result.current.flushNow([{ ...original, name: 'older save' }]);
+				});
+				host = {
+					...host,
+					executionQueue: [{ ...item, paused: true, dispatchRecoveryGeneration: 1 }],
+				};
+				await act(async () => {
+					for (const listener of listeners)
+						listener({ updated: [structuredClone(host)], baselines: [original] });
+				});
+				expect(
+					useSessionStore.getState().sessions[0].executionQueue[0].dispatchRecoveryGeneration
+				).toBe(1);
+				let cancellation!: Promise<void>;
+				await act(async () => {
+					const local = useSessionStore.getState().sessions[0];
+					seedSessions([{ ...local, executionQueue: [] }]);
+					cancellation = view.result.current.flushNow();
+				});
+				expect(rebasePendingSessionChanges([host])[0].executionQueue).toEqual([]);
+				await act(async () => {
+					releaseSave();
+					await first;
+					await cancellation;
+				});
+				expect(host.executionQueue).toEqual([]);
+				expect(view.result.current.isPending).toBe(false);
+			} finally {
+				view.unmount();
+				window.maestro.sessions.onLifecycleSync = previousListener;
+			}
+		}
+	);
+
+	it('does not discard a newer cancellation of the same object when an older save acknowledges', async () => {
+		const item = {
+			id: 'same-object',
+			type: 'message' as const,
+			text: 'work',
+			timestamp: 1,
+			tabId: 'default-tab',
+		};
+		const original = makeSession({ id: 'successive-removals', executionQueue: [item] });
+		seedSessions([original]);
+		const stored = mockPersistedSessions([original]);
+		const view = renderPersistence(makeInitialLoadRef(true));
+		await act(async () => {
+			await view.result.current.flushNow([original]);
+		});
+		let acknowledge!: (ok: boolean) => void;
+		vi.mocked(window.maestro.sessions.setMany).mockImplementationOnce(
+			() =>
+				new Promise((resolve) => {
+					acknowledge = resolve;
+				})
+		);
+		let first!: Promise<void>;
+		await act(async () => {
+			seedSessions([{ ...original, executionQueue: [] }]);
+			first = view.result.current.flushNow();
+		});
+		// Its first cancellation was accepted, but another event restored the same
+		// object before the acknowledgement reached the browser. Cancel again.
+		act(() => {
+			seedSessions([original]);
+			seedSessions([{ ...original, executionQueue: [] }]);
+		});
+		let second!: Promise<void>;
+		await act(async () => {
+			second = view.result.current.flushNow();
+		});
+		await act(async () => {
+			acknowledge(true);
+			await first;
+			await second;
+		});
+		expect(stored()[0].executionQueue).toEqual([]);
+	});
+
+	it('rebases only later cancellations, without replaying an uncertain submitted removal', async () => {
+		const item = {
+			id: 'uncertain-removal',
+			type: 'message' as const,
+			text: 'work',
+			timestamp: 1,
+			tabId: 'default-tab',
+			dispatchRecoveryGeneration: 1,
+		};
+		const original = makeSession({ id: 'uncertain-removal', executionQueue: [item] });
+		seedSessions([original]);
+		const view = renderPersistence(makeInitialLoadRef(true));
+		await act(async () => {
+			await view.result.current.flushNow([original]);
+		});
+		vi.mocked(window.maestro.sessions.setMany).mockRejectedValueOnce(
+			new Error('Submission uncertainty: removal response lost')
+		);
+		await act(async () => {
+			seedSessions([{ ...original, executionQueue: [] }]);
+			await view.result.current.flushNow();
+		});
+		// The attempted mutation is not safe to replay from an unknown outcome.
+		expect(rebasePendingSessionChanges([original])[0].executionQueue).toEqual([item]);
+		act(() => {
+			seedSessions([original]);
+			seedSessions([{ ...original, executionQueue: [] }]);
+		});
+		// A later explicit cancellation is new work, even for the same object.
+		expect(rebasePendingSessionChanges([original])[0].executionQueue).toEqual([]);
+	});
+
 	it('saves an agent created on the host after an empty bootstrap with its unmodified observed baseline', async () => {
 		const originalListener = window.maestro.sessions.onLifecycleSync;
 		const listeners = new Set<(payload: SessionLifecycleSyncPayload) => void>();
@@ -2968,7 +3194,7 @@ describe('useDebouncedPersistence', () => {
 		try {
 			await act(async () => {
 				window.dispatchEvent(
-					new CustomEvent(SESSION_PERSISTENCE_BASELINE_EVENT, { detail: [observed] })
+					new CustomEvent(SESSION_PERSISTENCE_BASELINE_EVENT, { detail: { sessions: [observed] } })
 				);
 				useSessionStore.getState().setSessions([{ ...observed, name: 'Restored name' }]);
 				useSessionStore.getState().setSessionsReadOk(true);
@@ -2987,5 +3213,339 @@ describe('useDebouncedPersistence', () => {
 			vi.mocked(window.maestro.sessions.setAll).mockResolvedValue(true);
 			vi.mocked(window.maestro.sessions.setMany).mockResolvedValue(true);
 		}
+	});
+	it('persists a local edit made during recovery against the recovered host baseline', async () => {
+		const initialLoad = makeInitialLoadRef(true);
+		const original = makeSession({ id: 'recovery-edit', name: 'Before', cwd: '/original' });
+		useSessionStore.setState({
+			sessions: [original],
+			sessionsReadOk: true,
+			initialLoadComplete: true,
+		});
+		const view = renderHook(() => useDebouncedPersistence(initialLoad));
+		await act(async () => {
+			await vi.runAllTimersAsync();
+		});
+		const flushNow = view.result.current.flushNow;
+		try {
+			const recovered = { ...original, name: 'Recovered host', cwd: '/host-progressed' };
+			const edited = { ...recovered, name: 'Local edit during recovery' };
+			await act(async () => {
+				useSessionStore.getState().setSessions([edited]);
+				window.dispatchEvent(
+					new CustomEvent(SESSION_PERSISTENCE_BASELINE_EVENT, {
+						detail: { sessions: [recovered], recovered: true },
+					})
+				);
+			});
+			await act(async () => {
+				await vi.runAllTimersAsync();
+			});
+			await act(async () => {
+				await flushNow(useSessionStore.getState().sessions);
+			});
+			expect(window.maestro.sessions.setMany).toHaveBeenCalledTimes(1);
+			expect(vi.mocked(window.maestro.sessions.setMany).mock.calls[0][0][0].name).toBe(
+				'Local edit during recovery'
+			);
+		} finally {
+			view.unmount();
+		}
+	});
+	it('accepts the recovered host baseline without replaying an ambiguous save or its queued flush', async () => {
+		const initialLoad = makeInitialLoadRef(true);
+		let host = makeSession({ id: 'recovery', name: 'Before', cwd: '/original' });
+		useSessionStore.setState({ sessions: [host], sessionsReadOk: true, initialLoadComplete: true });
+		vi.mocked(window.maestro.sessions.setAll).mockResolvedValue(true);
+		let rejectOld!: (error: Error) => void;
+		vi.mocked(window.maestro.sessions.setMany).mockImplementationOnce(async (updates) => {
+			host = updates[0];
+			return new Promise<boolean>((_resolve, reject) => {
+				rejectOld = reject;
+			});
+		});
+		const view = renderHook(() => useDebouncedPersistence(initialLoad));
+		try {
+			await act(async () => {
+				view.result.current.flushNow([host]);
+			});
+			await act(async () => {
+				useSessionStore.getState().setSessions([{ ...host, name: 'Ambiguous old save' }]);
+				await vi.advanceTimersByTimeAsync(DEFAULT_DEBOUNCE_DELAY + 1);
+			});
+			act(() => {
+				void view.result.current.flushNow(useSessionStore.getState().sessions);
+			});
+			const recovered = { ...host, name: 'Newer host state', cwd: '/host-progressed' };
+			host = recovered;
+			await act(async () => {
+				useSessionStore.getState().setSessions([recovered]);
+				window.dispatchEvent(
+					new CustomEvent(SESSION_PERSISTENCE_BASELINE_EVENT, {
+						detail: { sessions: [recovered], recovered: true },
+					})
+				);
+				rejectOld(new Error('Submission uncertainty: connection lost'));
+				await vi.runAllTimersAsync();
+			});
+			expect(host.name).toBe('Newer host state');
+			expect(view.result.current.isPending).toBe(false);
+			expect(window.maestro.sessions.setMany).toHaveBeenCalledTimes(1);
+			vi.mocked(window.maestro.sessions.setMany).mockImplementation(
+				async (updates, _removed, baselines) => {
+					host = mergeSessionPersistenceChanges(updates[0], host, baselines![0], true);
+					return true;
+				}
+			);
+			host = { ...host, cwd: '/peer-changed-after-recovery' };
+			await act(async () => {
+				useSessionStore.getState().setSessions([{ ...recovered, name: 'Fresh explicit change' }]);
+				await vi.runAllTimersAsync();
+			});
+			expect(host.name).toBe('Fresh explicit change');
+			expect(host.cwd).toBe('/peer-changed-after-recovery');
+		} finally {
+			view.unmount();
+			vi.mocked(window.maestro.sessions.setMany).mockResolvedValue(true);
+		}
+	});
+});
+
+describe('bridge persistence recovery', () => {
+	beforeEach(() => {
+		vi.useFakeTimers();
+		vi.clearAllMocks();
+		resetStore(useSessionStore);
+		useSessionStore.setState({ sessionsReadOk: true, initialLoadComplete: true });
+	});
+
+	afterEach(() => {
+		delete (window as unknown as Record<string, unknown>).__MAESTRO_BRIDGE_STATE__;
+		vi.useRealTimers();
+	});
+
+	it('pauses offline writes and flushes pending work when reconnect completes without another mutation', async () => {
+		const session = makeSession({ id: 'offline-dirty', name: 'Saved' });
+		seedSessions([session]);
+		const view = renderPersistence(makeInitialLoadRef(true));
+		try {
+			await act(async () => view.result.current.flushNow([session]));
+			vi.mocked(window.maestro.sessions.setAll).mockClear();
+			vi.mocked(window.maestro.sessions.setMany).mockClear();
+			(window as unknown as Record<string, unknown>).__MAESTRO_BRIDGE_STATE__ = 'reconnecting';
+			await act(async () => {
+				seedSessions([{ ...session, name: 'Unsent local edit' }]);
+				await vi.advanceTimersByTimeAsync(DEFAULT_DEBOUNCE_DELAY + 1);
+			});
+			expect(view.result.current.isPending).toBe(true);
+			expect(window.maestro.sessions.setMany).not.toHaveBeenCalled();
+			await act(async () => {
+				(window as unknown as Record<string, unknown>).__MAESTRO_BRIDGE_STATE__ = 'connected';
+				window.dispatchEvent(
+					new CustomEvent('maestro:bridge-state', { detail: { state: 'connected' } })
+				);
+				await vi.advanceTimersByTimeAsync(0);
+			});
+			expect(window.maestro.sessions.setMany).toHaveBeenCalledTimes(1);
+			expect(vi.mocked(window.maestro.sessions.setMany).mock.calls[0][0][0].name).toBe(
+				'Unsent local edit'
+			);
+			expect(view.result.current.isPending).toBe(false);
+		} finally {
+			view.unmount();
+		}
+	});
+	it('retains unsent local metadata, respects host conflicts, and saves against the recovered baseline', async () => {
+		const original = makeSession({ id: 'rebase-unsent', name: 'Saved', cwd: '/before' });
+		seedSessions([original]);
+		const view = renderPersistence(makeInitialLoadRef(true));
+		try {
+			await act(async () => view.result.current.flushNow([original]));
+			(window as unknown as Record<string, unknown>).__MAESTRO_BRIDGE_STATE__ = 'reconnecting';
+			await act(async () => {
+				seedSessions([{ ...original, name: 'Unsent name', bookmarked: true }]);
+				await vi.advanceTimersByTimeAsync(DEFAULT_DEBOUNCE_DELAY + 1);
+			});
+			const host = { ...original, cwd: '/host-progressed' };
+			const recovered = rebasePendingSessionChanges([host]);
+			expect(recovered[0]).toMatchObject({
+				name: 'Unsent name',
+				cwd: '/host-progressed',
+				bookmarked: true,
+			});
+			expect(rebasePendingSessionChanges([{ ...host, name: 'Newer host name' }])[0].name).toBe(
+				'Newer host name'
+			);
+			await act(async () => {
+				seedSessions(recovered);
+				window.dispatchEvent(
+					new CustomEvent(SESSION_PERSISTENCE_BASELINE_EVENT, {
+						detail: { sessions: [host], recovered: true },
+					})
+				);
+			});
+			expect(view.result.current.isPending).toBe(true);
+			await act(async () => {
+				(window as unknown as Record<string, unknown>).__MAESTRO_BRIDGE_STATE__ = 'connected';
+				window.dispatchEvent(
+					new CustomEvent('maestro:bridge-state', { detail: { state: 'connected' } })
+				);
+				await vi.advanceTimersByTimeAsync(0);
+			});
+			expect(window.maestro.sessions.setMany).toHaveBeenCalledTimes(1);
+			const [changes, , baselines] = vi.mocked(window.maestro.sessions.setMany).mock.calls[0];
+			expect(changes[0]).toMatchObject({
+				name: 'Unsent name',
+				cwd: '/host-progressed',
+				bookmarked: true,
+			});
+			expect(baselines?.[0]).toEqual(host);
+			expect(view.result.current.isPending).toBe(false);
+		} finally {
+			view.unmount();
+		}
+	});
+
+	it('drops an ambiguous attempted diff while saving later edits after host reconciliation', async () => {
+		const original = makeSession({ id: 'rebase-uncertain', name: 'Saved', bookmarked: false });
+		seedSessions([original]);
+		const view = renderPersistence(makeInitialLoadRef(true));
+		try {
+			await act(async () => view.result.current.flushNow([original]));
+			vi.mocked(window.maestro.sessions.setMany).mockRejectedValueOnce(
+				new BridgeTransportError(
+					'Submission uncertainty: reply lost',
+					'BRIDGE_SUBMISSION_UNCERTAIN',
+					'unknown',
+					'sessions:setMany'
+				)
+			);
+			const attempted = { ...original, name: 'Possibly accepted name' };
+			await act(async () => {
+				seedSessions([attempted]);
+				await view.result.current.flushNow();
+			});
+			(window as unknown as Record<string, unknown>).__MAESTRO_BRIDGE_STATE__ = 'reconnecting';
+			await act(async () => seedSessions([{ ...attempted, bookmarked: true }]));
+			const host = { ...original, name: 'Authoritative name', cwd: '/host-progressed' };
+			const recovered = rebasePendingSessionChanges([host]);
+			expect(recovered[0]).toMatchObject({
+				name: 'Authoritative name',
+				bookmarked: true,
+				cwd: '/host-progressed',
+			});
+			await act(async () => {
+				seedSessions(recovered);
+				window.dispatchEvent(
+					new CustomEvent(SESSION_PERSISTENCE_BASELINE_EVENT, {
+						detail: { sessions: [host], recovered: true },
+					})
+				);
+				(window as unknown as Record<string, unknown>).__MAESTRO_BRIDGE_STATE__ = 'connected';
+				window.dispatchEvent(
+					new CustomEvent('maestro:bridge-state', { detail: { state: 'connected' } })
+				);
+				await vi.advanceTimersByTimeAsync(0);
+			});
+			expect(window.maestro.sessions.setMany).toHaveBeenCalledTimes(2);
+			expect(vi.mocked(window.maestro.sessions.setMany).mock.calls[1][0][0]).toMatchObject({
+				name: 'Authoritative name',
+				bookmarked: true,
+			});
+			expect(view.result.current.isPending).toBe(false);
+		} finally {
+			view.unmount();
+			vi.mocked(window.maestro.sessions.setMany).mockResolvedValue(true);
+		}
+	});
+
+	it('keeps a not-submitted flush pending without reporting it to Sentry and retries on connected', async () => {
+		const original = makeSession({ id: 'not-sent', name: 'Saved' });
+		seedSessions([original]);
+		const view = renderPersistence(makeInitialLoadRef(true));
+		try {
+			await act(async () => view.result.current.flushNow([original]));
+			vi.mocked(window.maestro.sessions.setMany).mockRejectedValueOnce(
+				new BridgeTransportError(
+					'Not submitted: restoring authoritative host state. Your current work is retained.',
+					'BRIDGE_RESTORING'
+				)
+			);
+			await act(async () => {
+				seedSessions([{ ...original, name: 'Unsent' }]);
+				await view.result.current.flushNow();
+			});
+			expect(view.result.current.isPending).toBe(true);
+			expect(captureExceptionMock).not.toHaveBeenCalled();
+			await act(async () => {
+				window.dispatchEvent(
+					new CustomEvent('maestro:bridge-state', { detail: { state: 'connected' } })
+				);
+				await vi.advanceTimersByTimeAsync(0);
+			});
+			expect(window.maestro.sessions.setMany).toHaveBeenCalledTimes(2);
+			expect(view.result.current.isPending).toBe(false);
+		} finally {
+			view.unmount();
+			vi.mocked(window.maestro.sessions.setMany).mockResolvedValue(true);
+		}
+	});
+	it('rebases unsent additions and deletions without overwriting authoritative transcript rows', async () => {
+		const kept = makeSession({ id: 'keep', name: 'Before' });
+		const removed = makeSession({ id: 'remove' });
+		const added = makeSession({ id: 'local-add', name: 'Unsent addition' });
+		seedSessions([kept, removed]);
+		const view = renderPersistence(makeInitialLoadRef(true));
+		try {
+			await act(async () => view.result.current.flushNow([kept, removed]));
+			(window as unknown as Record<string, unknown>).__MAESTRO_BRIDGE_STATE__ = 'reconnecting';
+			await act(async () => {
+				seedSessions([
+					{
+						...kept,
+						name: 'Unsent rename',
+						aiTabs: [{ ...kept.aiTabs[0], logs: [makeLog('local-stale')] }],
+					},
+					added,
+				]);
+			});
+			const host = {
+				...kept,
+				aiTabs: [{ ...kept.aiTabs[0], logs: [makeLog('host-authoritative')] }],
+			};
+			const recovered = rebasePendingSessionChanges([host, removed]);
+			expect(recovered.map((session) => session.id)).toEqual(['keep', 'local-add']);
+			expect(recovered[0].name).toBe('Unsent rename');
+			expect(recovered[0].aiTabs[0].logs).toEqual(host.aiTabs[0].logs);
+		} finally {
+			view.unmount();
+		}
+	});
+
+	it('serializes shutdown flushes behind the active save rather than sending the same mutation again', async () => {
+		const original = makeSession({ id: 'shutdown', name: 'Before' });
+		seedSessions([original]);
+		const view = renderPersistence(makeInitialLoadRef(true));
+		await act(async () => view.result.current.flushNow([original]));
+		let resolveSave!: (value: boolean) => void;
+		vi.mocked(window.maestro.sessions.setMany).mockImplementationOnce(
+			() =>
+				new Promise<boolean>((resolve) => {
+					resolveSave = resolve;
+				})
+		);
+		let saving!: Promise<void>;
+		await act(async () => {
+			seedSessions([{ ...original, name: 'Save once' }]);
+			saving = view.result.current.flushNow();
+		});
+		act(() => window.dispatchEvent(new Event('beforeunload')));
+		view.unmount();
+		expect(window.maestro.sessions.setMany).toHaveBeenCalledTimes(1);
+		await act(async () => {
+			resolveSave(true);
+			await saving;
+		});
+		expect(window.maestro.sessions.setMany).toHaveBeenCalledTimes(1);
 	});
 });

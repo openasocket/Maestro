@@ -138,13 +138,19 @@ export function registerPluginsHandlers(deps: PluginsHandlerDependencies): void 
 	);
 	const wrappedUpdate = withIpcErrorLogging(
 		handlerOpts('update'),
-		async (sourceDir: unknown): Promise<PluginListSnapshot> => {
-			if (typeof sourceDir !== 'string' || sourceDir.length === 0) {
+		async (sourcePath: unknown, expectedId: unknown): Promise<PluginListSnapshot> => {
+			if (typeof sourcePath !== 'string' || sourcePath.length === 0) {
 				throw new Error('InvalidSourceDir');
+			}
+			if (
+				expectedId !== undefined &&
+				(typeof expectedId !== 'string' || !PLUGIN_ID_PATTERN.test(expectedId))
+			) {
+				throw new Error('InvalidPluginId');
 			}
 			const held = heldPluginChange({ op: 'update' });
 			if (held) throw new Error(held);
-			return snapshotOf(await manager.update(sourceDir));
+			return snapshotOf(await manager.update(sourcePath, expectedId));
 		}
 	);
 	const wrappedUninstall = withIpcErrorLogging(
@@ -278,9 +284,9 @@ export function registerPluginsHandlers(deps: PluginsHandlerDependencies): void 
 
 	ipcMain.handle(
 		'plugins:update',
-		async (event, sourceDir: unknown): Promise<PluginListSnapshot> => {
+		async (event, sourcePath: unknown, expectedId: unknown): Promise<PluginListSnapshot> => {
 			if (!isPluginsEnabled(settingsStore)) throw new Error('PluginsDisabled');
-			return wrappedUpdate(event, sourceDir);
+			return wrappedUpdate(event, sourcePath, expectedId);
 		}
 	);
 

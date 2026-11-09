@@ -1,3 +1,8 @@
+import { pianolaNewTabSpawns } from '../../../pianola/pianola-new-tab-dispatch';
+import {
+	acquireProviderSessionWriter,
+	bindProviderSessionWriter,
+} from '../../../utils/provider-session-writer';
 import { migrationHoldsTurns } from '../../../../shared/maestro-lib/translation/session';
 import { app, BrowserWindow } from 'electron';
 import Store from 'electron-store';
@@ -8,6 +13,10 @@ import { ProcessManager } from '../../../process-manager';
 import { AgentDetector } from '../../../agents';
 import { checkBinaryExists, checkCustomPath } from '../../../agents/path-prober';
 import { resolveMaestroCliScriptPath } from '../../../cue/cue-cli-executor';
+import { hostCallerRuns } from '../../../agent-run/caller-identity';
+import type { PluginToolRunProofFile } from '../../../plugins/plugin-tool-run-proof-file';
+import { PluginAuthorityError } from '../../../plugins/plugin-authority';
+import { generateUUID } from '../../../../shared/uuid';
 import {
 	pluginToolRunIdentity,
 	createPluginRunProofFile,
@@ -34,6 +43,7 @@ import {
 import {
 	buildCallerIdentityEnv,
 	withoutCallerIdentityEnv,
+	CALLER_RUN_PROOF_FILE_ENV_VAR,
 } from '../../../../shared/agentDelegation';
 import {
 	delegationContextEnv,
@@ -46,7 +56,6 @@ import {
 	spawnOriginOf,
 	type DispatchedSpawnIds,
 } from '../../../process-manager/types';
-import { generateUUID } from '../../../../shared/uuid';
 import { QUERY_USER_ENV_VAR } from '../../../../shared/webLogin';
 import { getActingUser } from '../../../web-server/auth/acting-user';
 import { currentSpawnActor } from '../../../web-server/auth/transport-actor';
@@ -79,7 +88,18 @@ import { getDefaultShell } from '../../../stores/defaults';
 import { sanitizeClaudeTranscriptBeforeApiResume } from './claude-transcript-sanitize';
 import { resolveClaudeSpawnContext } from './resolve-claude-spawn-context';
 import { resolveCodexSpawnTransport } from './resolve-codex-spawn-transport';
-import type { ClaudeSpawnEnvLayers } from '../../../agents/claudeSpawnCore';
+import { resolveHarnessControlSpawnMode } from './resolve-harness-control-mode';
+import {
+	buildNativeAcpBaseArgs,
+	buildNativeRpcBaseArgs,
+	nativeRpcProtocol,
+} from '../../../../shared/maestro-lib/providers/native-control';
+import {
+	mergeClaudeSpawnEnvLayers,
+	type ClaudeSpawnEnvLayers,
+} from '../../../agents/claudeSpawnCore';
+import { resolveConfigDirKey } from '../../../stores/claudeUsageStore';
+import { hasStandardApprovalChannel } from '../../../../shared/agentMetadata';
 import { applyLocalInteractiveSpawnDecision } from './apply-local-interactive-spawn';
 import { persistClaudeInteractiveMode } from './persist-claude-interactive-mode';
 import { wrapSpawnForSsh } from './wrap-spawn-for-ssh';
@@ -97,7 +117,7 @@ import {
 	type ManagedLaunchInput,
 } from '../../../../shared/maestro-lib/launch/launch-plan';
 import { resolvePromptDelivery } from '../../../../shared/maestro-lib/launch/prompt-delivery';
-import { preparePermissionRelayArgs } from '../../../permission-relay';
+import { cleanupSessionRelay, preparePermissionRelayArgs } from '../../../permission-relay';
 import {
 	primeOmpModelCatalog,
 	computeOmpCatalogKey,
@@ -109,8 +129,19 @@ import { managedSpawnRefusalMessage } from '../../../../shared/processErrors';
 
 const LOG_CONTEXT = '[ProcessManager]';
 
+const pendingDesktopSpawns = new Map<string, Set<AbortController>>();
+
+/** Stop a visible desktop turn that is still waiting for its writer or preflight. */
+export function cancelPendingDesktopSpawns(processId: string): boolean {
+	const pending = pendingDesktopSpawns.get(processId);
+	if (!pending?.size) return false;
+	for (const controller of pending) controller.abort();
+	return true;
+}
+
 /** Dependencies injected into the `process:spawn` orchestration handler. */
 export interface SpawnHandlerDependencies {
+	assertQueueOwner?: () => void;
 	getProcessManager: () => ProcessManager | null;
 	getAgentDetector: () => AgentDetector | null;
 	agentConfigsStore: Store<AgentConfigsData>;
@@ -136,27 +167,144 @@ export async function handleProcessSpawn(
 	config: SpawnProcessConfig,
 	deps: SpawnHandlerDependencies
 ) {
-	const proofCleanup: { release?: () => void } = {};
+	const admissionGuard = pianolaNewTabSpawns.claim(
+		config.sessionId,
+		config.pianolaDispatchId,
+		config.pianolaQueueItemId,
+		config.transcriptBoundaryId
+	);
+	const proofCleanup: { release?: () => void; notStarted: boolean } = { notStarted: true };
+	const controller = new AbortController();
+	const pending = pendingDesktopSpawns.get(config.sessionId) ?? new Set<AbortController>();
+	pending.add(controller);
+	pendingDesktopSpawns.set(config.sessionId, pending);
 	try {
-		return await handleProcessSpawnImpl(config, deps, proofCleanup);
-	} catch (error) {
-		try {
-			proofCleanup.release?.();
-		} catch (cleanupError) {
-			captureException(
-				cleanupError instanceof Error ? cleanupError : new Error(String(cleanupError)),
-				{ context: 'plugin run proof cleanup', sessionId: config.sessionId }
-			);
+		const manager = requireProcessManager(deps.getProcessManager);
+		const records = () =>
+			(deps.sessionsStore?.get('sessions', []) ?? []) as Array<{
+				id: string;
+				toolType?: string;
+				aiTabs?: Array<{ id: string; agentSessionId?: string; relayConversation?: unknown }>;
+			}>;
+		const relayTab =
+			config.toolType !== 'terminal'
+				? records()
+						.flatMap((agent) => (agent.aiTabs ?? []).map((tab) => ({ agentId: agent.id, tab })))
+						.find(
+							({ agentId, tab }) =>
+								tab.relayConversation &&
+								(config.sessionId === `${agentId}-ai-${tab.id}` ||
+									(!!config.agentSessionId && tab.agentSessionId === config.agentSessionId))
+						)
+				: undefined;
+		// The existing queue decides order. Reserve every desktop writer before any
+		// awaits, including an unmarked conversation that Relay may adopt mid-turn.
+		const resolveCurrentSessionId = relayTab
+			? () => {
+					const owner = records().find((agent) => agent.id === relayTab.agentId);
+					if (!owner || (owner.toolType && owner.toolType !== config.toolType))
+						throw new Error('Relay provider changed while waiting');
+					return (
+						owner.aiTabs?.find((tab) => tab.id === relayTab.tab.id)?.agentSessionId ??
+						config.agentSessionId
+					);
+				}
+			: undefined;
+		let release = () => {};
+		if (config.toolType !== 'terminal') {
+			let requestedId = config.agentSessionId;
+			for (;;) {
+				// The helper may retry internally; track the identity it actually reserves.
+				let protectedId = requestedId;
+				release = await acquireProviderSessionWriter(
+					config.toolType,
+					config.sessionId,
+					requestedId,
+					controller.signal,
+					resolveCurrentSessionId ? () => (protectedId = resolveCurrentSessionId()) : undefined
+				);
+				let currentId: string | undefined;
+				try {
+					if (controller.signal.aborted) throw new Error('Provider writer wait cancelled');
+					currentId = resolveCurrentSessionId?.() ?? requestedId;
+				} catch (error) {
+					release();
+					throw error;
+				}
+				if (currentId === protectedId) {
+					requestedId = protectedId;
+					break;
+				}
+				// The ID changed after acquisition resolved. Drop all stale keys before
+				// reacquiring in the canonical order; binding alone does not wait.
+				release();
+				requestedId = currentId;
+			}
+			if (relayTab && requestedId) config = { ...config, agentSessionId: requestedId };
 		}
-		throw error;
+		const onSessionId = (id: string, providerId: string) => {
+			if (id === config.sessionId) bindProviderSessionWriter(id, providerId);
+		};
+		const onExit = (id: string, code?: number) => {
+			if (id !== config.sessionId) return;
+			queueMicrotask(() => {
+				// ExitHandler removes the old process before emitting exit. The
+				// interactive replay listener can synchronously claim that same key;
+				// retain its writer and provider-id binding until its final exit.
+				// Skipped/failed replay leaves no replacement. Preflight cleanup
+				// calls this without an exit code and must release unconditionally.
+				if (code !== undefined && manager.get(config.sessionId)) return;
+				if (config.toolType !== 'terminal') {
+					manager.off('exit', onExit);
+					manager.off('session-id', onSessionId);
+				}
+				release();
+			});
+		};
+		if (config.toolType !== 'terminal') {
+			manager.on('exit', onExit);
+			manager.on('session-id', onSessionId);
+		}
+		try {
+			const result = await handleProcessSpawnImpl(
+				config,
+				deps,
+				proofCleanup,
+				controller.signal,
+				admissionGuard
+			);
+			if (!result.success) cleanupSessionRelay(config.sessionId);
+			if (!result.success || config.toolType === 'terminal') onExit(config.sessionId);
+			return result;
+		} catch (error) {
+			onExit(config.sessionId);
+			cleanupSessionRelay(config.sessionId);
+			try {
+				proofCleanup.release?.();
+			} catch (cleanupError) {
+				captureException(
+					cleanupError instanceof Error ? cleanupError : new Error(String(cleanupError)),
+					{ context: 'agent run proof cleanup', sessionId: config.sessionId }
+				);
+			}
+			throw error;
+		}
+	} finally {
+		if (proofCleanup.notStarted) admissionGuard.notStarted();
+		pending.delete(controller);
+		if (!pending.size && pendingDesktopSpawns.get(config.sessionId) === pending)
+			pendingDesktopSpawns.delete(config.sessionId);
 	}
 }
 
 async function handleProcessSpawnImpl(
 	config: SpawnProcessConfig,
 	deps: SpawnHandlerDependencies,
-	proofCleanup: { release?: () => void }
+	proofCleanup: { release?: () => void; notStarted: boolean },
+	signal: AbortSignal,
+	admissionGuard: () => void
 ) {
+	const callerSpawnGeneration = generateUUID();
 	const {
 		getProcessManager,
 		getAgentDetector,
@@ -190,10 +338,12 @@ async function handleProcessSpawnImpl(
 
 	// Get agent definition to access config options and argument builders
 	const agent = await agentDetector.getAgent(config.toolType);
+	signal.throwIfAborted();
 	let invalidLocalCustomPath = false;
 	if (config.sessionCustomPath && !config.sessionSshRemoteConfig?.enabled) {
 		const requestedCustomPath = config.sessionCustomPath;
 		const detection = await checkCustomPath(requestedCustomPath);
+		signal.throwIfAborted();
 		if (detection.exists && detection.path) {
 			config = { ...config, sessionCustomPath: detection.path };
 			if (detection.path !== requestedCustomPath) {
@@ -272,6 +422,7 @@ async function handleProcessSpawnImpl(
 		settingsStore,
 		envLayers: claudeEnvLayers,
 	});
+	signal.throwIfAborted();
 	const {
 		baseSessionId,
 		claudeResolvedMode,
@@ -284,6 +435,12 @@ async function handleProcessSpawnImpl(
 	// agent record so a stale renderer cannot route the turn differently from
 	// what is saved. Handed to ProcessManager.spawn() below.
 	const codexTransport = resolveCodexSpawnTransport(config, baseSessionId, deps.sessionsStore);
+	const harnessControlMode = resolveHarnessControlSpawnMode(
+		config,
+		baseSessionId,
+		deps.sessionsStore,
+		config.sessionId
+	);
 
 	// Who is asking, as the transport knows it (MRC-08-01A): the keyboard, a
 	// logged-in browser account, or, through the ticket a WebSocket dispatch
@@ -323,6 +480,36 @@ async function handleProcessSpawnImpl(
 		sessionCustomEnvVars: config.sessionCustomEnvVars,
 	});
 	finalArgs = configResolution.args;
+	const effectivePermissionMode =
+		config.permissionMode ?? (config.readOnlyMode === true ? 'readonly' : undefined);
+	const nativeAcpBaseArgs =
+		harnessControlMode === 'native' && agent
+			? buildNativeAcpBaseArgs(agent, effectivePermissionMode)
+			: null;
+	const nativeAcpArgs = nativeAcpBaseArgs
+		? applyAgentConfigOverrides(agent, nativeAcpBaseArgs, {
+				agentConfigValues,
+				sessionCustomModel: config.sessionCustomModel,
+				sessionCustomEffort: config.sessionCustomEffort,
+				sessionCustomEnvVars: config.sessionCustomEnvVars,
+				sessionCustomArgs: config.sessionCustomArgs,
+				readOnlyMode: effectivePermissionMode === 'readonly',
+			}).args
+		: undefined;
+	const nativeRpcProtocolId =
+		(harnessControlMode === 'native' && agent ? nativeRpcProtocol(agent.id) : null) ?? undefined;
+	const nativeRpcBaseArgs =
+		nativeRpcProtocolId && agent ? buildNativeRpcBaseArgs(agent, effectivePermissionMode) : null;
+	const nativeRpcArgs = nativeRpcBaseArgs
+		? applyAgentConfigOverrides(agent, nativeRpcBaseArgs, {
+				agentConfigValues,
+				sessionCustomModel: config.sessionCustomModel,
+				sessionCustomEffort: config.sessionCustomEffort,
+				sessionCustomArgs: config.sessionCustomArgs,
+				sessionCustomEnvVars: config.sessionCustomEnvVars,
+				readOnlyMode: effectivePermissionMode === 'readonly',
+			}).args
+		: undefined;
 
 	if (configResolution.modelSource === 'session' && config.sessionCustomModel) {
 		logger.debug(`Using session-level model for ${config.toolType}`, LOG_CONTEXT, {
@@ -337,12 +524,8 @@ async function handleProcessSpawnImpl(
 		);
 	}
 
-	// Derive effective read-only state, honoring the legacy boolean flag only
-	// when permissionMode wasn't explicitly set (back-compat for older configs).
-	const hasExplicitPermissionMode = config.permissionMode !== undefined;
-	const isReadOnly =
-		config.permissionMode === 'readonly' ||
-		(!hasExplicitPermissionMode && config.readOnlyMode === true);
+	// Native adapters consume the same effective read-only decision as CLI args.
+	const isReadOnly = effectivePermissionMode === 'readonly';
 
 	// Under management the mode this turn asks for is measured against the
 	// ceiling the policy pins for its provider (`ManagedRouteCeiling.
@@ -572,23 +755,24 @@ async function handleProcessSpawnImpl(
 		}
 	}
 
-	// MCP plugin-tool bridge: when the plugins feature is on, this agent
-	// supports a verified ephemeral MCP config, and at least one plugin tool
-	// is registered, point the agent at `maestro-cli mcp serve` so its model
-	// can call plugin tools (each call risk-gated in the app). Local spawns
-	// only - the bridge reaches the app over a localhost WebSocket + discovery
-	// file an SSH-remote agent cannot see. Best-guess (unverified) agents are
-	// intentionally skipped to avoid breaking their startup with a wrong shape.
+	// Host caller proofs and optional plugin proofs share exact-process cleanup.
+	// Their registries and authority stay separate, including with Plugins off.
 	let pluginRunToken: string | undefined;
 	let pluginRunProofFile: string | undefined;
+	let callerRunProof: PluginToolRunProofFile | undefined;
+	let spawnReturned = false;
 	const exitListener: { current?: (sessionId: string) => void } = {};
-	const cleanupPluginRunProof = (): void => {
+	const cleanupRunProofs = (): void => {
+		const callerProof = callerRunProof;
+		callerRunProof = undefined;
+		signal.removeEventListener('abort', cleanupRunProofs);
 		const token = pluginRunToken;
 		const file = pluginRunProofFile;
 		pluginRunToken = undefined;
 		pluginRunProofFile = undefined;
 		if (exitListener.current) processManager.off('exit', exitListener.current);
 		if (token) pluginToolRunIdentity.revoke(token);
+		callerProof?.dispose();
 		if (file) {
 			try {
 				removePluginRunProofFile(file);
@@ -599,7 +783,50 @@ async function handleProcessSpawnImpl(
 			}
 		}
 	};
-	proofCleanup.release = cleanupPluginRunProof;
+	proofCleanup.release = cleanupRunProofs;
+	// Clear inherited/configured delivery paths. Only this host may issue one,
+	// and an SSH process cannot use a local private file or localhost bridge.
+	effectiveCustomEnvVars = { ...effectiveCustomEnvVars, [CALLER_RUN_PROOF_FILE_ENV_VAR]: '' };
+	const callerTabId = config.tabId ?? config.sessionId.match(REGEX_AI_TAB_ID)?.[1];
+	const callerAgentExists = () =>
+		(deps.sessionsStore.get('sessions', []) as Array<{ id?: string }>).some(
+			(session) => session?.id === baseSessionId
+		);
+	if (
+		config.toolType !== 'terminal' &&
+		!isSshEnabled &&
+		callerTabId &&
+		config.sessionId === `${baseSessionId}-ai-${callerTabId}` &&
+		callerAgentExists()
+	) {
+		try {
+			callerRunProof = hostCallerRuns.issue(
+				{ agentId: baseSessionId, tabId: callerTabId, spawnGeneration: callerSpawnGeneration },
+				{
+					signal,
+					unattended: config.querySource !== 'user',
+					assertActive: () => {
+						if (
+							!callerAgentExists() ||
+							(spawnReturned &&
+								(!callerProcess || processManager.get(config.sessionId) !== callerProcess))
+						)
+							throw new Error('CallerRunUnavailable');
+					},
+				},
+				app.getPath('userData')
+			);
+			effectiveCustomEnvVars[CALLER_RUN_PROOF_FILE_ENV_VAR] = callerRunProof.runTokenFile;
+			signal.addEventListener('abort', cleanupRunProofs, { once: true });
+		} catch (error) {
+			if (!(error instanceof PluginAuthorityError)) throw error;
+			// Unsupported private storage leaves a normal human turn unverified
+			// for admission. Never substitute env IDs or expose a raw path/error.
+			logger.warn('Caller run identity unavailable', LOG_CONTEXT);
+		}
+	}
+	// MCP plugin tools remain gated separately. Only verified local provider
+	// configs can reach the localhost bridge; SSH and maestro-p are skipped.
 	const mcpCap = MCP_CONFIG_BY_AGENT[config.toolType];
 	if (
 		mcpCap?.verified &&
@@ -616,11 +843,16 @@ async function handleProcessSpawnImpl(
 			(session) => session?.id === baseSessionId
 		);
 		if (mcpTools.length > 0 && storedAgent) {
-			pluginRunToken = pluginToolRunIdentity.issue(baseSessionId);
+			pluginRunToken = pluginToolRunIdentity.issue(
+				baseSessionId,
+				undefined,
+				undefined,
+				config.querySource !== 'user'
+			);
 			try {
 				pluginRunProofFile = createPluginRunProofFile(pluginRunToken);
 			} catch (error) {
-				cleanupPluginRunProof();
+				cleanupRunProofs();
 				throw error;
 			}
 			const mcpSpec = {
@@ -689,7 +921,12 @@ async function handleProcessSpawnImpl(
 	// or the interactive (maestro-p/TUI) path, which renders its own
 	// native prompts.
 	// ========================================================================
-	if (isClaudeCode && claudeResolvedMode === 'api' && config.permissionMode === 'standard') {
+	if (
+		harnessControlMode !== 'native' &&
+		isClaudeCode &&
+		claudeResolvedMode === 'api' &&
+		config.permissionMode === 'standard'
+	) {
 		if (isSshEnabled) {
 			// Fail loud: never silently downgrade to full/unsafe over SSH.
 			// The relay socket is local-only, so it cannot mediate a remote
@@ -705,9 +942,10 @@ async function handleProcessSpawnImpl(
 				'Standard permission mode is not available for Claude Code over SSH. ' +
 					'Switch this agent to Full Access or Read-Only, or disable SSH.'
 			);
-			cleanupPluginRunProof();
+			cleanupRunProofs();
 			return { success: false, pid: 0 };
 		}
+		signal.throwIfAborted();
 		try {
 			const relayArgs = await preparePermissionRelayArgs({
 				sessionId: config.sessionId,
@@ -729,11 +967,41 @@ async function handleProcessSpawnImpl(
 				'Could not start the permission relay for Standard mode. ' +
 					'Switch to Full Access or Read-Only to continue.'
 			);
-			cleanupPluginRunProof();
+			cleanupRunProofs();
 			return { success: false, pid: 0 };
 		}
 	}
 
+	const standardApprovalChannel = hasStandardApprovalChannel({
+		toolType: config.toolType,
+		harnessControlMode,
+		codexTransport,
+		opencodeServer: encoreFeatures?.opencodeServer === true,
+		hasPrompt: !!config.prompt,
+		sshEnabled: isSshEnabled,
+		hasImages: (config.images?.length ?? 0) > 0,
+	});
+	if (config.permissionMode === 'standard' && !standardApprovalChannel) {
+		reportSpawnRefusal(
+			deps,
+			config.sessionId,
+			'Standard permission mode needs a native approval channel. Select Native ACP or switch to Full Access or Read-Only.'
+		);
+		cleanupRunProofs();
+		return { success: false, pid: 0 };
+	}
+
+	if (harnessControlMode === 'native' && isSshEnabled) {
+		reportSpawnRefusal(
+			deps,
+			config.sessionId,
+			'Native ACP control is currently local-only. Disable SSH or select the current transport.'
+		);
+		cleanupRunProofs();
+		return { success: false, pid: 0 };
+	}
+
+	signal.throwIfAborted();
 	// ========================================================================
 	// System prompt delivery (flag / Windows temp file / embed / resume skip).
 	// The rules live in applySystemPromptDelivery so Cue and Group Chat spawns
@@ -750,6 +1018,7 @@ async function handleProcessSpawnImpl(
 		agentId: agent?.id,
 		logContext: LOG_CONTEXT,
 	});
+	signal.throwIfAborted();
 	finalArgs = delivered.args;
 	let effectivePrompt = delivered.prompt;
 	const systemPromptTempFile = delivered.tempFile;
@@ -868,6 +1137,7 @@ async function handleProcessSpawnImpl(
 		hasPrompt: !!config.prompt,
 	});
 
+	signal.throwIfAborted();
 	// Get contextWindow: session-level override takes priority over agent-level config
 	// Falls back to the agent's configOptions default (e.g., 400000 for Codex, 128000 for OpenCode)
 	const contextWindow = getContextWindowValue(
@@ -900,15 +1170,18 @@ async function handleProcessSpawnImpl(
 		commandToSpawn,
 		argsToSpawn,
 		customEnvVarsToPass,
+		harnessControlMode,
 	});
 	({ commandToSpawn, argsToSpawn, customEnvVarsToPass } = interactiveSpawn);
 	const interactiveClaudeBinPath = interactiveSpawn.claudeBinPath;
 
-	persistClaudeInteractiveMode(config, claudeContext, {
-		sessionsStore: deps.sessionsStore,
-		safeSend,
-		getMainWindow,
-	});
+	if (harnessControlMode !== 'native') {
+		persistClaudeInteractiveMode(config, claudeContext, {
+			sessionsStore: deps.sessionsStore,
+			safeSend,
+			getMainWindow,
+		});
+	}
 
 	if (config.sessionCustomPath) {
 		logger.debug(`Using session-level custom path for ${config.toolType}`, LOG_CONTEXT, {
@@ -976,6 +1249,7 @@ async function handleProcessSpawnImpl(
 		settingsStore,
 		codexTransport,
 	});
+	signal.throwIfAborted();
 	const sshStdinScript = sshWrap.sshStdinScript;
 	const sshRemoteCommand = sshWrap.sshRemoteCommand;
 	commandToSpawn = sshWrap.commandToSpawn;
@@ -1067,10 +1341,12 @@ async function handleProcessSpawnImpl(
 			const relativeDetection = localSpawnBinaryPath
 				? await checkCustomPath(localSpawnBinaryPath)
 				: undefined;
+			signal.throwIfAborted();
 			if (relativeDetection?.exists && relativeDetection.path) {
 				ompPrimeBinaryPath = relativeDetection.path;
 			} else {
 				const probed = await checkBinaryExists(agent?.binaryName || localSpawnBinaryPath || 'omp');
+				signal.throwIfAborted();
 				if (probed.exists && probed.path && path.isAbsolute(probed.path)) {
 					ompPrimeBinaryPath = probed.path;
 				}
@@ -1116,6 +1392,7 @@ async function handleProcessSpawnImpl(
 				prime.then(() => false),
 				new Promise<boolean>((resolve) => setTimeout(() => resolve(true), OMP_PRIME_SPAWN_CAP_MS)),
 			]);
+			signal.throwIfAborted();
 			if (primeExceededCap) {
 				// Makes the cold-start theory checkable in the packaged app's log:
 				// the first turn will show the fallback window until the prime lands.
@@ -1131,10 +1408,10 @@ async function handleProcessSpawnImpl(
 	}
 
 	exitListener.current = (sessionId: string): void => {
-		if (sessionId !== config.sessionId || !pluginRunToken) return;
-		cleanupPluginRunProof();
+		if (sessionId !== config.sessionId) return;
+		cleanupRunProofs();
 	};
-	if (pluginRunToken && exitListener.current) processManager.on('exit', exitListener.current);
+	if (pluginRunToken || callerRunProof) processManager.on('exit', exitListener.current);
 	// ========================================================================
 	// Prompt delivery: argv vs stdin, decided HERE by the host, never by the
 	// caller, and from the FINAL prompt (system prompt and preambles folded in).
@@ -1166,7 +1443,7 @@ async function handleProcessSpawnImpl(
 	// spawn resumes. Two writers on one session fail the turn on Codex and
 	// interleave the transcript on Claude, so wait it out (see the helper).
 	if (agentSessionId) {
-		const gate = await awaitSynopsisWriters(processManager, agentSessionId);
+		const gate = await awaitSynopsisWriters(processManager, agentSessionId, { signal });
 		if (gate.waitedFor.length > 0) {
 			logger.info('Spawn waited for a synopsis writing the same provider session', LOG_CONTEXT, {
 				sessionId: config.sessionId,
@@ -1178,6 +1455,11 @@ async function handleProcessSpawnImpl(
 		}
 	}
 
+	if (signal.aborted) throw new Error('Agent run cancelled');
+	deps.assertQueueOwner?.();
+	admissionGuard();
+	// Exceptions after entering native spawn are uncertain; retain the fence.
+	proofCleanup.notStarted = false;
 	// Admitted for the actor resolved above (before the launch plan) before any
 	// branch: a managed host spawns nothing without an admission, a standalone
 	// host spawns as before. The ticket was spent there; strip it so the
@@ -1200,6 +1482,8 @@ async function handleProcessSpawnImpl(
 			// The launch plan's permission decision (MRC2-03-03A), host-authoritative:
 			// the sinks that map access flags read it, never the renderer's word.
 			permission: launchPermission,
+			// Native capture must see the resolved resume identity, including argument-based resumes.
+			agentSessionId,
 			command: commandToSpawn,
 			args: argsToSpawn,
 			// When using SSH, use user's home directory as local cwd
@@ -1211,6 +1495,7 @@ async function handleProcessSpawnImpl(
 			// For SSH, prompt is included in the stdin script, not passed separately
 			// For local execution, pass prompt (with system prompt embedded for non-append-system-prompt agents)
 			prompt: sshRemoteUsed ? undefined : effectivePrompt,
+			appendSystemPrompt: config.appendSystemPrompt,
 			// Host-authoritative (see above): overrides whatever the caller sent.
 			sendPromptViaStdin,
 			sendPromptViaStdinRaw,
@@ -1224,7 +1509,20 @@ async function handleProcessSpawnImpl(
 			customEnvVars: customEnvVarsToPass,
 			imageArgs: agent?.imageArgs, // Function to build image CLI args (for Codex, OpenCode)
 			imagePromptBuilder: agent?.imagePromptBuilder, // Function to embed image refs into prompts (for Copilot)
+			harnessControlMode,
+			nativeAcpArgs,
+			nativeRpcProtocol: nativeRpcProtocolId,
+			nativeRpcArgs,
+			effort: config.sessionCustomEffort,
+			...(harnessControlMode === 'native'
+				? {
+						modelId: configResolution.modelId ?? config.modelId,
+						effort: configResolution.effort ?? config.sessionCustomEffort,
+						permissionMode: effectivePermissionMode,
+					}
+				: {}),
 			promptArgs: agent?.promptArgs, // Function to build prompt args (e.g., ['-p', prompt] for OpenCode)
+			promptFileArgs: agent?.promptFileArgs, // Prompt-in-a-file delivery for CLIs that accept it (omp @path)
 			noPromptSeparator: agent?.noPromptSeparator, // Some agents don't support '--' before prompt
 			// Stats tracking: use cwd as projectPath if not explicitly provided
 			projectPath: config.cwd,
@@ -1246,7 +1544,38 @@ async function handleProcessSpawnImpl(
 		},
 		actor
 	);
-	if (!result.success && pluginRunToken) exitListener.current?.(config.sessionId);
+	proofCleanup.notStarted = !result.success;
+	const pianolaRunId = result.success
+		? pianolaNewTabSpawns.started(
+				config.sessionId,
+				undefined,
+				config.pianolaDispatchId,
+				config.pianolaQueueItemId
+			)
+		: undefined;
+	const callerProcess = processManager.get(config.sessionId);
+	spawnReturned = true;
+	if (!result.success) exitListener.current?.(config.sessionId);
+	if (
+		result.success &&
+		harnessControlMode === 'native' &&
+		config.toolType === 'claude-code' &&
+		processManager.getHarnessControlCapabilities(config.sessionId)
+	) {
+		persistClaudeInteractiveMode(
+			config,
+			{
+				...claudeContext,
+				isClaudeCode: true,
+				claudeResolvedMode: 'api',
+				claudeResolvedReason: 'auto',
+				resolvedConfigDirKey:
+					claudeContext.resolvedConfigDirKey ??
+					resolveConfigDirKey(mergeClaudeSpawnEnvLayers(claudeEnvLayers)),
+			},
+			{ sessionsStore: deps.sessionsStore, safeSend, getMainWindow }
+		);
+	}
 	if (result.success) proofCleanup.release = undefined;
 
 	// The prime outran the spawn cap, so the process started without a usable
@@ -1302,6 +1631,7 @@ async function handleProcessSpawnImpl(
 		// the user's custom vars or be inherited from whatever launched Maestro.
 		const probeEnv = buildChildProcessEnv(customEnvVarsToPass, false, globalShellEnvVars);
 		delete probeEnv.MAESTRO_CLAUDE_BIN;
+		delete probeEnv[CALLER_RUN_PROOF_FILE_ENV_VAR];
 		// On a managed host the probe is admitted before it starts (MRC2-03-04A):
 		// the port and the actor are resolved here, at the boundary that handles
 		// this request, and the probe asks for `--dangerously-skip-permissions`,
@@ -1330,6 +1660,7 @@ async function handleProcessSpawnImpl(
 		resolvedMaestroPBinPath &&
 		resolvedConfigDirKey &&
 		deps.interactiveReplayController &&
+		harnessControlMode !== 'native' &&
 		agent
 	) {
 		const replayPrompt = config.prompt ?? '';
@@ -1397,6 +1728,9 @@ async function handleProcessSpawnImpl(
 				const replayEnv = originalCustomEnvVars ? { ...originalCustomEnvVars } : undefined;
 				if (replayEnv) {
 					delete replayEnv.MAESTRO_CLAUDE_BIN;
+					// This replay bypasses handleProcessSpawn. It cannot inherit the
+					// completed generation's authority; admission must see it as unmanaged.
+					delete replayEnv[CALLER_RUN_PROOF_FILE_ENV_VAR];
 				}
 
 				const apiCommand = originalAgent.apiCommand ?? 'claude';
@@ -1463,6 +1797,7 @@ async function handleProcessSpawnImpl(
 	return {
 		...result,
 		...(admission ? { managedRun: managedRunViewOf(admission) } : {}),
+		...(config.pianolaQueueItemId ? { pianolaRunId } : {}),
 		sshRemote: sshRemoteUsed
 			? {
 					id: sshRemoteUsed.id,

@@ -259,6 +259,7 @@ import { useSettingsStore } from './stores/settingsStore';
 import { filterLiveAgents } from '../shared/agentVisibility';
 import { useTabStore } from './stores/tabStore';
 import { useFileExplorerStore } from './stores/fileExplorerStore';
+import { usePeerMirrorBridge } from './hooks/federation/usePeerMirrorBridge';
 
 /** Coordinates the desktop workspace, shared listeners, and app-level surfaces. */
 function MaestroConsoleInner() {
@@ -1089,7 +1090,7 @@ function MaestroConsoleInner() {
 	// subsystem so it pauses background work when the window is hidden. Silent
 	// while the Cue Encore Feature is off.
 	useCueVisibilityWiring(encoreFeatures.maestroCue);
-	// Adds the agents a bundle import brings (Bundles tab or `maestro-cli bundle import`).
+	// Adds the agents a bundle import brings (Import Agent modal or `maestro-cli bundle import`).
 	useCueBundleAgentSync();
 
 	// --- TAB HANDLERS (extracted hook) ---
@@ -2090,7 +2091,8 @@ function MaestroConsoleInner() {
 			if (currentSession.id !== activeSessionIdRef.current || currentTab?.id !== targetTabId)
 				return;
 
-			processInput();
+			// Context transfer/merge may originate from an agent or CLI request.
+			processInput(undefined, { querySource: 'auto' });
 		}, 100);
 
 		return () => clearTimeout(timeoutId);
@@ -2221,6 +2223,9 @@ function MaestroConsoleInner() {
 	// Keeps the native File/View menus showing the user's real accelerators, and
 	// replays menu clicks as keystrokes through the handler above.
 	useAppMenuBridge();
+
+	// Federation: follow the main-process peer mirror (memory only; nothing while the feature is off).
+	usePeerMirrorBridge();
 
 	// Persist sessions to electron-store using debounced persistence (reduces disk writes from 100+/sec to <1/sec during streaming)
 	// The hook handles: debouncing, flush-on-unmount, flush-on-visibility-change, flush-on-beforeunload

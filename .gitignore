@@ -77,3 +77,8 @@ src/main/lite/discovery-pairing-prototype/
 # Mega-Maestro contracts imported by scripts/import-mega-maestro.mjs (the pin beside them is committed)
 vendor/mega-maestro/contracts/
 vendor/mega-maestro/.import-*/
+
+# Local scratch files and Python test caches
+.tmp-*
+__pycache__/
+.pytest_cache/

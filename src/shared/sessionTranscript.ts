@@ -1,4 +1,20 @@
+/** Creation evidence lives only in the creating process, never in a disk window.
+ * Keying by the initial log array survives immutable tab spreads, but not hydration. */
+const newEmptyLogs = new WeakSet<object>();
+export function newEmptyTranscript<T>(): T[] {
+	const logs: T[] = [];
+	newEmptyLogs.add(logs);
+	return logs;
+}
+export function consumeEmptyTranscriptCreation(logs: object): boolean {
+	const created = newEmptyLogs.has(logs);
+	newEmptyLogs.delete(logs);
+	return created;
+}
+
 export interface SessionTranscriptPatch<T extends { id: string } = { id: string }> {
+	/** Native observation metadata; omitted by older renderers and browser clients. */
+	observation?: import('./currentTurn').TranscriptObservation;
 	sessionId: string;
 	tabId?: string;
 	field: 'logs' | 'aiLogs' | 'shellLogs';
@@ -9,6 +25,8 @@ export interface SessionTranscriptPatch<T extends { id: string } = { id: string 
 	snapshot?: boolean;
 	runtime?: Record<string, unknown>;
 	clearRuntimeFields?: string[];
+	/** Private owner inventory, including tabs not yet flushed to disk. Never a live delta. */
+	tabInventory?: Array<{ id: string; clearRuntimeFields?: string[]; [field: string]: unknown }>;
 }
 
 /** Private runtime hydration accompanies logs without duplicating their payload. */

@@ -163,6 +163,8 @@ export type CrossAgentSendRequest = Omit<CrossAgentRequest, 'requestId' | 'creat
 	 * the consult process. A typed `@mention` carries none.
 	 */
 	dispatchTicket?: string;
+	/** Locator only. Native queue release and owning renderer are verified by the host. */
+	managedQueue?: { dispatchId: string; generation: string; handoff?: boolean };
 };
 
 /**
@@ -209,4 +211,12 @@ export interface CrossAgentResponseChunk {
 	 * which blames the target for something the user did.
 	 */
 	canceled?: boolean;
+}
+
+/** Native aggregate progress for one accepted managed queue intent.
+ * Step IDs and recipients are transport locators; only live host releases authorize them. */
+export interface ManagedQueueRoutingProgress {
+	failed: boolean;
+	continuationStepId?: string;
+	handoff?: { generation: string; targetSessionIds: string[] };
 }

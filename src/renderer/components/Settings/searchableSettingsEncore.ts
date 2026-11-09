@@ -307,6 +307,28 @@ export const ENCORE_SETTINGS: SearchableSetting[] = [
 		],
 	},
 	{
+		id: 'encore-pianola-auto-fix',
+		tab: 'encore',
+		tabLabel: 'Plugins',
+		label: 'Automatic repairs',
+		description:
+			'Pianola supervision and bounded automatic repairs. Merge requires separate approval and is unavailable automatically.',
+		keywords: [
+			'pianola',
+			'autopilot',
+			'repair',
+			'automatic repairs',
+			'current mode disabled allow up to three repair attempts for orchestrated tasks that need review',
+			'repair workers can change files within their existing access',
+			'enabling including its autopilot cli alias does not change this permission',
+			'merging requires separate approval automatic merge is unavailable',
+			'supervision',
+			'merge',
+			'approval',
+		],
+		requiresEncore: 'pianola',
+	},
+	{
 		id: 'encore-concerto',
 		tab: 'encore',
 		tabLabel: 'Plugins',
@@ -576,6 +598,24 @@ export const ENCORE_SETTINGS: SearchableSetting[] = [
 		label: 'Trusted Vaults',
 		description: 'Vault folders whose DataviewJS scripts run without asking',
 		keywords: ['trusted vaults', 'trust', 'untrust', 'vault roots', 'dataviewjs', 'allow scripts'],
+	},
+	{
+		id: 'encore-federation',
+		tab: 'encore',
+		tabLabel: 'Plugins',
+		label: 'Federation',
+		description:
+			'Reach a maestro-cli host on an SSH remote and drive the agents it runs, so work continues after this machine sleeps',
+		keywords: [
+			'federation',
+			'remote host',
+			'host',
+			'ssh',
+			'peer',
+			'headless',
+			'server',
+			'remote agents',
+		],
 	},
 	{
 		id: 'encore-plugins',

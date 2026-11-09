@@ -163,8 +163,14 @@ import { MANAGED_CONTRACT_VERSION } from './managed/types';
  * (`./launch/interactive-mode`, `./turns/run-agent-turn`), `TurnNotStartedError` (`./run/start-turn`: a spawn
  * that throws before the process exists), `providerTranslationTabInventory` on `ProviderSwitchAgent`, and
  * `MAX_CLOSED_TAB_ARCHIVE` now follows the shared closed-tab history cap. Additions only; nothing is removed.
+ * 0.37.0: the second upstream/rc merge (MCOMP-33-00, upstream `919d28a66`, which numbered its own bumps 0.4.0
+ * to 0.6.0 from the shared 0.3.0) adds to the surface: `cmdShellArgsRefusal` (`./launch/windows-command`: checks
+ * a whole cmd.exe argument list and names the first bad argument by flag or position without quoting its value;
+ * a lone `%` now passes, only a `%NAME%` pair, `^` or a line break is refused) and the desktop current-turn
+ * observation types `CurrentTurnCursor`, `CurrentTurnMessage` and `CurrentTurnRead` (`../currentTurn`).
+ * Additions only; nothing is removed and no managed rule changes.
  */
-export const MAESTRO_LIB_VERSION = '0.36.0';
+export const MAESTRO_LIB_VERSION = '0.37.0';
 
 /** The Node range the built library runs on; `engines.node` of the built package. */
 export const MAESTRO_LIB_NODE_RANGE = '>=20';

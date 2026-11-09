@@ -34,7 +34,11 @@ import { notifyToast } from '../stores/notificationStore';
 import { notifyCenterFlash } from '../stores/centerFlashStore';
 import { resolveQueuedItemTarget } from '../utils/tabHelpers';
 import { generateId } from '../utils/ids';
-import { describeSteerBlocked, getSteerEligibility } from '../utils/executionQueue';
+import {
+	describeSteerBlocked,
+	getSteerEligibility,
+	recoverQueuedItem,
+} from '../utils/executionQueue';
 
 /**
  * Steers whose socket answer has not come back yet, keyed `sessionId:itemId`. The
@@ -165,7 +169,7 @@ export function returnPendingSteersToQueue(
 			next = mapTabLogs(next, p.tabId, (logs) => logs.filter((l) => l.id !== p.logEntryId));
 		}
 		if (!next.executionQueue.some((i) => i.id === p.item.id)) {
-			restored.push({ ...p.item, paused: paused || undefined });
+			restored.push(recoverQueuedItem({ ...p.item, paused: paused || undefined }));
 		}
 	}
 	return { ...next, executionQueue: [...restored, ...next.executionQueue] };
@@ -405,8 +409,8 @@ export function requestSteerSend(): void {
 
 /**
  * Say why a steer nobody clicked a button for did nothing. The Steer button is
- * hidden for every blocked reason, so it never needs this; a chord has no control
- * to hide and would otherwise look dead.
+ * hidden or dimmed with its reason as a tooltip, so it never needs this; a chord
+ * has no control to hide and would otherwise look dead.
  */
 function notifySteerBlocked(sessionId: string, tabId: string | undefined, reason?: string): void {
 	// A message with a steer already in flight is parked, not queued.

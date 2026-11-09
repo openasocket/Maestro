@@ -33,6 +33,9 @@ import {
 	isTerminalAgentRunStatus,
 	resolveAgentRunProvider,
 	deriveTerminalStatus,
+	redactPrompt,
+	redactAnswerTail,
+	redactSecrets,
 	type AgentRun,
 	type AgentRunEvent,
 	type AgentRunStatus,
@@ -53,7 +56,14 @@ import {
 } from '../../shared/maestro-lib/managed/events';
 import type { ManagedRunState } from '../../shared/maestro-lib/managed/types';
 import { resolveOwningMaestroSessionId } from '../coworking/coworking-session-id';
-import type { ProcessConfig, ProcessSpawnAdmission } from '../process-manager/types';
+import type {
+	ProcessConfig,
+	ProcessSpawnAdmission,
+	TurnSettlement,
+} from '../process-manager/types';
+import { nativeTabSession, type NativeTabSession } from '../pianola/pianola-queue-session';
+import type { AgentError } from '../../shared/types';
+import { canonicalJson } from '../../shared/canonicalJson';
 
 const GROUP_CHAT_PREFIX = 'group-chat-';
 
@@ -62,6 +72,9 @@ const MAX_LIVE_BINDINGS = 2_000;
 
 /** Minimal shape of a spawn we capture, projected from ProcessConfig. */
 export interface CaptureSpawnInput {
+	transcriptBoundaryId?: string;
+	nativeTabSession?: NativeTabSession;
+	agentSessionId?: string;
 	sessionId: string;
 	toolType: string;
 	cwd: string;
@@ -84,12 +97,17 @@ export interface CaptureSpawnInput {
 export interface CaptureExitInput {
 	sessionId: string;
 	exitCode: number;
+	signal?: number;
+	settlement?: TurnSettlement;
 }
 
 /** Everything the service touches that is not pure. Injected for testability. */
 export interface CaptureServiceDeps {
+	resolveNativeTabSession?: (input: CaptureSpawnInput) => NativeTabSession | undefined;
 	getAgentRun: (runId: string) => AgentRun | undefined;
-	upsertAgentRun: (run: AgentRun) => AgentRun;
+	/** Persist the run first, then pass ephemeral redacted output to native observers.
+	 * The output must never be merged into the run ledger or a wire payload. */
+	upsertAgentRun: (run: AgentRun, terminalOutput?: string) => AgentRun;
 	appendAgentRunEvent: (event: AgentRunEvent) => AgentRunEvent;
 	/** Find the live (non-terminal) run for a session, if any. */
 	findActiveRunBySession: (sessionId: string) => AgentRun | undefined;
@@ -256,6 +274,7 @@ export class AgentRunCaptureService {
 			}
 
 			const prepared = (this.deps.preparePrompt ?? ((p) => p))(input.prompt);
+			const nativeIdentity = this.deps.resolveNativeTabSession?.(input) ?? input.nativeTabSession;
 			const run: AgentRun = {
 				id: runId,
 				createdAt: ts,
@@ -266,7 +285,7 @@ export class AgentRunCaptureService {
 				agentId: input.agentId,
 				agentName: input.agentName,
 				sessionId: input.sessionId,
-				tabId: input.tabId,
+				tabId: nativeIdentity?.tabId ?? input.tabId,
 				cwd: input.cwd,
 				repo: input.repo,
 				worktreePath: input.worktreePath,
@@ -274,6 +293,16 @@ export class AgentRunCaptureService {
 				baseBranch: input.baseBranch,
 				prompt: prepared,
 				source: input.source,
+				...(nativeIdentity
+					? {
+							metadata: {
+								nativeTabSession: nativeIdentity,
+								...(input.transcriptBoundaryId && {
+									transcriptBoundaryId: input.transcriptBoundaryId,
+								}),
+							},
+						}
+					: {}),
 				artifacts: [],
 				touchedFiles: [],
 				checks: [],
@@ -286,6 +315,56 @@ export class AgentRunCaptureService {
 		} catch (error) {
 			this.report('error', `captureSpawn failed for ${input.sessionId}`, error);
 			return undefined;
+		}
+	}
+
+	/** The native session announcement belongs only to this live capture. */
+	captureSessionAnnouncement(sessionId: string, announcedSessionId: string): void {
+		try {
+			const run = this.deps.findActiveRunBySession(sessionId);
+			const identity = run && nativeTabSession(run);
+			if (!run || !identity || !announcedSessionId) return;
+			this.deps.upsertAgentRun({
+				...run,
+				metadata: {
+					...run.metadata,
+					nativeTabSession: {
+						...identity,
+						announcedSessionId,
+						...((identity.announcedSessionId &&
+							identity.announcedSessionId !== announcedSessionId) ||
+						(identity.initialSessionId && identity.initialSessionId !== announcedSessionId)
+							? { conflicted: true }
+							: {}),
+					},
+				},
+			});
+		} catch (error) {
+			this.report('error', `captureSessionAnnouncement failed for ${sessionId}`, error);
+		}
+	}
+
+	/** Retain a structured provider failure without copying raw provider payloads. */
+	captureError(sessionId: string, error: AgentError): void {
+		try {
+			if (!isCapturable(sessionId)) return;
+			const run = this.deps.findActiveRunBySession(sessionId);
+			if (!run || isTerminalAgentRunStatus(run.status)) return;
+			this.deps.upsertAgentRun({
+				...run,
+				updatedAt: this.now(),
+				metadata: {
+					...run.metadata,
+					agentError: {
+						type: error.type,
+						message: redactPrompt(error.message),
+						recoverable: error.recoverable,
+						timestamp: error.timestamp,
+					},
+				},
+			});
+		} catch (error) {
+			this.report('error', `captureError failed for ${sessionId}`, error);
 		}
 	}
 
@@ -321,24 +400,57 @@ export class AgentRunCaptureService {
 			// Merge enrichment first so review findings are visible, THEN derive the
 			// terminal status: an exit-0 run with open critical/high findings settles
 			// to needs_review, not completed (ISC-8.4/5.8).
-			const merged: AgentRun = { ...existing, ...enrichment };
-			const target = deriveTerminalStatus(merged, input.exitCode);
-			assertTransition(existing.status, target);
+			const current = this.deps.getAgentRun(runId);
+			if (!current || isTerminalAgentRunStatus(current.status)) return undefined;
+			// An enrich hook can wait on git/network while checks, review findings,
+			// or a provider error arrive. Apply only fields unchanged since it began;
+			// never resurrect a superseded run or overwrite those newer facts.
+			const merged: AgentRun = { ...current };
+			for (const key of Object.keys(enrichment) as (keyof AgentRun)[]) {
+				if (
+					['id', 'status', 'createdAt', 'updatedAt', 'sessionId', 'tabId', 'metadata'].includes(key)
+				)
+					continue;
+				if (canonicalJson({ value: existing[key] }) === canonicalJson({ value: current[key] })) {
+					Object.assign(merged, { [key]: enrichment[key] });
+				}
+			}
+			const outcome = input.settlement?.outcome;
+			const target =
+				outcome === 'interrupted'
+					? 'cancelled'
+					: outcome === 'crashed' || input.signal || current.metadata?.agentError
+						? 'failed'
+						: deriveTerminalStatus(merged, input.exitCode);
+			assertTransition(current.status, target);
 
 			const durationMs = Math.max(0, ts - existing.createdAt);
+			const { nativeAnswer, ...settlement } = input.settlement ?? {};
 			const next: AgentRun = {
 				...merged,
 				status: target,
 				updatedAt: ts,
 				metadata: {
-					...(existing.metadata ?? {}),
 					...(enrichment.metadata ?? {}),
+					...(current.metadata ?? {}),
 					exitCode: input.exitCode,
+					...(input.signal ? { signal: input.signal } : {}),
+					...settlement,
+					...(input.settlement?.answerTail
+						? { answerTail: redactAnswerTail(input.settlement.answerTail) }
+						: {}),
 					durationMs,
 					completedAt: ts,
 				},
 			};
-			const saved = this.deps.upsertAgentRun(next);
+			const saved = this.deps.upsertAgentRun(
+				next,
+				nativeAnswer !== undefined
+					? redactSecrets(nativeAnswer)
+					: input.settlement?.answerTail === undefined
+						? undefined
+						: redactSecrets(input.settlement.answerTail)
+			);
 			this.emit(runId, 'status_change', ts, target, `run ${target} (exit ${input.exitCode})`);
 			const bound = this.live.get(input.sessionId);
 			if (bound?.runId === runId) this.live.delete(input.sessionId);

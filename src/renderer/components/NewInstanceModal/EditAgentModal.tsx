@@ -47,6 +47,7 @@ import type { CodexTransport } from '../../../shared/codexTransport';
 import { ManagedChoicesNotice } from './NewInstanceModal';
 import { useManagedAgentOptions } from '../../hooks/enterprise/useManagedAgentOptions';
 import { AgentCommitRefusedError, type AgentCommitRefusal } from '../../services/agentCommit';
+import type { HarnessControlMode } from '../../../shared/maestro-lib/providers/native-control';
 
 /**
  * EditAgentModal - Modal for editing an existing agent's settings
@@ -103,6 +104,7 @@ export function EditAgentModal({
 	const [codexAutoReset, setCodexAutoReset] = useState(false);
 	// Codex transport. `exec` is the default; app-server is an experimental opt-in.
 	const [codexTransport, setCodexTransport] = useState<CodexTransport>('exec');
+	const [harnessControlMode, setHarnessControlMode] = useState<HarnessControlMode>('current');
 	const [editDynamicOptions, setEditDynamicOptions] = useState<Record<string, string[]>>({});
 	const [editLoadingDynamicOptions, setEditLoadingDynamicOptions] = useState(false);
 	const [refreshingAgent, setRefreshingAgent] = useState(false);
@@ -424,6 +426,7 @@ export function EditAgentModal({
 		// for a non-Codex agent, and saving it back would erase the preference
 		// of an agent that was moved off Codex and may move back.
 		setCodexTransport(session.codexTransport === 'app-server' ? 'app-server' : 'exec');
+		setHarnessControlMode(session.harnessControlMode === 'native' ? 'native' : 'current');
 
 		return () => {
 			stale = true;
@@ -686,16 +689,17 @@ export function EditAgentModal({
 				codexAutoReset,
 				codexTransport,
 			];
+			if (harnessControlMode === 'native') saveArguments[23] = 'native';
 			if (converting) {
 				// Limitations are shown as a notice; opting in and saving accepts them.
-				saveArguments[23] = true;
-				saveArguments[24] = selectedUserResources.map((p) => p.trim()).filter(Boolean);
-				saveArguments[25] = migrationPlan?.id;
-				saveArguments[26] = true;
+				saveArguments[24] = true;
+				saveArguments[25] = selectedUserResources.map((p) => p.trim()).filter(Boolean);
+				saveArguments[26] = migrationPlan?.id;
+				saveArguments[27] = true;
 			}
 			// The revision the approved choices on screen came from, so the host can
 			// answer `stale` for an edit built from an older policy (MCOMP-23-04A).
-			saveArguments[27] = { expectedPolicyRevision: formPolicyRevision };
+			saveArguments[28] = { expectedPolicyRevision: formPolicyRevision };
 			const saved = onSave(...saveArguments);
 			if (saved) await saved;
 			onClose();
@@ -738,6 +742,7 @@ export function EditAgentModal({
 		retryOnTokenExhaustion,
 		codexAutoReset,
 		codexTransport,
+		harnessControlMode,
 		agent,
 		agentConfig,
 		sshRemoteConfig,
@@ -1216,6 +1221,10 @@ export function EditAgentModal({
 							onEnvVarAdd={() => {
 								setCustomEnvVars((prev) => withBlankEnvVarRow(prev));
 							}}
+							onEnvVarsReplace={(vars, disabledVars) => {
+								setCustomEnvVars(vars);
+								setCustomEnvVarsDisabled(disabledVars);
+							}}
 							onEnvVarsBlur={() => {
 								/* Saved on modal save */
 							}}
@@ -1274,6 +1283,8 @@ export function EditAgentModal({
 							onCodexAutoResetChange={setCodexAutoReset}
 							codexTransport={codexTransport}
 							onCodexTransportChange={setCodexTransport}
+							harnessControlMode={harnessControlMode}
+							onHarnessControlModeChange={setHarnessControlMode}
 						/>
 					</div>
 				)}

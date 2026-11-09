@@ -41,6 +41,8 @@ import {
 	throughputGaugeToggle,
 } from './commands/throughput-gauge';
 import { sessionList, sessionShow } from './commands/session';
+import { journey } from './commands/journey';
+import { timeline, timelineShow } from './commands/timeline';
 import { listSessions } from './commands/list-sessions';
 import { openFile } from './commands/open-file';
 import { imageList, imageSave } from './commands/image';
@@ -87,7 +89,10 @@ import {
 	cueEngineInspect,
 } from './commands/cue-engine';
 import { bundleExport, bundleImport, bundleInspect, bundleValidate } from './commands/bundle';
-import { hostStart, hostStatus, hostStop } from './commands/host';
+import { hostEndpoint, hostStart, hostStatus, hostStop } from './commands/host';
+import { remoteHostStart, remoteHostStatus } from './commands/remote-host';
+import { lift } from './commands/lift';
+import { federationPeers, federationReconnect } from './commands/federation';
 import { createAgent } from './commands/create-agent';
 import { duplicateAgent } from './commands/duplicate-agent';
 import { liveStatus, liveOn, liveOff, liveTunnel } from './commands/live';
@@ -97,6 +102,7 @@ import { createWorktree } from './commands/create-worktree';
 import { removeAgent } from './commands/remove-agent';
 import { updateAgent } from './commands/update-agent';
 import { listSshRemotes } from './commands/list-ssh-remotes';
+import { listModels } from './commands/list-models';
 import { listTerminals } from './commands/list-terminals';
 import { sendTerminal } from './commands/send-terminal';
 import { readTerminal, DEFAULT_TAIL_LINES } from './commands/read-terminal';
@@ -197,6 +203,11 @@ import {
 	tabShow,
 	tabClosed,
 	tabReopen,
+	tabPinsList,
+	tabPinsAdd,
+	tabPinsRemove,
+	tabPinsRename,
+	tabPinsShow,
 	tabCompact,
 	tabMerge,
 	tabTransfer,
@@ -239,18 +250,43 @@ import {
 	computerHistoryStatus,
 } from './commands/computer-history';
 import { setVerbosity } from './output/verbosity';
-import { pianolaWatch, pianolaRules, pianolaAddRule, pianolaLog } from './commands/pianola';
+import { pianolaWatchScope } from './commands/pianola-scope-watch';
+import {
+	pianolaWatch,
+	pianolaRules,
+	pianolaAddRule,
+	pianolaLog,
+	pianolaResolveDecision,
+} from './commands/pianola';
+import { pianolaMemory } from './commands/pianola-memory';
 import { pianolaLearn } from './commands/pianola-learn';
 import { pianolaProfile, pianolaSetProfile } from './commands/pianola-profile';
 import {
 	pianolaPlanSet,
+	pianolaPlanRevise,
+	pianolaPlanSkip,
 	pianolaPlanList,
 	pianolaPlanShow,
 	pianolaOrchestrate,
+	pianolaValidate,
 } from './commands/pianola-orchestrate';
+import { pianolaProgramLoop } from './commands/pianola-program-loop';
+import {
+	pianolaProgramApply,
+	pianolaProgramList,
+	pianolaProgramShow,
+	pianolaProgramStatus,
+	pianolaEscalate,
+	pianolaNeedsMe,
+	pianolaResolve,
+	pianolaDismiss,
+	pianolaBrief,
+} from './commands/pianola-portfolio';
 import {
 	pianolaSuperviseWatch,
+	pianolaSuperviseScope,
 	pianolaSuperviseOrchestrate,
+	pianolaSuperviseProgram,
 	pianolaSuperviseList,
 	pianolaSuperviseRemove,
 	pianolaSuperviseSetEnabled,
@@ -387,6 +423,19 @@ list
 	.command('agents')
 	.description('List all agents')
 	.option('-g, --group <id>', 'Filter by group ID')
+	// Federation's peer flags: left out of --help while the feature is off, refused if passed.
+	.addOption(
+		new Option(
+			'--peer <name>',
+			"List the agents on one Federation peer (an SSH remote's name)"
+		).hideHelp(!encoreFlags.federation)
+	)
+	.addOption(
+		new Option(
+			'--all-peers',
+			'List local agents, then the agents on every SSH remote opted in to Federation'
+		).hideHelp(!encoreFlags.federation)
+	)
 	.option('--json', 'Output as JSON lines (for scripting)')
 	.action(listAgents);
 
@@ -411,6 +460,16 @@ list
 	.description('List all configured SSH remotes')
 	.option('--json', 'Output as JSON lines (for scripting)')
 	.action(listSshRemotes);
+
+list
+	.command('models <provider>')
+	.description(
+		'List the models a provider offers (e.g. opencode, claude-code), as the model pickers see them'
+	)
+	.option('--refresh', 'Re-run discovery past the cache and update every open model picker')
+	.option('--ssh-remote <id>', 'Discover on this SSH remote instead of this machine')
+	.option('--json', 'Output as JSON (for scripting)')
+	.action(listModels);
 
 list
 	.command('terminals')
@@ -567,12 +626,16 @@ program
 // callers can address the same tab again without owning a persistent channel.
 program
 	.command('dispatch <agent-id> <message>')
+	.option(
+		'--dispatch-id <uuid>',
+		'For dispatch and --queue: reconcile the same dispatch after an unknown acknowledgment; never generate another send for it'
+	)
 	.description(
 		'Dispatch a prompt to an agent in the Maestro desktop app and return its tab/session ID'
 	)
 	.option(
 		'--new-tab',
-		'Create a fresh AI tab and deliver the prompt into it. The tab is hidden by default: it is named from the prompt but draws no chip until the user opens it from the completion toast or the delegation pill. A working agent cannot start a second turn, so the prompt is queued for the new tab and runs when the current turn ends (the response reports queued: true).'
+		'Create a fresh AI tab and deliver the prompt into it. The tab is hidden by default: it is named from the prompt but draws no chip until the user opens it from the completion toast or the delegation pill. It runs now, even while another tab of the agent is working.'
 	)
 	.option(
 		'--visible',
@@ -588,7 +651,7 @@ program
 	)
 	.option(
 		'-f, --force',
-		'Bypass the busy-state guard when writing to a busy tab; requires allowConcurrentSend (cannot be combined with --new-tab, which queues instead)'
+		'Write into a tab that is itself mid-turn (interleaves two answers); requires allowConcurrentSend. An idle tab of a busy agent needs no --force. Cannot be combined with --new-tab.'
 	)
 	.option(
 		'--focus',
@@ -596,7 +659,7 @@ program
 	)
 	.option(
 		'--queue',
-		'If the target tab is busy, queue the prompt into the execution queue (FIFO) instead of rejecting it; an idle target dispatches immediately. Cannot be combined with --new-tab (which already queues when the agent is busy) or --force. Returns the queue position.'
+		'If the target tab is busy, queue the prompt into the execution queue (FIFO) instead of rejecting it; an idle target tab dispatches immediately, even while another tab of the agent is working. Cannot be combined with --new-tab or --force. Returns the queue position.'
 	)
 	.option('--wait', 'Alias for --queue')
 	.option(
@@ -613,7 +676,7 @@ program
 	)
 	.option(
 		'--callback-tab <id>',
-		'Specific tab of the --notify-on-complete agent to wake (default: the calling tab when an agent notifies itself, else its active AI tab)'
+		'Specific tab of the --notify-on-complete agent to wake (default: the calling tab when an agent notifies itself, else a new tab)'
 	)
 	.option(
 		'--callback-prompt <text>',
@@ -883,6 +946,46 @@ session
 	.option('--tail <n>', 'Only return the last N messages (applied after --since)')
 	.option('--json', 'Output as JSON (for scripting); default is a formatted transcript')
 	.action(sessionShow);
+
+// Timeline - one time-ordered list of what happened around an agent, merged
+// from its history, the User Journey, git, and (when on) Computer History. The
+// first stop for "where did we leave off": the tip of the iceberg, ending with
+// the commands that read more. `timeline show` opens one turn in full.
+const timelineCommand = program
+	.command('timeline')
+	.description('Show what happened, oldest first: agent turns, user actions in Maestro, commits')
+	.option('-a, --agent <id>', 'Agent ID or name (default: every agent)')
+	.option('--since <time>', 'Start: 30m, 2h, 1d, 1w, ISO-8601, or epoch (default 1d)')
+	.option('--until <time>', 'End (default now)')
+	.option('--sources <list>', 'Comma list of sources (default history,journey,git)')
+	.option('--tail <n>', 'Only the newest N events (default 30)')
+	.option('--per-source <n>', 'Only the newest N events of each source (default 15)')
+	.option('--grep <text>', 'Only events whose line matches (regex, case-insensitive)')
+	.option('--json', 'Output as JSON (for scripting)')
+	.action(timeline);
+
+timelineCommand
+	.command('show <entry>')
+	.description('Show one agent turn in full (its reply, tab, and timing) by an [entry <id>] handle')
+	.option('-a, --agent <id>', 'Agent ID or name (default: search every agent)')
+	.option('--json', 'Output as JSON (for scripting)')
+	// `timeline` declares --agent and --json too, and commander hands a shared
+	// flag to the parent, so read both levels.
+	.action((entry: string, _options, command: Command) =>
+		timelineShow(entry, command.optsWithGlobals())
+	);
+
+// User Journey - what the USER did inside Maestro (files opened, saved, renamed,
+// pages browsed), per agent. Read-only, straight off disk; the desktop records it.
+program
+	.command('journey')
+	.description('Show what the user did in Maestro: files opened/saved/renamed, pages browsed')
+	.option('-a, --agent <id>', 'Agent ID or name (default: every agent)')
+	.option('--since <timestamp>', 'Only entries at or after this time (ISO-8601 or epoch ms/sec)')
+	.option('--tail <n>', 'Only the newest N entries per agent (applied after the other filters)')
+	.option('--kind <kinds>', 'Comma list of kinds, e.g. file.save,browser.navigate')
+	.option('--json', 'Output as JSON (for scripting)')
+	.action(journey);
 
 // Group chat commands - start and drive multi-agent group chats in the desktop app.
 // `start` is how a script hands a job to a moderator (the release commands use it);
@@ -1313,6 +1416,10 @@ cue
 	.command('list')
 	.description('List all Cue subscriptions across agents')
 	.option('--json', 'Output as JSON (for scripting)')
+	.option(
+		'--data-dir <path>',
+		'Maestro data directory to use (overrides MAESTRO_USER_DATA; must already exist)'
+	)
 	.action(cueList);
 
 // Read or change the model one subscription runs on. No setting flag = read.
@@ -1340,6 +1447,10 @@ cue
 	.description('Turn a Cue subscription on (name, or the full id from `cue list --json`)')
 	.option('-a, --agent <id>', 'Disambiguate a name several agents share')
 	.option('--json', 'Output as JSON (for scripting)')
+	.option(
+		'--data-dir <path>',
+		'Maestro data directory to use (overrides MAESTRO_USER_DATA; must already exist)'
+	)
 	.action(cueEnable);
 
 cue
@@ -1347,6 +1458,10 @@ cue
 	.description('Turn a Cue subscription off without deleting it')
 	.option('-a, --agent <id>', 'Disambiguate a name several agents share')
 	.option('--json', 'Output as JSON (for scripting)')
+	.option(
+		'--data-dir <path>',
+		'Maestro data directory to use (overrides MAESTRO_USER_DATA; must already exist)'
+	)
 	.action(cueDisable);
 
 cue
@@ -1357,7 +1472,7 @@ cue
 	.option('--json', 'Output as JSON (for scripting)')
 	.option(
 		'--data-dir <path>',
-		'Data directory to read cue.db from when the app is not running (default: MAESTRO_USER_DATA or the platform default)'
+		'Data directory whose app or host is asked, and whose cue.db is read when neither answers (default: MAESTRO_USER_DATA or the platform default)'
 	)
 	.action(cueActivity);
 
@@ -1601,7 +1716,7 @@ cueEngine
 
 // Bundle commands - pack a Cue pipeline or one agent into a portable zip, and
 // import one. With the app running (and no --data-dir), export and import go
-// through it, the same as the Cue modal's Bundles tab; otherwise they read and
+// through it, the same as the Export Agent and Import Agent modals; otherwise they read and
 // write the data directory directly.
 const bundle = program
 	.command('bundle')
@@ -1748,6 +1863,10 @@ host
 		'--stop-grace <seconds>',
 		'On SIGTERM/SIGINT, wait this long for work in flight before stopping (default 30; 0 stops at once)'
 	)
+	.option(
+		'--no-prevent-sleep',
+		'macOS: let the Mac sleep even while work is in flight (default: caffeinate holds it awake)'
+	)
 	.option('--json', 'Output as JSON (for scripting)')
 	.action((options) => hostStart(options, cliVersion));
 
@@ -1758,6 +1877,20 @@ host
 	.option('--dev', 'Use the development data directory')
 	.option('--json', 'Output as JSON (for scripting)')
 	.action((options) => hostStatus(options));
+
+// Federation pairing P1 (#1716): a laptop reads this over SSH. It is hidden from `--help` while
+// Federation is off here, but not refused: the opt-in lives on the laptop that dials in, and
+// a headless host's own settings rarely carry Encore flags. It prints nothing `cat` of the
+// owner-only discovery file would not.
+host
+	.command('endpoint', { hidden: !encoreFlags.federation })
+	.description(
+		"Print this data directory's host endpoint (port, token, CLI secret) for Federation over SSH"
+	)
+	.option('--data-dir <path>', 'Maestro data directory (default: resolved like the desktop app)')
+	.option('--dev', 'Use the development data directory')
+	.option('--json', 'Output as JSON, with the token and the CLI secret')
+	.action((options) => hostEndpoint(options));
 
 host
 	.command('stop')
@@ -1773,6 +1906,54 @@ host
 	.option('--force', 'Stop even with work in flight; a run records how it ended first')
 	.option('--json', 'Output as JSON (for scripting)')
 	.action((options) => hostStop(options));
+
+// Remote host commands - the `maestro-cli host` on a Federation-enabled SSH remote (#1716)
+const remoteHost = encoreCommand(program, 'remote-host', 'federation', encoreFlags).description(
+	'Check and start the maestro-cli host on an SSH remote that is opted in to Federation'
+);
+
+remoteHost
+	.command('status <ssh-remote>')
+	.description(
+		'Report whether Maestro is installed on the remote, whether its host runs, and the version skew'
+	)
+	.option('--timeout <seconds>', 'Give up on the SSH call after this many seconds (default 60)')
+	.option('--json', 'Output as JSON (for scripting)')
+	.action((ref: string, options) => remoteHostStatus(ref, options, cliVersion));
+
+remoteHost
+	.command('start <ssh-remote>')
+	.description('Start the host on the remote (as the SSH user) when none runs, then report status')
+	.option('--timeout <seconds>', 'Give up on each SSH call after this many seconds (default 60)')
+	.option('--json', 'Output as JSON (for scripting)')
+	.action((ref: string, options) => remoteHostStart(ref, options, cliVersion));
+
+// Lift - move an SSH remote agent onto the maestro-cli host on its remote (Federation, #1716)
+encoreCommand(program, 'lift <agent>', 'federation', encoreFlags)
+	.description(
+		'Move an SSH remote agent, with its tabs, transcripts, provider sessions and queue, onto the host on its remote'
+	)
+	.option('--dry-run', 'Print what would move and what stays, then stop')
+	.option('--with-env', 'Send secret env vars too (non-secret ones always move)')
+	.option('--json', 'Output as JSON (for scripting)')
+	.action((agent: string, options) => lift(agent, options));
+
+// Federation peer mirror - the peers the desktop mirrors in its Left Bar (FED-SSH-05)
+const federation = encoreCommand(program, 'federation', 'federation', encoreFlags).description(
+	'List and reconnect the Federation peers the desktop app mirrors in its Left Bar'
+);
+
+federation
+	.command('peers')
+	.description('List the peers the desktop mirrors, with connection state and agent count')
+	.option('--json', 'Output as JSON (for scripting)')
+	.action((options) => federationPeers(options));
+
+federation
+	.command('reconnect <peer>')
+	.description('Force the desktop to reconnect to a peer and reload its agent list')
+	.option('--json', 'Output as JSON (for scripting)')
+	.action((peer: string, options) => federationReconnect(peer, options));
 
 // Completions command - emit a shell completion script (introspects the program)
 program
@@ -2265,6 +2446,38 @@ tab
 	.option('--json', 'Output as JSON (for scripting)')
 	.action((options) => tabReopen(options));
 
+// Message pins: the pin button on a message and the pin panel.
+const tabPins = tab
+	.command('pins')
+	.description("Read and change an AI tab's pinned messages (default: list them)");
+
+const tabPinsOptions = (cmd: Command): Command =>
+	cmd
+		.option('-t, --tab <tab-id>', 'The AI tab (exact, unique prefix, or "active"; default: active)')
+		.option('-a, --agent <id>', 'Whose active tab, when the tab is "active"')
+		.option('--json', 'Output as JSON (for scripting)');
+
+tabPinsOptions(tabPins.command('list', { isDefault: true }))
+	.description("List a tab's pinned messages in transcript order")
+	.action((options) => tabPinsList(options));
+
+tabPinsOptions(tabPins.command('add [message-id]'))
+	.description('Pin a message by transcript entry id, or the newest one with --last')
+	.option('--last <who>', 'Pin the newest message of this kind: user or agent')
+	.action((messageId, options) => tabPinsAdd(messageId, options));
+
+tabPinsOptions(tabPins.command('remove <pin-id>'))
+	.description('Unpin a message (pin id: exact or unique prefix)')
+	.action((pinId, options) => tabPinsRemove(pinId, options));
+
+tabPinsOptions(tabPins.command('rename <pin-id> [label...]'))
+	.description("Rename a pin; no label restores the message's own first line")
+	.action((pinId, label, options) => tabPinsRename(pinId, label, options));
+
+tabPinsOptions(tabPins.command('show'))
+	.description('Open the pin panel over the tab (selects the agent and the tab)')
+	.action((options) => tabPinsShow(options));
+
 tabTargetOptions(tab.command('compact [tab-id]'))
 	.description(
 		'Context: Compact - summarize a tab into a new tab beside it (default: the active tab) and print its id'
@@ -2295,6 +2508,14 @@ tabTargetOptions(tab.command('transfer [tab-id]'))
 	.option('--focus', 'Jump to the new tab (default)')
 	.action((tabId, options) => tabTransfer(tabId, options));
 
+// The per-remote Federation opt-in belongs to the Federation Encore Feature: left
+// out of --help while it is off, and passing it then is refused.
+const FEDERATION_OPTION_KEYS = ['federation'] as const;
+const federationOption = (): Option =>
+	new Option('--federation <on|off>', 'Opt this remote in to Federation (on/off)').hideHelp(
+		!encoreFlags.federation
+	);
+
 // Create SSH remote command - add a new SSH remote configuration
 program
 	.command('create-ssh-remote <name>')
@@ -2320,8 +2541,12 @@ program
 	)
 	.option('--ssh-config', 'Use ~/.ssh/config for connection settings (host becomes Host pattern)')
 	.option('--disabled', 'Create in disabled state')
+	.addOption(federationOption())
 	.option('--set-default', 'Set as the global default SSH remote')
 	.option('--json', 'Output as JSON (for scripting)')
+	.hook('preAction', (_command, action) =>
+		requireEncoreForOptions('federation', action.opts(), FEDERATION_OPTION_KEYS)
+	)
 	.action(createSshRemote);
 
 // Update SSH remote command - edit an existing SSH remote configuration
@@ -2373,8 +2598,12 @@ program
 	)
 	.option('--ssh-config <bool>', 'Use ~/.ssh/config for connection settings (true/false)')
 	.option('--enabled <bool>', 'Enable or disable this remote (true/false)')
+	.addOption(federationOption())
 	.option('--set-default', 'Set as the global default SSH remote')
 	.option('--json', 'Output as JSON (for scripting)')
+	.hook('preAction', (_command, action) =>
+		requireEncoreForOptions('federation', action.opts(), FEDERATION_OPTION_KEYS)
+	)
 	.action(updateSshRemote);
 
 // Remove SSH remote command - delete an SSH remote configuration
@@ -2950,6 +3179,27 @@ const pianola = encoreCommand(program, 'pianola', 'pianola', encoreFlags).descri
 );
 
 pianola
+	.command('resolve <id>')
+	.description('Resolve a persisted manager handoff or founder ask after revalidation')
+	.option('--answer <text>', 'Answer the requesting agent exactly once')
+	.option('--escalation <text>', 'Ask the human to decide, with a concrete recommendation')
+	.option('--option <text>', 'Resolve a founder ask with this option')
+	.option('--note <text>', 'Add a note to a founder-ask resolution')
+	.option('--background', 'Preserve the active agent and tab')
+	.option('--json', 'Output as JSON')
+	.action((id, options) =>
+		options.option !== undefined ? pianolaResolve(id, options) : pianolaResolveDecision(id, options)
+	);
+
+pianola
+	.command('watch-scope <scope-id>')
+	.description('Run one registered agent/group selection under the native supervisor')
+	.option('--once', 'Run one bounded scope cycle and exit')
+	.option('--dry-run', 'Classify and record without sending answers')
+	.option('--json', 'Output cycle status as JSON')
+	.action((scopeId, options) => pianolaWatchScope(scopeId, options));
+
+pianola
 	.command('watch <tab-id>')
 	.description('Watch a desktop tab and act on awaiting-input prompts per your rules')
 	.option('--agent <agent-id>', 'Agent id to dispatch answers to (defaults to the tab owner)')
@@ -3025,12 +3275,94 @@ pianola
 	.action((options) => pianolaSetProfile(options));
 
 pianola
+	.command('memory [action] [value...]')
+	.description('Backfill and retrieve evidence-backed user and project memory')
+	.option('--project <path>', 'Project scope')
+	.option('--provider <id>', 'Historical provider for a custom root')
+	.option('--root <path>', 'Custom account/data root')
+	.option('--mine', 'Explicitly attribute selected pools to your human-authored history')
+	.option('--mode <mode>', 'local, cli, hosted, or batch')
+	.option('--cli-provider <id>', 'Installed Maestro CLI to use for extraction')
+	.option('--hosted-provider <id>', 'Hosted extraction provider: openai or nan')
+	.option('--model <model>', 'Extraction model')
+	.option('--endpoint <url>', 'Loopback local extraction endpoint')
+	.option('--qualify-model <model>', 'Recall qualification model (default: qwen3:8b)')
+	.option('--qualify-provider <id>', 'Recall qualification provider: local or hosted')
+	.option('--qualify-endpoint <url>', 'Qualification endpoint (loopback for local)')
+	.option('--rerank-model <model>', 'Hosted recall reranker model (default: rerank)')
+	.option('--rerank-endpoint <url>', 'Hosted reranker endpoint')
+	.option('--tokens <n>', 'Total token cap including reservations')
+	.option('--dollars <n>', 'Total cost cap including reservations')
+	.option('--exclude <paths...>', 'Exclude absolute roots/projects/files before reads')
+	.option('--consent-hosted', 'Consent to off-device processing of selected excerpts')
+	.option('--ongoing', 'Continue incremental learning after backfill completes')
+	.option('--no-ongoing', 'Stop after the current backfill completes')
+	.option('--kind <kind>', 'preference, project, decision, episode, commitment, or context')
+	.option('--history', 'List-only: browse all lifecycle statuses and dates')
+	.option(
+		'--intent <mode>',
+		'Recall: current, as-of, previous, proposed, contested, or history (default: current; --qualify may infer)'
+	)
+	.option('--at <date>', 'Required instant for --intent as-of')
+	.option('--qualify', 'Opt into slower, fallible local model review; not a correctness guarantee')
+	.option('--rerank', 'Opt into hosted reranking; sends the question and shortlisted assertions')
+	.option('--out <file>', 'Write JSON output to a file')
+	.option('--json', 'JSON output')
+	.action((action, values, options) => pianolaMemory(action ?? 'status', values ?? [], options));
+pianola
 	.command('log')
 	.description('Show recent Pianola decisions from the audit log')
 	.option('--limit <n>', 'Maximum number of records to show (default 20)')
 	.option('--json', 'Output as JSON (for scripting)')
 	.action((options) => pianolaLog(options));
 
+const pianolaProgram = pianola.command('program').description('Manage product programs');
+pianolaProgram
+	.command('apply')
+	.requiredOption('--file <path>', 'YAML or JSON program manifest')
+	.option('--json', 'Output as JSON')
+	.action((options) => pianolaProgramApply(options));
+pianolaProgram
+	.command('list')
+	.option('--json', 'Output as JSON')
+	.action((options) => pianolaProgramList(options));
+pianolaProgram
+	.command('show <id>')
+	.option('--json', 'Output as JSON')
+	.action((id, options) => pianolaProgramShow(id, options));
+pianolaProgram
+	.command('pause <id>')
+	.option('--json', 'Output as JSON')
+	.action((id, options) => pianolaProgramStatus(id, 'paused', options));
+pianolaProgram
+	.command('resume <id>')
+	.option('--json', 'Output as JSON')
+	.action((id, options) => pianolaProgramStatus(id, 'active', options));
+
+pianola
+	.command('escalate')
+	.requiredOption('--title <text>')
+	.requiredOption('--detail <text>')
+	.option('--program <id>')
+	.option('--agent <id>')
+	.option('--tab <id>')
+	.option('--severity <level>')
+	.option('--requested-action <text>')
+	.option('--distinct')
+	.option('--json')
+	.action((options) => pianolaEscalate(options));
+pianola
+	.command('needs-me')
+	.option('--json')
+	.action((options) => pianolaNeedsMe(options));
+pianola
+	.command('dismiss <askId>')
+	.option('--json')
+	.action((askId, options) => pianolaDismiss(askId, options));
+pianola
+	.command('brief')
+	.option('--json')
+	.action((options) => pianolaBrief(options));
 // Pianola plan - author and inspect task DAGs the orchestrator runs.
 const pianolaPlan = pianola
 	.command('plan')
@@ -3042,6 +3374,22 @@ pianolaPlan
 	.option('--file <path>', 'Read the plan JSON from this file (else reads stdin)')
 	.option('--json', 'Output as JSON (for scripting)')
 	.action((options) => pianolaPlanSet(options));
+
+pianolaPlan
+	.command('revise <planId> <taskId>')
+	.description('Revise a reviewed or failed task and queue it again without replacing its plan')
+	.requiredOption(
+		'--prompt <text>',
+		'Corrected implementation instructions; validation stays unchanged'
+	)
+	.option('--json', 'Output as JSON (for scripting)')
+	.action((planId, taskId, options) => pianolaPlanRevise(planId, taskId, options));
+
+pianolaPlan
+	.command('skip <planId> <taskId>')
+	.description('Skip a failed task while keeping its dependents blocked')
+	.option('--json', 'Output as JSON (for scripting)')
+	.action((planId, taskId, options) => pianolaPlanSkip(planId, taskId, options));
 
 pianolaPlan
 	.command('list')
@@ -3064,6 +3412,18 @@ pianola
 	.option('--json', 'Output as JSON (for scripting)')
 	.action((planId, options) => pianolaOrchestrate(planId, options));
 
+pianola
+	.command('validate <planId> <taskId>')
+	.description('Run the task validation oracle in the sandbox and append its Agent Run check')
+	.option('--json', 'Output as JSON (for scripting)')
+	.action((planId, taskId, options) => pianolaValidate(planId, taskId, options));
+
+pianola
+	.command('program-loop <programId>')
+	.option('--interval <seconds>', 'Polling interval (default 120)')
+	.option('--once', 'Perform one tick and exit')
+	.option('--json', 'Output as JSON')
+	.action((programId, options) => pianolaProgramLoop(programId, options));
 // Pianola supervise - register background targets the desktop keeps alive
 // (restart on crash, relaunch on app start, visible health). These write the
 // shared supervisor store; the running app reconciles within ~1s.
@@ -3072,6 +3432,28 @@ const pianolaSupervise = pianola
 	.description(
 		'Register desktop-supervised watchers and orchestrations (survive crashes/restarts)'
 	);
+
+pianolaSupervise
+	.command('scope')
+	.description(
+		'Configure or reconcile an owner-authorized agent/group selection through the desktop host'
+	)
+	.requiredOption('--manager <agent-id>', 'Manager agent id')
+	.requiredOption('--label <label>', 'Selection label')
+	.option('--id <scope-id>', 'Existing owner-authorized selection id')
+	.option('--agents <ids>', 'Comma-separated agent IDs')
+	.option('--groups <ids>', 'Comma-separated group IDs')
+	.option('--exclude <ids>', 'Comma-separated excluded agent IDs')
+	.option(
+		'--future-local-agents',
+		'Include future local agents (requires --id or --request-owner-approval)'
+	)
+	.option(
+		'--request-owner-approval',
+		'Request one native owner confirmation for this exact configuration'
+	)
+	.option('--json', 'Output as JSON')
+	.action((options) => pianolaSuperviseScope(options));
 
 pianolaSupervise
 	.command('watch <tabId>')
@@ -3094,8 +3476,14 @@ pianolaSupervise
 	.action((planId, options) => pianolaSuperviseOrchestrate(planId, options));
 
 pianolaSupervise
+	.command('program <programId>')
+	.option('--interval <seconds>', 'Polling interval (default 120)')
+	.option('--json', 'Output as JSON')
+	.action((programId, options) => pianolaSuperviseProgram(programId, options));
+pianolaSupervise
 	.command('list')
 	.description('List registered supervised targets')
+	.option('--live', 'Read worker and coverage status from the desktop host')
 	.option('--json', 'Output as JSON (for scripting)')
 	.action((options) => pianolaSuperviseList(options));
 

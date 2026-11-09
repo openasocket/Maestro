@@ -17,6 +17,7 @@ import {
 	TerminalOutput,
 	collapseAiResponseLogs,
 } from '../../../renderer/components/TerminalOutput';
+import { computeTurnDurations } from '../../../renderer/components/TerminalOutput/utils/turnDurations';
 import { useCenterFlashStore } from '../../../renderer/stores/centerFlashStore';
 import { useSettingsStore } from '../../../renderer/stores/settingsStore';
 import { useUIStore } from '../../../renderer/stores/uiStore';
@@ -729,6 +730,69 @@ describe('TerminalOutput', () => {
 			expect(screen.getAllByText('10m')).toHaveLength(1);
 			expect(screen.queryByText('1m')).not.toBeInTheDocument();
 		});
+
+		it.each([
+			{
+				name: 'before the answer',
+				entries: [
+					['warning', 'stderr', 1],
+					['answer', 'stdout', 10],
+				],
+				replyId: 'answer',
+				elapsedMinutes: 10,
+			},
+			{
+				name: 'the only output',
+				entries: [['warning', 'stderr', 1]],
+				replyId: null,
+				elapsedMinutes: 1,
+			},
+			{
+				name: 'between answer fragments',
+				entries: [
+					['opening', 'stdout', 1],
+					['warning', 'stderr', 5],
+					['answer', 'stdout', 10],
+					['answer-part', 'stdout', 12],
+				],
+				replyId: 'answer',
+				elapsedMinutes: 12,
+			},
+			{
+				name: 'after the answer',
+				entries: [
+					['answer', 'stdout', 5],
+					['answer-part', 'stdout', 7],
+					['warning', 'stderr', 10],
+				],
+				replyId: 'answer',
+				elapsedMinutes: 10,
+			},
+		] as const)(
+			'keeps the duration badge off stderr when a warning is $name',
+			({ entries, replyId, elapsedMinutes }) => {
+				const sentAt = Date.now() - 30 * MINUTE;
+				const logs = [
+					createLogEntry({ id: 'user', text: 'Go', source: 'user', timestamp: sentAt }),
+					...entries.map(([id, source, minutes]) =>
+						createLogEntry({ id, source, text: id, timestamp: sentAt + minutes * MINUTE })
+					),
+				];
+				const durations = computeTurnDurations(logs);
+				const renderedAnswerIds = collapseAiResponseLogs(logs)
+					.filter((log) => log.source === 'stdout')
+					.map((log) => log.id);
+				expect([...durations]).toEqual(replyId ? [[replyId, elapsedMinutes * MINUTE]] : []);
+				expect([...durations.keys()]).toEqual(renderedAnswerIds.slice(-1));
+
+				const { container } = renderTurn(logs);
+				const badges = Array.from(container.querySelectorAll('[title^="Agent took "]'));
+				expect(
+					badges.map((badge) => badge.closest('[data-log-id]')?.getAttribute('data-log-id'))
+				).toEqual(replyId ? [replyId] : []);
+				if (replyId) expect(badges[0]).toHaveTextContent(`${elapsedMinutes}m`);
+			}
+		);
 
 		it('reads as instant when the agent answered inside a minute', () => {
 			const sentAt = Date.now() - 5 * MINUTE;
@@ -3681,7 +3745,7 @@ describe('TerminalOutput', () => {
 			});
 
 			// The pin button appears once we're away from the bottom.
-			const pinButton = screen.getByTitle(/pin/i);
+			const pinButton = screen.getByTitle(/click to pin/i);
 			await act(async () => {
 				fireEvent.click(pinButton);
 				vi.advanceTimersByTime(50);
@@ -3769,12 +3833,12 @@ describe('TerminalOutput', () => {
 			await act(async () => {
 				vi.advanceTimersByTime(20);
 			});
-			expect(screen.getByTitle(/pin/i)).toBeInTheDocument();
+			expect(screen.getByTitle(/click to pin/i)).toBeInTheDocument();
 
 			// Click the pin: synchronously arms the guard (records bottom target
 			// 600, starts the 100ms timer) and jumps to the bottom.
 			await act(async () => {
-				fireEvent.click(screen.getByTitle(/pin/i));
+				fireEvent.click(screen.getByTitle(/click to pin/i));
 				vi.advanceTimersByTime(20); // clear the scroll throttle; guard still armed
 			});
 			onAtBottomChange.mockClear();
@@ -3790,7 +3854,7 @@ describe('TerminalOutput', () => {
 			// Discriminator: the scroll-up registered as leaving the bottom, and
 			// the pin button is shown again (auto-scroll paused).
 			expect(onAtBottomChange).toHaveBeenCalledWith(false);
-			expect(screen.getByTitle(/pin/i)).toBeInTheDocument();
+			expect(screen.getByTitle(/click to pin/i)).toBeInTheDocument();
 		});
 	});
 
@@ -4894,6 +4958,49 @@ describe('collapseAiResponseLogs', () => {
 		expect(out[1].text).toBe('part 1 part 2');
 	});
 
+	it.each([true, false])(
+		'keeps a stderr diagnostic separate with warningFirst=%s',
+		(warningFirst) => {
+			const warning = mk({
+				id: 'warning',
+				source: 'stderr',
+				text: 'Codex warning: ignored setting\n',
+			});
+			const answer = mk({ id: 'answer', source: 'stdout', text: 'The answer.' });
+			const logs = warningFirst ? [warning, answer] : [answer, warning];
+
+			expect(collapseAiResponseLogs(logs)).toEqual(logs);
+		}
+	);
+
+	it('keeps diagnostic boundaries while collapsing assistant chunks on either side', () => {
+		const warning = mk({
+			id: 'warning',
+			source: 'stderr',
+			text: 'Codex warning: ignored setting\n',
+		});
+		const nextWarning = mk({
+			id: 'warning-2',
+			source: 'stderr',
+			text: 'Codex warning: another setting\n',
+		});
+		const out = collapseAiResponseLogs([
+			mk({ id: 'before', text: 'Before ' }),
+			mk({ id: 'before-2', text: 'warning.' }),
+			warning,
+			nextWarning,
+			mk({ id: 'answer', text: 'The ' }),
+			mk({ id: 'answer-2', text: 'answer.' }),
+		]);
+
+		expect(out.map(({ id, source, text }) => ({ id, source, text }))).toEqual([
+			{ id: 'before', source: 'stdout', text: 'Before warning.' },
+			{ id: 'warning', source: 'stderr', text: warning.text },
+			{ id: 'warning-2', source: 'stderr', text: nextWarning.text },
+			{ id: 'answer', source: 'stdout', text: 'The answer.' },
+		]);
+	});
+
 	it('keeps each cross-agent reply as its own standalone bubble', () => {
 		const out = collapseAiResponseLogs([
 			mk({ id: 'u', source: 'user', text: 'what are we working on? @LH and @MM' }),
@@ -4952,5 +5059,86 @@ describe('collapseAiResponseLogs', () => {
 		// The outage marker breaks the run: the text on either side stays separate.
 		expect(out.map((l) => l.id)).toEqual(['a', 'outage', 'b']);
 		expect(out.find((l) => l.id === 'outage')!.retryOutageId).toBe('out-1');
+	});
+});
+
+describe('message pins', () => {
+	const pinLogs = (): LogEntry[] => [
+		createLogEntry({ id: 'u1', source: 'user', text: 'What is the plan?', timestamp: 100 }),
+		createLogEntry({ id: 'a1', source: 'stdout', text: 'The plan is simple.', timestamp: 110 }),
+	];
+
+	afterEach(() => {
+		useUIStore.setState({ messagePinsTabId: null });
+	});
+
+	it('offers a pin toggle that pins the reply on the tab it belongs to', async () => {
+		const { useSessionStore } = await import('../../../renderer/stores/sessionStore');
+		const tabs = [{ id: 'tab-1', agentSessionId: 'claude-123', logs: pinLogs(), isUnread: false }];
+		const session = createDefaultSession({ tabs, aiTabs: tabs, activeTabId: 'tab-1' } as never);
+		useSessionStore.setState({ sessions: [session], activeSessionId: session.id });
+
+		render(<TerminalOutput {...createDefaultProps({ session })} />);
+		const toggles = screen.getAllByTitle('Pin message');
+		expect(toggles).toHaveLength(2);
+
+		fireEvent.click(toggles[1]);
+		const pinned = useSessionStore.getState().sessions[0].aiTabs[0].pinnedMessages;
+		expect(pinned).toHaveLength(1);
+		expect(pinned?.[0]).toMatchObject({ logId: 'a1', source: 'stdout' });
+	});
+
+	it('marks pinned messages and shows the pin button only once the tab has a pin', () => {
+		const unpinned = [
+			{ id: 'tab-1', agentSessionId: 'claude-123', logs: pinLogs(), isUnread: false },
+		];
+		const { rerender } = render(
+			<TerminalOutput
+				{...createDefaultProps({
+					session: createDefaultSession({
+						tabs: unpinned,
+						aiTabs: unpinned,
+						activeTabId: 'tab-1',
+					} as never),
+				})}
+			/>
+		);
+		expect(screen.queryByTestId('message-pins-panel')).not.toBeInTheDocument();
+		expect(screen.queryByTestId('log-pinned-marker')).not.toBeInTheDocument();
+
+		const pinnedTabs = [
+			{
+				...unpinned[0],
+				pinnedMessages: [
+					{
+						id: 'pin-1',
+						logId: 'a1',
+						source: 'stdout',
+						timestamp: 110,
+						title: 'The plan is simple.',
+						excerpt: 'The plan is simple.',
+						pinnedAt: 200,
+					},
+				],
+			},
+		];
+		rerender(
+			<TerminalOutput
+				{...createDefaultProps({
+					session: createDefaultSession({
+						tabs: pinnedTabs,
+						aiTabs: pinnedTabs,
+						activeTabId: 'tab-1',
+					} as never),
+				})}
+			/>
+		);
+		expect(screen.getByTestId('message-pins-panel')).toBeInTheDocument();
+		expect(screen.getAllByTestId('log-pinned-marker')).toHaveLength(1);
+		expect(screen.getByTitle('Unpin message')).toBeInTheDocument();
+
+		// The gutter marker opens the panel for this tab.
+		fireEvent.click(screen.getByTestId('log-pinned-marker'));
+		expect(useUIStore.getState().messagePinsTabId).toBe('tab-1');
 	});
 });

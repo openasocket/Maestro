@@ -19,14 +19,23 @@ import type { PluginToolReceipt } from './plugin-tool-run-identity';
 import type { PluginActBinding } from './plugin-host-handlers';
 
 export interface HeadlessAgentReply {
+	originalAttachments?: readonly [
+		import('../../shared/plugins/media-tools').OriginalAttachmentReceipt,
+	];
 	success: boolean;
 	response: string | null;
 	sessionId: string | null;
 	error?: string;
+	/** Host-only: false proves a returned preflight failure started no provider work. */
+	executionStarted?: boolean;
 	usageStats?: import('../../shared/types').UsageStats;
 	/** Present only for an authenticated CLI run that requested one tool ID. */
 	toolReceipts?: PluginToolReceipt[];
 }
+export interface HeadlessTurnSettings {
+	originalAttachment?: import('./plugin-media-tools').OriginalAttachmentLease;
+}
+
 export type HeadlessAgentRunner = (
 	agentId: string,
 	prompt: string,
@@ -36,6 +45,9 @@ export type HeadlessAgentRunner = (
 	onProgress?: (event: AgentSendProgressEvent) => void,
 	receiptToolId?: string,
 	requirePluginTools?: boolean,
+	/** Host-only: Relay already holds the tab/provider reservation for this run. */
+	writerLeaseHeld?: boolean,
+	turn?: HeadlessTurnSettings,
 	/**
 	 * The calling plugin's consent-bound act binding (MRC-09-02A), present only
 	 * for a plugin host call on a managed desktop: the turn is then admitted as
