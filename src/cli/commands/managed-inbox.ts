@@ -12,6 +12,13 @@
 //   managed_command (execution), managed_command_status (status),
 //   managed_run (run; refused by name for a lease this host never admitted)
 //
+// A detached host (`maestro-cli host start`) answers the first four too
+// (MCOMP-29-03A): `answerManagedCommunication()` in
+// `src/main/enterprise/service.ts` is the one answer both bridges give, over
+// the host's own inbox and command service, so these verbs read the same reply
+// from either. A host that composed no managed standing refuses each by name;
+// `managed_run` stays desktop-only (the host keeps no dispatch ledger).
+//
 // Every write verb prints the durable receipt (the receipt ledger's record for
 // an inbox act, the command ledger's id and evidence digest for a command) or
 // the word `unknown` when this host recorded the act but never saw the

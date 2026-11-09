@@ -85,6 +85,7 @@ import {
 import {
 	createInboxClient,
 	createInboxReceiptLedger,
+	inboxActionProblem,
 	inboxView,
 	MANAGED_INBOX_RECEIPTS_FILE_NAME,
 	type InboxActionOutcome,
@@ -120,7 +121,16 @@ import {
 	createProcessSpawnAuthority,
 	pairedDeviceActorProblems,
 } from './spawn-authority';
-import { getActingTransport, transportSpawnActor } from '../web-server/auth/transport-actor';
+import {
+	describeSpawnActor,
+	getActingTransport,
+	transportSpawnActor,
+} from '../web-server/auth/transport-actor';
+import { getActingUser } from '../web-server/auth/acting-user';
+import type {
+	ManagedCommunicationsPort,
+	ManagedCommunicationType,
+} from '../../shared/maestro-lib/runtime/server-requests';
 import {
 	buildVibesRecordedGraph,
 	createVibesPublisher,
@@ -394,6 +404,115 @@ export function createManagedCommunications(
 					});
 		},
 		commandStatus: () => deps.commands()?.status() ?? null,
+	};
+}
+
+const MAX_MANAGED_ID = 256;
+
+/** A caller-supplied id on a managed bridge message: 1 to 256 characters, refused by field name, never by value. */
+export function managedMessageId(value: unknown, name: string): string {
+	if (typeof value !== 'string' || value.length === 0 || value.length > MAX_MANAGED_ID) {
+		throw new Error(`${name} must be a string of 1 to ${MAX_MANAGED_ID} characters.`);
+	}
+	return value;
+}
+
+/** The typed runtime command a `managed_command` message names; refused by field name, never by value. */
+export function validateLocalCommand(raw: unknown): LocalCommandAction {
+	if (typeof raw !== 'object' || raw === null) throw new Error('action must be an object.');
+	const input = raw as Record<string, unknown>;
+	switch (input.kind) {
+		case 'cancel-run':
+			return { kind: 'cancel-run', runId: managedMessageId(input.runId, 'action.runId') };
+		case 'report-status':
+			return { kind: 'report-status' };
+		case 'refresh-policy': {
+			const revision = input.desiredRevision;
+			if (revision === undefined) return { kind: 'refresh-policy' };
+			if (typeof revision !== 'number' || !Number.isInteger(revision) || revision < 0) {
+				throw new Error('action.desiredRevision must be a whole policy revision number.');
+			}
+			return { kind: 'refresh-policy', desiredRevision: revision };
+		}
+		default:
+			throw new Error('action.kind must be one of cancel-run, report-status, refresh-policy.');
+	}
+}
+
+export interface ManagedCommunicationAnswerOptions {
+	/** Where the refusal says nothing is composed, with its preposition. Default: `in this desktop`. */
+	place?: string;
+	/**
+	 * Who an inbox act is attributed to. Default: the transport the current call was admitted over
+	 * (`getActingTransport()`, the desktop dispatcher's context). A detached host, whose callers
+	 * are all admitted on its per-boot CLI secret, names that peer.
+	 */
+	actor?: () => ProcessSpawnActor;
+	/** One line per inbox act (who recorded which receipt on which message); never a body or reply text. */
+	log?: (line: string) => void;
+}
+
+/**
+ * Answer one inbox or command bridge message (MCOMP-29-03A): the named field of its
+ * `<type>_result`, or a thrown sentence naming the refused field. The one implementation the
+ * desktop bridge (`messageHandlers/managed.ts`) and a detached host's bridge
+ * (`createManagedCommunicationsPort`) both answer from, so `maestro-cli managed inbox|command`
+ * reads the same reply from either.
+ */
+export async function answerManagedCommunication(
+	communications: ManagedCommunications,
+	type: ManagedCommunicationType,
+	message: Record<string, unknown>,
+	options: ManagedCommunicationAnswerOptions = {}
+): Promise<Record<string, unknown>> {
+	const place = options.place ?? 'in this desktop';
+	switch (type) {
+		case 'managed_inbox_list': {
+			const listing = await communications.inboxList({ refresh: message.refresh !== false });
+			if (!listing) throw new Error(`No notice inbox is composed ${place}.`);
+			return { listing };
+		}
+		case 'managed_inbox_act': {
+			const problem = inboxActionProblem(message.action);
+			if (problem) throw new Error(`action: ${problem}.`);
+			const messageId = managedMessageId(message.messageId, 'messageId');
+			const campaignId =
+				message.campaignId === undefined
+					? undefined
+					: managedMessageId(message.campaignId, 'campaignId');
+			const spawnActor = options.actor?.() ?? transportSpawnActor(getActingTransport());
+			const actor = describeSpawnActor(spawnActor);
+			const user = getActingUser()?.username ?? null;
+			options.log?.(
+				`managed_inbox_act ${String((message.action as { kind: string }).kind)} on ${messageId} by ${actor}${user ? ` (${user})` : ''}`
+			);
+			const outcome = await communications.inboxAct({
+				messageId,
+				campaignId,
+				action: message.action as EndpointInboxAction,
+				// The desktop leaves the facade to read the transport itself; a host names its peer.
+				...(options.actor ? { actor: spawnActor } : {}),
+			});
+			return { outcome, actor, user };
+		}
+		case 'managed_command':
+			return { execution: await communications.command(validateLocalCommand(message.action)) };
+		case 'managed_command_status': {
+			const status = communications.commandStatus();
+			if (!status) throw new Error(`No command service is composed ${place}.`);
+			return { status };
+		}
+	}
+	throw new Error(`Unknown managed message ${String(type)}.`);
+}
+
+/** The communications a detached host serves over its bridge (MCOMP-29-03A), as the runtime server's port. */
+export function createManagedCommunicationsPort(
+	communications: ManagedCommunications,
+	options: ManagedCommunicationAnswerOptions = {}
+): ManagedCommunicationsPort {
+	return {
+		answer: (type, message) => answerManagedCommunication(communications, type, message, options),
 	};
 }
 

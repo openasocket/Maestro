@@ -26,17 +26,14 @@
  * reply names the actor so the caller sees whose receipt it was.
  */
 
-import { inboxActionProblem } from '../../../enterprise/inbox';
-import type { LocalCommandAction } from '../../../enterprise/commands';
-import type { ManagedOperations } from '../../../enterprise/service';
+import {
+	answerManagedCommunication,
+	managedMessageId,
+	type ManagedOperations,
+} from '../../../enterprise/service';
+import { isManagedCommunicationType } from '../../../../shared/maestro-lib/runtime/server-requests';
 import { validateEnrollmentRequest } from '../../../ipc/handlers/enterprise';
 import { logger } from '../../../utils/logger';
-import { getActingUser } from '../../auth/acting-user';
-import {
-	describeSpawnActor,
-	getActingTransport,
-	transportSpawnActor,
-} from '../../auth/transport-actor';
 import { LOG_CONTEXT } from './shared';
 import type { WebClient, WebClientMessage, MessageHandlerContext } from './types';
 
@@ -67,47 +64,29 @@ export const NO_MANAGED_SERVICE_MESSAGE =
 	'The enterprise enrollment service is not running in this desktop.';
 export const MANAGED_CLI_ONLY_MESSAGE =
 	'This managed operation is taken from maestro-cli only; a browser cannot send it.';
-const NO_INBOX_MESSAGE = 'No notice inbox is composed in this desktop.';
-const NO_COMMANDS_MESSAGE = 'No command service is composed in this desktop.';
-const MAX_ID = 256;
 
 export function isManagedMessageType(type: string): type is ManagedMessageType {
 	return (MANAGED_MESSAGE_TYPES as readonly string[]).includes(type);
 }
 
-function id(value: unknown, name: string): string {
-	if (typeof value !== 'string' || value.length === 0 || value.length > MAX_ID) {
-		throw new Error(`${name} must be a string of 1 to ${MAX_ID} characters.`);
-	}
-	return value;
-}
-
-/** A local command as the CLI sends it; anything else is refused by name before the service sees it. */
-export function validateLocalCommand(raw: unknown): LocalCommandAction {
-	if (typeof raw !== 'object' || raw === null) throw new Error('action must be an object.');
-	const input = raw as Record<string, unknown>;
-	switch (input.kind) {
-		case 'cancel-run':
-			return { kind: 'cancel-run', runId: id(input.runId, 'action.runId') };
-		case 'report-status':
-			return { kind: 'report-status' };
-		case 'refresh-policy': {
-			const revision = input.desiredRevision;
-			if (revision === undefined) return { kind: 'refresh-policy' };
-			if (typeof revision !== 'number' || !Number.isInteger(revision) || revision < 0) {
-				throw new Error('action.desiredRevision must be a whole policy revision number.');
-			}
-			return { kind: 'refresh-policy', desiredRevision: revision };
-		}
-		default:
-			throw new Error('action.kind must be one of cancel-run, report-status, refresh-policy.');
-	}
-}
+/**
+ * The typed command a `managed_command` names. Lives beside the shared communications answer in
+ * `src/main/enterprise/service.ts` (Electron-free, so a detached host serves it too); re-exported
+ * here for the callers that import it from the bridge.
+ */
+export { validateLocalCommand } from '../../../enterprise/service';
 
 async function answer(
 	managed: ManagedOperations,
 	message: WebClientMessage
 ): Promise<Record<string, unknown>> {
+	// The inbox and command verbs answer from the one implementation a detached host serves too
+	// (MCOMP-29-03A), so `maestro-cli managed inbox|command` reads the same reply from either.
+	if (isManagedCommunicationType(message.type)) {
+		return answerManagedCommunication(managed, message.type, message, {
+			log: (line) => logger.info(`[Web] ${line}`, LOG_CONTEXT),
+		});
+	}
 	switch (message.type as ManagedMessageType) {
 		case 'managed_status':
 			return { state: managed.status() };
@@ -124,40 +103,8 @@ async function answer(
 			return {
 				outcome: await managed.requestEnrollment(validateEnrollmentRequest(message.request)),
 			};
-		case 'managed_inbox_list': {
-			const listing = await managed.inboxList({ refresh: message.refresh !== false });
-			if (!listing) throw new Error(NO_INBOX_MESSAGE);
-			return { listing };
-		}
-		case 'managed_inbox_act': {
-			const problem = inboxActionProblem(message.action);
-			if (problem) throw new Error(`action: ${problem}.`);
-			const messageId = id(message.messageId, 'messageId');
-			const campaignId =
-				message.campaignId === undefined ? undefined : id(message.campaignId, 'campaignId');
-			// The caller of record (MRC-08-01): the facade reads the same context to gate the act.
-			const actor = describeSpawnActor(transportSpawnActor(getActingTransport()));
-			const user = getActingUser()?.username ?? null;
-			logger.info(
-				`[Web] managed_inbox_act ${String((message.action as { kind: string }).kind)} on ${messageId} by ${actor}${user ? ` (${user})` : ''}`,
-				LOG_CONTEXT
-			);
-			const outcome = await managed.inboxAct({
-				messageId,
-				campaignId,
-				action: message.action as Parameters<ManagedOperations['inboxAct']>[0]['action'],
-			});
-			return { outcome, actor, user };
-		}
-		case 'managed_command':
-			return { execution: await managed.command(validateLocalCommand(message.action)) };
-		case 'managed_command_status': {
-			const status = managed.commandStatus();
-			if (!status) throw new Error(NO_COMMANDS_MESSAGE);
-			return { status };
-		}
 		case 'managed_run': {
-			const leaseId = id(message.leaseId, 'leaseId');
+			const leaseId = managedMessageId(message.leaseId, 'leaseId');
 			const run = managed.run(leaseId);
 			if (!run) throw new Error(`Lease ${leaseId} is not in this host's dispatch ledger.`);
 			return { run };

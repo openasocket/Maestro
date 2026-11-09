@@ -41,6 +41,10 @@ import {
 	managedListenerStanding,
 	type ListenerAuthority,
 } from '../../main/enterprise/listener-policy';
+import {
+	createManagedCommunications,
+	createManagedCommunicationsPort,
+} from '../../main/enterprise/service';
 import { PROMPT_IDS } from '../../shared/promptDefinitions';
 import { startHostCue, type HostCue } from './host-cue';
 import {
@@ -56,6 +60,9 @@ export class HostStartError extends Error {
 		this.name = 'HostStartError';
 	}
 }
+
+/** Where a detached host's refusal says nothing is composed. */
+const HOST_PLACE = 'on this host';
 
 /** The one address a detached host's bridge binds: this machine only. */
 export const RUNTIME_HOST_BIND = '127.0.0.1';
@@ -378,6 +385,22 @@ export async function startRuntimeHost(
 			unsubscribeTelemetryWake = runtime.lifecycle.subscribe(() => client.wake());
 			telemetry.start();
 		}
+		// The inbox and command verbs over the bridge (MCOMP-29-03A): the same answer the desktop
+		// bridge gives, over this standing's inbox and command service (read per call, so null before
+		// the runtime acquires the adapter and after close). Every caller here was admitted on the
+		// per-boot CLI secret, so an inbox act is attributed to that peer. An uncomposed host passes
+		// no port and each verb is refused by name, never answered from the ledger files.
+		const communications = composition?.composed
+			? createManagedCommunicationsPort(
+					createManagedCommunications({
+						identity: composition.identity,
+						inbox: composition.communications.inbox,
+						commands: composition.communications.commands,
+						place: HOST_PLACE,
+					}),
+					{ place: HOST_PLACE, actor: () => ({ peer: 'host-secret' }), log }
+				)
+			: undefined;
 		const token = deps.randomToken();
 		const cliSecret = deps.randomToken();
 		cue = await deps.startCue({
@@ -393,6 +416,7 @@ export async function startRuntimeHost(
 			address: RUNTIME_HOST_BIND,
 			onStopRequested: () => void stop(),
 			...(roundParents ? { roundParents } : {}),
+			...(communications ? { communications } : {}),
 			describe: () => ({
 				cue: cue.state(),
 				cueRuns: cue.activeRuns(),
