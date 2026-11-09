@@ -2437,6 +2437,25 @@
 					"R39 EditAgentModal.test.tsx: HEAD cases that read the policy or the translation arguments by index must use the merged slots (harnessControlMode 23, acceptTranslationLimitations 24, selectedUserResources 25, migrationPlanId 26, convertProviderHistory 27, policy 28)."
 				],
 				"tests": "NewInstanceModal.test 95/95; with AgentPickerGrid, AgentCotExportSection, useModalHandlers and AgentSelectionScreen utils 286/286 before the index fix (2 failing then, both fixed). EditAgentModal.test is unmerged (R39)."
+			},
+			"MCOMP-33-00R39": {
+				"resolvedAt": "2026-11-09",
+				"resolvedBy": "Maestro-Claude",
+				"files": [
+					"src/__tests__/renderer/components/NewInstanceModal/EditAgentModal.test.tsx",
+					"src/__tests__/renderer/components/shared/AgentConfigPanel.test.tsx",
+					"src/renderer/components/AppModals/AppSessionModals.tsx"
+				],
+				"method": "Four hunks resolved by a shape-asserting script (Working/mcomp-33-00r39/resolve.mjs, both sides read in full, every replacement computed before any write); auto-merged HEAD cases in EditAgentModal.test re-slotted onto the merged onSave order in the same script plus one length assertion fixed after the first suite run; the auto-merged onSaveEditAgent declaration widened outside the hunk. Staged through merge-tool.mjs stage (2 unmerged left; prettier left all three unchanged). check.mjs: 0 syntax diagnostics, no case title of either side missing; the three LOW seam counts in AppSessionModals (HarnessControlMode, CodexTransport, AdditionalDirectory) are upstream's inline onCreateSession parameter list, now carried by the referenced NewInstanceModalProps['onCreate'] type.",
+				"hunks": {
+					"EditAgentModal.test.tsx conversion tail (1)": "upstream slot shape args.slice(24) (harnessControlMode at 23, conversion args 24-27) with HEAD's policy appended: [true, [], 'plan', true, { expectedPolicyRevision: null }].",
+					"AgentConfigPanel.test.tsx vitest import (1)": "upstream's import (adds beforeEach, used by its new localStorage cases).",
+					"AgentConfigPanel.test.tsx imports (1)": "kept both: HEAD useSettingsStore and NO_MANAGED_SETTING_LOCKS (managed lock cases) and upstream installLocalStorageMock.",
+					"AppSessionModals.tsx onCreateSession (1)": "HEAD's onCreateSession: NewInstanceModalProps['onCreate']; since R38 that type carries upstream's harnessControlMode positionally before HEAD's operation and policy and returns the awaited outcome, so it is a superset of upstream's inline list."
+				},
+				"outsideHunks": "AppSessionModals.tsx: the auto-merged onSaveEditAgent stopped at harnessControlMode and returned void; extended with acceptTranslationLimitations, selectedUserResources, migrationPlanId, convertProviderHistory and policy, returning void | Promise<void>, matching EditAgentModalProps.onSave. EditAgentModal.test.tsx (auto-merged HEAD cases): five full toHaveBeenCalledWith lists gain the harnessControlMode slot (undefined) after codexTransport, three slice(23) tails gain one undefined, three policy index reads move 27 to 28, and the MCOMP-23-04A length assertion moves 28 to 29.",
+				"semanticFor00C": [],
+				"tests": "src/__tests__/renderer/components/NewInstanceModal (incl. EditAgentModal.test, NewInstanceModal.test), AgentConfigPanel.test and AppModals: 8 files, 344/344."
 			}
 		}
 	}
