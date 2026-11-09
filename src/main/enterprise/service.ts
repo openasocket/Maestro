@@ -154,7 +154,12 @@ import { heldEgress, type EgressHold } from '../utils/fetchWithTimeout';
 import type { EnrollmentRequestInput, LifecycleOutcome } from './enrollment';
 import type { InstallationInventory } from './inventory';
 import { heldListeners, type ListenerHold } from './listener-gate';
-import { projectManagedState, type ManagedStateView } from './managed-state';
+import {
+	managedStandingOf,
+	projectManagedState,
+	type ManagedStanding,
+	type ManagedStateView,
+} from './managed-state';
 import { readManagedSettingLocks } from './settings-policy';
 import type { UpdateHold } from './update-policy';
 
@@ -419,6 +424,35 @@ export interface EnterpriseServiceDeps {
 	contractsPin?: string | (() => ContractsPinStatus);
 	/** Test seam: the hold ledgers `managed.status()` lists. Default: the real ones. */
 	holds?: ManagedHolds;
+	/** How often live runs are held to the standing in force (`constrainLiveRuns`). Default 15 s; 0 runs no timer. */
+	liveRunCheckMs?: number;
+}
+
+/**
+ * The standings under which a managed run may not keep running (MCOMP-25-03):
+ * the record is revoked, retired or suspended, the endpoint denied the last
+ * request, or custody of the record is refused. The renderer's run state reads
+ * the same set as `revoked` (`useManagedStatus.ts`). An `offline` or
+ * `stale` standing is not among them: the run keeps what it was admitted
+ * under, as an offline holder does, and a live run still answers Stop.
+ */
+export const RUN_REFUSING_STANDINGS: ReadonlySet<ManagedStanding> = new Set([
+	'denied',
+	'suspended',
+	'revoked',
+	'retired',
+	'custody-refused',
+]);
+
+/** What one pass of `constrainLiveRuns` found and did. Lease ids only. */
+export interface LiveRunConstraint {
+	standing: ManagedStanding;
+	/** Leases issued or bound when the pass began. */
+	live: number;
+	/** Leases this pass revoked; each sink stops its process under the revoked lease. */
+	revoked: string[];
+	/** The sentence each revoked lease carries into the ledger; null when nothing was refused. */
+	reason: string | null;
 }
 
 export interface EnterpriseService {
@@ -517,6 +551,15 @@ export interface EnterpriseService {
 		workflow: WorkflowIdentityLike,
 		run: { runId: string; attemptId: string }
 	): Promise<WorkflowFenceAnswer>;
+	/**
+	 * Hold every live managed run to the standing in force now (MCOMP-25-03):
+	 * under a standing in `RUN_REFUSING_STANDINGS` each issued or bound lease
+	 * is revoked with the reason, so the process manager stops the process
+	 * running under it and the ledger records `revoked`. Policy loss constrains
+	 * the running effect, not only the next send. Runs on a timer between
+	 * `start()` and `close()` and after every policy refresh.
+	 */
+	constrainLiveRuns(): LiveRunConstraint;
 	/** Recover once before admitting work, then re-attach. Ledger failure rejects and holds admission. */
 	start(): Promise<void>;
 	close(): Promise<void>;
@@ -727,10 +770,26 @@ export function createEnterpriseService(deps: EnterpriseServiceDeps): Enterprise
 		}),
 		now,
 	});
+	const constrainLiveRuns = (): LiveRunConstraint => {
+		const status = lifecycle.status();
+		const standing = managedStandingOf(status, policy.status());
+		const live = host.authority.live();
+		if (!RUN_REFUSING_STANDINGS.has(standing) || live.length === 0)
+			return { standing, live: live.length, revoked: [], reason: null };
+		const reason =
+			`Managed execution is refused: the host standing is ${standing}.` +
+			(status.reason ? ` ${status.reason}` : '');
+		const revoked = live
+			.filter((lease) => host.authority.revoke(lease.leaseId, reason))
+			.map((lease) => lease.leaseId);
+		return { standing, live: live.length, revoked, reason };
+	};
+	let liveRunTimer: ReturnType<typeof setInterval> | null = null;
+	const liveRunCheckMs = deps.liveRunCheckMs ?? 15_000;
 	// The status surface every caller answers from (MRC2-07-01): the IPC handler,
 	// the bridge and the CLI read this one object, so a held key, a stale policy
 	// or a refused custody is the same sentence on every screen.
-	const managed = createManagedOperations({
+	const operations = createManagedOperations({
 		lifecycle,
 		policy,
 		identity,
@@ -740,6 +799,15 @@ export function createEnterpriseService(deps: EnterpriseServiceDeps): Enterprise
 		dispatch,
 		...(deps.holds ? { holds: deps.holds } : {}),
 	});
+	// A refresh is where a revocation or suspension is learned: the runs it refuses stop now.
+	const managed: ManagedOperations = {
+		...operations,
+		async refreshPolicy() {
+			const outcome = await operations.refreshPolicy();
+			if (!closing) constrainLiveRuns();
+			return outcome;
+		},
+	};
 	return {
 		installation,
 		identity,
@@ -763,6 +831,7 @@ export function createEnterpriseService(deps: EnterpriseServiceDeps): Enterprise
 		managed,
 		workflows,
 		claimWorkflowFence,
+		constrainLiveRuns,
 		start() {
 			if (closing) return closing;
 			starting ??= (async () => {
@@ -797,6 +866,13 @@ export function createEnterpriseService(deps: EnterpriseServiceDeps): Enterprise
 				// What this boot is, once its standing is known: one event per distinct
 				// inventory, kept by the journal, withheld from the endpoint by name.
 				inventory.record();
+				// From here on a live run is held to the standing between sends, not only at admission.
+				if (liveRunCheckMs > 0 && !closing && !liveRunTimer) {
+					liveRunTimer = setInterval(() => {
+						if (!closing) constrainLiveRuns();
+					}, liveRunCheckMs);
+					liveRunTimer.unref?.();
+				}
 			})();
 			return starting;
 		},
@@ -805,6 +881,8 @@ export function createEnterpriseService(deps: EnterpriseServiceDeps): Enterprise
 			// the second caller waits on the first drain instead of starting another.
 			closing ??= (async () => {
 				admissionReady = false;
+				if (liveRunTimer) clearInterval(liveRunTimer);
+				liveRunTimer = null;
 				host.authority.revokeAll('The desktop authority is closing.');
 				// A failed start still needs cleanup; its caller receives the original rejection.
 				await starting?.catch(() => undefined);

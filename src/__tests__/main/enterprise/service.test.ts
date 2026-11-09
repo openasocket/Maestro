@@ -57,7 +57,7 @@ describe('enterprise service', () => {
 
 	function compose(
 		anchor = fakeAnchor(holder),
-		extra: Pick<EnterpriseServiceDeps, 'openPort' | 'effectProducer'> = {}
+		extra: Pick<EnterpriseServiceDeps, 'openPort' | 'effectProducer' | 'liveRunCheckMs'> = {}
 	) {
 		const seal = fakeSeal();
 		const service = createEnterpriseService({
@@ -904,5 +904,130 @@ describe('enterprise service', () => {
 			message: expect.stringContaining('no managed standing'),
 		});
 		expect(fake.calls).toHaveLength(0);
+	});
+
+	describe('live managed runs under a standing that changes mid-run (MCOMP-25-03)', () => {
+		/** A registered service over a declared local prepared-execution fixture, and one bound run. */
+		async function boundRun(liveRunCheckMs = 0) {
+			let service!: EnterpriseService;
+			let leaseNumber = 0;
+			service = compose(undefined, {
+				liveRunCheckMs,
+				openPort: (socketPath) => {
+					const port = createLocalEndpointClient({ socketPath, timeoutMs: 1_000 });
+					const prepared = createLocalHostAuthority({
+						authorityId: service.host.authority.authorityId,
+						now: () => NOW,
+						newId: () => `run-lease-${++leaseNumber}`,
+						decide: () => ({ decision: 'allow', policyRevision: 3 }),
+					});
+					Object.defineProperty(port, 'preparedExecution', { value: { ...prepared, version: 1 } });
+					return port;
+				},
+			});
+			await register(service);
+			// Local custody fixture only: v1 registration carries no actor binding.
+			const enrolled = service.identity.read();
+			if (enrolled.status !== 'ok' || !enrolled.record.registration)
+				throw new Error('expected the local registration fixture');
+			await service.identity.write({
+				...enrolled.record,
+				registration: { ...enrolled.record.registration, actorId: 'fixture-actor' },
+			});
+			const verified = service.spawnAuthority.verify({
+				actor: { peer: 'in-process' },
+				identity: {
+					requestId: 'run-request',
+					idempotencyKey: 'run-key',
+					attemptId: 'run-attempt',
+					runId: null,
+					rootRunId: null,
+					parentRunId: null,
+				},
+				traceId: 'run-trace',
+				policyRevision: 3,
+				workflow: null,
+			});
+			if (!verified.ok) throw new Error(verified.problems.join('; '));
+			const admitted = await service.spawnAuthority.authority.admit({
+				context: verified.context,
+				policy: service.spawnAuthority.policy(),
+				snapshot: buildDispatchSnapshot(
+					{ command: '/local/fixture', args: [], cwd: dir, env: {} },
+					{ provider: 'claude-code', model: null }
+				),
+			});
+			if (admitted.state !== 'admitted') throw new Error(admitted.message);
+			admitted.lease.bind(42);
+			// The process manager's subscription: a revoked lease stops its process.
+			const stopped = vi.fn();
+			admitted.lease.onRevoked(stopped);
+			return { service, lease: admitted.lease, stopped };
+		}
+
+		async function setManagement(service: EnterpriseService, management: 'revoked' | 'suspended') {
+			const read = service.identity.read();
+			if (read.status !== 'ok') throw new Error('expected an enrolled record');
+			await service.identity.write({ ...read.record, management });
+		}
+
+		it('leaves a run admitted under a standing that still allows it alone', async () => {
+			const { service, lease, stopped } = await boundRun();
+			const pass = service.constrainLiveRuns();
+			expect(pass).toMatchObject({ live: 1, revoked: [], reason: null });
+			expect(pass.standing).not.toBe('revoked');
+			expect(lease.state()).toBe('bound');
+			expect(stopped).not.toHaveBeenCalled();
+		});
+
+		it('revokes the running lease when the record is revoked, so its process stops and the ledger says why', async () => {
+			const { service, lease, stopped } = await boundRun();
+			await setManagement(service, 'revoked');
+			const pass = service.constrainLiveRuns();
+			expect(pass).toMatchObject({ standing: 'revoked', live: 1, revoked: [lease.leaseId] });
+			expect(lease.state()).toBe('revoked');
+			expect(stopped).toHaveBeenCalledWith(expect.stringContaining('host standing is revoked'));
+			expect(service.dispatch.receipt(lease.leaseId)?.effect).toMatchObject({
+				state: 'revoked',
+				reason: expect.stringContaining('Managed execution is refused'),
+			});
+			// Nothing is live any more, so a second pass revokes nothing.
+			expect(service.constrainLiveRuns()).toMatchObject({ live: 0, revoked: [] });
+		});
+
+		it('a policy refresh that learns of a suspension stops the run it refuses', async () => {
+			const { service, lease, stopped } = await boundRun();
+			// The refresh is where the endpoint's suspension lands on the record.
+			const refresh = service.policy.refresh;
+			vi.spyOn(service.policy, 'refresh').mockImplementation(async () => {
+				const outcome = await refresh();
+				await setManagement(service, 'suspended');
+				return outcome;
+			});
+			expect(service.constrainLiveRuns().revoked).toEqual([]);
+			await service.managed.refreshPolicy();
+			expect(lease.state()).toBe('revoked');
+			expect(stopped).toHaveBeenCalledWith(expect.stringContaining('suspended'));
+		});
+
+		it('holds live runs to the standing on a timer between start and close, with no send', async () => {
+			const { service, lease, stopped } = await boundRun(10);
+			await setManagement(service, 'revoked');
+			await vi.waitFor(() => expect(lease.state()).toBe('revoked'), { timeout: 2_000 });
+			expect(stopped).toHaveBeenCalledOnce();
+		});
+
+		it('reads a run that was bound when the desktop went away back as unknown after a restart, never as running', async () => {
+			const { service, lease } = await boundRun();
+			// The ledger as a process that died without closing left it: the lease bound, no release.
+			await service.dispatch.flush();
+			const reopened = compose();
+			await reopened.start();
+			expect(reopened.managed.run(lease.leaseId)).toMatchObject({
+				leaseId: lease.leaseId,
+				effect: { state: 'unknown' },
+			});
+			expect(reopened.host.authority.live()).toHaveLength(0);
+		});
 	});
 });
