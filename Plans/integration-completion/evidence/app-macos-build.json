@@ -1,0 +1,442 @@
+{
+	"schemaVersion": 1,
+	"schema": "maestro-integration-build/1",
+	"artifactId": "MAESTRO-APP-MACOS-BUILD",
+	"owner": "maestro",
+	"proofClass": "implementation-input",
+	"status": "complete-native-package-build",
+	"producerDocument": "MCOMP-35",
+	"task": "MCOMP-35-01",
+	"stage": "M35",
+	"backlog": ["VERIFY-01"],
+	"recordedAt": "2026-11-09T19:59:09.009Z",
+	"standing": "An actual macOS (darwin arm64) application archive built by the existing electron-builder workflow on a native Mac from the MAESTRO-FINAL-CONSUMERS-BUILD source cohort. Proves packaging only: grants no execution authority and qualifies no native peer authentication, custody, provider effect or application pair (MCOMP-32, MCOMP-34).",
+	"grants": {
+		"authority": "none",
+		"lease": "none",
+		"policy": "none"
+	},
+	"qualification": {
+		"paired": false,
+		"provider": false,
+		"native": false,
+		"desktopGui": false,
+		"nativePackage": true
+	},
+	"implementationRevision": "6e2232a4cb2010993166b708297bb2482bea27aa",
+	"observedRevision": "f89a3d32e887dd53c7df414be1708f26db2f7d10",
+	"sourceEquivalence": {
+		"from": "6e2232a4cb2010993166b708297bb2482bea27aa",
+		"to": "f89a3d32e887dd53c7df414be1708f26db2f7d10",
+		"changedPaths": [
+			"Plans/integration-completion/evidence/final-build.json",
+			"Plans/integration-completion/program.json"
+		],
+		"rule": "Only Plans/ coordination files changed between the cohort implementation revision and the packaged HEAD; the uncommitted working-tree changes are Plans/ coordination files and untracked tool state, none of them build inputs."
+	},
+	"runner": {
+		"os": "macOS 27.2 (26B123)",
+		"kernel": "Darwin 27.2.0 arm64",
+		"hardwareArch": "arm64",
+		"xcode": "/Applications/Xcode.app/Contents/Developer",
+		"node": "v26.13.0",
+		"electronBuilder": "26.15.3",
+		"electron": "41.10.7",
+		"kind": "The owning native macOS arm64 host of this workspace (not a cross-build, not a VM image of another OS). It is not a disposable runner and no service or custody privileges were used or needed for packaging."
+	},
+	"dependencies": [
+		{
+			"artifactId": "MAESTRO-FINAL-CONSUMERS-BUILD",
+			"path": "Plans/integration-completion/evidence/final-build.json",
+			"sha256": "c8cc99b05924a0aefd025a95bfaa4f36448d6f1135e90cec92884729fe85a4f9",
+			"implementationRevision": "6e2232a4cb2010993166b708297bb2482bea27aa",
+			"inputDigest": "b63ca065e556bf4a745457540497cda35fbf4823351e271ca4384e86a267b037"
+		},
+		{
+			"artifactId": "RUNNER-MACOS",
+			"standing": "Satisfied for packaging only by the native host above. The service/custody privileges the external input names are not established here and remain an input of MCOMP-32/MCOMP-34."
+		}
+	],
+	"archives": {
+		"macos": {
+			"folder": ".maestro/playbooks/Working/MCOMP-35-01/archive/9b31e0718cd41329f102cd4b6a75fdd31ab33d4d7240d938e5a26ac5e2d72a93",
+			"manifest": {
+				"path": ".maestro/playbooks/Working/MCOMP-35-01/archive/9b31e0718cd41329f102cd4b6a75fdd31ab33d4d7240d938e5a26ac5e2d72a93/artifact.json",
+				"sha256": "906c040b4e65c4353b37fcd0480e6f8dfe87c0e9d1ce7c41f3a820b061bc4c94"
+			},
+			"zip": {
+				"path": ".maestro/playbooks/Working/MCOMP-35-01/archive/9b31e0718cd41329f102cd4b6a75fdd31ab33d4d7240d938e5a26ac5e2d72a93/maestro-1.1.1-RC-arm64-mac.zip",
+				"sha256": "9b31e0718cd41329f102cd4b6a75fdd31ab33d4d7240d938e5a26ac5e2d72a93",
+				"sha512": "9cec3800c7b52b35bf663fb4d4f8891fee673c43ffac4ba27ab3adae55bb324a98da65db54b5fa77629cdd431e34bde0a47adc00686f604de2271e991e136505",
+				"bytes": 864316178
+			},
+			"dmg": {
+				"path": ".maestro/playbooks/Working/MCOMP-35-01/archive/9b31e0718cd41329f102cd4b6a75fdd31ab33d4d7240d938e5a26ac5e2d72a93/maestro-1.1.1-RC-arm64-mac.dmg",
+				"sha256": "28f12d76765fa7c3dd2b7cb324dc76e562c8a225b893893c8d3509230d3a13f6",
+				"sha512": "0dacece7329a042dfc89e74950de26c0bd4f05e89387a279f185e40bae262267a88671910b06ee1c4ab38d2fba50d8c64b16161ae31ffc4b954637d78a2c0a97",
+				"bytes": 866502654
+			},
+			"updateManifest": {
+				"path": ".maestro/playbooks/Working/MCOMP-35-01/archive/9b31e0718cd41329f102cd4b6a75fdd31ab33d4d7240d938e5a26ac5e2d72a93/latest-mac.yml",
+				"sha256": "e55c4e27c2300843dd2207de6eb81be714e960f36dfc2edcef98312be26b33f2",
+				"sha512": "eef7d1a208c3158cf5a6077902179a8043bd81ad4d0b1b36afcfef11b776ea6df6ff5d98b0417d80a3dfbb270409d2d8982940c9261062f4b7e2c5d60b2c5a6b",
+				"bytes": 521
+			},
+			"buildOutput": "release/ (electron-builder directories.output); the archive folder holds read-only hard links to the same inodes so a later package run cannot replace these bytes."
+		},
+		"runtime": {
+			"path": "/Users/dr3/dev-shit/Maestro/dist/mega-maestro-runtime/0.37.0/17062250db843f62b00b37fa4c005170522142a8880eaa878f39fd563f4f9614/runtime.tgz",
+			"sha256": "17062250db843f62b00b37fa4c005170522142a8880eaa878f39fd563f4f9614",
+			"libraryMember": "package/library/index.js",
+			"libraryMemberSha256": "0da112ad1128d9342edc41317a33017ec9e8bed0cadf47d56a943ce4fb3445c2"
+		}
+	},
+	"application": {
+		"infoPlist": {
+			"CFBundleIdentifier": "com.maestro.app",
+			"CFBundleShortVersionString": "1.1.1-RC",
+			"CFBundleVersion": "1.1.1-RC",
+			"CFBundleExecutable": "Maestro",
+			"LSMinimumSystemVersion": "12.0",
+			"ElectronAsarIntegrity": {
+				"Resources/app.asar": {
+					"hash": "42234be993d4a48f87dd0d79a36edea7201568458298fd1d8d303b0ec17f8f00",
+					"algorithm": "SHA256"
+				}
+			}
+		},
+		"machO": [
+			{
+				"path": "Contents/MacOS/Maestro",
+				"present": true,
+				"file": "Mach-O 64-bit executable arm64"
+			},
+			{
+				"path": "Contents/Resources/app.asar.unpacked/node_modules/better-sqlite3/build/Release/better_sqlite3.node",
+				"present": true,
+				"file": "Mach-O 64-bit bundle arm64"
+			},
+			{
+				"path": "Contents/Resources/app.asar.unpacked/node_modules/node-pty/build/Release/pty.node",
+				"present": true,
+				"file": "Mach-O 64-bit bundle arm64"
+			},
+			{
+				"path": "Contents/Resources/native/maestro-computer-history",
+				"present": true,
+				"file": "Mach-O 64-bit executable arm64"
+			}
+		],
+		"signature": {
+			"display": [
+				"Identifier=Electron",
+				"Format=app bundle with Mach-O thin (arm64)",
+				"CodeDirectory v=20400 size=392 flags=0x20002(adhoc,linker-signed) hashes=9+0 location=embedded",
+				"Signature=adhoc",
+				"TeamIdentifier=not set"
+			],
+			"verifyDeepStrict": {
+				"status": 1,
+				"stderr": "/Users/dr3/dev-shit/Maestro/release/mac-arm64/Maestro.app: code has no resources but signature indicates they must be present"
+			},
+			"standing": "Unsigned: electron-builder ran with CSC_IDENTITY_AUTO_DISCOVERY=false because this host has 0 code-signing identities, so only the ad-hoc linker signature of the Electron binary is present and scripts/notarize.js skipped notarization. codesign --verify --deep --strict fails as expected for an unsealed bundle."
+		},
+		"asar": {
+			"bytes": 1062062959,
+			"headerSha256": "42234be993d4a48f87dd0d79a36edea7201568458298fd1d8d303b0ec17f8f00",
+			"plistIntegrity": "42234be993d4a48f87dd0d79a36edea7201568458298fd1d8d303b0ec17f8f00",
+			"integrityMatches": true
+		},
+		"asarDist": {
+			"files": 3675,
+			"digest": "a5b9f70ea86d91b49b5549206a5bc2ce049d6b2c413385fe92735580509b2f3f",
+			"byTopDir": {
+				"dist/__tests__": 14,
+				"dist/cli": 17,
+				"dist/maestro-lib": 5,
+				"dist/main": 1031,
+				"dist/mega-maestro-actor-bridge": 3,
+				"dist/mega-maestro-author-desktop": 3,
+				"dist/mega-maestro-collection-desktop": 3,
+				"dist/mega-maestro-commands-desktop": 3,
+				"dist/mega-maestro-final-desktop": 3,
+				"dist/mega-maestro-gaps01-desktop": 3,
+				"dist/mega-maestro-headless-cli": 6,
+				"dist/mega-maestro-interactive-desktop": 3,
+				"dist/mega-maestro-policy-desktop": 3,
+				"dist/mega-maestro-residual-desktop": 3,
+				"dist/mega-maestro-routes-desktop": 3,
+				"dist/mega-maestro-runtime": 155,
+				"dist/mega-maestro-workflow-desktop": 3,
+				"dist/prompts": 1,
+				"dist/renderer": 546,
+				"dist/shared": 728,
+				"dist/web-desktop": 1139
+			},
+			"map": {
+				"path": ".maestro/playbooks/Working/MCOMP-35-01/asar-dist.json",
+				"sha256": "9e51c9f90f0ecbc551d452f5ae134e004ab48d5c971b62502faabc0553274bf0"
+			}
+		},
+		"extraResources": [
+			{
+				"resource": "maestro-cli.js",
+				"from": "dist/cli/maestro-cli.js",
+				"sha256": "86ba18d3706b68d2b92a5c145095787b82614e6aa8c16cfc3bdda42a061768cb",
+				"matchesBuild": true
+			},
+			{
+				"resource": "maestro-p.js",
+				"from": "dist/cli/maestro-p.js",
+				"sha256": "1c82e46e5d14b9b7b91b19e7ee619cea6d09083902c104b36afb0f9ace596c98",
+				"matchesBuild": true
+			},
+			{
+				"resource": "maestro-lib-run.js",
+				"from": "dist/cli/maestro-lib-run.js",
+				"sha256": "eed77bf05b0683c1e74c9626353072822c14b7a1c1fd7947fc7cc801d8c36ed5",
+				"matchesBuild": true
+			},
+			{
+				"resource": "permission-relay-bridge.js",
+				"from": "dist/cli/permission-relay-bridge.js",
+				"sha256": "c4edce48eaf8ce7bf59b6dc8af8cd8be4bb7f18b8aaa370a0f880a169082342e",
+				"matchesBuild": true
+			},
+			{
+				"resource": "native/maestro-computer-history",
+				"from": "dist/native/darwin-arm64/maestro-computer-history",
+				"sha256": "b7ec12a313691492d7c764f934b24fe571671d4e192c624c703dec031ed5552c",
+				"matchesBuild": true
+			}
+		]
+	},
+	"checks": [
+		{
+			"name": "build",
+			"command": "node scripts/set-version.mjs npm run build",
+			"env": {
+				"CSC_IDENTITY_AUTO_DISCOVERY": "false"
+			},
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-35-01/build.log",
+				"sha256": "bbfea1edcad140ab1a62f31a4050eae7b9ef053ffe4051c76e5261af79a44d77"
+			}
+		},
+		{
+			"name": "build-computer-history",
+			"command": "npm run build:computer-history",
+			"env": {
+				"CSC_IDENTITY_AUTO_DISCOVERY": "false"
+			},
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-35-01/build-computer-history.log",
+				"sha256": "d01ac194c618a78da5f167640cdb691c909b62ba0fbe5be97f188b90b77a0442"
+			}
+		},
+		{
+			"name": "electron-builder",
+			"command": "node scripts/set-version.mjs electron-builder --mac --arm64 --publish never",
+			"env": {
+				"CSC_IDENTITY_AUTO_DISCOVERY": "false"
+			},
+			"exitCode": 127,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-35-01/electron-builder.log",
+				"sha256": "4c4fff570e06894d9bf141ea311f275f881fa0b104e9b406203618e7145c823c"
+			}
+		},
+		{
+			"name": "electron-builder-attempt-1",
+			"command": "node scripts/set-version.mjs electron-builder --mac --arm64 --publish never",
+			"exitCode": 127,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-35-01/electron-builder-attempt1-path.log",
+				"sha256": "9e64e291de2249bce803933931f9418c01629142ff7d9e67ed122e84274c9592"
+			},
+			"note": "Harness defect, not a build failure: node_modules/.bin was not on PATH outside an npm script. Fixed in build.mjs and rerun."
+		},
+		{
+			"name": "electron-builder",
+			"command": "node scripts/set-version.mjs electron-builder --mac --arm64 --publish never",
+			"env": {
+				"CSC_IDENTITY_AUTO_DISCOVERY": "false"
+			},
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-35-01/electron-builder.log",
+				"sha256": "4c4fff570e06894d9bf141ea311f275f881fa0b104e9b406203618e7145c823c"
+			}
+		},
+		{
+			"name": "latest-mac-yml",
+			"result": [
+				{
+					"url": "maestro-1.1.1-RC-arm64-mac.zip",
+					"sha512Matches": true,
+					"sizeMatches": true
+				},
+				{
+					"url": "maestro-1.1.1-RC-arm64-mac.dmg",
+					"sha512Matches": true,
+					"sizeMatches": true
+				}
+			]
+		},
+		{
+			"name": "zip-extract-equals-app",
+			"command": "/usr/bin/ditto -x -k <zip> <tmp>",
+			"result": {
+				"missing": 0,
+				"extra": 0,
+				"differ": 0
+			},
+			"equal": true,
+			"treeDigest": "139214abc750f3238a25eacc66713ba3666be42d9b87b07d7cd5e4f90ea358e2"
+		},
+		{
+			"name": "dmg-verify-attach-equals-app",
+			"commands": [
+				"/usr/bin/hdiutil verify <dmg>",
+				"/usr/bin/hdiutil attach -readonly -nobrowse -noautoopen -mountpoint <tmp> <dmg>",
+				"/usr/bin/hdiutil detach <tmp>"
+			],
+			"verify": {
+				"status": 0,
+				"tail": "  GPT Header (Backup GPT Header : 8): verified   CRC32 $FAE9565B verified   CRC32 $9C105905"
+			},
+			"volumeEntries": [
+				".DS_Store",
+				".VolumeIcon.icns",
+				".background.tiff",
+				"Applications",
+				"Maestro.app"
+			],
+			"equal": true,
+			"treeDigest": "139214abc750f3238a25eacc66713ba3666be42d9b87b07d7cd5e4f90ea358e2"
+		},
+		{
+			"name": "asar-integrity",
+			"equal": true
+		},
+		{
+			"name": "asar-dist-equals-workspace-build",
+			"equal": true
+		},
+		{
+			"name": "cohort-desktop-payload",
+			"payload": {
+				"path": ".maestro/playbooks/Working/MCOMP-33-04/main-build-payload.json",
+				"sha256": "0489e33f8108e2679aed0272d1ba2defcaa7e02eac838b12bb8bcc9045f62aba"
+			},
+			"compiledArchive": "000969dcfaf4e505842705e98ab8437d5275decd5e0e741a2a2623f01b08f5ad",
+			"result": {
+				"files": 2305,
+				"differ": ["dist/main/build-info.json", "dist/renderer/index.html"],
+				"renamedRendererAssets": 30
+			},
+			"renderer": {
+				"cohortFiles": 546,
+				"packagedFiles": 546,
+				"packagedWithoutCohortCounterpart": [],
+				"differing": 31,
+				"explained": 31,
+				"unexplained": [],
+				"normalization": "content-hashed asset file names (Name-XXXXXXXX.js|css -> Name-#) the git short hash in build-info, and the VITE_APP_VERSION suffix \"<hash> (local)\" that scripts/set-version.mjs adds in the package workflow (MCOMP-33-04 built the renderer without that wrapper)",
+				"evidence": {
+					"path": ".maestro/playbooks/Working/MCOMP-35-01/renderer-compare.json",
+					"sha256": "510fd878619f184f2f7619f40dc5deb4029b81637d38bae088e2be9f20bf77ca"
+				}
+			},
+			"buildInfo": {
+				"cohort": {
+					"commitHash": "b508ce2c"
+				},
+				"packaged": {
+					"commitHash": "f89a3d32"
+				}
+			},
+			"standing": "Every MCOMP-33-04 compiled main/shared/preload file is byte-identical in app.asar except build-info.json (git short hash). All 546 renderer files match after normalizing content-hashed asset names and the VITE_APP_VERSION suffix the package workflow adds."
+		},
+		{
+			"name": "public-runtime-load",
+			"command": "ELECTRON_RUN_AS_NODE=1 release/mac-arm64/Maestro.app/Contents/MacOS/Maestro -e <probe>",
+			"exitCode": 0,
+			"result": {
+				"electron": "41.10.7",
+				"node": "24.18.0",
+				"modules": "145",
+				"arch": "arm64",
+				"platform": "darwin",
+				"libVersion": "0.37.0",
+				"packageVersion": "0.37.0",
+				"exports": 868,
+				"planSessionTurn": "function",
+				"sqlite": 42,
+				"libPath": "/Users/dr3/dev-shit/Maestro/release/mac-arm64/Maestro.app/Contents/Resources/app.asar/dist/maestro-lib/index.js"
+			},
+			"cohortLibraryEntrySha256": "0da112ad1128d9342edc41317a33017ec9e8bed0cadf47d56a943ce4fb3445c2",
+			"packagedLibraryEntrySha256": "0da112ad1128d9342edc41317a33017ec9e8bed0cadf47d56a943ce4fb3445c2"
+		},
+		{
+			"name": "packaged-cli",
+			"command": "ELECTRON_RUN_AS_NODE=1 release/mac-arm64/Maestro.app/Contents/MacOS/Maestro Contents/Resources/maestro-cli.js --version",
+			"exitCode": 0,
+			"stdout": "1.1.1-RC"
+		}
+	],
+	"evidence": {
+		"verification": {
+			"path": ".maestro/playbooks/Working/MCOMP-35-01/verification.json",
+			"sha256": "70215cd5ffb3e7ef4d96e3bd55475345ee82b18728e19029217eaa732e738598"
+		},
+		"harness": [
+			{
+				"path": ".maestro/playbooks/Working/MCOMP-35-01/build.mjs",
+				"sha256": "cc3fc1ea799042141ffcfa4850679121df795015fb1205d31642223a109aec32"
+			},
+			{
+				"path": ".maestro/playbooks/Working/MCOMP-35-01/verify.mjs",
+				"sha256": "b6c8a692957081663578ef68a2ee21bd098d13bd3ac42622cf3fb2eb71c76797"
+			},
+			{
+				"path": ".maestro/playbooks/Working/MCOMP-35-01/compare-renderer.mjs",
+				"sha256": "c019f38c9ad0b5acf5eecf4d036a9d0bba8626c565334323278cc156d95c9353"
+			},
+			{
+				"path": ".maestro/playbooks/Working/MCOMP-35-01/write-receipt.mjs",
+				"sha256": "7091af2d4ed9952c6f0b0db73e779baf2e7979172accaa5afc1a65e9e85656e4"
+			}
+		]
+	},
+	"limitations": [
+		"arm64 only. The release workflow also builds x64 after rebuilding node-pty and better-sqlite3 for x64 (.github/scripts/rebuild-and-verify-native.sh x64); doing that here would rewrite the shared workspace node_modules, so no x64 archive exists.",
+		"Unsigned and not notarized (no Developer ID identity or Apple credentials on this host). Gatekeeper refuses a downloaded copy; signing and notarization are release concerns, not packaging proof.",
+		"app.asar carries 320 MB of earlier harness outputs (dist/__tests__ and dist/mega-maestro-*) because package.json build.files includes dist/**/* and this workspace dist/ holds them. They are inert data the app never loads; a clean checkout has none. Excluding them from build.files is a follow-up, not done here.",
+		"The packaged GUI was not launched: it shares the bundle id and data directory of the Maestro instance running on this host. Runtime loading was proved under the packaged Electron in node mode (ELECTRON_RUN_AS_NODE=1), which loads app.asar and the unpacked native module.",
+		"Packaging only. Native peer authentication, custody, provider effects and the final application pair remain MCOMP-32 and MCOMP-34."
+	],
+	"asarNonApplicationSubtrees": {
+		"note": "Earlier harness outputs in the local dist/ that the package.json files glob (dist/**/*) swept into app.asar; a clean CI checkout has none of them.",
+		"bytesBySubtree": {
+			"dist/__tests__": 75368,
+			"dist/mega-maestro-actor-bridge": 406969,
+			"dist/mega-maestro-author-desktop": 20128178,
+			"dist/mega-maestro-collection-desktop": 20143539,
+			"dist/mega-maestro-commands-desktop": 20154452,
+			"dist/mega-maestro-final-desktop": 20725573,
+			"dist/mega-maestro-gaps01-desktop": 20114700,
+			"dist/mega-maestro-headless-cli": 14886734,
+			"dist/mega-maestro-interactive-desktop": 20136966,
+			"dist/mega-maestro-policy-desktop": 20009092,
+			"dist/mega-maestro-residual-desktop": 20095573,
+			"dist/mega-maestro-routes-desktop": 20161709,
+			"dist/mega-maestro-runtime": 102747550,
+			"dist/mega-maestro-workflow-desktop": 20086283
+		},
+		"totalBytes": 319872686
+	},
+	"imagesAnalyzed": 0
+}
