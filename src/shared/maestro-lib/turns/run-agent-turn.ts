@@ -16,6 +16,8 @@
  *   drop would send a prompt about a picture the agent never sees.
  * - Standard permission mode on a Claude Code API turn (PA11). The permission relay lives in
  *   the desktop; without it Claude aborts on the first tool call.
+ * - A managed real-provider launch (one with a route ceiling) whose provider route is not
+ *   qualified for exactly this launch (MCOMP-31-01A). No fallback to another route or login.
  * - An enrolled host with no managed authority, or with one that is not the authority answering
  *   for the installation now (MRC3-01-02, MCOMP-09-02). The host's standing is read from what the
  *   caller passed AND from what the host installed at the sink; an omitted or standalone word from
@@ -71,6 +73,14 @@ import {
 	type PolicySourceSet,
 } from '../managed/authority';
 import type { ManagedAuthenticatedContext } from '../managed/types';
+import { providerTransportForRoute } from '../managed/provider-contract';
+import {
+	approveProviderRoute,
+	type ProviderEvidenceTransport,
+	type ProviderQualificationTier,
+	type ProviderRouteCandidate,
+	type ProviderRouteEvidenceVerifier,
+} from '../managed/provider-route';
 import {
 	runTurn,
 	UnknownProviderError,
@@ -150,8 +160,79 @@ export interface ManagedTurnAuthority {
 	 * route builds its own complete spec and has none.
 	 */
 	launch?: ManagedLaunchInput;
+	/**
+	 * The route evidence a real-provider launch is approved on (MCOMP-31-01A). Required whenever
+	 * `launch` is present; absent or unqualified, the turn is refused before admission.
+	 */
+	providerRoute?: ManagedProviderRouteInput;
 	/** The lease, once admitted, so the caller can journal its id and hear its end. */
 	onLease?(lease: DispatchLease): void;
+}
+
+/** The route the host is about to launch, with its signed evidence. The verifier is host-injected. */
+export interface ManagedProviderRouteInput {
+	/** The signed route qualification receipt, as the producer published it. */
+	evidence: unknown;
+	/** The exact route: provider, adapter, transport, binary, OS, sandbox backend, input digest. */
+	candidate: ProviderRouteCandidate;
+	verifier?: ProviderRouteEvidenceVerifier;
+	/** The gateway origin the host hashed into `candidate.inputDigest`; must be the route's `baseUrl`. */
+	gateway: string | null;
+	/** The approved credential binding digest the host hashed into `candidate.inputDigest`. */
+	credentialBindingDigest: string;
+	/** Oldest acceptable observation, in ms (bounded by `PROVIDER_ROUTE_EVIDENCE_AGE_MS`). */
+	maxAgeMs: number;
+	now?: () => number;
+}
+
+/** The provider route a managed launch ran on: identifiers only, for the caller's journal. */
+export interface ApprovedProviderRouteBinding {
+	receiptId: string;
+	payloadDigest: string;
+	tier: Exclude<ProviderQualificationTier, 'node-harness'>;
+	transport: ProviderEvidenceTransport;
+	/** The qualified sandbox backend the launch is confined by. */
+	sandboxBackendId: string;
+	gateway: string | null;
+	credentialBindingDigest: string;
+}
+
+/**
+ * Why a provider route input does not describe this launch. Names only. The route must use an
+ * approved credential (never the provider's own login), and the candidate must name the turn's
+ * provider and the transport it will actually run on.
+ */
+export function providerRouteLaunchProblems(
+	input: ManagedProviderRouteInput,
+	launch: ManagedLaunchInput,
+	expected: { providerId: string; transport: ProviderEvidenceTransport }
+): string[] {
+	const problems: string[] = [];
+	const route = launch.route;
+	if (route.providerId !== expected.providerId)
+		problems.push('the route ceiling names another provider');
+	if (input.candidate.provider !== expected.providerId)
+		problems.push('the candidate names another provider');
+	if (input.candidate.transport !== expected.transport) {
+		problems.push(`the candidate transport is not ${expected.transport}`);
+	}
+	if (input.gateway !== route.baseUrl)
+		problems.push('the candidate gateway is not the route gateway');
+	if (route.login !== 'approved-credential') {
+		problems.push(
+			'the route lets the provider login bill; a qualified route needs an approved credential'
+		);
+	}
+	const credentials = launch.credentials;
+	if (!credentials || credentials.approved.length === 0) {
+		problems.push('the launch carries no approved credential reference');
+	} else if (credentials.digest !== input.credentialBindingDigest) {
+		problems.push('the candidate credential binding is not the launch binding');
+	}
+	if (typeof input.candidate.backend?.id !== 'string' || input.candidate.backend.id.length === 0) {
+		problems.push('the candidate names no sandbox backend');
+	}
+	return problems;
 }
 
 export interface RunAgentTurnOptions {
@@ -207,6 +288,8 @@ export interface AgentTurnRun {
 	result: Promise<CompletedTurn>;
 	/** Stop the way the Stop button does: interrupt, then terminate, then kill the tree. */
 	interrupt(): void;
+	/** The qualified provider route a managed real-provider launch ran on. Absent otherwise. */
+	providerRoute?: ApprovedProviderRouteBinding;
 	/** Stop without the interrupt stage. */
 	terminate(): void;
 	/** Last resort for process exit: no grace, nothing awaited. */
@@ -584,6 +667,59 @@ export async function runAgentTurn(
 				: ({ kind: 'local' } as const),
 		resourceIds: options.managed?.resourceIds ?? [],
 	};
+	// A managed real-provider launch runs only on a route qualified for exactly this launch
+	// (MCOMP-31-01A). The transport is the one the final spec runs on; nothing is lowered or swapped.
+	let providerRoute: ApprovedProviderRouteBinding | undefined;
+	const managedLaunch = options.managed?.launch;
+	if (managedLaunch) {
+		const routeInput = options.managed?.providerRoute;
+		if (!routeInput) {
+			return abandon(
+				'managed-unavailable',
+				'This managed launch carries no provider route evidence, so it was not started.'
+			);
+		}
+		const transport = providerTransportForRoute(
+			plan.target.kind === 'remote'
+				? 'ssh'
+				: claudeDecision?.mode === 'interactive' && claudeDecision.maestroPBinPath
+					? 'pty'
+					: 'child-process'
+		);
+		// Read once: what is checked is what is approved and reported.
+		const held: ManagedProviderRouteInput = {
+			...routeInput,
+			candidate: structuredClone(routeInput.candidate),
+		};
+		const problems = providerRouteLaunchProblems(held, managedLaunch, { providerId, transport });
+		if (problems.length > 0) {
+			return abandon(
+				'managed-denied',
+				`The provider route does not describe this launch - ${problems.join('; ')}`
+			);
+		}
+		const approval = await approveProviderRoute(held.evidence, held.candidate, held.verifier, {
+			maxAgeMs: held.maxAgeMs,
+			...(held.now ? { now: held.now } : {}),
+			signal: options.signal ?? new AbortController().signal,
+		});
+		if (approval.state !== 'qualified') {
+			return abandon(
+				'managed-unavailable',
+				`The provider route is not qualified for this launch - ${approval.reasons.join('; ')}`
+			);
+		}
+		providerRoute = {
+			receiptId: approval.receiptId,
+			payloadDigest: approval.payloadDigest,
+			tier: approval.tier,
+			transport,
+			sandboxBackendId: held.candidate.backend.id,
+			gateway: held.gateway,
+			credentialBindingDigest: held.credentialBindingDigest,
+		};
+	}
+
 	let admission: { gate: DispatchAdmission; attribution: typeof attribution } | undefined;
 	let lease: DispatchLease | undefined;
 	const stopGraceMs = options.stopGraceMs ?? INTERACTIVE_STOP_GRACE_MS;
@@ -677,6 +813,7 @@ export async function runAgentTurn(
 			events: stream,
 			result,
 			interrupt: stops.interrupt,
+			...(providerRoute ? { providerRoute } : {}),
 			terminate: stops.terminate,
 			terminateNow: stops.terminateNow,
 			stopRequested: () => running.handle.stopRequested(),
