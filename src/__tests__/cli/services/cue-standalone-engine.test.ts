@@ -73,6 +73,8 @@ vi.mock('../../../cli/services/system-prompt', () => ({ prepareMaestroSystemProm
 // word a test sets, and the inputs the engine built it from. Never the developer's keyring.
 const custody = vi.hoisted(() => ({
 	standing: null as InstallationStanding | null,
+	/** When set, the custody holds its record for this data directory only (MCOMP-21-14). */
+	only: null as string | null,
 	inputs: [] as Array<{ userDataDir: string; custody: { ok: boolean } }>,
 }));
 vi.mock('../../../cli/services/host-managed', () => ({
@@ -81,7 +83,10 @@ vi.mock('../../../cli/services/host-managed', () => ({
 		custody.inputs.push(input);
 		return {
 			read: () =>
-				custody.standing ?? { standing: 'standalone', detail: 'The test custody holds nothing.' },
+				(custody.only !== null && input.userDataDir !== custody.only ? null : custody.standing) ?? {
+					standing: 'standalone',
+					detail: 'The test custody holds nothing.',
+				},
 		};
 	},
 }));
@@ -1072,6 +1077,261 @@ describe('managed admission (MRC-07-02A)', () => {
 			expect(lines).not.toContain('odin-secret');
 			expect(network).not.toHaveBeenCalled();
 			network.mockRestore();
+		});
+	});
+
+	/**
+	 * Residual headless bypasses (MCOMP-21-14): the engine reads the standing of
+	 * the data directory it is pointed at on every run (never one it cached),
+	 * the outbound sinks name their egress class to whichever authority is
+	 * installed (approved standalone, refused by class when managed, with no
+	 * socket), and a maestro-p launch is stamped with the key of its own data
+	 * directory, so a handshake that is missing, inherited or signed elsewhere
+	 * never reads as this host's admission.
+	 */
+	describe('residual headless bypasses (MCOMP-21-14)', () => {
+		const chokepoint = () => import('../../../main/utils/fetchWithTimeout');
+		const credentials = () => import('../../../main/enterprise/credential-custody');
+		const susfactor = () => import('../../../main/cue/cue-susfactor');
+		const ODIN = process.env.ODIN_API_TOKEN;
+		let other: string;
+		beforeEach(() => {
+			other = fs.mkdtempSync(path.join(os.tmpdir(), 'cue-standalone-other-'));
+		});
+		afterEach(async () => {
+			(await chokepoint()).setEgressAuthority(null);
+			(await credentials()).setCredentialCustodyAuthority(null);
+			(await susfactor()).setSusFactorScanPolicy(null);
+			(await susfactor()).resetSusFactorTokenCache();
+			vi.unstubAllGlobals();
+			custody.only = null;
+			if (ODIN === undefined) delete process.env.ODIN_API_TOKEN;
+			else process.env.ODIN_API_TOKEN = ODIN;
+			fs.rmSync(other, { recursive: true, force: true });
+		});
+
+		it('re-resolves the data directory per run: the standing and the fence belong to the directory the engine points at', async () => {
+			custody.only = dir;
+			await enroll();
+			const { port: owner, requests } = ownerPort(owned);
+			const deps = buildStandaloneCueEngineDeps({
+				onLog: vi.fn(),
+				managedHost: attachedHost('endpoint-test', owner),
+			});
+			expect(await promptRun(deps, 'run-here')).toMatchObject({ status: 'completed' });
+			expect(executeCuePrompt.mock.calls[0][0].admission).toBeDefined();
+			expect(fs.existsSync(path.join(dir, 'maestro-managed-workflows.json'))).toBe(true);
+
+			// The same engine pointed at another, unenrolled data directory: read over that directory,
+			// never the first one's binding, fence or admission.
+			process.env.MAESTRO_USER_DATA = other;
+			expect(buildStandaloneCueSpawnPort({ managedHost: attachedHost() })().standing()).toBe(
+				'standalone'
+			);
+			expect(custody.inputs.at(-1)).toMatchObject({ userDataDir: other });
+			expect(await promptRun(deps, 'run-there')).toMatchObject({ status: 'completed' });
+			expect(executeCuePrompt.mock.calls[1][0].admission).toBeUndefined();
+			expect(requests).toHaveLength(1);
+			expect(fs.readdirSync(other)).not.toContain('maestro-managed-workflows.json');
+
+			// A binding file in that directory the custody does not hold: managed, unavailable, refused.
+			const planted = await createManagedBinding({
+				paths: { userDataDir: other, productionDataDir: other },
+				fence: () => ({ ok: true as const }),
+				now: () => 1_700_000_000_000,
+			}).enroll({
+				installationId: 'inst-other',
+				authorityId: 'endpoint-test',
+				endpointRef: '/tmp/endpoint.sock',
+				policySources: [{ id: 'endpoint-test', kind: 'endpoint', revision: 7 }],
+				policyRevision: 7,
+			});
+			expect(planted.ok).toBe(true);
+			const refused = await promptRun(deps, 'run-planted');
+			expect(refused).toMatchObject({ status: 'failed', managed: { state: 'unavailable' } });
+			expect(executeCuePrompt).toHaveBeenCalledTimes(2);
+
+			// Pointed back: admitted under the first directory's enrollment again.
+			process.env.MAESTRO_USER_DATA = dir;
+			expect(await promptRun(deps, 'run-back')).toMatchObject({ status: 'completed' });
+			expect(executeCuePrompt).toHaveBeenCalledTimes(3);
+			expect(requests).toHaveLength(2);
+		});
+
+		it('names user-webhook and vendor-telemetry at the real sinks, and a standalone engine lets them leave', async () => {
+			const seen: Array<{ url: string; class: string }> = [];
+			const inner = await buildStandaloneCueEgressAuthority({ managedHost: null });
+			(await chokepoint()).setEgressAuthority({
+				evaluateEgress(request) {
+					seen.push({ url: request.url, class: request.class });
+					return inner.evaluateEgress(request);
+				},
+			});
+			const network = vi.fn(async (url: string) =>
+				String(url).includes('access_tokens')
+					? new Response(JSON.stringify({ token: 'jwt-1' }), { status: 200 })
+					: String(url).includes('/sus')
+						? new Response(JSON.stringify({ score: 0.01 }), { status: 200 })
+						: new Response('', { status: 204 })
+			);
+			vi.stubGlobal('fetch', network);
+
+			const { createCueNotifyWebhook, parseNotifyWebhookUrl } =
+				await import('../../../main/cue/cue-notify-webhook');
+			const webhook = createCueNotifyWebhook({
+				target: parseNotifyWebhookUrl('https://hooks.example.com/in'),
+				onLog: vi.fn(),
+			});
+			webhook.send({
+				type: 'cue.notify',
+				agent: { id: 'a', name: 'A', toolType: 'claude-code' },
+				subscription: 's',
+				pipeline: null,
+				runId: 'r',
+				title: 't',
+				message: 'm',
+				sticky: false,
+			});
+			await webhook.flush(1000);
+
+			process.env.ODIN_API_TOKEN = 'odin-secret';
+			const allowed = await (
+				await susfactor()
+			).guardScoredText({
+				scorableText: 'a harmless issue body',
+				itemRef: 'o/r#1',
+				event: { id: 'e', type: 'github.issue', payload: {} },
+				sessionId: 's',
+				subscriptionId: 's:x',
+				subscriptionName: 'x',
+				enabled: true,
+				threshold: 0.95,
+				onLog: vi.fn(),
+			});
+			expect(allowed).toBe(true);
+			expect(seen).toEqual(
+				expect.arrayContaining([
+					{ url: 'https://hooks.example.com/in', class: 'user-webhook' },
+					{ url: 'https://0din.ai/api/v1/access_tokens', class: 'vendor-telemetry' },
+					{ url: 'https://defense.0din.ai/api/v1/sus', class: 'vendor-telemetry' },
+				])
+			);
+			expect(network).toHaveBeenCalledTimes(3);
+		});
+
+		it('holds the 0DIN exchange as vendor-telemetry when managed, opening no socket and passing nothing on', async () => {
+			await enroll();
+			const seen: string[] = [];
+			const inner = await buildStandaloneCueEgressAuthority({ managedHost: null });
+			(await chokepoint()).setEgressAuthority({
+				evaluateEgress(request) {
+					seen.push(request.class);
+					return inner.evaluateEgress(request);
+				},
+			});
+			// A custody that lets the token be read, so the egress ceiling is what decides.
+			(await credentials()).setCredentialCustodyAuthority({
+				standing: () => 'managed',
+				authorize: () => ({ allowed: true }),
+			});
+			(await susfactor()).setSusFactorScanPolicy(
+				buildStandaloneCueSusFactorScanPolicy({ managedHost: null })
+			);
+			const network = vi.fn();
+			vi.stubGlobal('fetch', network);
+			process.env.ODIN_API_TOKEN = 'odin-secret';
+			const onLog = vi.fn();
+			const allowed = await (
+				await susfactor()
+			).guardScoredText({
+				scorableText: 'a harmless issue body',
+				itemRef: 'o/r#2',
+				event: { id: 'e', type: 'github.issue', payload: {} },
+				sessionId: 's',
+				subscriptionId: 's:x',
+				subscriptionName: 'x',
+				enabled: true,
+				threshold: 0.95,
+				onLog,
+			});
+			expect(allowed).toBe(false);
+			expect(seen).toEqual(['vendor-telemetry']);
+			expect(network).not.toHaveBeenCalled();
+			const lines = onLog.mock.calls.map((c) => String(c[1])).join('\n');
+			expect(lines).toContain('[managed-unavailable]');
+			expect(lines).not.toContain('odin-secret');
+		});
+
+		it("stamps a maestro-p launch with its own data directory's key, and nothing else reads as this host's admission", async () => {
+			const tui = await import('../../../shared/maestro-lib/managed/tui-handshake');
+			const bin = path.join(dir, 'claude');
+			fs.writeFileSync(bin, 'claude bytes');
+			const lease = {
+				leaseId: 'lease-1',
+				authorityId: 'endpoint-test',
+				attemptId: 'att-1',
+				runId: 'run-1',
+				policyRevision: 7,
+				actor: { kind: 'service' as const, id: 'maestro-cue:test' },
+			};
+			const stampIn = (dataDir: string | null) =>
+				tui.stampTuiAdmission({
+					dataDir,
+					lease: lease as never,
+					requestId: 'run-1',
+					launch: { claudeBinPath: bin, args: ['--print'] },
+					permissionMode: 'standard',
+					surface: 'cue',
+				});
+
+			// No data directory, or no approved binary: refused, and no key is written anywhere.
+			expect(stampIn(null)).toMatchObject({ ok: false, reason: /names no data directory/ });
+			expect(
+				tui.stampTuiAdmission({
+					dataDir: other,
+					lease: lease as never,
+					requestId: 'run-1',
+					launch: { claudeBinPath: null, args: [] },
+					permissionMode: 'standard',
+					surface: 'cue',
+				})
+			).toMatchObject({ ok: false, reason: /no MAESTRO_CLAUDE_BIN/ });
+			expect(tui.readTuiHandshakeKey(other)).toBeNull();
+
+			const stamped = stampIn(dir);
+			expect(stamped.ok).toBe(true);
+			if (!stamped.ok) return;
+			expect(stamped.env.MAESTRO_USER_DATA).toBe(dir);
+			expect(stamped.payload.owner).toEqual({ surface: 'cue', actor: lease.actor });
+			const ownKey = () => tui.readTuiHandshakeKey(dir);
+			expect(tui.readTuiHandshakeEnv(stamped.env, { readKey: ownKey })).toMatchObject({
+				status: 'ok',
+			});
+
+			// The same handshake checked in another data directory: no key there, or a different key.
+			const elsewhere = () => tui.readTuiHandshakeKey(other);
+			expect(tui.readTuiHandshakeEnv(stamped.env, { readKey: elsewhere })).toMatchObject({
+				status: 'refused',
+				reason: /no key to verify it with/,
+			});
+			tui.loadOrCreateTuiHandshakeKey(other);
+			expect(tui.readTuiHandshakeEnv(stamped.env, { readKey: elsewhere })).toMatchObject({
+				status: 'refused',
+			});
+
+			// A launch env that inherited a handshake and a steering token loses both before the stamp,
+			// so a missing stamp reads as absent and the run's token is the fresh one.
+			const inherited = {
+				...stamped.env,
+				PATH: '/usr/bin',
+			};
+			const bare = tui.withoutInheritedTuiAdmission(inherited);
+			expect(bare).toEqual({ MAESTRO_USER_DATA: dir, PATH: '/usr/bin' });
+			expect(tui.readTuiHandshakeEnv(bare, { readKey: ownKey })).toEqual({ status: 'absent' });
+			const again = stampIn(dir);
+			expect(again.ok).toBe(true);
+			if (!again.ok) return;
+			expect(again.steeringToken).not.toBe(stamped.steeringToken);
 		});
 	});
 });

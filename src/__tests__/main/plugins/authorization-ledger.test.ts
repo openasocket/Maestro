@@ -15,6 +15,7 @@ import * as path from 'path';
 
 import {
 	AuthorizationStore,
+	ManagedPluginAuthorizationError,
 	createKeyringAnchor,
 	shouldDisablePluginForVerifyResult,
 	type SealProvider,
@@ -27,6 +28,10 @@ import type { PermissionGrant } from '../../../shared/plugins/permissions';
 import { isPermitted, parseAllowlistScope } from '../../../shared/plugins/permissions';
 import { PermissionBroker } from '../../../main/plugins/permission-broker';
 import { createPluginPolicySource } from '../../../main/enterprise/plugin-policy';
+import {
+	effectiveTrustedKeys,
+	parseManagedSettingsPolicy,
+} from '../../../shared/managedSettingsLock';
 
 let tmpDir: string;
 let ledgerPath: string;
@@ -692,5 +697,193 @@ describe('the sealed ledger under a managed ceiling (MRC-09-06)', () => {
 			managed: { outcome: 'outside-ceiling', consentEpoch: 3 },
 		});
 		expect(isPermitted(store.readGrants('p'), 'agents:dispatch', 'b')).toBe(true);
+	});
+});
+
+/**
+ * Authorization acts under the managed standing (MCOMP-21-14, over MCOMP-21-07):
+ * a consent mint, an allowlist widening and a load-time verify are held to the
+ * same plugin ceiling the broker reads, before the sealed ledger moves. A
+ * refused act leaves the sealed bytes, the anchor, the epoch and every other
+ * plugin's consent exactly as they were; a ceiling only narrows, so a revoke
+ * and a narrowing are never held, and a standalone host is unchanged.
+ */
+describe('authorization acts under the managed standing (MCOMP-21-14)', () => {
+	const identity = ident('h1', 'trusted', 'k1');
+	const ceiling = (entry: Record<string, unknown> = {}, extra: Record<string, unknown> = {}) => ({
+		policyRevision: 4,
+		plugins: [
+			{
+				pluginId: 'p',
+				contentHash: 'h1',
+				signerKey: 'k1',
+				capabilities: [
+					{ capability: 'fs:read', scopes: ['/data'] },
+					{ capability: 'agents:dispatch', scopes: ['a', 'b'] },
+				],
+				...entry,
+			},
+		],
+		...extra,
+	});
+
+	/** A store composed the way index.ts composes it: the policy source's standing read per act. */
+	function managed(state = { enrolled: true }) {
+		const holder = { value: null as Anchor | null };
+		const store = makeStore(fakeSeal(), fakeAnchor(holder));
+		const policy = createPluginPolicySource({
+			enrolled: () => state.enrolled,
+			policy: () => ({ appliedRevision: 4 }),
+		});
+		store.setManagedStanding(() => policy.standing());
+		// Another plugin consented before enrollment: the witness that a refusal touches nothing.
+		const before = { ...state };
+		state.enrolled = false;
+		store.mint('other', caps('fs:read', '/x'), ident('o1'));
+		state.enrolled = before.enrolled;
+		const snapshot = () => ({
+			bytes: fs.readFileSync(ledgerPath),
+			anchor: holder.value ? { ...holder.value } : null,
+			other: store.readConsent('other'),
+		});
+		const unchangedSince = (taken: ReturnType<typeof snapshot>) => {
+			expect(fs.readFileSync(ledgerPath).equals(taken.bytes)).toBe(true);
+			expect(holder.value).toEqual(taken.anchor);
+			expect(store.readConsent('other')).toEqual(taken.other);
+			// A fresh store over the same file and anchor reads the same ledger.
+			expect(makeStore(fakeSeal(), fakeAnchor(holder)).readConsent('other')).toEqual(taken.other);
+		};
+		return { holder, store, policy, state, snapshot, unchangedSince };
+	}
+
+	it('refuses a mint with no delivered ceiling, by name, before the ledger moves', () => {
+		const { store, snapshot, unchangedSince } = managed();
+		const taken = snapshot();
+		let thrown: unknown;
+		try {
+			store.mint('p', caps('fs:read', '/data'), identity);
+		} catch (error) {
+			thrown = error;
+		}
+		expect(thrown).toBeInstanceOf(ManagedPluginAuthorizationError);
+		expect(thrown).toMatchObject({ pluginId: 'p', outcome: 'unavailable' });
+		expect((thrown as Error).message).toMatch(/managed plugin ceiling is unavailable/);
+		expect(store.isEnabled('p')).toBe(false);
+		expect(store.readGrants('p')).toEqual([]);
+		unchangedSince(taken);
+	});
+
+	it('mints within the ceiling and persists it; refuses a capability, a plugin or bytes it does not name', () => {
+		const { holder, store, policy, snapshot, unchangedSince } = managed();
+		policy.install(ceiling());
+		const taken = snapshot();
+		expect(() => store.mint('p', caps('shell:openExternal'), identity)).toThrow(
+			/shell:openExternal is outside the managed plugin ceiling for "p" \(policy revision 4\)/
+		);
+		expect(() => store.mint('q', caps('fs:read', '/data'), ident('h1', 'trusted', 'k1'))).toThrow(
+			/"q" is not within the managed plugin ceiling of policy revision 4/
+		);
+		// A user-trusted signature over other bytes is not the identity the ceiling names.
+		expect(() => store.mint('p', caps('fs:read', '/data'), ident('h2', 'trusted', 'k1'))).toThrow(
+			ManagedPluginAuthorizationError
+		);
+		unchangedSince(taken);
+
+		store.mint('p', caps('fs:read', '/data'), identity);
+		expect(store.readGrants('p')).toEqual(caps('fs:read', '/data'));
+		expect(makeStore(fakeSeal(), fakeAnchor(holder)).readConsent('p')?.caps).toEqual(
+			caps('fs:read', '/data')
+		);
+	});
+
+	it('refuses a plugin whose publisher the ceiling revokes, even under a trusted signature', () => {
+		const { store, policy, snapshot, unchangedSince } = managed();
+		policy.install(ceiling({}, { revokedPublishers: ['k1'] }));
+		const taken = snapshot();
+		expect(() => store.mint('p', caps('fs:read', '/data'), identity)).toThrow(
+			/"p" is revoked by the managed plugin ceiling of policy revision 4/
+		);
+		unchangedSince(taken);
+	});
+
+	it('holds an allowlist widening to the ceiling members, and never a narrowing', () => {
+		const { store, policy, state, snapshot, unchangedSince } = managed();
+		policy.install(ceiling());
+		store.mint('p', caps('agents:dispatch', 'a'), identity);
+		const taken = snapshot();
+		expect(store.setAllowlistScope('p', 'agents:dispatch', ['a', 'c'])).toBe(false);
+		expect(parseAllowlistScope(store.readGrants('p')[0].scope)).toEqual(['a']);
+		unchangedSince(taken);
+
+		expect(store.setAllowlistScope('p', 'agents:dispatch', ['a', 'b'])).toBe(true);
+		expect(parseAllowlistScope(store.readGrants('p')[0].scope)).toEqual(['a', 'b']);
+
+		// The ceiling withdrawn: a widening is refused, a narrowing still goes through.
+		policy.clear();
+		expect(store.setAllowlistScope('p', 'agents:dispatch', ['a', 'b', 'c'])).toBe(false);
+		expect(store.setAllowlistScope('p', 'agents:dispatch', ['b'])).toBe(true);
+		expect(parseAllowlistScope(store.readGrants('p')[0].scope)).toEqual(['b']);
+		expect(state.enrolled).toBe(true);
+	});
+
+	it('loads a consented plugin only within the ceiling, keeps the consent when it is outside, and revokes under any standing', () => {
+		const { store, policy } = managed();
+		policy.install(ceiling());
+		store.mint('p', caps('fs:read', '/data'), identity);
+		expect(store.verify('p', identity, ['fs:read'])).toMatchObject({ authorized: true });
+
+		policy.install(ceiling({ revoked: true }));
+		expect(store.verify('p', identity, ['fs:read'])).toEqual({
+			authorized: false,
+			reason: 'managed',
+			caps: [],
+		});
+		expect(store.isEnabled('p')).toBe(true);
+		expect(store.readConsent('p')?.caps).toEqual(caps('fs:read', '/data'));
+
+		policy.clear();
+		store.revoke('p');
+		expect(store.isEnabled('p')).toBe(false);
+		expect(store.isTombstoned('p')).toBe(true);
+	});
+
+	it('is unchanged standalone: no standing composed, or a standing that reads standalone', () => {
+		const plain = makeStore(fakeSeal(), fakeAnchor({ value: null }));
+		plain.mint('p', caps('shell:openExternal'), identity);
+		expect(plain.isEnabled('p')).toBe(true);
+
+		const { store, state } = managed({ enrolled: false });
+		store.mint('p', caps('shell:openExternal'), identity);
+		expect(store.setAllowlistScope('p', 'shell:openExternal', ['x'])).toBe(false); // not allowlist-scoped
+		expect(store.verify('p', identity, ['shell:openExternal'])).toMatchObject({ authorized: true });
+		// Enrolled afterwards, with no ceiling delivered: the same consent no longer loads.
+		state.enrolled = true;
+		expect(store.verify('p', identity, ['shell:openExternal'])).toMatchObject({
+			authorized: false,
+			reason: 'managed',
+		});
+	});
+
+	it("replaces the user's trusted publisher keys with a pinned list, and keeps them when nothing is pinned", () => {
+		const pinned = parseManagedSettingsPolicy({
+			policyRevision: 4,
+			locks: [{ key: 'pluginTrustedKeys', pin: { value: ['UElOTkVE'] } }],
+		});
+		expect(pinned.ok).toBe(true);
+		if (!pinned.ok) return;
+		const userKeys = ['VVNFUg=='];
+		expect(effectiveTrustedKeys(userKeys, pinned.policy)).toEqual(['UElOTkVE']);
+		const lockedOnly = parseManagedSettingsPolicy({
+			policyRevision: 4,
+			locks: [{ key: 'plugins.installed' }],
+		});
+		expect(lockedOnly.ok).toBe(true);
+		if (!lockedOnly.ok) return;
+		expect(effectiveTrustedKeys(userKeys, lockedOnly.policy)).toEqual(userKeys);
+		expect(effectiveTrustedKeys(userKeys, null)).toEqual(userKeys);
+		// The answer is a copy: a caller mutating it cannot widen the pin.
+		const answer = effectiveTrustedKeys(userKeys, pinned.policy);
+		answer.push('VVNFUg==');
+		expect(effectiveTrustedKeys(userKeys, pinned.policy)).toEqual(['UElOTkVE']);
 	});
 });
