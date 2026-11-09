@@ -864,6 +864,14 @@ export interface RequestHandlerOptions {
 	 * reaches `turns.send` with the standing the turn service holds on its own.
 	 */
 	managedScope?: ManagedRequestScope;
+	/**
+	 * The custody a host's own group chat rounds run under (MCOMP-17-03CA): `start_group_chat` and
+	 * `send_group_chat_message` run inside `roundParents.run`, so every background process the
+	 * round starts is bound to one host-standing parent the runtime's `backgroundParentContext`
+	 * (the same custody's `lookup`) reads. The custody runs a round with no parent while the
+	 * binding reads `standalone`. Absent: a round runs with no parent, as before.
+	 */
+	roundParents?: Pick<RoundParentCustody, 'run'>;
 }
 
 /** Answer the desktop bridge's typed messages with `client`. */
@@ -872,6 +880,8 @@ export function createRequestHandler(
 	options: RequestHandlerOptions = {}
 ): RequestHandler {
 	const sessionId = (message: Request): string => str(message.sessionId) ?? '';
+	const inRound = <T>(round: () => Promise<T>): Promise<T> =>
+		options.roundParents ? options.roundParents.run(round) : round();
 
 	return async (message) => {
 		switch (message.type) {
@@ -1261,23 +1271,27 @@ export function createRequestHandler(
 				const participantIds = Array.isArray(message.participantIds)
 					? message.participantIds.filter((id): id is string => typeof id === 'string')
 					: [];
-				const result = await client.groupChats.create({
-					name: typeof message.topic === 'string' ? message.topic : '',
-					participantIds,
-					// The wire names the moderator by PROVIDER: the host moderates with a provider, not an agent.
-					...(str(message.moderatorAgentId)
-						? { moderatorProvider: str(message.moderatorAgentId) }
-						: {}),
-					...(str(message.message) ? { message: str(message.message) } : {}),
-				});
+				const result = await inRound(() =>
+					client.groupChats.create({
+						name: typeof message.topic === 'string' ? message.topic : '',
+						participantIds,
+						// The wire names the moderator by PROVIDER: the host moderates with a provider, not an agent.
+						...(str(message.moderatorAgentId)
+							? { moderatorProvider: str(message.moderatorAgentId) }
+							: {}),
+						...(str(message.message) ? { message: str(message.message) } : {}),
+					})
+				);
 				return outcome('start_group_chat_result', result, (value) => ({ chatId: value.chatId }));
 			}
 			case 'send_group_chat_message':
 				return outcome(
 					'send_group_chat_message_result',
-					await client.groupChats.send(
-						str(message.chatId) ?? '',
-						typeof message.message === 'string' ? message.message : ''
+					await inRound(() =>
+						client.groupChats.send(
+							str(message.chatId) ?? '',
+							typeof message.message === 'string' ? message.message : ''
+						)
 					)
 				);
 			case 'stop_group_chat':

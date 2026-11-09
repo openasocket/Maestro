@@ -1040,3 +1040,118 @@ describe('the parent a room round runs under on the host standing (MCOMP-17-03BZ
 		expect(custody.lookup(`p-${MAX_ROUND_PARENT_PROCESSES}`).ok).toBe(true);
 	});
 });
+
+describe('the group chat verbs run each round under the host standing parent (MCOMP-17-03CA)', () => {
+	const installation = { installationId: 'inst-1', runtimeId: 'rt-1', processEpoch: 'epoch-1' };
+	const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+	function host(binding: ReturnType<ManagedRequestScope['binding']> = 'enrolled', wired = true) {
+		const scope: ManagedRequestScope = {
+			installation,
+			actor: () => ({ kind: 'human', id: 'person-1' }),
+			policyRevision: () => 7,
+			binding: () => binding,
+		};
+		const custody = createRoundParentCustody(scope);
+		const started: string[] = [];
+		const pending: Array<Promise<void>> = [];
+		// A round starts its processes in the background, after the verb has answered.
+		const startInBackground = (processId: string) => {
+			started.push(processId);
+			pending.push(
+				new Promise<void>((resolve) =>
+					setTimeout(() => {
+						custody.lookup(processId);
+						resolve();
+					}, 0)
+				)
+			);
+		};
+		let round = 0;
+		const client = {
+			groupChats: {
+				create: async () => {
+					round += 1;
+					startInBackground(`group-chat-c1-moderator-${round}`);
+					return ok({ chatId: 'c1' });
+				},
+				send: async () => {
+					round += 1;
+					startInBackground(`group-chat-c1-moderator-${round}`);
+					await tick();
+					startInBackground(`group-chat-c1-participant-Alpha-${round}`);
+					return ok(undefined);
+				},
+				stop: async () => {
+					startInBackground('group-chat-c1-stop');
+					return ok(undefined);
+				},
+			},
+		};
+		const handle = createRequestHandler(client as unknown as MaestroClient, {
+			managedScope: scope,
+			...(wired ? { roundParents: custody } : {}),
+		});
+		const settle = () => Promise.all(pending.splice(0));
+		return { handle, custody, started, settle };
+	}
+
+	it('binds the processes a started room spawns, after the verb answered, to one verified parent', async () => {
+		const { handle, custody, settle } = host();
+		expect(
+			await handle({ type: 'start_group_chat', topic: 'T', participantIds: ['a1'], message: 'hi' })
+		).toMatchObject({ type: 'start_group_chat_result', success: true, chatId: 'c1' });
+		await settle();
+		const parent = custody.lookup('group-chat-c1-moderator-1');
+		expect(parent.ok).toBe(true);
+		if (!parent.ok) return;
+		expect(isVerifiedContext(parent.context)).toBe(true);
+		expect(parent.context).toMatchObject({
+			installation,
+			actor: { kind: 'human', id: 'person-1' },
+			delegation: { chain: [], grantRef: null },
+			workflow: null,
+			verification: { peer: 'host-secret', verifierId: 'host-secret:rt-1' },
+		});
+		expect(parent.context.traceId).toBe(`room:${parent.context.identity.requestId}`);
+	});
+
+	it('gives each sent round its own parent, shared by every process that round starts', async () => {
+		const { handle, custody, settle } = host();
+		await handle({ type: 'start_group_chat', topic: 'T', participantIds: ['a1'] });
+		expect(
+			await handle({ type: 'send_group_chat_message', chatId: 'c1', message: '@Alpha go' })
+		).toMatchObject({ type: 'send_group_chat_message_result', success: true });
+		await settle();
+		const first = custody.lookup('group-chat-c1-moderator-1');
+		const moderator = custody.lookup('group-chat-c1-moderator-2');
+		const participant = custody.lookup('group-chat-c1-participant-Alpha-2');
+		expect(first.ok && moderator.ok && participant.ok).toBe(true);
+		if (!first.ok || !moderator.ok || !participant.ok) return;
+		expect(participant.context.identity).toEqual(moderator.context.identity);
+		expect(moderator.context.identity.requestId).not.toBe(first.context.identity.requestId);
+	});
+
+	it('parents no process a stop starts, nor any round of a handler the custody is not given to', async () => {
+		const wired = host();
+		await wired.handle({ type: 'stop_group_chat', chatId: 'c1' });
+		await wired.settle();
+		expect(wired.custody.lookup('group-chat-c1-stop').ok).toBe(false);
+
+		const unwired = host('enrolled', false);
+		await unwired.handle({ type: 'start_group_chat', topic: 'T', participantIds: ['a1'] });
+		await unwired.settle();
+		const seen = unwired.custody.lookup('group-chat-c1-moderator-1');
+		expect(seen.ok).toBe(false);
+		expect(!seen.ok && seen.problems[0]).toMatch(/no round this host holds a parent for/);
+	});
+
+	it('runs a round with no parent while the host binding reads standalone', async () => {
+		const { handle, custody, settle } = host('standalone');
+		expect(
+			await handle({ type: 'send_group_chat_message', chatId: 'c1', message: 'hi' })
+		).toMatchObject({ type: 'send_group_chat_message_result', success: true });
+		await settle();
+		expect(custody.lookup('group-chat-c1-moderator-1').ok).toBe(false);
+		expect(custody.lookup('group-chat-c1-participant-Alpha-1').ok).toBe(false);
+	});
+});
