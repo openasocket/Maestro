@@ -20,6 +20,13 @@
  * refused and every listener refused before it bound, each as one
  * `[managed-<code>] ...` line from the projection's own records. A quiet
  * record in place of a toast per start; nothing here is a control.
+ *
+ * The roll-forward word (MCOMP-19-04A) comes from the hook's `update`: a hold
+ * the updater reported itself (at quit, at install) lists with the holds when
+ * the projection carries none, and an admitted download waiting for a restart
+ * draws its label and sentence beside them. A held version is never offered
+ * as a restart, and there is no install control here: the Update modal owns
+ * installing.
  */
 
 import { formatManagedHold, formatRelativeTime } from '../../../shared/formatters';
@@ -27,7 +34,11 @@ import type { ManagedStanding, ManagedStateView } from '../../../main/enterprise
 import type { EgressHold } from '../../../main/utils/fetchWithTimeout';
 import type { ListenerHold } from '../../../main/enterprise/listener-gate';
 import type { UpdateHoldView } from '../../types';
-import { MANAGED_STANDING_COPY } from '../../hooks/enterprise/useManagedStatus';
+import {
+	MANAGED_STANDING_COPY,
+	MANAGED_UPDATE_COPY,
+	type ManagedUpdateState,
+} from '../../hooks/enterprise/useManagedStatus';
 import type { Theme } from '../../types';
 import { MiniBadge } from '../ui/MiniBadge';
 
@@ -56,16 +67,20 @@ export const STATUS_COPY = {
 } as const;
 
 /** The list under the standing, or null when nothing is held. */
-function Holds({ state }: { state: ManagedStateView }) {
-	const update = state.update.held;
+function Holds({ state, word }: { state: ManagedStateView; word?: ManagedUpdateState }) {
+	// An older host projects no `update` section; it then reads as nothing held.
+	const update = state.update?.held ?? null;
+	// The updater's own hold (at quit, at install) when the projection carries none.
+	const updaterHold = !update && word?.word === 'held' ? word.message : null;
 	const egress = state.egress.held;
 	const listeners = state.listeners.held;
-	if (!update && egress.length === 0 && listeners.length === 0) return null;
+	if (!update && !updaterHold && egress.length === 0 && listeners.length === 0) return null;
 	return (
 		<div className="text-xs" data-testid="managed-holds">
 			<span className="font-medium">{STATUS_COPY.holds}</span>
 			<ul className="list-disc pl-4 mt-0.5 select-text">
 				{update ? <li>{STATUS_COPY.updateHold(update)}</li> : null}
+				{updaterHold ? <li>{updaterHold}</li> : null}
 				{egress.map((hold) => (
 					<li key={`${hold.class}\n${hold.code}\n${hold.origin ?? ''}`}>
 						{STATUS_COPY.egressHold(hold)}
@@ -77,6 +92,17 @@ function Holds({ state }: { state: ManagedStateView }) {
 					</li>
 				))}
 			</ul>
+		</div>
+	);
+}
+
+/** An admitted download waiting for a restart, or null; never drawn beside an update hold. */
+function RestartNeeded({ state, word }: { state: ManagedStateView; word?: ManagedUpdateState }) {
+	if (word?.word !== 'restart-needed' || state.update?.held) return null;
+	return (
+		<div className="text-xs" data-testid="managed-update">
+			<span className="font-medium">{MANAGED_UPDATE_COPY['restart-needed']}</span>
+			<p className="mt-0.5 opacity-70 select-text">{word.message}</p>
 		</div>
 	);
 }
@@ -101,8 +127,16 @@ export function standingColor(theme: Theme, standing: ManagedStanding): string {
 
 export interface ManagedStatusProps {
 	theme: Theme;
-	/** The hook's answer: `supported`, the `state` (undefined reading, null no service) and the read error. */
-	status: { supported: boolean; state: ManagedStateView | null | undefined; error: string | null };
+	/**
+	 * The hook's answer: `supported`, the `state` (undefined reading, null no
+	 * service), the read error and, optionally, the roll-forward word.
+	 */
+	status: {
+		supported: boolean;
+		state: ManagedStateView | null | undefined;
+		error: string | null;
+		update?: ManagedUpdateState;
+	};
 	/** The badge alone, for a header; nothing at all for an unmanaged desktop. */
 	compact?: boolean;
 	testId?: string;
@@ -114,7 +148,7 @@ export function ManagedStatus({
 	compact = false,
 	testId = 'managed-standing',
 }: ManagedStatusProps) {
-	const { supported, state, error } = status;
+	const { supported, state, error, update } = status;
 	if (!supported || state === undefined || state === null) {
 		if (compact) return null;
 		let sentence: string = STATUS_COPY.reading;
@@ -149,7 +183,8 @@ export function ManagedStatus({
 				<MiniBadge label={copy.label} theme={theme} color={tint} testId={testId} />
 			</div>
 			<p className="text-xs opacity-70">{detail}</p>
-			<Holds state={state} />
+			<Holds state={state} word={update} />
+			<RestartNeeded state={state} word={update} />
 		</>
 	);
 }

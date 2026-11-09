@@ -604,6 +604,65 @@ describe('the managed roll-forward word (MCOMP-19-04)', () => {
 		expect(managedUpdateState(null, { status: 'available' } as UpdateStatus).word).toBe('none');
 	});
 
+	// MCOMP-19-04A: the pane draws the word the hook returns.
+	it('draws restart-needed beside the holds, lists an updater hold, and never offers a held version', () => {
+		const restart = managedUpdateState(null, {
+			status: 'downloaded',
+			info: { version: '1.3.0' },
+		} as UpdateStatus);
+		const { rerender } = render(
+			<ManagedStatus
+				theme={mockTheme}
+				status={{ ...status(stateOf('managed')), update: restart }}
+			/>
+		);
+		const pane = within(screen.getByTestId('managed-update'));
+		expect(pane.getByText(MANAGED_UPDATE_COPY['restart-needed'])).toBeInTheDocument();
+		expect(pane.getByText(restart.message)).toBeInTheDocument();
+		// Not a hold, and no install control: the Update modal owns installing.
+		expect(screen.queryByTestId('managed-holds')).not.toBeInTheDocument();
+		expect(screen.queryByRole('button')).not.toBeInTheDocument();
+		// Compact stays the badge alone.
+		rerender(
+			<ManagedStatus
+				theme={mockTheme}
+				status={{ ...status(stateOf('managed')), update: restart }}
+				compact
+			/>
+		);
+		expect(screen.queryByTestId('managed-update')).not.toBeInTheDocument();
+		// The updater's own hold (at quit) lists with the holds when the projection has none.
+		const atQuit = managedUpdateState(null, {
+			status: 'held-by-policy',
+			info: { version: '1.3.0' },
+			held: { ...hold, code: 'held', candidate: '1.3.0' },
+		} as UpdateStatus);
+		rerender(
+			<ManagedStatus theme={mockTheme} status={{ ...status(stateOf('managed')), update: atQuit }} />
+		);
+		expect(
+			within(screen.getByTestId('managed-holds'))
+				.getAllByRole('listitem')
+				.map((item) => item.textContent)
+		).toEqual([atQuit.message]);
+		expect(screen.queryByTestId('managed-update')).not.toBeInTheDocument();
+		// A projection hold beside a stale restart word: the hold alone, drawn once.
+		const projected = stateOf('managed', null, {
+			update: { held: { ...hold, candidate: 'v1.3.0' } },
+		} as Partial<ManagedStateView>);
+		rerender(
+			<ManagedStatus theme={mockTheme} status={{ ...status(projected), update: restart }} />
+		);
+		expect(screen.getAllByRole('listitem').map((item) => item.textContent)).toEqual([
+			'Update v1.3.0: [managed-pin-denied] pinned to 1.2.0',
+		]);
+		expect(screen.queryByTestId('managed-update')).not.toBeInTheDocument();
+		// No word (an older caller): nothing extra.
+		rerender(<ManagedStatus theme={mockTheme} status={status(stateOf('managed'))} />);
+		expect(screen.queryByTestId('managed-update')).not.toBeInTheDocument();
+		expect(screen.queryByTestId('managed-holds')).not.toBeInTheDocument();
+	});
+
 	it('follows the updater status events in the hook', async () => {
 		const originalUpdates = maestro.updates;
 		let emit: ((status: UpdateStatus) => void) | null = null;
