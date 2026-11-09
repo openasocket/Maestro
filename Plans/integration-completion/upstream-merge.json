@@ -1812,6 +1812,23 @@
 				],
 				"notes": "No guard dropped; no hunk took one whole side. cliSpawnAuthority(), SpawnAgentOptions.managed and AgentResult.managed stay; an unresolved SSH remote still fails loudly through sshUnresolvedFailure (3 call sites, both sides).",
 				"unmergedAfter": 64
+			},
+			"MCOMP-33-00R16": {
+				"resolvedAt": "2026-11-09",
+				"resolvedBy": "Maestro-Claude",
+				"files": ["src/__tests__/cli/services/agent-spawner.test.ts"],
+				"method": "Two hunks resolved by a shape-asserting script (Working/mcomp-33-00r16/resolve.mjs, both sides read in full, one write after every assert); staged through merge-tool.mjs stage (prettier left it unchanged, 63 unmerged left). Working/mcomp-33-00r16/check.mjs: 0 syntax diagnostics, every it/describe title of HEAD (224) and MERGE_HEAD (224) present (240 now), no markers, every seam count at least the larger side's. git diff HEAD +500 -14 (the -14 are upstream's non-conflicting edits), git diff MERGE_HEAD +507 -0. The suite cannot load until launch/env.ts and launch/agent-args.ts (00R21) merge (vitest stops on env.ts markers).",
+				"hunks": {
+					"src/__tests__/cli/services/agent-spawner.test.ts": [
+						"Hunks 1 and 2 are one conflict: both sides appended a new top-level describe after the appendSystemPrompt block and diff3 aligned their identical `beforeEach(() => mockSpawn.mockReturnValue(mockChild))` and closing lines, interleaving two unrelated blocks. Rebuilt as two whole sibling describes, each with its own beforeEach: HEAD's 'spawnAgent: managed launches' (hostAuthority/managedAuthority fixtures, the maestro-p admission stamp at the CLI sink, denied and unavailable launches, the bare CLI binding standing, forged actor and lease, per-spawn effort-retry admission, standalone regression, permission-mode ceilings) first, then upstream's 'spawnAgent: long prompt file delivery (Windows, omp)' (withPlatform, prompt-file cleanup on close, async and sync spawn error, stdin delivery, SSH omp, @path delivery, exclusive files, EEXIST retry, short and off-Windows inline)."
+					]
+				},
+				"outsideHunks": [],
+				"semanticConflictsForC": [
+					"The managed cases match the 00R15 spawner resolution (admitCliLaunch on the final spec, refusal catch before supervision); none covers the 00R15 managed native CLI refusal. 00S should run this suite once 00R21 merges, and a case asserting that a managed (non-standalone) authority with harnessControlMode native is refused before spawnNativeSdkAgent belongs with whichever task lifts or keeps that refusal (00C)."
+				],
+				"notes": "No case dropped; no hunk took one whole side.",
+				"unmergedAfter": 63
 			}
 		}
 	}
