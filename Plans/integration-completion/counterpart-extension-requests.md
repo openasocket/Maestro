@@ -14,11 +14,11 @@ not production authority.
 
 Until these are negotiated, the paired and native stages below stay blocked:
 
-| Maestro task | Blocked by | Gate |
-| --- | --- | --- |
+| Maestro task                             | Blocked by                                                    | Gate                                   |
+| ---------------------------------------- | ------------------------------------------------------------- | -------------------------------------- |
 | MCOMP-14-01 (first positive direct pair) | REGISTRATION-HTTP/2, PREPARED/1, EFFECT/1, HEADLESS-CUSTODY/1 | probe reports `blocked`, `missing: []` |
-| MCOMP-16-01 (policy verify) | DESKTOP-LOCAL/1, plus receipts below | probe reports `blocked` |
-| MCOMP-32-01, MCOMP-34-01 | the same four extensions as MCOMP-14-01 | paired verification |
+| MCOMP-16-01 (policy verify)              | DESKTOP-LOCAL/1, plus receipts below                          | probe reports `blocked`                |
+| MCOMP-32-01, MCOMP-34-01                 | the same four extensions as MCOMP-14-01                       | paired verification                    |
 
 ## 1. REGISTRATION-HTTP/2
 
