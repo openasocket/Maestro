@@ -2737,6 +2737,187 @@
 					"result": "11 passed, 0 failed",
 					"preExisting": "src/__tests__/integration/pianola-native-acceptance.integration.test.ts fails to load with and without the change (child_process mock has no default export, reached through start-turn.ts via host-adapter.ts); left for MCOMP-33-00S."
 				}
+			},
+			"MCOMP-33-00S": {
+				"completedAt": "2026-11-09",
+				"completedBy": "Maestro-Claude",
+				"worktreeHead": "5db2b18ee",
+				"featureBaseline": "main checkout feature/mega-maestro-v1.1.0-rc at bd0c78c3c",
+				"environment": "vendor/mega-maestro/contracts (gitignored import, pin identical) copied from the main checkout into the worktree; without it host-managed.test.ts failed in beforeAll (--contracts-dir is not a directory). No source change.",
+				"static": {
+					"files": 97,
+					"eslint": {
+						"exit": 0,
+						"note": "0 errors; 13 warnings, all \"file ignored\" for suites the dashes config covers"
+					},
+					"eslintDashes": {
+						"exit": 0,
+						"files": 13
+					},
+					"prettier": {
+						"exit": 0,
+						"note": "All matched files use Prettier code style"
+					},
+					"docsVerify": {
+						"exit": 0,
+						"note": "1555 asserted paths, 464 index entries, 0 findings"
+					},
+					"npmInstallDryRun": {
+						"exit": 0,
+						"note": "up to date: package.json and package-lock.json agree"
+					}
+				},
+				"targeted": {
+					"scope": "every suite directly in each resolved test directory, in the src/__tests__ mirror of each resolved source directory and in co-located __tests__ (non-recursive)",
+					"files": 1332,
+					"tests": 36433,
+					"passed": 36036,
+					"failedTests": 271,
+					"failedFiles": {
+						"src/__tests__/renderer/hooks/useSessionLifecycle.test.ts": 3,
+						"src/__tests__/cli/services/host-managed.test.ts": 0,
+						"src/__tests__/cli/commands/create-ssh-remote.test.ts": 3,
+						"src/__tests__/cli/commands/managed.test.ts": 9,
+						"src/__tests__/main/pianola/pianola-legacy-migration.test.ts": 17,
+						"src/__tests__/main/pianola/pianola-scope-host.test.ts": 4,
+						"src/__tests__/main/web-server/new-tab-supervision.test.ts": 1,
+						"src/__tests__/main/utils/remote-worktree-paths.test.ts": 2,
+						"src/__tests__/main/preload/process/browserTabRemote.test.ts": 2,
+						"src/__tests__/main/preload/process/commandRemote.test.ts": 5,
+						"src/__tests__/main/preload/process/queueRemote.test.ts": 1,
+						"src/__tests__/main/ipc/handlers/persistence.test.ts": 136,
+						"src/__tests__/main/web-server/managers/CallbackRegistry.test.ts": 6,
+						"src/__tests__/main/web-server/handlers/messageHandlers.managed.test.ts": 8,
+						"src/__tests__/main/web-server/handlers/messageHandlers.test.ts": 34,
+						"src/__tests__/main/ipc/handlers/process/handle-spawn-native.test.ts": 21,
+						"src/__tests__/main/ipc/handlers/process/handle-spawn.managed.test.ts": 19
+					},
+					"seconds": 452
+				},
+				"full": {
+					"files": 2912,
+					"tests": 66998,
+					"passed": 66576,
+					"failedTests": 298,
+					"failedFiles": {
+						"src/__tests__/renderer/hooks/useSessionLifecycle.test.ts": 3,
+						"src/__tests__/cli/commands/create-ssh-remote.test.ts": 3,
+						"src/__tests__/cli/commands/managed.test.ts": 9,
+						"src/__tests__/integration/mega-maestro/full-pair.test.ts": 9,
+						"src/__tests__/integration/mega-maestro/offline-recovery.test.ts": 3,
+						"src/__tests__/main/cot-export/invisibility.test.ts": 3,
+						"src/__tests__/main/enterprise/listener-policy.test.ts": 1,
+						"src/__tests__/main/cue/cue-file-watcher-missing-base.test.ts": 1,
+						"src/__tests__/main/pianola/pianola-legacy-migration.test.ts": 17,
+						"src/__tests__/main/pianola/pianola-scope-host.test.ts": 4,
+						"src/__tests__/main/quick-chat/quick-chat-controller.managed.test.ts": 9,
+						"src/__tests__/main/web-server/new-tab-supervision.test.ts": 1,
+						"src/__tests__/main/utils/remote-worktree-paths.test.ts": 2,
+						"src/__tests__/main/preload/process/browserTabRemote.test.ts": 2,
+						"src/__tests__/main/preload/process/commandRemote.test.ts": 5,
+						"src/__tests__/main/preload/process/queueRemote.test.ts": 1,
+						"src/__tests__/main/ipc/handlers/persistence.test.ts": 136,
+						"src/__tests__/main/web-server/handlers/messageHandlers.managed.test.ts": 8,
+						"src/__tests__/main/web-server/handlers/messageHandlers.test.ts": 34,
+						"src/__tests__/main/web-server/managers/CallbackRegistry.test.ts": 6,
+						"src/__tests__/shared/maestro-lib/managed/contracts.test.ts": 1,
+						"src/__tests__/main/ipc/handlers/process/handle-spawn-native.test.ts": 21,
+						"src/__tests__/main/ipc/handlers/process/handle-spawn.managed.test.ts": 19
+					},
+					"seconds": 616
+				},
+				"baseline": {
+					"targetedFailuresOnFeatureBranch": {
+						"ran": 13,
+						"failed": {
+							"src/__tests__/main/utils/remote-worktree-paths.test.ts": 2
+						}
+					},
+					"extraFailuresOnFeatureBranch": {
+						"ran": 7,
+						"failed": {
+							"src/__tests__/integration/mega-maestro/full-pair.test.ts": 9,
+							"src/__tests__/integration/mega-maestro/offline-recovery.test.ts": 3
+						}
+					},
+					"extraFailuresAloneInWorktree": {
+						"ran": 7,
+						"failed": {
+							"src/__tests__/integration/mega-maestro/full-pair.test.ts": 9,
+							"src/__tests__/integration/mega-maestro/offline-recovery.test.ts": 3,
+							"src/__tests__/main/cot-export/invisibility.test.ts": 3,
+							"src/__tests__/main/enterprise/listener-policy.test.ts": 1,
+							"src/__tests__/main/cue/cue-file-watcher-missing-base.test.ts": 1,
+							"src/__tests__/main/quick-chat/quick-chat-controller.managed.test.ts": 9,
+							"src/__tests__/shared/maestro-lib/managed/contracts.test.ts": 1
+						}
+					},
+					"upstreamNewSuites": "pianola-legacy-migration, pianola-scope-host, new-tab-supervision, handle-spawn-native and the integration pianola-native-acceptance do not exist on the feature branch; upstream rc carries them green by construction, so their failures are merge-introduced"
+				},
+				"classification": {
+					"featureBaseline": [
+						"integration/mega-maestro/full-pair.test.ts 9",
+						"integration/mega-maestro/offline-recovery.test.ts 3",
+						"main/utils/remote-worktree-paths.test.ts 2 (gpgsign status-null, environment)"
+					],
+					"expectedUntilMCOMP3300P": [
+						"shared/maestro-lib/managed/contracts.test.ts 1 (runtime pin names the library before 0.37.0)"
+					],
+					"mergeIntroduced": {
+						"MCOMP-33-00S1": [
+							"main/web-server/managers/CallbackRegistry.test.ts 6",
+							"main/web-server/handlers/messageHandlers.test.ts 34"
+						],
+						"MCOMP-33-00S2": [
+							"main/web-server/handlers/messageHandlers.managed.test.ts 8",
+							"cli/commands/managed.test.ts 9",
+							"main/quick-chat/quick-chat-controller.managed.test.ts 9"
+						],
+						"MCOMP-33-00S3": [
+							"main/preload/process/commandRemote.test.ts 5",
+							"main/preload/process/browserTabRemote.test.ts 2",
+							"main/preload/process/queueRemote.test.ts 1"
+						],
+						"MCOMP-33-00S4": [
+							"main/ipc/handlers/persistence.test.ts 136",
+							"main/ipc/handlers/process/handle-spawn-native.test.ts 21"
+						],
+						"MCOMP-33-00S5": [
+							"main/ipc/handlers/process/handle-spawn.managed.test.ts 19 (10s timeouts)"
+						],
+						"MCOMP-33-00S6": [
+							"main/web-server/new-tab-supervision.test.ts 1",
+							"pianola-new-tab-dispatch runExisting ticket and delegation (00R33 carry)"
+						],
+						"MCOMP-33-00S7": [
+							"main/pianola/pianola-legacy-migration.test.ts 17",
+							"main/pianola/pianola-scope-host.test.ts 4",
+							"integration/pianola-native-acceptance.integration.test.ts (fails to load)"
+						],
+						"MCOMP-33-00S8": [
+							"renderer/hooks/useSessionLifecycle.test.ts 3",
+							"cli/commands/create-ssh-remote.test.ts 3"
+						],
+						"MCOMP-33-00S9": [
+							"main/enterprise/listener-policy.test.ts 1",
+							"main/cot-export/invisibility.test.ts 3",
+							"main/cue/cue-file-watcher-missing-base.test.ts 1 (fails alone in the worktree only)"
+						]
+					}
+				},
+				"continuations": [
+					"MCOMP-33-00S1",
+					"MCOMP-33-00S2",
+					"MCOMP-33-00S3",
+					"MCOMP-33-00S4",
+					"MCOMP-33-00S5",
+					"MCOMP-33-00S6",
+					"MCOMP-33-00S7",
+					"MCOMP-33-00S8",
+					"MCOMP-33-00S9",
+					"MCOMP-33-00S10"
+				],
+				"tools": "Working/mcomp-33-00s: static.mjs, suites.mjs (targeted | full | list <cwd> <tag> <list.json>), record.mjs; results *.summary.json"
 			}
 		}
 	}
