@@ -22,6 +22,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { randomUUID } from 'crypto';
 import { logger } from '../utils/logger';
+import { holdListener } from '../enterprise/listener-gate';
 import { createPending, lookupBinding } from './registry';
 import { parseQuestionRequest } from './question-request';
 import type {
@@ -128,6 +129,12 @@ export class PermissionRelayServer {
 
 	private async start(userDataDir: string): Promise<string> {
 		const socketPath = this.resolveSocketPath(userDataDir);
+
+		// The managed listener ceiling (MCOMP-19-01B) holds the relay socket
+		// BEFORE the stale-file unlink and the bind: a refusal throws
+		// `ListenerDeniedError` (`[managed-<code>] ...`), the spawn that asked
+		// fails loud by that name and nothing listens. Standalone asks nothing.
+		holdListener({ kind: 'relay', bind: socketPath, port: 0 });
 
 		// Remove any stale socket file from a previous unclean shutdown.
 		if (process.platform !== 'win32') {

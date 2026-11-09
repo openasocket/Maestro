@@ -38,6 +38,7 @@
 import * as fs from 'fs';
 import * as net from 'net';
 import { logger } from '../utils/logger';
+import { listenerHoldFor } from '../enterprise/listener-gate';
 import {
 	COWORKING_SOCKET_ENV_VAR,
 	readCoworkingRunAdmission,
@@ -233,6 +234,16 @@ export async function startCoworkingBridge(options?: {
 		browserAuthority = options.browserAuthority;
 	}
 	if (server) return;
+	// The managed listener ceiling (MCOMP-19-01B) holds the bridge socket
+	// BEFORE the stale-file unlink and the bind. A hold is not a bind failure:
+	// it is logged by its `[managed-<code>]` message (recorded once in
+	// `heldListeners()`), nothing listens, and the feature stays unavailable
+	// until a later start the ceiling admits. Standalone asks nothing.
+	const hold = listenerHoldFor({ kind: 'coworking', bind: getBridgeSocketPath(), port: 0 });
+	if (hold) {
+		logger.warn(`${LOG_CTX} not started: ${hold.message}`, 'Coworking');
+		return;
+	}
 	if (!starting) {
 		starting = listenOnBridgeSocket().finally(() => {
 			starting = null;
