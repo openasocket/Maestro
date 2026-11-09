@@ -6,10 +6,12 @@ import { registerCrossAgentHandlers } from '../../../../main/ipc/handlers/cross-
 import { cancelCrossAgentRequestsForSource } from '../../../../main/cross-agent/cross-agent-router';
 import {
 	bindQueueConsultRelease,
+	forgetQueueAdmissionActor,
 	forgetQueueConsultRelease,
 	sweepQueueConsultReleases,
 	startReleasedQueueConsult,
 } from '../../../../main/pianola/pianola-queue-routing';
+import { runAsClient } from '../../../../main/web-server/auth/transport-actor';
 import * as systemPromptService from '../../../../main/utils/maestro-system-prompt';
 import type { StartCrossAgentRequestOptions } from '../../../../main/cross-agent/cross-agent-router';
 import Conf from 'conf';
@@ -3109,6 +3111,60 @@ describe('persistence IPC handlers', () => {
 				}
 			}
 		);
+
+		describe('queue release actor (MCOMP-33-00G)', () => {
+			// The row is enqueued over the CLI transport; its branches are released later over the
+			// owning window's IPC, outside any transport context, where the caller reads as main.
+			async function cliQueuedConsult() {
+				const q = queueAdapter(true, true);
+				await runAsClient({ cli: true }, () => q.adapter.runQueue(q.client, q.input, q.arm));
+				const snapshot = q.deps.snapshot();
+				snapshot.tabs[0].busy = false;
+				snapshot.tabs[0].cursorAvailable = true;
+				q.deps.snapshot = () => snapshot;
+				const f = await managedConsultFixture(true, { ...q, snapshot } as never);
+				const actors: unknown[] = [];
+				Object.assign(f.manager, {
+					spawnAdmitted: vi.fn(async (config: unknown, actor: unknown) => {
+						actors.push(actor);
+						return f.manager.spawn(config);
+					}),
+				});
+				return { ...f, actors };
+			}
+
+			it('admits a released consult as the actor its queued dispatch was admitted for', async () => {
+				const f = await cliQueuedConsult();
+				const { requestId } = await f.start('peer-a');
+				expect(f.manager.spawn).toHaveBeenCalledTimes(1);
+				expect(f.actors).toEqual([{ peer: 'host-secret' }]);
+				f.manager.emit('exit', `cross-agent-${requestId}`, 0);
+			});
+
+			it('refuses a released consult whose admitted actor is gone instead of spawning it as main', async () => {
+				const f = await cliQueuedConsult();
+				expect(forgetQueueAdmissionActor(f.input.dispatchId)).toBe(true);
+				await expect(f.start('peer-a')).rejects.toThrow('DispatchRoutingActorUnavailable');
+				expect(f.manager.spawn).not.toHaveBeenCalled();
+			});
+
+			it('hands a queued handoff to the admission service as the actor it was admitted for', async () => {
+				const q = queueAdapter(true, 'handoff');
+				await runAsClient({ cli: true }, () => q.adapter.runQueue(q.client, q.input, q.arm));
+				const handoff = vi
+					.spyOn(q.adapter.admission, 'startQueueHandoff')
+					.mockResolvedValue({ requestId: 'handoff' });
+				const locator = { dispatchId: q.input.dispatchId, generation: 'g' };
+				const opts = { onChunk: () => {} } as never;
+				await q.adapter.startQueueHandoff('agent', 'tab', locator, 'peer-a', opts);
+				expect(handoff.mock.calls[0][3]).toMatchObject({ actor: { peer: 'host-secret' } });
+				forgetQueueAdmissionActor(q.input.dispatchId);
+				expect(() => q.adapter.startQueueHandoff('agent', 'tab', locator, 'peer-a', opts)).toThrow(
+					'DispatchRoutingActorUnavailable'
+				);
+				expect(handoff).toHaveBeenCalledTimes(1);
+			});
+		});
 
 		it.each(['ENOSPC', 'EACCES'])(
 			'keeps a positive native spawn supervised after %s start-journal failure until Stop',

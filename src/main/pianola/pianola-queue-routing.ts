@@ -10,6 +10,7 @@ import {
 } from '../../shared/maestro-lib/mentions/roster';
 import type { AgentRecord, GroupRecord } from '../../shared/maestro-lib/store/records';
 import type { PianolaQueueItem, PianolaQueueRouting } from '../../shared/pianola/pianola-dispatch';
+import type { ProcessSpawnActor } from '../process-manager/types';
 
 export interface QueueRoutingSnapshot {
 	agents: readonly AgentRecord[];
@@ -205,9 +206,47 @@ export function bindQueueConsultRelease(
 }
 
 /**
+ * The actor each queued dispatch was admitted for, keyed by dispatch id (MCOMP-33-00G). The
+ * queue is enqueued inside the sending transport's context (`runQueue` in the WebSocket
+ * handler), but its routing branches are released later over the owning window's IPC, where
+ * `currentSpawnActor()` reads the operator at the keyboard. A released consult or handoff is
+ * attributed and admitted as the actor recorded here, never as main. Process-local like the
+ * release closures: a restart, an eviction or a cancel leaves no actor, and a release start
+ * with none is refused rather than falling back to main.
+ */
+const queueAdmissionActors = new Map<string, ProcessSpawnActor>();
+
+/** Record the actor a queued dispatch was admitted for. Bounded: the oldest entries go first. */
+export function noteQueueAdmissionActor(dispatchId: string, actor: ProcessSpawnActor): void {
+	queueAdmissionActors.delete(dispatchId);
+	while (queueAdmissionActors.size >= 256)
+		queueAdmissionActors.delete(queueAdmissionActors.keys().next().value!);
+	queueAdmissionActors.set(dispatchId, actor);
+}
+
+/** Drop the recorded actor of a cancelled dispatch. */
+export function forgetQueueAdmissionActor(dispatchId: string): boolean {
+	return queueAdmissionActors.delete(dispatchId);
+}
+
+/**
+ * The release-start options with the actor the dispatch was admitted for. Throws
+ * `DispatchRoutingActorUnavailable` when none is recorded, so a released branch is never
+ * spawned as the in-process caller that drained the queue.
+ */
+export function withQueueAdmissionActor<T extends { actor?: ProcessSpawnActor }>(
+	dispatchId: string,
+	opts: T
+): T {
+	const actor = queueAdmissionActors.get(dispatchId);
+	if (!actor) throw new Error('DispatchRoutingActorUnavailable');
+	return { ...opts, actor };
+}
+
+/**
  * Start a released consult only for the matching generation and source agent/tab. Missing or
  * mismatched release authority rejects the promise before invoking the native start
- * callback.
+ * callback. The consult runs as the actor the dispatch was admitted for.
  */
 export function startReleasedQueueConsult(
 	locator: { dispatchId: string; generation: string },
@@ -228,7 +267,13 @@ export function startReleasedQueueConsult(
 		release.generation !== locator.generation
 	)
 		return Promise.reject(new Error('DispatchRoutingReleaseUnavailable'));
-	return release.start(targetAgentId, opts);
+	let admitted: typeof opts;
+	try {
+		admitted = withQueueAdmissionActor(locator.dispatchId, opts);
+	} catch (error) {
+		return Promise.reject(error);
+	}
+	return release.start(targetAgentId, admitted);
 }
 
 export function forgetQueueConsultRelease(dispatchId: string): boolean {

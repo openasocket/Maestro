@@ -4,7 +4,13 @@ import { readAgentRuns } from '../../cli/services/agent-run-store';
 import { nativeTabSession } from './pianola-queue-session';
 import { nativeCurrentTurns } from './current-turn';
 import { isTerminalAgentRunStatus, type AgentRun } from '../../shared/agent-run';
-import { forgetQueueConsultRelease } from './pianola-queue-routing';
+import {
+	forgetQueueAdmissionActor,
+	forgetQueueConsultRelease,
+	noteQueueAdmissionActor,
+	withQueueAdmissionActor,
+} from './pianola-queue-routing';
+import { currentSpawnActor } from '../web-server/auth/transport-actor';
 import { getDispatchCallbackRegistry, type DispatchCallbackRegistry } from '../dispatch-callbacks';
 import { canonicalJson } from '../../shared/canonicalJson';
 import { isPianolaScopeId, resolvePianolaScopeOwnership } from '../../shared/pianola/pianola-scope';
@@ -560,7 +566,12 @@ export class PianolaNewTabDispatch {
 		request: PianolaExistingTabRequest & { held: boolean; callbackIntent?: unknown },
 		armCallback: (tabId: string) => string | undefined
 	): Promise<{ receipt: PianolaDispatchReceipt; callbackId?: string; durable: boolean }> {
+		// Read synchronously, still inside the sending transport's context: the routing
+		// branches of this row are released later over IPC, where the caller is main
+		// (MCOMP-33-00G).
+		const actor = currentSpawnActor();
 		return this.queue.enqueue(request.dispatchId, async () => {
+			noteQueueAdmissionActor(request.dispatchId, actor);
 			await this.admission.prepare(client, {
 				dispatchId: request.dispatchId,
 				targetAgentId: request.targetAgentId,
@@ -639,6 +650,7 @@ export class PianolaNewTabDispatch {
 		const record = this.deps.store.readDispatchAdmission(itemId);
 		if (record?.targetAgentId !== agentId || record.targetTabId !== tabId) return;
 		const revoked = this.admission.revokeQueueRouting(itemId);
+		forgetQueueAdmissionActor(itemId);
 		cancelPianolaQueueItem(this.deps.store, this.registry(), agentId, tabId, itemId, revoked);
 	}
 
@@ -663,7 +675,7 @@ export class PianolaNewTabDispatch {
 			locator.dispatchId,
 			locator.generation,
 			targetAgentId,
-			opts
+			withQueueAdmissionActor(locator.dispatchId, opts)
 		);
 	}
 
