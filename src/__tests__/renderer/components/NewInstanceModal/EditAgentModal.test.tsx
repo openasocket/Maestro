@@ -12,6 +12,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act, render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { EditAgentModal } from '../../../../renderer/components/NewInstanceModal/EditAgentModal';
 import { useSessionStore } from '../../../../renderer/stores/sessionStore';
+import { useSettingsStore } from '../../../../renderer/stores/settingsStore';
 import { clearCachedResources } from '../../../../renderer/hooks/utils/useCachedResource';
 import { AgentCommitRefusedError } from '../../../../renderer/services/agentCommit';
 import type { Theme, Session, AgentConfig } from '../../../../renderer/types';
@@ -2307,6 +2308,53 @@ describe('EditAgentModal', () => {
 			await waitFor(() =>
 				expect(screen.getByTestId('managed-policy-revision')).toHaveTextContent('revision 7')
 			);
+		});
+
+		it('disables a policy-held choice with its reason and saves the held value unchanged (MCOMP-23-05)', async () => {
+			managedState.mockResolvedValue(managed(6));
+			vi.mocked(window.maestro.agents.detect).mockResolvedValue([
+				{
+					id: 'claude-code',
+					name: 'Claude Code',
+					available: true,
+					path: '/usr/local/bin/claude',
+					binaryName: 'claude',
+					hidden: false,
+					configOptions: [{ key: 'model', type: 'text', label: 'Model', default: '' }],
+				} as unknown as AgentConfig,
+			]);
+			const previousLocks = useSettingsStore.getState().managedLocks;
+			const held = { code: 'locked' as const, pinned: true };
+			act(() =>
+				useSettingsStore.setState({
+					managedLocks: {
+						policyRevision: 6,
+						locks: {
+							'agentConfig.customPath': { ...held, message: 'The binary is fixed by policy.' },
+							'agentConfig.model': { ...held, message: 'The model is fixed by policy.' },
+						},
+					},
+				})
+			);
+			try {
+				renderEdit();
+				expect(await screen.findByTestId('held-by-policy-customPath')).toHaveTextContent(
+					'Held by policy: The binary is fixed by policy.'
+				);
+				expect(screen.getByTestId('held-by-policy-model')).toHaveTextContent(
+					'Held by policy: The model is fixed by policy.'
+				);
+				expect(screen.getByDisplayValue('/custom/claude')).toBeDisabled();
+				expect(screen.getByDisplayValue('claude-sonnet')).toBeDisabled();
+				// A field the policy does not hold stays editable.
+				expect(screen.getByDisplayValue('My Agent')).not.toBeDisabled();
+				await save();
+				expect(onSave.mock.calls[0][5]).toBe('/custom/claude');
+				expect(onSave.mock.calls[0][8]).toBe('claude-sonnet');
+				expect(onSave.mock.calls[0][27]).toEqual({ expectedPolicyRevision: 6 });
+			} finally {
+				act(() => useSettingsStore.setState({ managedLocks: previousLocks }));
+			}
 		});
 
 		it('still reports an ordinary save failure as before', async () => {
