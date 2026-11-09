@@ -109,6 +109,17 @@ export interface AutoRunController {
 	pausedMs(): number;
 }
 
+/**
+ * A managed run's cooperative task boundary (MCOMP-29-01A): the one place a pause a management
+ * peer asked for takes effect. The engine awaits it before every task dispatch, so a task in
+ * flight always finishes first and nothing suspends a process. It parks while a pause is held
+ * (`CooperativeRun.atBoundary` in `managed/commands.ts` has this shape) and answers `stop` to
+ * end the run as an operator stop.
+ */
+export interface AutoRunTaskBoundary {
+	atBoundary(): Promise<'continue' | 'stop'>;
+}
+
 /** The record of a run the engine appends to History. */
 export type AutoRunHistoryEntry = HistoryEntry;
 
@@ -220,4 +231,6 @@ export interface AutoRunDeps {
 	policy?: AutoRunPolicy;
 	/** Absent: the run never pauses and stops only through `signal`. */
 	controller?: AutoRunController;
+	/** A managed host's cooperative task boundary. Absent: no task boundary waits (playbook runs only). */
+	boundary?: AutoRunTaskBoundary;
 }

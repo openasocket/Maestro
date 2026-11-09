@@ -94,6 +94,7 @@ import type {
 import { logger } from '../host';
 import { isVerifiedContext, type ContextVerification } from '../managed/authority';
 import type { ManagedBinding } from '../managed/binding';
+import type { CooperativePauseGate } from '../managed/commands';
 import type { ManagedIdentityPort } from '../managed/endpoint-port';
 import {
 	createHeadlessSpawnAuthority,
@@ -175,6 +176,13 @@ export interface RuntimeAutoRunManagedOptions {
 	): WorkflowFenceAnswer | Promise<WorkflowFenceAnswer>;
 	/** Every admission and refusal, for a journal or a test. */
 	onAdmission?(event: AutoRunAdmissionEvent): void;
+	/**
+	 * The cooperative pause gate of the host's command service (MCOMP-29-01A), read at each launch.
+	 * A playbook run is tracked under its workflow run id: a management pause parks it at its next
+	 * task boundary, a cancel stops it there, and it ends when the run does. Absent or null: no
+	 * run is tracked and a pause answers that nothing here can pause. Goal runs are never tracked.
+	 */
+	runControl?(): Pick<CooperativePauseGate, 'track' | 'stop'> | null;
 }
 
 export interface RuntimeAutoRunOptions {
@@ -252,6 +260,8 @@ interface RunHandle {
 	workflowLifetime?: WorkflowFenceLifetime;
 	removeWorkflowListener?(): void;
 	admitted?: boolean;
+	/** The run's cooperative boundary, when the host tracks it: wake a parked run to stop, and end it. */
+	boundary?: { stop(): void; end(): Promise<void> };
 }
 
 const ok = <T>(value: T): ClientResult<T> => ({ ok: true, value });
@@ -583,6 +593,7 @@ export function createRuntimeAutoRun(options: RuntimeAutoRunOptions): RuntimeAut
 									};
 									const stop = () => {
 										run?.controller.requestStop();
+										run?.boundary?.stop();
 										run?.abort.abort();
 										void registry.stopAgent(agentId);
 									};
@@ -739,6 +750,12 @@ export function createRuntimeAutoRun(options: RuntimeAutoRunOptions): RuntimeAut
 			} finally {
 				run.removeWorkflowListener?.();
 				try {
+					// A pause still pending when the run ends settles no-effect in the command ledger.
+					await run.boundary?.end();
+				} catch (error) {
+					logger.warn(`The run's task boundary did not settle: ${errorText(error)}`, LOG_CONTEXT);
+				}
+				try {
 					await run.workflowLifetime?.finish(
 						!run.admitted ? 'no_effect' : outcome?.status === 'completed' ? 'applied' : 'uncertain'
 					);
@@ -769,6 +786,14 @@ export function createRuntimeAutoRun(options: RuntimeAutoRunOptions): RuntimeAut
 				options.onRunEnded?.(run.agentId);
 			}
 		})();
+	}
+
+	/** Track a playbook run in the host's cooperative pause gate, when one is composed. */
+	function trackBoundary(runId: string) {
+		const control = options.managed?.runControl?.() ?? null;
+		if (!control) return null;
+		const run = control.track(runId);
+		return { run, handle: { stop: () => void control.stop(runId), end: () => run.end() } };
 	}
 
 	function newController(): RunController {
@@ -933,8 +958,11 @@ export function createRuntimeAutoRun(options: RuntimeAutoRunOptions): RuntimeAut
 			startedAt,
 		});
 		const deps = buildDeps(agentId, controller, workflow, parentContext);
+		const boundary = trackBoundary(workflow.runId);
+		if (boundary) deps.boundary = boundary.run;
 		startRun(
 			{
+				...(boundary ? { boundary: boundary.handle } : {}),
 				agentId,
 				sourceCustody: deps.turns.sourceCustody,
 				callerSource: deps.turns.callerSource,
@@ -1075,6 +1103,8 @@ export function createRuntimeAutoRun(options: RuntimeAutoRunOptions): RuntimeAut
 			const run = runs.get(agentId);
 			if (!run) return noRun('autoRun.stop', agentId);
 			run.controller.requestStop();
+			// A run parked at a task boundary has no turn to interrupt; wake it to stop.
+			run.boundary?.stop();
 			run.wire = { ...run.wire, isStopping: true };
 			publish(run);
 			return ok(undefined);

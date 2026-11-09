@@ -509,6 +509,16 @@ export async function* runPlaybook(
 						return;
 					}
 
+					// A managed pause takes effect here, between tasks, never inside one (MCOMP-29-01A).
+					// A cancel answers `stop`; a stop asked while parked is honoured on the way out.
+					if (deps.boundary) {
+						const verdict = await deps.boundary.atBoundary();
+						if (verdict === 'stop' || controller?.stopRequested() || signal?.aborted) {
+							yield* stopRun(false, { document: docEntry.filename, taskIndex });
+							return;
+						}
+					}
+
 					// A gate asks for a human. A batch run has none, so it reports the gate and
 					// moves on rather than dispatching a task nobody can finish. A run that can
 					// wait parks here instead, and on resume records the human step itself: the
