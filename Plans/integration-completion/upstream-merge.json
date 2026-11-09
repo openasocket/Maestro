@@ -2340,6 +2340,27 @@
 				],
 				"notes": "messageHandlers suites now load (tabs.ts merged). createSessionBackground, createSessionProvenance, federationCommand, liveCommand, maestroRun, listAgentModels pass; messageHandlers 28 and messageHandlers.managed 8 fail as named above (36/549).",
 				"unmergedAfter": 18
+			},
+			"MCOMP-33-00R34": {
+				"resolvedAt": "2026-11-09",
+				"resolvedBy": "Maestro-Claude",
+				"files": [
+					"src/main/preload/process/browserTabRemote.ts",
+					"src/main/preload/process/commandRemote.ts",
+					"src/main/preload/process/queueRemote.ts"
+				],
+				"method": "Eight hunks resolved by a shape-asserting script (Working/mcomp-33-00r34/resolve.mjs, both sides read in full, every replacement computed before any write); staged through merge-tool.mjs stage (15 unmerged left; prettier left all three unchanged). Working/mcomp-33-00r34/check.mjs: 0 syntax diagnostics, every HEAD and MERGE_HEAD seam count kept.",
+				"hunks": {
+					"browserTabRemote.ts": "onRemoteNewAITabWithPrompt (2): upstream control keeps slot 7, HEAD delegation and dispatchTicket follow; handler forwards control always and [delegation, dispatchTicket] only when set, matching browserTabCallbacks.ts.",
+					"commandRemote.ts": "onRemoteCommand (3): handler takes ...trailing after mentionRouting and reads the receipt channel LAST; up to two trailing args keep upstream decode, more are [pianolaDispatchId, delegation, dispatchTicket, receiptChannel]; ticket kept only when a string; callback gets receiptChannel, then pianolaDispatchId, then delegation and dispatchTicket, trailing groups only when set; presence-only logging kept.",
+					"queueRemote.ts": "onRemoteEnqueueCommand (3): dispatchCallback, control (upstream) then delegation, dispatchTicket (HEAD); handler forwards dispatchCallback always, [control, delegation, dispatchTicket] when the integration slots are set, [control] when only control is, matching queueCallbacks.ts."
+				},
+				"outsideHunks": "commandRemote.ts doc comment rewritten for the merged order.",
+				"semanticFor00C": [
+					"8 preload cases pin HEAD fixed-arity wire (2 browserTabRemote, 5 commandRemote, 1 queueRemote); update to the merged order.",
+					"00R35 global.d.ts / useRemoteHandlers must read executeCommand receiptChannel 9, pianolaDispatchId 10, delegation 11, ticket 12; newAITabWithPrompt control 7, delegation 8, ticket 9; enqueueCommand dispatchCallback 10, control 11, delegation 12, ticket 13."
+				],
+				"tests": "40/48 across the nine preload process suites; the 8 failures are the HEAD-wire cases above; core.test.ts cannot parse until core.ts (00R35)."
 			}
 		}
 	}
