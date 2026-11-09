@@ -3117,6 +3117,31 @@
 				},
 				"static": "prettier --write left both files unchanged",
 				"tools": "Working/mcomp-33-00s8 (apply-ssh.mjs, apply-lifecycle.mjs, run.mjs, tsc-suite.mjs, commit-wt.mjs, record.mjs)"
+			},
+			"MCOMP-33-00S9": {
+				"completedAt": "2026-11-09",
+				"completedBy": "Maestro-Claude",
+				"worktreeCommit": "6ebc358e7",
+				"worktreeParent": "1be779c80",
+				"verdict": "Suite-only; the source is right in all three. (1) listener-policy (1): upstream rc moved the tunnel free-port probe into maestro-lib as availableLocalPort() (src/shared/maestro-lib/client/local-port.ts). The merged openTunnel still calls holdListener ssh-tunnel 127.0.0.1 before that probe, the ssh -G resolution and the spawn, so the merged sink is held; the SINKS entry now names await availableLocalPort( as the first socket reach. (2) invisibility (3): upstream handle-spawn issues each local AI tab spawn a caller run proof (MAESTRO_CALLER_RUN_PROOF_FILE) in a fresh mkdtemp folder plugin-tool-run-proofs/run-XXXXXX/proof, so the three runs (export off, on, recording) differed only by that random segment. Fails identically on a pristine export of 919d28a66 (upstream suite gap). withoutSpawnNoise replaces only the six random characters, like the Windows sysprompt temp suffix; the variable, folder and file name are still compared. (3) cue-file-watcher-missing-base same tick (1): NOT a merge defect. cue-file-watcher.ts and this case are identical on both sides (chokidar 3.6.0 in both node_modules); 0/12 alone in each checkout, but under 10 parallel runs it fails on BOTH: worktree 5/40, feature branch 7/40 and 4/40. The second event is usually fast.txt change about 100 ms after the add (the FSEvents two-batch mode upstream 45bbf87 documented for the re-created folder case), and once per side a second add about 60-90 ms later (two watchers firing for one file, a real pre-existing watcher defect on the feature branch too). Left unchanged: relaxing the case would loosen it, and a source fix for the duplicate add would not make the case deterministic (the trailing change is the OS). Classify as a load flake present on both sides in 00S10.",
+				"change": {
+					"src/__tests__/main/enterprise/listener-policy.test.ts": "tunnel SINKS entry before: await availableLocalPort( (was await availablePort(), with a comment naming the upstream move.",
+					"src/__tests__/main/cot-export/invisibility.test.ts": "CALLER_RUN_PROOF_DIR regex in withoutSpawnNoise, replacing only the mkdtemp suffix of the proof folder."
+				},
+				"findingsForLater": {
+					"MCOMP-33-00L": "Upstream-new src/shared/maestro-lib/client/ssh-forward.ts (federation SshForwardManager, reached from src/main/federation/index.ts and src/cli/services/peer-resolver.ts through getSshForwardManager().acquire) allocates a loopback port with availableLocalPort() and spawns ssh -N -L 127.0.0.1:<port> on every (re)start with no holdListener: an unheld ssh-tunnel listener. Not in the SINKS table. 00L rescan should give it its own bounded continuation (hold on every start, not only at acquire, as the Lite tunnel re-asks on reconnect per MCOMP-19-01A).",
+					"MCOMP-33-00S10": "cue-file-watcher-missing-base same tick is a load flake on both sides (see verdict); the duplicate add is a pre-existing watcher defect worth its own backlog item."
+				},
+				"mutation": "Suite-only repair, no source change, so no mutation case. Pristine upstream check: Working/mcomp-33-00s9/pristine.mjs (git archive 919d28a66 src + configs, symlinked node_modules, removed after).",
+				"typeCheck": {
+					"testFiles": "ad hoc config over both suites: 0 errors before and after in both (Working/mcomp-33-00s9/tsc-suite.mjs)."
+				},
+				"suites": {
+					"run": "listener-policy, cot-export/invisibility, cue-file-watcher-missing-base",
+					"result": "106/106 (was 4 failed)"
+				},
+				"static": "prettier --check clean; eslint ignores src/__tests__",
+				"tools": "Working/mcomp-33-00s9 (debug.mjs temp source probe, pristine.mjs, repeat.mjs, load.mjs, probe.mjs / probe-main.mjs parallel watcher probe, tsc-suite.mjs, commit-wt.mjs, record.mjs)"
 			}
 		}
 	}
