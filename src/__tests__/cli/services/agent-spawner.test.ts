@@ -213,6 +213,13 @@ import {
 	type PolicyDecision,
 } from '../../../shared/maestro-lib/managed/authority';
 import { MANAGED_CONTRACT_VERSION } from '../../../shared/maestro-lib/managed/types';
+import {
+	TUI_HANDSHAKE_ENV_VAR,
+	readTuiHandshakeKey,
+	tuiHandshakeKeyPath,
+	verifyTuiHandshake,
+} from '../../../shared/maestro-lib/managed/tui-handshake';
+import { STEERING_TOKEN_ENV_VAR } from '../../../shared/chatSteering';
 
 const hostPlatform = process.platform;
 
@@ -4555,6 +4562,141 @@ Some text with [x] in it that's not a checkbox
 
 		beforeEach(() => {
 			mockSpawn.mockReturnValue(mockChild);
+		});
+
+		describe('the maestro-p admission stamp at the CLI sink (MCOMP-21-14A)', () => {
+			let actualFs: typeof import('fs');
+			let dataDir: string;
+			let claudeBin: string;
+			let savedUserData: string | undefined;
+			const TOKEN_SOURCE = { enableMaestroP: true, maestroPMode: 'interactive' as const };
+
+			beforeEach(async () => {
+				actualFs = await vi.importActual<typeof import('fs')>('fs');
+				const actualOs = await vi.importActual<typeof import('os')>('os');
+				dataDir = actualFs.mkdtempSync(path.join(actualOs.tmpdir(), 'cli-tui-stamp-'));
+				claudeBin = path.join(dataDir, 'claude-bin');
+				actualFs.writeFileSync(claudeBin, '#!/bin/sh\necho claude\n');
+				savedUserData = process.env.MAESTRO_USER_DATA;
+				process.env.MAESTRO_USER_DATA = dataDir;
+				// maestro-p is present (dev layout, no app.asar beside the CLI).
+				vi.mocked(fs.accessSync).mockReturnValue(undefined);
+				vi.mocked(fs.existsSync).mockImplementation((p) => !String(p).endsWith('app.asar'));
+				// This suite mocks fs reads and writes; the scratch data dir is real.
+				const inScratch = (file: unknown) =>
+					typeof file === 'string' && file.startsWith(dataDir + path.sep);
+				const read = vi.mocked(fs.readFileSync);
+				const readFallback = read.getMockImplementation();
+				read.mockImplementation(((file: fs.PathOrFileDescriptor, ...rest: unknown[]) =>
+					inScratch(file)
+						? actualFs.readFileSync(file, ...(rest as [BufferEncoding]))
+						: (readFallback?.(file, ...(rest as [])) ?? undefined)) as typeof fs.readFileSync);
+				const write = vi.mocked(fs.writeFileSync);
+				const writeFallback = write.getMockImplementation();
+				write.mockImplementation(((file: fs.PathOrFileDescriptor, ...rest: unknown[]) =>
+					inScratch(file)
+						? actualFs.writeFileSync(file, ...(rest as [string]))
+						: writeFallback?.(file, ...(rest as [string]))) as typeof fs.writeFileSync);
+			});
+			afterEach(() => {
+				if (savedUserData === undefined) delete process.env.MAESTRO_USER_DATA;
+				else process.env.MAESTRO_USER_DATA = savedUserData;
+				actualFs.rmSync(dataDir, { recursive: true, force: true });
+			});
+
+			function spawnedEnv(): NodeJS.ProcessEnv {
+				return (mockSpawn.mock.calls[0] as [string, string[], { env: NodeJS.ProcessEnv }])[2].env;
+			}
+
+			it('stamps an admitted maestro-p launch with a handshake that verifies (surface cli)', async () => {
+				const { host, authority } = managedAuthority(ALLOW);
+				const result = await driveSpawnToCompletion(
+					spawnAgent('claude-code', '/p', 'hi', undefined, {
+						...TOKEN_SOURCE,
+						managed: authority,
+						agentCommand: claudeBin,
+						customEnvVars: {
+							[TUI_HANDSHAKE_ENV_VAR]: 'inherited-handshake',
+							[STEERING_TOKEN_ENV_VAR]: 'inherited-token',
+						},
+					}),
+					0,
+					'{"type":"result","result":"ok"}\n'
+				);
+				expect(result.success).toBe(true);
+				const [command, args] = mockSpawn.mock.calls[0] as [string, string[]];
+				expect(command).toBe(process.execPath);
+				expect(String(args[0])).toMatch(/maestro-p\.js$/);
+
+				// The admitted spec held neither the inherited names nor the stamp.
+				expect(host.asked).toHaveLength(1);
+				const envKeys = host.asked[0].snapshot.envKeys;
+				expect(envKeys).toContain('MAESTRO_CLAUDE_BIN');
+				expect(envKeys).not.toContain(TUI_HANDSHAKE_ENV_VAR);
+				expect(envKeys).not.toContain(STEERING_TOKEN_ENV_VAR);
+
+				const env = spawnedEnv();
+				expect(env.MAESTRO_CLAUDE_BIN).toBe(claudeBin);
+				expect(env.MAESTRO_USER_DATA).toBe(path.resolve(dataDir));
+				expect(env[STEERING_TOKEN_ENV_VAR]).toMatch(/^[0-9a-f]{32,}$/);
+				expect(env[TUI_HANDSHAKE_ENV_VAR]).not.toBe('inherited-handshake');
+				const key = readTuiHandshakeKey(dataDir);
+				expect(key).not.toBeNull();
+				const verified = verifyTuiHandshake(env[TUI_HANDSHAKE_ENV_VAR]!, key!);
+				expect(verified.ok).toBe(true);
+				if (!verified.ok) return;
+				expect(verified.payload.owner).toEqual({ surface: 'cli', actor: ACTOR });
+				expect(verified.payload.run).toMatchObject({
+					leaseId: 'lease-1',
+					authorityId: 'authority-cli',
+					requestId: host.asked[0].context.identity.requestId,
+				});
+				expect(verified.payload.binary.path).toBe(claudeBin);
+				expect(host.authority.live()).toEqual([]);
+			});
+
+			it('refuses with a corrupt key file, spawns nothing and releases the lease', async () => {
+				actualFs.writeFileSync(tuiHandshakeKeyPath(dataDir), 'not a key\n');
+				const { host, authority } = managedAuthority(ALLOW);
+				const result = await spawnAgent('claude-code', '/p', 'hi', undefined, {
+					...TOKEN_SOURCE,
+					managed: authority,
+					agentCommand: claudeBin,
+				});
+
+				expect(result).toMatchObject({
+					success: false,
+					managed: { state: 'denied', code: 'policy-denied' },
+				});
+				expect(result.error).toContain('the handshake key could not be loaded');
+				expect(result.error).toContain('Nothing was started');
+				expect(mockSpawn).not.toHaveBeenCalled();
+				expect(host.asked).toHaveLength(1);
+				expect(host.authority.live()).toEqual([]);
+				expect(actualFs.readFileSync(tuiHandshakeKeyPath(dataDir), 'utf8')).toBe('not a key\n');
+			});
+
+			it('leaves a launch that is not maestro-p untouched', async () => {
+				const { host, authority } = managedAuthority(ALLOW);
+				const result = await driveSpawnToCompletion(
+					spawnAgent('claude-code', '/p', 'hi', undefined, {
+						managed: authority,
+						agentCommand: claudeBin,
+						customEnvVars: { [STEERING_TOKEN_ENV_VAR]: 'inherited-token' },
+					}),
+					0,
+					'{"type":"result","result":"ok"}\n'
+				);
+				expect(result.success).toBe(true);
+				expect(host.asked).toHaveLength(1);
+				const [command] = mockSpawn.mock.calls[0] as [string];
+				expect(command).toBe(claudeBin);
+				const env = spawnedEnv();
+				expect(env[TUI_HANDSHAKE_ENV_VAR]).toBeUndefined();
+				expect(env[STEERING_TOKEN_ENV_VAR]).toBe('inherited-token');
+				expect(env.MAESTRO_USER_DATA).toBe(process.env.MAESTRO_USER_DATA);
+				expect(actualFs.existsSync(tuiHandshakeKeyPath(dataDir))).toBe(false);
+			});
 		});
 
 		it('refuses a denied launch with zero effect and never retries it as an effort rejection', async () => {

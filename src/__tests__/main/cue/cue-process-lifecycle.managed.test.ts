@@ -10,7 +10,11 @@
  * labeled as such.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { createHash } from 'crypto';
 import { EventEmitter } from 'events';
 import type { ChildProcess } from 'child_process';
 import type { SpawnSpec } from '../../../main/cue/cue-spawn-builder';
@@ -28,6 +32,13 @@ import {
 	type ManagedAuthenticatedContext,
 } from '../../../shared/maestro-lib/managed/types';
 import { installTurnSinkStanding } from '../../../shared/maestro-lib/run/start-turn';
+import {
+	TUI_HANDSHAKE_ENV_VAR,
+	readTuiHandshakeKey,
+	tuiHandshakeKeyPath,
+	verifyTuiHandshake,
+} from '../../../shared/maestro-lib/managed/tui-handshake';
+import { STEERING_TOKEN_ENV_VAR } from '../../../shared/chatSteering';
 
 vi.mock('../../../main/parsers', () => ({
 	getOutputParser: () => null,
@@ -567,5 +578,205 @@ describe('runProcess managed admission', () => {
 		expect(leases[0].ended().reason).toBe('owner fenced');
 		expect(authority.live()).toEqual([]);
 		expect(getActiveProcessMap().has('run-1')).toBe(false);
+	});
+});
+
+// ─── maestro-p admission stamp at the Cue sink (MCOMP-21-14A) ───────────────
+
+describe('runProcess maestro-p admission stamp (MCOMP-21-14A)', () => {
+	const MAESTRO_P_SCRIPT = '/opt/maestro/resources/maestro-p.js';
+	let dataDir: string;
+	let claudeBin: string;
+	let savedUserData: string | undefined;
+
+	beforeEach(() => {
+		savedUserData = process.env.MAESTRO_USER_DATA;
+		dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cue-tui-stamp-'));
+		claudeBin = path.join(dataDir, 'claude-bin');
+		fs.writeFileSync(claudeBin, '#!/bin/sh\necho claude\n');
+		process.env.MAESTRO_USER_DATA = dataDir;
+	});
+	afterEach(() => {
+		if (savedUserData === undefined) delete process.env.MAESTRO_USER_DATA;
+		else process.env.MAESTRO_USER_DATA = savedUserData;
+		fs.rmSync(dataDir, { recursive: true, force: true });
+	});
+
+	/** A local maestro-p spec carrying a handshake and a steering token the engine inherited. */
+	function tuiSpec(env: Record<string, string> = {}, overrides: Partial<SpawnSpec> = {}) {
+		return spec({
+			command: process.execPath,
+			args: [MAESTRO_P_SCRIPT, '--dangerously-skip-permissions', '--', 'do the thing'],
+			env: {
+				PATH: '/usr/bin',
+				MAESTRO_CLAUDE_BIN: claudeBin,
+				[TUI_HANDSHAKE_ENV_VAR]: 'inherited-handshake',
+				[STEERING_TOKEN_ENV_VAR]: 'inherited-token',
+				...env,
+			},
+			...overrides,
+		});
+	}
+
+	function spawnedEnv(): Record<string, string | undefined> {
+		const call = mockSpawn.mock.calls[0] as unknown as [
+			string,
+			string[],
+			{ env: NodeJS.ProcessEnv },
+		];
+		return call[2].env;
+	}
+
+	it('strips the inherited admission, stamps after the gate and the stamp verifies', async () => {
+		const { authority, asked } = tableAuthority(() => ({ decision: 'allow', policyRevision: 3 }));
+		const leases: DispatchLease[] = [];
+		const run = runProcess(
+			'run-1',
+			// A standard ceiling: the bypass flag would not be signable under it.
+			tuiSpec(
+				{},
+				{
+					args: [MAESTRO_P_SCRIPT, '--model', 'opus', '--', 'do the thing'],
+					permissionCeiling: 'standard',
+				}
+			),
+			options({
+				managed: managedSpawn(authority, {
+					context: verifiedContext({ requestId: 'req-cue-7' }),
+					onLease: (lease) => leases.push(lease),
+				}),
+			})
+		);
+		const child = await spawned();
+
+		// The authority saw the spec without the inherited names and without the
+		// stamp: the stamp names the lease, so it is never part of what it digests.
+		expect(asked).toHaveLength(1);
+		expect(asked[0].snapshot.envKeys).toEqual(['MAESTRO_CLAUDE_BIN', 'PATH']);
+
+		const env = spawnedEnv();
+		expect(env.MAESTRO_USER_DATA).toBe(path.resolve(dataDir));
+		expect(env[STEERING_TOKEN_ENV_VAR]).toMatch(/^[0-9a-f]{32,}$/);
+		expect(env[STEERING_TOKEN_ENV_VAR]).not.toBe('inherited-token');
+		const encoded = env[TUI_HANDSHAKE_ENV_VAR];
+		expect(encoded).toBeTruthy();
+		expect(encoded).not.toBe('inherited-handshake');
+		expect(env.MAESTRO_CLAUDE_BIN).toBe(claudeBin);
+
+		const key = readTuiHandshakeKey(dataDir);
+		expect(key).not.toBeNull();
+		const verified = verifyTuiHandshake(encoded!, key!);
+		expect(verified.ok).toBe(true);
+		if (!verified.ok) return;
+		expect(leases).toHaveLength(1);
+		expect(verified.payload.run).toMatchObject({
+			leaseId: leases[0].leaseId,
+			authorityId: 'test-authority',
+			requestId: 'req-cue-7',
+		});
+		expect(verified.payload.owner).toEqual({
+			surface: 'cue',
+			actor: { kind: leases[0].actor.kind, id: leases[0].actor.id },
+		});
+		expect(verified.payload.permissionMode).toBe('standard');
+		expect(verified.payload.binary).toEqual({
+			path: claudeBin,
+			digest: createHash('sha256').update(fs.readFileSync(claudeBin)).digest('hex'),
+		});
+		// Another data directory's key does not verify it.
+		const otherKey = 'a'.repeat(64);
+		expect(verifyTuiHandshake(encoded!, otherKey).ok).toBe(false);
+
+		child.emit('close', 0);
+		expect((await run).status).toBe('completed');
+		expect(authority.live()).toEqual([]);
+	});
+
+	it('every admitted run mints its own steering token', async () => {
+		const { authority } = tableAuthority(() => ({ decision: 'allow', policyRevision: 3 }));
+		const tokens: (string | undefined)[] = [];
+		for (const runId of ['run-a', 'run-b']) {
+			mockSpawn.mockClear();
+			const run = runProcess(runId, tuiSpec(), options({ managed: managedSpawn(authority) }));
+			const child = await spawned();
+			tokens.push(spawnedEnv()[STEERING_TOKEN_ENV_VAR]);
+			child.emit('close', 0);
+			await run;
+		}
+		expect(tokens[0]).toBeTruthy();
+		expect(tokens[1]).toBeTruthy();
+		expect(tokens[0]).not.toBe(tokens[1]);
+	});
+
+	it('a launch that names no MAESTRO_CLAUDE_BIN is denied, spawns nothing and releases the lease', async () => {
+		const { authority, asked } = tableAuthority(() => ({ decision: 'allow', policyRevision: 3 }));
+		const onLease = vi.fn();
+		const { MAESTRO_CLAUDE_BIN: _bin, ...noBin } = tuiSpec().env;
+		const result = await runProcess(
+			'run-1',
+			tuiSpec({}, { env: noBin }),
+			options({ managed: managedSpawn(authority, { onLease }) })
+		);
+
+		expect(asked).toHaveLength(1);
+		expect(mockSpawn).not.toHaveBeenCalled();
+		expect(result).toMatchObject({
+			status: 'failed',
+			executionStarted: false,
+			managed: { state: 'denied', code: 'policy-denied' },
+		});
+		expect(result.stderr).toContain('MAESTRO_CLAUDE_BIN');
+		expect(result.stderr).toContain('Nothing was started');
+		// Released, never handed out, and no key minted for a launch it refused.
+		expect(onLease).not.toHaveBeenCalled();
+		expect(authority.live()).toEqual([]);
+		expect(fs.existsSync(tuiHandshakeKeyPath(dataDir))).toBe(false);
+		expect(mockCaptureException).not.toHaveBeenCalled();
+	});
+
+	it('an unreadable key is denied, spawns nothing, releases the lease and leaves the file alone', async () => {
+		fs.writeFileSync(tuiHandshakeKeyPath(dataDir), 'not a key\n');
+		const { authority } = tableAuthority(() => ({ decision: 'allow', policyRevision: 3 }));
+		const result = await runProcess(
+			'run-1',
+			tuiSpec(),
+			options({ managed: managedSpawn(authority) })
+		);
+
+		expect(mockSpawn).not.toHaveBeenCalled();
+		expect(result.managed).toEqual({ state: 'denied', code: 'policy-denied' });
+		expect(result.stderr).toContain('the handshake key could not be loaded');
+		expect(authority.live()).toEqual([]);
+		expect(fs.readFileSync(tuiHandshakeKeyPath(dataDir), 'utf8')).toBe('not a key\n');
+	});
+
+	it('without an admission only the inherited admission is stripped', async () => {
+		const run = runProcess('run-1', tuiSpec(), options());
+		const child = await spawned();
+		const env = spawnedEnv();
+		expect(env[TUI_HANDSHAKE_ENV_VAR]).toBeUndefined();
+		expect(env[STEERING_TOKEN_ENV_VAR]).toBeUndefined();
+		expect(env.MAESTRO_USER_DATA).toBeUndefined();
+		expect(env).toMatchObject({ PATH: '/usr/bin', MAESTRO_CLAUDE_BIN: claudeBin });
+		expect(fs.existsSync(tuiHandshakeKeyPath(dataDir))).toBe(false);
+		child.emit('close', 0);
+		expect((await run).status).toBe('completed');
+	});
+
+	it('a launch that is not maestro-p is neither stripped nor stamped', async () => {
+		const { authority } = tableAuthority(() => ({ decision: 'allow', policyRevision: 3 }));
+		const run = runProcess(
+			'run-1',
+			tuiSpec({}, { command: '/bin/claude', args: ['--print', '--', 'do the thing'] }),
+			options({ managed: managedSpawn(authority) })
+		);
+		const child = await spawned();
+		const env = spawnedEnv();
+		expect(env[TUI_HANDSHAKE_ENV_VAR]).toBe('inherited-handshake');
+		expect(env[STEERING_TOKEN_ENV_VAR]).toBe('inherited-token');
+		expect(env.MAESTRO_USER_DATA).toBeUndefined();
+		expect(fs.existsSync(tuiHandshakeKeyPath(dataDir))).toBe(false);
+		child.emit('close', 0);
+		await run;
 	});
 });
