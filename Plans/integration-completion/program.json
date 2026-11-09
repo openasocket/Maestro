@@ -5011,6 +5011,75 @@
 					"id": "MCOMP-19-01"
 				},
 				{
+					"label": "Re-hold the tunnel listener on every supervised reconnect",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/__tests__/main/tunnel-manager.test.ts",
+						"src/main/tunnel-manager.ts"
+					],
+					"outcome": "Continuation of MCOMP-19-01 inserted during execution; landed as f61793648. Targets: `src/main/tunnel-manager.ts`, `src/__tests__/main/tunnel-manager.test.ts`. `TunnelManager.start()` asks `listenerHoldFor({ kind: 'tunnel', ... })` once, but the supervised restart in `scheduleRestart()` calls `spawnTunnel()` again with no hold, so a ceiling installed, narrowed or revoked after the first start republishes the port to the Internet on the next cloudflared respawn. Ask the same hold before every respawn; on a hold, end supervision, set the status error to the hold message and spawn nothing. Test allowed reconnect, refused reconnect (no spawn) and standalone (nothing asked). Required inputs: `MAESTRO-CONTRACT-INPUTS-BUILD`. Limit 1-3 authored files and fewer than 500 changed lines; never a stub, skipped test or fabricated success. Backlog: M-05.",
+					"backlog": ["M-05"],
+					"requires": ["MAESTRO-CONTRACT-INPUTS-BUILD"],
+					"produces": [],
+					"id": "MCOMP-19-01A"
+				},
+				{
+					"label": "Hold the relay, coworking and steering listeners before bind",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/__tests__/main/enterprise/relay-coworking-listener-holds.test.ts",
+						"src/main/coworking/coworking-bridge.ts",
+						"src/main/permission-relay/PermissionRelayServer.ts"
+					],
+					"outcome": "Continuation of MCOMP-19-01A inserted during execution; landed as 4b914eec2. Targets: `src/main/permission-relay/PermissionRelayServer.ts`, `src/main/coworking/coworking-bridge.ts`, and the maestro-p steering socket bind site (discover it; `src/maestro-p/`). The ceiling vocabulary already names `relay`, `coworking` and `steering` (src/main/enterprise/listener-policy.ts) but none of those sinks asks `holdListener()` / `listenerHoldFor()` before `listen()`, so an enrolled host whose ceiling omits them still opens them. Hold each with its OS-local endpoint as `bind` (reach `loopback`) before the socket exists, report a hold by its `[managed-<code>]` message rather than as a bind failure, and add focused tests per sink (refused: no listen; admitted and standalone: listen as before). If the steering socket lives in a process with no listener authority, record that instead of inventing one. Also confirm the kind `src/main/lite/tailnet-relay.ts` (127.0.0.1:0) belongs to, and hold it or record why not. Required inputs: `MAESTRO-CONTRACT-INPUTS-BUILD`. Limit 1-3 authored files and fewer than 500 changed lines (split into a further labeled continuation if the tests push past it); never a stub, skipped test or fabricated success. Backlog: M-05.",
+					"backlog": ["M-05"],
+					"requires": ["MAESTRO-CONTRACT-INPUTS-BUILD"],
+					"produces": [],
+					"id": "MCOMP-19-01B"
+				},
+				{
+					"label": "Hold the Lite client's tailnet/LAN relay before bind",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/__tests__/main/lite/tailnet-relay.test.ts",
+						"src/main/lite/tailnet-relay.ts"
+					],
+					"outcome": "Continuation of MCOMP-19-01B inserted during execution; landed as 5f0663177. Targets: `src/main/lite/tailnet-relay.ts`, `src/__tests__/main/lite/tailnet-relay.test.ts`. `openPairedRelay()` binds `127.0.0.1:0` with no listener hold. Call `holdListener({ kind: 'ssh-tunnel', bind: '127.0.0.1', port: 0 })` (the Lite client's loopback forward kind, as `src/main/lite/tunnel.ts` does) BEFORE the destination read and `createServer()`, so a refusal throws `ListenerDeniedError` by name and `connect()` in `src/main/lite/index.ts` reports it; if reading the code shows a different closed kind fits better, record why. Test refused (no listen, no destination read), admitted and standalone. Required inputs: `MAESTRO-CONTRACT-INPUTS-BUILD`. Limit 1-3 authored files and fewer than 500 changed lines; never a stub, skipped test or fabricated success. Backlog: M-05.",
+					"backlog": ["M-05"],
+					"requires": ["MAESTRO-CONTRACT-INPUTS-BUILD"],
+					"produces": [],
+					"id": "MCOMP-19-01C"
+				},
+				{
+					"label": "Hold the maestro-p steering socket at the desktop spawn",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/__tests__/main/agents/applyLocalInteractiveSpawn.steering.test.ts",
+						"src/__tests__/main/enterprise/listener-policy.test.ts",
+						"src/main/ipc/handlers/process/apply-local-interactive-spawn.ts"
+					],
+					"outcome": "Continuation of MCOMP-19-01C inserted during execution; landed as a487ab61d. The steering socket binds inside the maestro-p child, which has no listener authority. Discover the desktop site that hands maestro-p its steering socket path (the interactive-mode spawn in `src/main/process-manager/` or `src/shared/maestro-lib/launch/interactive-mode.ts`) and ask `listenerHoldFor({ kind: 'steering', bind: <socket path>, port: 0 })` there before spawning; on a hold, spawn maestro-p WITHOUT a steering path (the turn runs unsteerable, which maestro-p already tolerates) and surface the `[managed-<code>]` message, unless reading the code shows steering is required for the turn, in which case refuse the spawn by that name. Test refused/admitted/standalone. Required inputs: `MAESTRO-CONTRACT-INPUTS-BUILD`. Limit 1-3 authored files and fewer than 500 changed lines; never a stub, skipped test or fabricated success. Backlog: M-05.",
+					"backlog": ["M-05"],
+					"requires": ["MAESTRO-CONTRACT-INPUTS-BUILD"],
+					"produces": [],
+					"id": "MCOMP-19-01D"
+				},
+				{
+					"label": "Hold the steering socket of a group chat participant spawn",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/__tests__/main/enterprise/listener-policy.test.ts",
+						"src/__tests__/main/group-chat/spawnGroupChatAgent.test.ts",
+						"src/main/group-chat/spawnGroupChatAgent.ts",
+						"src/shared/maestro-lib/groupchat/spawn.ts"
+					],
+					"outcome": "Continuation of MCOMP-19-01D inserted during execution; landed as 5199b19e8. Targets: `src/shared/maestro-lib/groupchat/spawn.ts` (`deps.steeringSocketPath`, line ~256), `src/main/group-chat/spawnGroupChatAgent.ts`, and the spawn test. Let the dep answer `string | null` (null: open no channel), and have the desktop wiring ask `listenerHoldFor({ kind: 'steering', bind: <path>, port: 0 })` and answer null on a hold, logging the `[managed-<code>]` message, exactly as `applyLocalInteractiveSpawnDecision()` does; extend the `SINKS` row in src/__tests__/main/enterprise/listener-policy.test.ts. Test refused/admitted/standalone. Required inputs: `MAESTRO-CONTRACT-INPUTS-BUILD`. Limit 1-3 authored files and fewer than 500 changed lines; never a stub, skipped test or fabricated success. Backlog: M-05.",
+					"backlog": ["M-05"],
+					"requires": ["MAESTRO-CONTRACT-INPUTS-BUILD"],
+					"produces": [],
+					"id": "MCOMP-19-01E"
+				},
+				{
 					"label": "Guard asynchronous repository effects before dispatch",
 					"kind": "IMPLEMENT",
 					"targets": [
@@ -5039,6 +5108,19 @@
 					"id": "MCOMP-19-03"
 				},
 				{
+					"label": "Hold the playbook ZIP import's replacements before extraction",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/__tests__/main/ipc/handlers/playbooks.managed.test.ts",
+						"src/main/ipc/handlers/playbooks.ts"
+					],
+					"outcome": "Continuation of MCOMP-19-03 inserted during execution; landed as 6633a47f1. In `src/main/ipc/handlers/playbooks.ts` `playbooks:import`, after the archive entries are held to the install ceiling and the manifest validated but BEFORE the first `fs.mkdir`/`fs.writeFile`, compute every destination (documents into the Auto Run folder, assets into `assets/`) and hold the ones already present ONCE with `holdReplacementEffect()` from src/main/enterprise/local-effects-policy.ts (the actor already read at the top of the handler). A refusal must leave every existing document and asset unchanged and create no folder. Add cases to src/__tests__/main/ipc/handlers/playbooks.managed.test.ts (or a real-temp-dir file like replacement-holds.managed.test.ts) for deny, confirm declined, a fresh import holding nothing, and standalone. Keep to 1-2 authored files and fewer than 200 changed lines; run the playbooks, enterprise and ipc/handlers suites, tsc and prettier. Required inputs: `MAESTRO-CONTRACT-INPUTS-BUILD`. Backlog: M-05.",
+					"backlog": ["M-05"],
+					"requires": ["MAESTRO-CONTRACT-INPUTS-BUILD"],
+					"produces": [],
+					"id": "MCOMP-19-03A"
+				},
+				{
 					"label": "Apply updater policy in the actual desktop update flow",
 					"kind": "IMPLEMENT",
 					"targets": [
@@ -5050,6 +5132,19 @@
 					"requires": ["MEGA-DESKTOP-POLICY-BUILD"],
 					"produces": [],
 					"id": "MCOMP-19-04"
+				},
+				{
+					"label": "Draw the roll-forward word in the managed status pane",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/__tests__/renderer/components/Enterprise/ManagedStatus.test.tsx",
+						"src/renderer/components/Enterprise/ManagedStatus.tsx"
+					],
+					"outcome": "Continuation of MCOMP-19-04 inserted during execution; landed as 7435315d3. `useManagedStatus()` now returns `update: ManagedUpdateState` (`held` / `restart-needed` / `none`, with `MANAGED_UPDATE_COPY` labels), but `src/renderer/components/Enterprise/ManagedStatus.tsx` draws only the projection's `update.held` and takes `status: { supported, state, error }`. Pass the hook's `update` through (optional prop, so existing callers keep working; `src/renderer/components/Settings/MegaMaestroSettings.tsx` is the caller) and draw `restart-needed` beside the holds (label + the state's sentence), never offering a held version as a restart. Do not add an install button there (the Update modal owns installing). Test in `src/__tests__/renderer/components/Enterprise/ManagedStatus.test.tsx`. Required inputs: `MAESTRO-CONTRACT-INPUTS-BUILD`. Limit to 1-3 authored files and fewer than 500 changed lines. Backlog: M-05.",
+					"backlog": ["M-05"],
+					"requires": ["MAESTRO-CONTRACT-INPUTS-BUILD"],
+					"produces": [],
+					"id": "MCOMP-19-04A"
 				},
 				{
 					"label": "Unify native GUI and CLI mutation commands",
@@ -5066,6 +5161,21 @@
 					"id": "MCOMP-19-05"
 				},
 				{
+					"label": "Route the SSH remote update and remove verbs through the host boundary",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/__tests__/cli/commands/remove-ssh-remote.test.ts",
+						"src/__tests__/cli/commands/update-ssh-remote.test.ts",
+						"src/cli/commands/remove-ssh-remote.ts",
+						"src/cli/commands/update-ssh-remote.ts"
+					],
+					"outcome": "Continuation of MCOMP-19-05 inserted during execution; landed as d67baff80. Targets: `src/cli/commands/update-ssh-remote.ts`, `src/cli/commands/remove-ssh-remote.ts` and their tests in `src/__tests__/cli/commands/`. Replace `writeSshRemotes()` / `writeSettingValue('defaultSshRemoteId', ...)` with `writeSettingThroughHost()` from `src/cli/services/managed-desktop-write.ts` (make the verbs async, `return reportDesktopWriteFailure(error, options.json, ...)` on failure, never write the default after a refused list write), mirroring `create-ssh-remote.ts`. Tests mock `managed-desktop-write` and assert the host write plus one refusal case each. Fewer than 500 changed lines; no stub or skipped test. Backlog: M-05.",
+					"backlog": ["M-05"],
+					"requires": ["MAESTRO-CONTRACT-INPUTS-BUILD"],
+					"produces": [],
+					"id": "MCOMP-19-05A"
+				},
+				{
 					"label": "Test native residual effect boundaries",
 					"kind": "TEST",
 					"targets": [
@@ -5078,6 +5188,19 @@
 					"requires": [],
 					"produces": [],
 					"id": "MCOMP-19-06"
+				},
+				{
+					"label": "Re-hold a confirmed local effect against the ceiling current at the answer",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/__tests__/main/enterprise/local-effects-policy.test.ts",
+						"src/main/enterprise/local-effects-policy.ts"
+					],
+					"outcome": "Continuation of MCOMP-19-06 inserted during execution; landed as f46464e3a. Targets: `src/main/enterprise/local-effects-policy.ts`, `src/__tests__/main/enterprise/managed-effects.test.ts` (or `local-effects-policy.test.ts`). `createLocalEffectsPolicySource().authorize()` computes the verdict, then awaits the operator's confirmation in `resolveLocalEffectVerdict()` and answers `confirmed` without looking at the standing again; a confirmation dialog can stay open for minutes, so a ceiling cleared, a revision moved, or a class narrowed to `deny` meanwhile still lets the delete, trash, open or clipboard write proceed. After a `confirmed` answer, re-evaluate `localEffectVerdict()` against the standing read at that moment (and the actor's unbindable problems): anything but `allow` or `confirm` refuses with its own code and receipt; `confirm` again is admitted on the answer already given. Test: revocation during a pending confirmation (file left in place, code `unavailable`), narrowing to `deny` (code `denied`), an unchanged ceiling (removed, outcome `confirmed`), and standalone (nothing asked). Required inputs: `MAESTRO-CONTRACT-INPUTS-BUILD`. Limit 1-3 authored files and fewer than 500 changed lines; never a stub, skipped test or fabricated success. Backlog: M-05.",
+					"backlog": ["M-05"],
+					"requires": ["MAESTRO-CONTRACT-INPUTS-BUILD"],
+					"produces": [],
+					"id": "MCOMP-19-06A"
 				},
 				{
 					"label": "Verify and publish implementation inputs",
@@ -5094,7 +5217,7 @@
 			"produces": ["MAESTRO-RESIDUAL-EFFECTS-BUILD"],
 			"id": "MCOMP-19",
 			"path": ".maestro/playbooks/2026-10-29-Maestro-Integration-Completion/MCOMP-19.md",
-			"taskCount": 7,
+			"taskCount": 16,
 			"stage": "S12"
 		},
 		{
@@ -6735,7 +6858,7 @@
 				"PAIR-DIRECT-EVIDENCE"
 			],
 			"nativeInputs": false,
-			"taskCount": 45
+			"taskCount": 54
 		},
 		{
 			"id": "S13",
@@ -6892,8 +7015,8 @@
 			"taskCount": 1
 		}
 	],
-	"taskCount": 407,
-	"taskCounts": { "IMPLEMENT": 298, "TEST": 49, "VERIFY": 60 },
+	"taskCount": 416,
+	"taskCounts": { "IMPLEMENT": 307, "TEST": 49, "VERIFY": 60 },
 	"artifacts": {
 		"MEGA-CONTRACTS-FOUNDATION-BUILD": {
 			"producerDocument": "GCOMP-01",
@@ -7767,11 +7890,20 @@
 			"MCOMP-15-05",
 			"MCOMP-15-06",
 			"MCOMP-19-01",
+			"MCOMP-19-01A",
+			"MCOMP-19-01B",
+			"MCOMP-19-01C",
+			"MCOMP-19-01D",
+			"MCOMP-19-01E",
 			"MCOMP-19-02",
 			"MCOMP-19-03",
+			"MCOMP-19-03A",
 			"MCOMP-19-04",
+			"MCOMP-19-04A",
 			"MCOMP-19-05",
+			"MCOMP-19-05A",
 			"MCOMP-19-06",
+			"MCOMP-19-06A",
 			"MCOMP-19-07",
 			"MCOMP-20-01",
 			"MCOMP-21-01",
