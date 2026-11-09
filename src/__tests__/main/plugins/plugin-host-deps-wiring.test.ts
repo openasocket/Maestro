@@ -630,15 +630,25 @@ describe('production repository ceiling wiring (MRC-09-05C)', () => {
 
 	it('the IPC bootstrap is handed that source and passes it to the Symphony handlers', () => {
 		expect(source).toMatch(/getRepositoryAuthority: \(\) => repositoryPolicy,/);
-		expect(bootstrapSource).toMatch(
-			/registerSymphonyHandlers\(\{[^;]*getRepositoryAuthority: deps\.getRepositoryAuthority,\n\t+\}\);/
-		);
-		// No registration of the Symphony handlers anywhere runs without the reader.
-		const calls = bootstrapSource.match(/registerSymphonyHandlers\([^;]*\)/g) ?? [];
+		// Every registration of the Symphony handlers hands both readers
+		// through, in any order within the call: the repository ceiling for the
+		// clone, push and PR effects, and the local-effects ceiling for the
+		// clone cleanup (MCOMP-21-11).
+		const calls = bootstrapSource.match(/registerSymphonyHandlers\(\{[^;]*\}\);/g) ?? [];
 		expect(calls.length).toBeGreaterThan(0);
 		for (const call of calls) {
-			expect(call, call).toMatch(/getRepositoryAuthority/);
+			expect(call, call).toMatch(/\n\t+getRepositoryAuthority: deps\.getRepositoryAuthority,\n/);
+			expect(call, call).toMatch(/\n\t+getLocalEffectAuthority: deps\.getLocalEffectAuthority,\n/);
 		}
+		// No registration of the Symphony handlers anywhere runs without either reader.
+		for (const call of bootstrapSource.match(/registerSymphonyHandlers\([^;]*\)/g) ?? []) {
+			expect(call, call).toMatch(/getRepositoryAuthority/);
+			expect(call, call).toMatch(/getLocalEffectAuthority/);
+		}
+	});
+
+	it('the local-effects source reaches the IPC bootstrap as the Symphony reader', () => {
+		expect(source).toMatch(/getLocalEffectAuthority: \(\) => localEffectsPolicy,/);
 	});
 });
 
