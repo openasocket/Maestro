@@ -1,0 +1,417 @@
+{
+	"schemaVersion": 1,
+	"schema": "maestro-integration-build/1",
+	"artifactId": "MAESTRO-AGENT-AUTHORING-BUILD",
+	"owner": "maestro",
+	"proofClass": "implementation-input",
+	"status": "complete-local-consumer-build",
+	"producerDocument": "MCOMP-23",
+	"task": "MCOMP-23-07",
+	"stage": "S12",
+	"backlog": ["G-09", "M-06"],
+	"recordedAt": "2026-11-09T08:30:54.049Z",
+	"standing": "Compiled and locally tested inputs published at the content-addressed paths below. Grants no execution authority and proves no paired, native, GUI or real-provider support.",
+	"grants": {
+		"authority": "none",
+		"lease": "none",
+		"policy": "none"
+	},
+	"qualification": {
+		"paired": false,
+		"provider": false,
+		"native": false,
+		"desktopGui": false
+	},
+	"implementationRevision": "7f7cc45c9ebe55fbd72a6073114d2f3fa2edbc91",
+	"observedRevision": "75ebdcb827f8a95f2351368a9aaa86d32f4fd339",
+	"inputDigest": "42d512243521cf7aeede5d318ddcc6328285fc706f4ad1198f4396c007ef5e5c",
+	"snapshot": {
+		"implementationClean": true,
+		"checkoutClean": false,
+		"implementationDigest": "63a380aa75a2f1f41c517d023a9c640a7c09ca6db6413adef9834558fae4d93d",
+		"implementationFiles": 6943,
+		"inputMap": {
+			"path": ".maestro/playbooks/Working/MCOMP-23-07/input-map.json",
+			"sha256": "6348052b3f7e0416d64b2e76024bad0657a9dee097dbf0b9cf2f02897a095a19"
+		},
+		"inputDigestEncoding": "sha256(canonicalJson(inputMap.inputs))",
+		"implementationMap": "/Users/dr3/dev-shit/Maestro/dist/mega-maestro-runtime/0.36.0/155f7a9c1e1ab57b1fea691a46c0b5975b779569c2a5192d0331d22cfc06e8bb/runtime.tgz#package/source/implementation.json",
+		"libraryInputMap": "/Users/dr3/dev-shit/Maestro/dist/mega-maestro-runtime/0.36.0/155f7a9c1e1ab57b1fea691a46c0b5975b779569c2a5192d0331d22cfc06e8bb/runtime.tgz#package/source/library-inputs.json",
+		"changeRange": {
+			"from": "368d865d9 (MCOMP-23-01, parent excluded)",
+			"to": "ff28998da (MCOMP-23-06, e2e/managed-agents.spec.ts; outside the implementation snapshot, linted and format-checked here)",
+			"implementationRevision": "7f7cc45c9ebe55fbd72a6073114d2f3fa2edbc91",
+			"manifestReconcile": "75ebdcb82",
+			"changedFiles": {
+				"path": ".maestro/playbooks/Working/MCOMP-23-07/checked-files.json",
+				"sha256": "0c3bee52342f7b9c5d8e99b12e3874a16a68627b1e1e2e0d7defb69579a63082"
+			}
+		},
+		"inputs": "All tracked implementation source, prompts, templates and schemas; package and lockfiles; main/renderer/library/test/lint/format configuration; packaged README and SDK metadata; coverage and archive plans; imported contracts and exact dependencies; all installed dependency bytes including compiler/native tools; verification harnesses and Node executable. Build override variables and renderer .env inputs were absent.",
+		"installedDependencyFiles": 77914,
+		"importedContractFiles": 891,
+		"testCoordinationInput": {
+			"path": "Plans/integration-completion/program.json",
+			"sha256": "b532b480371ea580fbcddc4c0680d9fe974dcb19b4bdff05167043f3b9657ee2",
+			"committedSha256": "e2f7c9a8ca2e528c01b03e8a33ae77d1cdae3b281feb76fa12c91612ff9bcaea",
+			"role": "Uncommitted coordination manifest read only to validate task IDs; excluded from production source cleanliness claim"
+		},
+		"preservedDiff": {
+			"path": ".maestro/playbooks/Working/MCOMP-23-07/initial-planning.patch",
+			"sha256": "32ee66800c717b27a36d0c8697ea7d2fc619020fd7273cd7bceef1452413f18e"
+		},
+		"exclusions": "Existing planning amendments, checklist/coordination receipts, SlopTimize state and graph output are not application/build inputs. program.json is explicitly hashed as an uncommitted test coordination input. The full checkout and full test input set are not claimed committed. No private sibling implementation is loaded."
+	},
+	"dependencies": [
+		{
+			"artifactId": "MAESTRO-CONTRACT-INPUTS-BUILD",
+			"path": "Plans/integration-completion/evidence/contract-inputs-build.json",
+			"sha256": "206664f3ab7605927bbf9964597da12f4607da34bac5f601ce18e19fffca34c2",
+			"implementationRevision": "dc5938509be17742adcca713cca07c0176af6fe6",
+			"inputDigest": "115a3223b356e0975ca73b9a53c4b6e25031437915888b5534bcfd955f6116b5"
+		},
+		{
+			"artifactId": "MAESTRO-EFFECT-CONSUMERS-BUILD",
+			"path": "Plans/integration-completion/evidence/effect-build.json",
+			"sha256": "f5f81b81e3255ec225eb51d9e80c12f9c1a8ee921cc24aa7a13482cb29ae031e",
+			"implementationRevision": "4094931879e55287eec1a1306d857111293b7460",
+			"inputDigest": "901b2125ede561263fbe03428207fabb92c8ebc006d5b0410f038f48f0626b73"
+		},
+		{
+			"artifactId": "MAESTRO-POLICY-CONSUMERS-BUILD",
+			"path": "Plans/integration-completion/evidence/policy-build.json",
+			"sha256": "e253139055c3b804bbf2ff6e6f155d360e426c48132869d284c42c2a29232b09",
+			"implementationRevision": "d86ddb94c43360d46631a9f88e61f4a931435103",
+			"inputDigest": "9f5807ac2d21e92e9dd8952e3703e32ba4d90054bd8fa2ab432804cbe3ea6771"
+		},
+		{
+			"artifactId": "MAESTRO-WORKFLOW-CONSUMERS-BUILD",
+			"path": "Plans/integration-completion/evidence/workflow-build.json",
+			"sha256": "9f1105a55d036d31724b7e7960e4f77c56812ebce2bf3c3f23600bf332c08bec",
+			"implementationRevision": "59ea7a5309eecc8d7befafd56e6dd599b2fe3b11",
+			"inputDigest": "5b64f9ca421d985cb18538ffe720cccba91bbf18d46960bfe03876402b64ed2c"
+		}
+	],
+	"archives": {
+		"runtime": {
+			"path": "/Users/dr3/dev-shit/Maestro/dist/mega-maestro-runtime/0.36.0/155f7a9c1e1ab57b1fea691a46c0b5975b779569c2a5192d0331d22cfc06e8bb/runtime.tgz",
+			"sha256": "155f7a9c1e1ab57b1fea691a46c0b5975b779569c2a5192d0331d22cfc06e8bb",
+			"sha512": "d0e58c0af6115bb9ea4ba1d953d13967324a772fdb6c65d8914a46eaed46ddf6c02a257265c23c4707bd7bcd607cb83832619123b7b8c145daf3c2e82d788e08",
+			"bytes": 2655148,
+			"manifest": {
+				"path": "/Users/dr3/dev-shit/Maestro/dist/mega-maestro-runtime/0.36.0/155f7a9c1e1ab57b1fea691a46c0b5975b779569c2a5192d0331d22cfc06e8bb/artifact.json",
+				"sha256": "ca827ed5a1886d849f13b9c110fd86a038b9f4e4711b56e7db0cb21c2db89385"
+			},
+			"sidecar": {
+				"path": "/Users/dr3/dev-shit/Maestro/dist/mega-maestro-runtime/0.36.0/155f7a9c1e1ab57b1fea691a46c0b5975b779569c2a5192d0331d22cfc06e8bb/runtime.tgz.sha256",
+				"sha256": "6d5c47e67cd777d8019626d65a1eed40c794e8b03a02e2c608296fdc16d35b4e"
+			},
+			"payloadFiles": 309,
+			"payloadDigest": "269abc54d5851c3f018137773029c66973bff97c3524ec8777f2518b06c1df41",
+			"payloadMap": "/Users/dr3/dev-shit/Maestro/dist/mega-maestro-runtime/0.36.0/155f7a9c1e1ab57b1fea691a46c0b5975b779569c2a5192d0331d22cfc06e8bb/artifact.json#/payloadSha256"
+		},
+		"desktopCompiled": {
+			"path": "/Users/dr3/dev-shit/Maestro/dist/mega-maestro-author-desktop/1/4ee888d90c34a4667ea8e2ff0d041bb9a00b132782a776046d234428e7c340d9/desktop-compiled.tgz",
+			"sha256": "4ee888d90c34a4667ea8e2ff0d041bb9a00b132782a776046d234428e7c340d9",
+			"sha512": "3613cf53ea28535128ff146bddf57d0d3ef6db0bcc161c2a0dcdbb12a319e5fadef61497b6e105c0ef2e15fde8478e8f14b2ed29c6c3f1683fe89a7f4b7cced5",
+			"bytes": 19873835,
+			"manifest": {
+				"path": "/Users/dr3/dev-shit/Maestro/dist/mega-maestro-author-desktop/1/4ee888d90c34a4667ea8e2ff0d041bb9a00b132782a776046d234428e7c340d9/artifact.json",
+				"sha256": "8d0bba6adc589782839dcfe3dc9431be251af801f64781f2f74cbb061c3840ab"
+			},
+			"sidecar": {
+				"path": "/Users/dr3/dev-shit/Maestro/dist/mega-maestro-author-desktop/1/4ee888d90c34a4667ea8e2ff0d041bb9a00b132782a776046d234428e7c340d9/desktop-compiled.tgz.sha256",
+				"sha256": "e0e0375d7b476c6b141deaa94215440968aa3e4a5dc9bc8875865cf8dadfaf8c"
+			},
+			"payloadFiles": 2142,
+			"payloadDigest": "f4e2b81009e4b7c7de88d61dea4113063e796cf92f2fbfc63b8c0c7176ce5d14",
+			"payloadMap": "/Users/dr3/dev-shit/Maestro/dist/mega-maestro-author-desktop/1/4ee888d90c34a4667ea8e2ff0d041bb9a00b132782a776046d234428e7c340d9/artifact.json#/payloadSha256"
+		},
+		"publicContracts": {
+			"name": "@mega-maestro/contracts",
+			"version": "0.1.0",
+			"path": "/Users/dr3/dev-shit/mega-maestro/artifacts/enterprise/0.1.0/c34e6cd0590fdce90cd2ace60f8f43ee278f6d24d62d4b6caab2bb4f720ab177/contracts.tgz",
+			"sha256": "c34e6cd0590fdce90cd2ace60f8f43ee278f6d24d62d4b6caab2bb4f720ab177",
+			"integrity": "sha512-MNZe6OgdHh5LwxRVY85zDkudqUFJjyQHdW/IgfuzH3S0cGnN1lKLaAV4dT1Z4hpyXzMbhIYiKQjpECt9RWNhTA==",
+			"manifest": {
+				"path": "/Users/dr3/dev-shit/mega-maestro/artifacts/enterprise/0.1.0/c34e6cd0590fdce90cd2ace60f8f43ee278f6d24d62d4b6caab2bb4f720ab177/artifact.json",
+				"sha256": "6c346c4fa4a7b7d4ec41b1624c7b155715128ec04c877bf0830910fd49aa127d"
+			},
+			"sidecar": {
+				"path": "/Users/dr3/dev-shit/mega-maestro/artifacts/enterprise/0.1.0/c34e6cd0590fdce90cd2ace60f8f43ee278f6d24d62d4b6caab2bb4f720ab177/contracts.tgz.sha256",
+				"sha256": "36b351059a4fc51fda3c278dc87d892fa098ac8ad8517972cec0f82f01a88fd6"
+			},
+			"payloadFiles": 46,
+			"payloadDigest": "12976943661224f30e6461430332d1fefb36f4133bd38e93cb02f006d52296fd"
+		}
+	},
+	"builds": {
+		"libraryProvenance": {
+			"path": ".maestro/playbooks/Working/MCOMP-23-07/library/provenance.json",
+			"sha256": "a64aeba48489be8e4a4818613fa500262d79d12b398e11d7606f557e27ac0216"
+		},
+		"desktopPayloadMap": {
+			"path": ".maestro/playbooks/Working/MCOMP-23-07/main-build-payload.json",
+			"sha256": "81a01f79108dd92b69f5585eed8986e463b5c15af73861337478ed1db3f81413"
+		},
+		"scope": "Runtime library, Electron main/shared/preload and renderer compiled locally. Desktop archive contains compiled inputs with external Electron/Node/native dependencies, not an installable native app. No GUI session was qualified."
+	},
+	"archiveValidation": {
+		"integrity": {
+			"path": ".maestro/playbooks/Working/MCOMP-23-07/archive-validation.json",
+			"sha256": "8ef3c5abf1efba05396f59c6c8a04802275b1af493a0c09ba6584f6a0869d408"
+		},
+		"importTrace": {
+			"path": ".maestro/playbooks/Working/MCOMP-23-07/archive-redirects.log",
+			"sha256": "dde36295157da13fb88c34b60758524ad276b36ea4be370558c9e3ed35d2b5e4"
+		},
+		"runtimeInput": {
+			"path": ".maestro/playbooks/Working/MCOMP-23-07/runtime-input-validation.json",
+			"sha256": "b939e2863aaaeed9c3b4fcf102cb8c22cd2909312526eee49ad9aea3135588e3"
+		},
+		"desktopRedirects": 5,
+		"runtimeRedirects": 1,
+		"scope": "SHA-256/SHA-512, sidecars, manifests, member sets, safe paths and every payload hash verified before extraction. Every relative import of the desktop agent command (main/agents/agent-config-writes), the approved-choice validator (shared/maestro-lib/managed/agent-policy) and the governed-field merge (shared/sessionPersistenceMerge) was redirected to the compiled desktop archive, and every import of the agent repository (maestro-lib/agents/repository, authorizeAgentMutation hook) to the public runtime bundle; four suites (host command and repository hook, sessions:commitAgent and whole-record persistence handlers, native create/edit/persistence races, governed-field merge) ran on those bytes, the persistence handlers loading the compiled command. agent-config-writes.test.ts and agents.locks.test.ts were tried and stay source-only: they install the settings write authority on the source settings-policy instance, which the compiled command does not share (5 failures of that kind, not of the subject). Renderer form, hook and dialog suites stay source-only. Public declaration checks and a plain Node load of the runtime repository (approved create committed, unapproved create refused before the write, throwing authority fails closed) passed. Temporary identity-only pin leaves the historical runtime pin unchanged."
+	},
+	"tests": {
+		"source": {
+			"files": 23,
+			"passed": 1090,
+			"failed": 0,
+			"skipped": 0,
+			"results": {
+				"path": ".maestro/playbooks/Working/MCOMP-23-07/source-tests.json",
+				"sha256": "540eb7ae74df0dd97d9f7053c1816f664fff531e01f2791de603d240e670bde3"
+			}
+		},
+		"archived": {
+			"files": 4,
+			"passed": 50,
+			"failed": 0,
+			"skipped": 0,
+			"results": {
+				"path": ".maestro/playbooks/Working/MCOMP-23-07/archive-tests.json",
+				"sha256": "b851e2f7e9864d1a2ba9cc5053ca5a30f5b2cace2d9399a16bb825bb4bec8cc6"
+			}
+		},
+		"boundary": "Local typed-port and public-schema fixtures, a contract-fixture endpoint double, temporary data directories and recording sinks only. No signed production delivery, real tenant, provider, native peer or live endpoint supplied authority. The e2e journeys (e2e/managed-agents.spec.ts) are not run here; MCOMP-24 executes and records them."
+	},
+	"behavior": [
+		"One host command (authorizeManagedAgentCommand over checkManagedAgentMutation) validates provider, model, account, workspace, credential, permission and transport values of a governed create or edit against the approved options read at the commit, with typed per-field refusals; standalone is unchanged and a managed host with no usable policy fails closed.",
+		"The agent repository asks the host authority with the record exactly as it would be committed, inside the command queue and before any write; a throwing authority is a refusal.",
+		"Renderer creation and editing (New Agent, Edit Agent, clone, wizard, worktree spawn and discovery, CLI create and duplicate, merge, transfer, Cue bundle import, Symphony) converge on sessions:commitAgent; whole-record setMany/setAll writes restore governed fields from the stored record.",
+		"The New Agent, Edit Agent and Symphony agent forms show the managed choices notice, send the policy revision they were shown, keep the draft on a refusal and recover from a stale revision; held provider settings render disabled with the reason.",
+		"A Symphony contribution commits its agent before any clone, fork or draft PR, and withdraws the admitted agent when the repository start fails."
+	],
+	"contractMappings": {
+		"pin": {
+			"path": "vendor/mega-maestro/contracts.pin.json",
+			"sha256": "8343292d926cf3ed7b67a3c6f34a88eecedf85045dddb187d0357deae3daf3f4"
+		},
+		"coverage": {
+			"path": "Plans/integration-completion/contract-coverage.json",
+			"sha256": "6b1d8a57c3864678df317d013b8a2d4663bf86d4fab885b7d8fdb0573e3bf0b2"
+		},
+		"endpointProtocolsAccepted": [1],
+		"liveNegotiationPerformed": false,
+		"extensions": [
+			{
+				"id": "DESKTOP-LOCAL/1",
+				"status": "proposed-not-negotiated",
+				"productionProducer": false
+			}
+		],
+		"remaining": "Approved choices arrive as opaque references and the reference resolver is host-only (null on the desktop), so the forms cannot narrow their pickers and governed values are validated at the host commit; recorded under DESKTOP-LOCAL/1 (agentMutation, newAgentForm, editAgentForm, symphonyAgentCreation). No shipped wire operation or advertised capability was invented; production admission still requires authenticated negotiated authority."
+	},
+	"checks": [
+		{
+			"name": "archive-tests",
+			"command": "st node node_modules/vitest/vitest.mjs run --config .maestro/playbooks/Working/MCOMP-23-07/vitest.archive.config.mts src/__tests__/main/agents/managed-agent-command.test.ts src/__tests__/main/ipc/handlers/persistence.agent-commit.test.ts src/__tests__/main/enterprise/managed-agents.test.ts src/__tests__/shared/sessionPersistenceMerge.test.ts --reporter=default --reporter=json --outputFile=.maestro/playbooks/Working/MCOMP-23-07/archive-tests.json",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-23-07/archive-tests.log",
+				"sha256": "e9565e0844d7943e199c306998f68843aaa4b190f04d23bf8b48125d02735029"
+			}
+		},
+		{
+			"name": "build-library",
+			"command": "st node scripts/build-maestro-lib.mjs --out-dir .maestro/playbooks/Working/MCOMP-23-07/library",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-23-07/build-library.log",
+				"sha256": "3062dba9106f66701d27e8cfc4000ef95d1466430e12c705f2498fa2493768c9"
+			}
+		},
+		{
+			"name": "build-main",
+			"command": "st npm run build:main",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-23-07/build-main.log",
+				"sha256": "19121abefc7b71b4204c7c9531ae215c6049ddf6751d7ce098e063d00617b8a2"
+			}
+		},
+		{
+			"name": "build-renderer",
+			"command": "st npm run build:renderer",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-23-07/build-renderer.log",
+				"sha256": "4a0cf87355774204cffb4776dba1ff13f57e25e2a726ad116cfa70efa2e6081e"
+			}
+		},
+		{
+			"name": "contract-vectors",
+			"command": "st node .maestro/playbooks/Working/MCOMP-00-03/exact-dependency-vectors.mjs",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-23-07/contract-vectors.log",
+				"sha256": "e15ef2fcaa677666d1461af0a5a760e956fee6ca69c90a14e15ea37d2443d295"
+			}
+		},
+		{
+			"name": "contracts",
+			"command": "st node .maestro/playbooks/Working/MCOMP-00-01/verify-inputs.mjs",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-23-07/contracts.log",
+				"sha256": "36eef50e024c7307bd9a3e4832a63c265dcb6df7b15878eb105b99f0b2f989a9"
+			}
+		},
+		{
+			"name": "dash-lint",
+			"command": "st node node_modules/eslint/bin/eslint.js -c eslint.dashes.config.mjs Plans/integration-completion/contract-coverage.json e2e/managed-agents.spec.ts src/__tests__/cli/commands/duplicate-agent.test.ts src/__tests__/main/agents/managed-agent-command.test.ts src/__tests__/main/cue-bundle-service.test.ts src/__tests__/main/cue/bundle/cue-bundle-importer.test.ts src/__tests__/main/enterprise/managed-agents.test.ts src/__tests__/main/ipc/handlers/persistence.agent-commit.test.ts src/__tests__/main/web-server/handlers/createSessionBackground.test.ts src/__tests__/renderer/components/AgentCreationDialog.test.tsx src/__tests__/renderer/components/NewInstanceModal.test.tsx src/__tests__/renderer/components/NewInstanceModal/EditAgentModal.test.tsx src/__tests__/renderer/components/SymphonyModal.test.tsx src/__tests__/renderer/components/shared/AgentConfigPanel.test.tsx src/__tests__/renderer/hooks/remote/useAppRemoteEventListenersCreateSession.test.ts src/__tests__/renderer/hooks/session/useSessionLifecycleSync.test.tsx src/__tests__/renderer/hooks/useMergeSession.test.ts src/__tests__/renderer/hooks/useSendToAgent.test.ts src/__tests__/renderer/hooks/useSessionCrud.test.ts src/__tests__/renderer/hooks/useSessionLifecycle.test.ts src/__tests__/renderer/hooks/useSymphonyContribution.test.ts src/__tests__/renderer/hooks/useWizardHandlers.test.ts src/__tests__/renderer/hooks/useWorktreeHandlers.test.ts src/__tests__/renderer/utils/worktreeSpawn.test.ts src/__tests__/setup.ts src/cli/commands/duplicate-agent.ts src/main/agents/agent-config-writes.ts src/main/cue-bundle-service.ts src/main/cue/bundle/cue-bundle-importer.ts src/main/index.ts src/main/ipc/handlers/cue-bundle.ts src/main/ipc/handlers/persistence.ts src/main/preload/process/sessionCrudRemote.ts src/main/preload/settings.ts src/main/web-server/handlers/bridgeDenyList.ts src/main/web-server/handlers/messageHandlers/sessions.ts src/main/web-server/handlers/messageHandlers/types.ts src/main/web-server/managers/CallbackRegistry.ts src/main/web-server/types.ts src/renderer/components/AgentCreationDialog.tsx src/renderer/components/AppModals/AppModals.tsx src/renderer/components/AppModals/AppSessionModals.tsx src/renderer/components/AppStandaloneModals.tsx src/renderer/components/NewInstanceModal/EditAgentModal.tsx src/renderer/components/NewInstanceModal/NewInstanceModal.tsx src/renderer/components/NewInstanceModal/types.ts src/renderer/components/SymphonyModal/SymphonyModal.tsx src/renderer/components/SymphonyModal/types.ts src/renderer/components/shared/AgentConfigPanel.tsx src/renderer/global.d.ts src/renderer/hooks/agent/useMergeSession.ts src/renderer/hooks/agent/useSendToAgent.ts src/renderer/hooks/enterprise/useManagedAgentOptions.ts src/renderer/hooks/remote/useAppRemoteEventListeners.ts src/renderer/hooks/session/useSessionCrud.ts src/renderer/hooks/session/useSessionLifecycle.ts src/renderer/hooks/symphony/useSymphonyContribution.ts src/renderer/hooks/wizard/useWizardHandlers.ts src/renderer/hooks/worktree/useWorktreeHandlers.ts src/renderer/services/agentCommit.ts src/renderer/services/providerTranslation.ts src/renderer/utils/worktreeSpawn.ts src/shared/maestro-lib/agents/repository.ts src/shared/maestro-lib/managed/agent-policy.ts src/shared/sessionPersistenceMerge.ts",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-23-07/dash-lint.log",
+				"sha256": "6c1d9382ebc650a1a420dc6865ccc687f9f7138d64e7ce47666f9b15164ac4c3"
+			}
+		},
+		{
+			"name": "dependencies",
+			"command": "st node .maestro/playbooks/Working/MCOMP-23-07/verify-dependencies.mjs",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-23-07/dependencies.log",
+				"sha256": "43a625fdbb9e73aac9f54c02b6561691ca1e7e4dcc1cd628f7db9ef58f2f93c8"
+			}
+		},
+		{
+			"name": "docs",
+			"command": "st npm run docs:verify",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-23-07/docs.log",
+				"sha256": "56683629ce6ed30d817e0a34bc4cde8c75211aade58d0b3584a9c459b85764b2"
+			}
+		},
+		{
+			"name": "eslint",
+			"command": "st node node_modules/eslint/bin/eslint.js e2e/managed-agents.spec.ts src/__tests__/setup.ts src/cli/commands/duplicate-agent.ts src/main/agents/agent-config-writes.ts src/main/cue-bundle-service.ts src/main/cue/bundle/cue-bundle-importer.ts src/main/index.ts src/main/ipc/handlers/cue-bundle.ts src/main/ipc/handlers/persistence.ts src/main/preload/process/sessionCrudRemote.ts src/main/preload/settings.ts src/main/web-server/handlers/bridgeDenyList.ts src/main/web-server/handlers/messageHandlers/sessions.ts src/main/web-server/handlers/messageHandlers/types.ts src/main/web-server/managers/CallbackRegistry.ts src/main/web-server/types.ts src/renderer/components/AgentCreationDialog.tsx src/renderer/components/AppModals/AppModals.tsx src/renderer/components/AppModals/AppSessionModals.tsx src/renderer/components/AppStandaloneModals.tsx src/renderer/components/NewInstanceModal/EditAgentModal.tsx src/renderer/components/NewInstanceModal/NewInstanceModal.tsx src/renderer/components/NewInstanceModal/types.ts src/renderer/components/SymphonyModal/SymphonyModal.tsx src/renderer/components/SymphonyModal/types.ts src/renderer/components/shared/AgentConfigPanel.tsx src/renderer/global.d.ts src/renderer/hooks/agent/useMergeSession.ts src/renderer/hooks/agent/useSendToAgent.ts src/renderer/hooks/enterprise/useManagedAgentOptions.ts src/renderer/hooks/remote/useAppRemoteEventListeners.ts src/renderer/hooks/session/useSessionCrud.ts src/renderer/hooks/session/useSessionLifecycle.ts src/renderer/hooks/symphony/useSymphonyContribution.ts src/renderer/hooks/wizard/useWizardHandlers.ts src/renderer/hooks/worktree/useWorktreeHandlers.ts src/renderer/services/agentCommit.ts src/renderer/services/providerTranslation.ts src/renderer/utils/worktreeSpawn.ts src/shared/maestro-lib/agents/repository.ts src/shared/maestro-lib/managed/agent-policy.ts src/shared/sessionPersistenceMerge.ts",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-23-07/eslint.log",
+				"sha256": "47633cd385d11f82ef72b40e77682d49e9eea0430dca9f5844674681dcad949e"
+			}
+		},
+		{
+			"name": "extract-all",
+			"command": "st python3 .maestro/playbooks/Working/MCOMP-23-07/extract.py",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-23-07/extract-all.log",
+				"sha256": "8ef3c5abf1efba05396f59c6c8a04802275b1af493a0c09ba6584f6a0869d408"
+			}
+		},
+		{
+			"name": "format",
+			"command": "st node node_modules/prettier/bin/prettier.cjs --check Plans/integration-completion/contract-coverage.json e2e/managed-agents.spec.ts src/__tests__/cli/commands/duplicate-agent.test.ts src/__tests__/main/agents/managed-agent-command.test.ts src/__tests__/main/cue-bundle-service.test.ts src/__tests__/main/cue/bundle/cue-bundle-importer.test.ts src/__tests__/main/enterprise/managed-agents.test.ts src/__tests__/main/ipc/handlers/persistence.agent-commit.test.ts src/__tests__/main/web-server/handlers/createSessionBackground.test.ts src/__tests__/renderer/components/AgentCreationDialog.test.tsx src/__tests__/renderer/components/NewInstanceModal.test.tsx src/__tests__/renderer/components/NewInstanceModal/EditAgentModal.test.tsx src/__tests__/renderer/components/SymphonyModal.test.tsx src/__tests__/renderer/components/shared/AgentConfigPanel.test.tsx src/__tests__/renderer/hooks/remote/useAppRemoteEventListenersCreateSession.test.ts src/__tests__/renderer/hooks/session/useSessionLifecycleSync.test.tsx src/__tests__/renderer/hooks/useMergeSession.test.ts src/__tests__/renderer/hooks/useSendToAgent.test.ts src/__tests__/renderer/hooks/useSessionCrud.test.ts src/__tests__/renderer/hooks/useSessionLifecycle.test.ts src/__tests__/renderer/hooks/useSymphonyContribution.test.ts src/__tests__/renderer/hooks/useWizardHandlers.test.ts src/__tests__/renderer/hooks/useWorktreeHandlers.test.ts src/__tests__/renderer/utils/worktreeSpawn.test.ts src/__tests__/setup.ts src/cli/commands/duplicate-agent.ts src/main/agents/agent-config-writes.ts src/main/cue-bundle-service.ts src/main/cue/bundle/cue-bundle-importer.ts src/main/index.ts src/main/ipc/handlers/cue-bundle.ts src/main/ipc/handlers/persistence.ts src/main/preload/process/sessionCrudRemote.ts src/main/preload/settings.ts src/main/web-server/handlers/bridgeDenyList.ts src/main/web-server/handlers/messageHandlers/sessions.ts src/main/web-server/handlers/messageHandlers/types.ts src/main/web-server/managers/CallbackRegistry.ts src/main/web-server/types.ts src/renderer/components/AgentCreationDialog.tsx src/renderer/components/AppModals/AppModals.tsx src/renderer/components/AppModals/AppSessionModals.tsx src/renderer/components/AppStandaloneModals.tsx src/renderer/components/NewInstanceModal/EditAgentModal.tsx src/renderer/components/NewInstanceModal/NewInstanceModal.tsx src/renderer/components/NewInstanceModal/types.ts src/renderer/components/SymphonyModal/SymphonyModal.tsx src/renderer/components/SymphonyModal/types.ts src/renderer/components/shared/AgentConfigPanel.tsx src/renderer/global.d.ts src/renderer/hooks/agent/useMergeSession.ts src/renderer/hooks/agent/useSendToAgent.ts src/renderer/hooks/enterprise/useManagedAgentOptions.ts src/renderer/hooks/remote/useAppRemoteEventListeners.ts src/renderer/hooks/session/useSessionCrud.ts src/renderer/hooks/session/useSessionLifecycle.ts src/renderer/hooks/symphony/useSymphonyContribution.ts src/renderer/hooks/wizard/useWizardHandlers.ts src/renderer/hooks/worktree/useWorktreeHandlers.ts src/renderer/services/agentCommit.ts src/renderer/services/providerTranslation.ts src/renderer/utils/worktreeSpawn.ts src/shared/maestro-lib/agents/repository.ts src/shared/maestro-lib/managed/agent-policy.ts src/shared/sessionPersistenceMerge.ts",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-23-07/format.log",
+				"sha256": "17aa973d3f004560237d9a95171210b0671deff23d61628eecf7322ff5938f20"
+			}
+		},
+		{
+			"name": "package",
+			"command": "st node .maestro/playbooks/Working/MCOMP-23-07/package.mjs",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-23-07/package.log",
+				"sha256": "13b99e4b24f5fce9f5808c7336fca9cb28065c79d95273448faf94432e76d278"
+			}
+		},
+		{
+			"name": "package-desktop",
+			"command": "st node .maestro/playbooks/Working/MCOMP-23-07/package-desktop.mjs",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-23-07/package-desktop.log",
+				"sha256": "8f9135f63829f5f29d82b919cfffaf7ec7187df4d1e6e77adfd98787830f0c97"
+			}
+		},
+		{
+			"name": "plain-node-load",
+			"command": "st node .maestro/playbooks/Working/MCOMP-23-07/load.mjs",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-23-07/plain-node-load.log",
+				"sha256": "4151bf0a2a6c35fce84039e0a878c8157d308f8cfe00b1de0bce00c4f0a49a26"
+			}
+		},
+		{
+			"name": "public-types",
+			"command": "st node node_modules/typescript/bin/tsc --ignoreConfig --noEmit --strict --target es2022 --module esnext --moduleResolution bundler --skipLibCheck --esModuleInterop .maestro/playbooks/Working/MCOMP-23-07/consumer.ts",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-23-07/public-types.log",
+				"sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+			}
+		},
+		{
+			"name": "runtime-input",
+			"command": "st node .maestro/playbooks/Working/MCOMP-23-07/verify-runtime.mjs",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-23-07/runtime-input.log",
+				"sha256": "e484de55cc2c81fdea3925934f76536e7ed4250da69c78fc6d678f223e5bf767"
+			}
+		},
+		{
+			"name": "schemas",
+			"command": "st node .maestro/playbooks/Working/MCOMP-00-01/load-schemas.mjs",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-23-07/schemas.log",
+				"sha256": "b5948d1f375bddd6ecbf9e871653e313413adbb7b5a4d25b063d3f2e153a443d"
+			}
+		},
+		{
+			"name": "source-tests",
+			"command": "st node node_modules/vitest/vitest.mjs run src/__tests__/cli/commands/duplicate-agent.test.ts src/__tests__/integration/mega-maestro/conformance.test.ts src/__tests__/main/agents/managed-agent-command.test.ts src/__tests__/main/cue-bundle-service.test.ts src/__tests__/main/cue/bundle/cue-bundle-importer.test.ts src/__tests__/main/enterprise/managed-agents.test.ts src/__tests__/main/ipc/handlers/persistence.agent-commit.test.ts src/__tests__/main/web-server/handlers/createSessionBackground.test.ts src/__tests__/renderer/components/AgentCreationDialog.test.tsx src/__tests__/renderer/components/NewInstanceModal.test.tsx src/__tests__/renderer/components/NewInstanceModal/EditAgentModal.test.tsx src/__tests__/renderer/components/SymphonyModal.test.tsx src/__tests__/renderer/components/shared/AgentConfigPanel.test.tsx src/__tests__/renderer/hooks/remote/useAppRemoteEventListenersCreateSession.test.ts src/__tests__/renderer/hooks/session/useSessionLifecycleSync.test.tsx src/__tests__/renderer/hooks/useMergeSession.test.ts src/__tests__/renderer/hooks/useSendToAgent.test.ts src/__tests__/renderer/hooks/useSessionCrud.test.ts src/__tests__/renderer/hooks/useSessionLifecycle.test.ts src/__tests__/renderer/hooks/useSymphonyContribution.test.ts src/__tests__/renderer/hooks/useWizardHandlers.test.ts src/__tests__/renderer/hooks/useWorktreeHandlers.test.ts src/__tests__/renderer/utils/worktreeSpawn.test.ts --reporter=default --reporter=json --outputFile=.maestro/playbooks/Working/MCOMP-23-07/source-tests.json",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-23-07/source-tests.log",
+				"sha256": "06b1e5d54ea50068fc2b29a3e0f2b08a0ca29b2e49635ba8aa78bba075014ac2"
+			}
+		},
+		{
+			"name": "typecheck",
+			"command": "st npm run lint",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-23-07/typecheck.log",
+				"sha256": "ed9e886b2a647f29f520344068302948b8558e4b83a448690f8259049c5af0b3"
+			}
+		}
+	],
+	"limitations": [
+		"This BUILD supplies local compiled inputs only; GUI create/edit pair, provider and native outcomes remain in MCOMP-24 and later qualification tasks.",
+		"Renderer build exited zero; its warnings are retained in the log. Compilation is not GUI/runtime qualification.",
+		"The form Refresh policy control re-reads the host projection only; a revision the endpoint moved is seen after the host refreshes its policy (found in MCOMP-23-06, not changed here).",
+		"The runtime library version string stays 0.36.0 although its bytes differ from earlier archives. A counterpart must pin this archive by digest and requalify before claiming compatibility.",
+		"Continuations MCOMP-23-02A..04E were reconciled into program.json in 75ebdcb82 before this check; the conformance suite that maps every coverage consumer to a manifest task passes on that manifest.",
+		"Archives and detailed evidence are workspace-local handoff artifacts. No remote artifact registry, native application archive, CI matrix qualification or production release is claimed."
+	],
+	"imagesAnalyzed": 0
+}
