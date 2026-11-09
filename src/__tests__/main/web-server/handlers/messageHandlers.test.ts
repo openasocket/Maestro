@@ -1,3 +1,6 @@
+const hostPaths = vi.hoisted(() => ({ userData: '' }));
+vi.mock('electron', () => ({ app: { getPath: () => hostPaths.userData } }));
+
 vi.mock(
 	'../../../../main/plugins/plugin-scan',
 	async () => await import('../../../helpers/pluginScan')
@@ -26,7 +29,7 @@ import { RELAY_PUBLISHER_KEY } from '../../../../shared/plugins/relay-identity';
  * - Select session with focus (window foregrounding)
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest';
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach, afterAll } from 'vitest';
 import { WebSocket } from 'ws';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -47,6 +50,7 @@ import {
 import { PluginManager } from '../../../../main/plugins/plugin-manager';
 import { PluginAuthorityError } from '../../../../main/plugins/plugin-authority';
 import { pluginToolRunIdentity } from '../../../../main/plugins/plugin-tool-run-identity';
+import { hostCallerRuns } from '../../../../main/agent-run/caller-identity';
 import {
 	initDispatchCallbacks,
 	getDispatchCallbackRegistry,
@@ -342,6 +346,15 @@ function createMockCallbacks(): MessageHandlerCallbacks {
 	};
 }
 
+beforeAll(() => {
+	hostPaths.userData = fs.mkdtempSync(path.join(os.tmpdir(), 'message-handler-host-'));
+	vi.stubEnv('MAESTRO_USER_DATA', hostPaths.userData);
+});
+afterAll(() => {
+	vi.unstubAllEnvs();
+	fs.rmSync(hostPaths.userData, { recursive: true, force: true });
+});
+
 describe('WebSocketMessageHandler', () => {
 	let handler: WebSocketMessageHandler;
 	let client: WebClient;
@@ -352,6 +365,92 @@ describe('WebSocketMessageHandler', () => {
 		client = createMockClient();
 		callbacks = createMockCallbacks();
 		handler.setCallbacks(callbacks);
+	});
+
+	describe('agent dispatch without native admission', () => {
+		afterEach(() => vi.restoreAllMocks());
+
+		it.each([
+			['send_command', 'command_result', 'executeCommand'],
+			['enqueue_command', 'enqueue_command_result', 'enqueueCommand'],
+		] as const)('refuses %s for revoked bound runs before delivery', (type, result, callback) => {
+			vi.spyOn(hostCallerRuns, 'resolve').mockReturnValue(undefined);
+			vi.spyOn(hostCallerRuns, 'isRunClient').mockReturnValue(true);
+			handler.handleMessage(client, {
+				type,
+				sessionId: 'session-1',
+				command: 'do work',
+				inputMode: 'ai',
+				requestId: 'request-1',
+			});
+			expect(callbacks[callback]).not.toHaveBeenCalled();
+			expect(JSON.parse(vi.mocked(client.socket.send).mock.lastCall![0] as string)).toMatchObject({
+				type: result,
+				success: false,
+				error: 'CallerRunUnavailable',
+				requestId: 'request-1',
+			});
+		});
+
+		it('does not turn public caller attribution into authority for a human send', async () => {
+			handler.handleMessage(client, {
+				type: 'send_command',
+				sessionId: 'session-1',
+				command: 'hello',
+				inputMode: 'ai',
+				fromSessionId: 'forged-manager',
+				fromTabId: 'forged-tab',
+			});
+			await vi.waitFor(() => expect(callbacks.executeCommand).toHaveBeenCalledOnce());
+		});
+
+		it('cannot bypass queue admission by claiming terminal mode', () => {
+			vi.spyOn(hostCallerRuns, 'isRunClient').mockReturnValue(true);
+			handler.handleMessage(client, {
+				type: 'enqueue_command',
+				sessionId: 'session-1',
+				command: 'do work',
+				inputMode: 'terminal',
+			});
+			expect(callbacks.enqueueCommand).not.toHaveBeenCalled();
+			expect(JSON.parse(vi.mocked(client.socket.send).mock.lastCall![0] as string)).toMatchObject({
+				type: 'enqueue_command_result',
+				success: false,
+				error: 'CallerRunUnavailable',
+			});
+		});
+
+		it('does not trust an older terminal-mode snapshot for an unspecified send mode', () => {
+			vi.spyOn(hostCallerRuns, 'isRunClient').mockReturnValue(true);
+			vi.mocked(callbacks.getSessionDetail!).mockReturnValueOnce({
+				state: 'idle',
+				inputMode: 'terminal',
+			} as ReturnType<NonNullable<typeof callbacks.getSessionDetail>>);
+			handler.handleMessage(client, {
+				type: 'send_command',
+				sessionId: 'session-1',
+				command: 'do work',
+			});
+			expect(callbacks.executeCommand).not.toHaveBeenCalled();
+			expect(JSON.parse(vi.mocked(client.socket.send).mock.lastCall![0] as string)).toMatchObject({
+				type: 'command_result',
+				success: false,
+				error: 'CallerRunUnavailable',
+			});
+		});
+
+		it('keeps terminal sends separate from agent AI delegation', async () => {
+			vi.spyOn(hostCallerRuns, 'resolve').mockReturnValue(
+				{} as ReturnType<typeof hostCallerRuns.resolve>
+			);
+			handler.handleMessage(client, {
+				type: 'send_command',
+				sessionId: 'session-1',
+				command: 'pwd',
+				inputMode: 'terminal',
+			});
+			await vi.waitFor(() => expect(callbacks.executeCommand).toHaveBeenCalledOnce());
+		});
 	});
 
 	describe('External toast duration units', () => {
@@ -1538,6 +1637,8 @@ describe('WebSocketMessageHandler', () => {
 					false,
 					undefined,
 					undefined,
+					undefined,
+					undefined,
 					expect.any(String)
 				);
 			});
@@ -1567,6 +1668,8 @@ describe('WebSocketMessageHandler', () => {
 					false,
 					'consult-first',
 					undefined,
+					undefined,
+					undefined,
 					expect.any(String)
 				);
 			});
@@ -1583,8 +1686,10 @@ describe('WebSocketMessageHandler', () => {
 
 			expect(callbacks.executeCommand).not.toHaveBeenCalled();
 			const response = JSON.parse((client.socket.send as any).mock.calls[0][0]);
-			expect(response.type).toBe('error');
-			expect(response.message).toContain('Unknown mention routing');
+			expect(response.type).toBe('command_result');
+			expect(response.success).toBe(false);
+			expect(response.code).toBe('INVALID_OPTIONS');
+			expect(response.error).toContain('Unknown mention routing');
 		});
 
 		it('marks a delivered CLI dispatch in the calling agent transcript', async () => {
@@ -1666,24 +1771,72 @@ describe('WebSocketMessageHandler', () => {
 					false,
 					undefined,
 					undefined,
+					undefined,
+					undefined,
 					undefined
 				);
 			});
 		});
 
-		it('should reject command when session is busy', () => {
+		it('forwards to the renderer while the agent is busy - the busy guard is per tab', async () => {
+			// A busy agent only means some tab of it is working. An idle tab beside
+			// it takes its own turn in parallel, so main must not refuse here: only
+			// the renderer knows which tab is mid-turn.
 			(callbacks.getSessionDetail as any).mockReturnValue({ state: 'busy', inputMode: 'ai' });
 
 			handler.handleMessage(client, {
 				type: 'send_command',
 				sessionId: 'session-1',
-				command: 'test',
+				command: 'parallel turn',
+				inputMode: 'ai',
+				tabId: 'idle-tab',
 			});
 
+			await vi.waitFor(() => {
+				expect(callbacks.executeCommand).toHaveBeenCalledWith(
+					'session-1',
+					'parallel turn',
+					'ai',
+					'idle-tab',
+					false,
+					undefined,
+					false,
+					undefined,
+					undefined,
+					undefined,
+					undefined,
+					expect.any(String)
+				);
+			});
 			const response = JSON.parse((client.socket.send as any).mock.calls[0][0]);
-			expect(response.type).toBe('error');
-			expect(response.message).toContain('busy');
-			expect(callbacks.executeCommand).not.toHaveBeenCalled();
+			expect(response.type).toBe('command_result');
+			expect(response.success).toBe(true);
+		});
+
+		it('answers a renderer refusal as a command_result error the caller can match', async () => {
+			// The CLI waits for `command_result` by requestId. A bare `error` frame
+			// matched nothing and left `dispatch --tab` hanging until its timeout.
+			(callbacks.executeCommand as any).mockResolvedValue(false);
+
+			handler.handleMessage(client, {
+				type: 'send_command',
+				sessionId: 'session-1',
+				command: 'test',
+				inputMode: 'ai',
+				tabId: 'busy-tab',
+				requestId: 'req-1',
+			});
+
+			await vi.waitFor(() => expect(client.socket.send).toHaveBeenCalled());
+			const response = JSON.parse((client.socket.send as any).mock.calls[0][0]);
+			expect(response).toMatchObject({
+				type: 'command_result',
+				success: false,
+				code: 'DISPATCH_REFUSED',
+				tabId: 'busy-tab',
+				requestId: 'req-1',
+			});
+			expect(response.error).toContain('mid-turn');
 		});
 
 		it('omits tabId from command_result on the no-tabId path so callers do not chain to a stale snapshot', async () => {
@@ -1735,6 +1888,8 @@ describe('WebSocketMessageHandler', () => {
 					false,
 					undefined,
 					undefined,
+					undefined,
+					undefined,
 					expect.any(String)
 				);
 			});
@@ -1769,6 +1924,8 @@ describe('WebSocketMessageHandler', () => {
 					false,
 					undefined,
 					undefined,
+					undefined,
+					undefined,
 					expect.any(String)
 				);
 			});
@@ -1786,7 +1943,7 @@ describe('WebSocketMessageHandler', () => {
 			});
 
 			const response = JSON.parse((client.socket.send as any).mock.calls[0][0]);
-			expect(response.type).toBe('error');
+			expect(response).toMatchObject({ type: 'command_result', success: false });
 			expect(callbacks.executeCommand).not.toHaveBeenCalled();
 		});
 
@@ -1809,6 +1966,8 @@ describe('WebSocketMessageHandler', () => {
 					false,
 					images,
 					false,
+					undefined,
+					undefined,
 					undefined,
 					undefined,
 					expect.any(String)
@@ -1836,6 +1995,8 @@ describe('WebSocketMessageHandler', () => {
 					true,
 					undefined,
 					false,
+					undefined,
+					undefined,
 					undefined,
 					undefined,
 					expect.any(String)
@@ -1867,6 +2028,8 @@ describe('WebSocketMessageHandler', () => {
 					true,
 					undefined,
 					undefined,
+					undefined,
+					undefined,
 					expect.any(String)
 				);
 			});
@@ -1894,6 +2057,8 @@ describe('WebSocketMessageHandler', () => {
 					false,
 					undefined,
 					undefined,
+					undefined,
+					undefined,
 					expect.any(String)
 				);
 			});
@@ -1906,11 +2071,17 @@ describe('WebSocketMessageHandler', () => {
 				type: 'send_command',
 				sessionId: 'nonexistent',
 				command: 'test',
+				requestId: 'req-2',
 			});
 
 			const response = JSON.parse((client.socket.send as any).mock.calls[0][0]);
-			expect(response.type).toBe('error');
-			expect(response.message).toContain('not found');
+			expect(response).toMatchObject({
+				type: 'command_result',
+				success: false,
+				code: 'SESSION_NOT_FOUND',
+				requestId: 'req-2',
+			});
+			expect(response.error).toContain('not found');
 		});
 
 		it('should reject command with missing sessionId', () => {
@@ -1920,8 +2091,8 @@ describe('WebSocketMessageHandler', () => {
 			});
 
 			const response = JSON.parse((client.socket.send as any).mock.calls[0][0]);
-			expect(response.type).toBe('error');
-			expect(response.message).toContain('Missing');
+			expect(response).toMatchObject({ type: 'command_result', success: false });
+			expect(response.error).toContain('Missing');
 		});
 
 		it('should reject command with missing command', () => {
@@ -1931,7 +2102,7 @@ describe('WebSocketMessageHandler', () => {
 			});
 
 			const response = JSON.parse((client.socket.send as any).mock.calls[0][0]);
-			expect(response.type).toBe('error');
+			expect(response).toMatchObject({ type: 'command_result', success: false });
 		});
 
 		it('should handle command execution failure', async () => {
@@ -1946,8 +2117,10 @@ describe('WebSocketMessageHandler', () => {
 			await vi.waitFor(() => {
 				const calls = (client.socket.send as any).mock.calls;
 				const lastResponse = JSON.parse(calls[calls.length - 1][0]);
-				expect(lastResponse.type).toBe('error');
-				expect(lastResponse.message).toContain('Execution failed');
+				// The caller gets a command_result it can match, not just the
+				// requestId-less error frame reportHandlerError sends.
+				expect(lastResponse).toMatchObject({ type: 'command_result', success: false });
+				expect(lastResponse.error).toContain('Execution failed');
 			});
 		});
 	});
@@ -2003,6 +2176,8 @@ describe('WebSocketMessageHandler', () => {
 					undefined,
 					true,
 					undefined,
+					undefined,
+					undefined,
 					delegation,
 					expect.any(String)
 				);
@@ -2057,6 +2232,8 @@ describe('WebSocketMessageHandler', () => {
 					false,
 					true,
 					undefined,
+					undefined,
+					undefined,
 					delegation,
 					expect.any(String)
 				);
@@ -2099,6 +2276,7 @@ describe('WebSocketMessageHandler', () => {
 					'build it',
 					true,
 					true,
+					undefined,
 					undefined,
 					delegation,
 					expect.any(String)
@@ -2144,6 +2322,8 @@ describe('WebSocketMessageHandler', () => {
 					false,
 					undefined,
 					undefined,
+					undefined,
+					undefined,
 					expect.any(String)
 				);
 			});
@@ -2161,7 +2341,7 @@ describe('WebSocketMessageHandler', () => {
 	 */
 	describe('Dispatch ticket (MRC-08-01B)', () => {
 		const sent = () => vi.mocked(callbacks.executeCommand).mock.calls[0];
-		const ticketSent = (): string | undefined => sent()[9] as string | undefined;
+		const ticketSent = (): string | undefined => sent()[11] as string | undefined;
 
 		it('issues a ticket for a CLI dispatch that the sink claims as the host secret, once', async () => {
 			handler.handleMessage(
@@ -2295,9 +2475,9 @@ describe('WebSocketMessageHandler', () => {
 	 */
 	describe('Dispatch ticket on new_ai_tab_with_prompt and enqueue_command (MRC-08-02)', () => {
 		const newTabTicket = (): string | undefined =>
-			vi.mocked(callbacks.newAITabWithPrompt).mock.calls[0]?.[6] as string | undefined;
+			vi.mocked(callbacks.newAITabWithPrompt).mock.calls[0]?.[7] as string | undefined;
 		const enqueueTicket = (): string | undefined =>
-			vi.mocked(callbacks.enqueueCommand).mock.calls[0]?.[9] as string | undefined;
+			vi.mocked(callbacks.enqueueCommand).mock.calls[0]?.[11] as string | undefined;
 		const lastSent = (): Record<string, unknown> => {
 			const calls = vi.mocked(client.socket.send).mock.calls;
 			return JSON.parse(String(calls[calls.length - 1][0]));
@@ -2700,7 +2880,7 @@ describe('WebSocketMessageHandler', () => {
 			tabId: 'tab-1',
 		});
 		const sentTickets = (): string[] =>
-			vi.mocked(callbacks.executeCommand).mock.calls.map((call) => call[9] as string);
+			vi.mocked(callbacks.executeCommand).mock.calls.map((call) => call[11] as string);
 		const claimed = (ticket: string) =>
 			transportSpawnActor(claimDispatchTicket(ticket, { agentId: 'session-1', tabId: 'tab-1' })!);
 		const device = (id: string, name: string, extra: Partial<WebClient> = {}): WebClient => ({
@@ -4624,6 +4804,7 @@ describe('WebSocketMessageHandler', () => {
 					false,
 					'only',
 					undefined,
+					undefined,
 					expect.any(String)
 				);
 			});
@@ -4661,6 +4842,7 @@ describe('WebSocketMessageHandler', () => {
 					false,
 					undefined,
 					undefined,
+					undefined,
 					expect.any(String)
 				);
 			});
@@ -4690,6 +4872,7 @@ describe('WebSocketMessageHandler', () => {
 					false,
 					undefined,
 					undefined,
+					undefined,
 					expect.any(String)
 				);
 			});
@@ -4712,6 +4895,7 @@ describe('WebSocketMessageHandler', () => {
 					true,
 					undefined,
 					undefined,
+					undefined,
 					expect.any(String)
 				);
 			});
@@ -4732,6 +4916,7 @@ describe('WebSocketMessageHandler', () => {
 					'Summarize the repo',
 					false,
 					false,
+					undefined,
 					undefined,
 					undefined,
 					expect.any(String)
@@ -4812,7 +4997,10 @@ describe('WebSocketMessageHandler', () => {
 		};
 
 		beforeEach(() => {
-			initDispatchCallbacks({ enqueue: vi.fn().mockResolvedValue({ success: true }) });
+			initDispatchCallbacks({
+				enqueue: vi.fn().mockResolvedValue({ success: true }),
+				openTab: vi.fn().mockResolvedValue({ success: true }),
+			});
 		});
 
 		afterEach(() => {
@@ -4864,8 +5052,8 @@ describe('WebSocketMessageHandler', () => {
 			});
 
 			const response = lastSend();
-			expect(response.type).toBe('error');
-			expect(String(response.message)).toContain('requires an explicit target tab');
+			expect(response).toMatchObject({ type: 'command_result', success: false });
+			expect(String(response.error)).toContain('requires an explicit target tab');
 			expect(callbacks.executeCommand).not.toHaveBeenCalled();
 		});
 
@@ -4909,7 +5097,7 @@ describe('WebSocketMessageHandler', () => {
 				tabId: 'tab-7',
 				notifyOnComplete: 'caller-1',
 			});
-			expect(String(lastSend().message)).toContain('CALLBACK_ALREADY_ARMED');
+			expect(String(lastSend().error)).toContain('CALLBACK_ALREADY_ARMED');
 		});
 
 		it('refuses a callback that would wake the dispatch target itself', () => {
@@ -4921,7 +5109,7 @@ describe('WebSocketMessageHandler', () => {
 				tabId: 'tab-7',
 				notifyOnComplete: 'session-1',
 			});
-			expect(String(lastSend().message)).toContain('cannot be the dispatch target itself');
+			expect(String(lastSend().error)).toContain('cannot be the dispatch target itself');
 		});
 
 		it('refuses an unknown callback agent', () => {
@@ -4936,7 +5124,7 @@ describe('WebSocketMessageHandler', () => {
 				tabId: 'tab-7',
 				notifyOnComplete: 'ghost',
 			});
-			expect(String(lastSend().message)).toContain('Callback agent not found');
+			expect(String(lastSend().error)).toContain('Callback agent not found');
 		});
 
 		it('arms a callback on enqueue_command for an explicit tab', async () => {
@@ -5048,6 +5236,8 @@ describe('WebSocketMessageHandler', () => {
 					false,
 					undefined,
 					undefined,
+					undefined,
+					undefined,
 					expect.any(String)
 				);
 			});
@@ -5082,6 +5272,8 @@ describe('WebSocketMessageHandler', () => {
 					false,
 					false,
 					'handoff',
+					undefined,
+					undefined,
 					undefined,
 					expect.any(String)
 				);
@@ -5286,6 +5478,8 @@ describe('WebSocketMessageHandler', () => {
 					undefined,
 					false,
 					true,
+					undefined,
+					undefined,
 					undefined,
 					undefined,
 					expect.any(String)
@@ -6351,8 +6545,8 @@ describe('WebSocketMessageHandler', () => {
 			});
 
 			const response = JSON.parse((client.socket.send as any).mock.calls[0][0]);
-			expect(response.type).toBe('error');
-			expect(response.message).toContain('not configured');
+			expect(response).toMatchObject({ type: 'command_result', success: false });
+			expect(response.error).toContain('not configured');
 		});
 
 		it('should handle missing switchMode callback', () => {
@@ -7143,11 +7337,31 @@ describe('WebSocketMessageHandler', () => {
 			expect(response.requestId).toBe('req-1');
 		});
 
-		it('returns an empty list when the callback is unconfigured rather than echoing', () => {
-			// Unknown-type echo would confuse the CLI's request/response pairing
-			// (`MaestroClient` matches by responseType). Returning the empty
-			// success shape keeps the wire contract intact even when the desktop
-			// hasn't wired up the callback yet - older builds on a newer CLI.
+		it('preserves the versioned native owner census and its original host capture time', () => {
+			const snapshot = {
+				supervisionVersion: 1,
+				complete: true,
+				capturedAt: 123,
+				owners: [
+					{
+						id: 'tabless',
+						cwd: '/project',
+						parentSessionId: null,
+						isPianola: false,
+						remote: false,
+					},
+				],
+				sessions: [],
+			};
+			(callbacks.listDesktopSessions as any).mockReturnValue(snapshot);
+			handler.handleMessage(client, { type: 'list_desktop_sessions', requestId: 'req-scope' });
+			const response = JSON.parse((client.socket.send as any).mock.calls[0][0]);
+			expect(response).toMatchObject({ ...snapshot, success: true, requestId: 'req-scope' });
+		});
+
+		it('fails closed when the callback is unconfigured rather than retiring membership', () => {
+			// Preserve request/response pairing, but never treat missing metadata
+			// as evidence that every previously supervised tab has closed.
 			callbacks.listDesktopSessions = undefined;
 			handler.setCallbacks(callbacks);
 
@@ -7155,8 +7369,30 @@ describe('WebSocketMessageHandler', () => {
 
 			const response = JSON.parse((client.socket.send as any).mock.calls[0][0]);
 			expect(response.type).toBe('desktop_sessions_list');
-			expect(response.success).toBe(true);
-			expect(response.sessions).toEqual([]);
+			expect(response.success).toBe(false);
+			expect(response.error).toBe('Desktop sessions not configured');
+			expect(response.requestId).toBe('req-1');
+			expect(response.sessions).toBeUndefined();
+			expect(response.capturedAt).toBeUndefined();
+		});
+
+		it('returns a timestamped empty snapshot when the configured callback has no tabs', () => {
+			callbacks.listDesktopSessions = vi.fn().mockReturnValue([]);
+			handler.setCallbacks(callbacks);
+			const before = Date.now();
+
+			handler.handleMessage(client, { type: 'list_desktop_sessions', requestId: 'req-empty' });
+
+			const response = JSON.parse((client.socket.send as any).mock.calls[0][0]);
+			expect(response).toMatchObject({
+				type: 'desktop_sessions_list',
+				success: true,
+				sessions: [],
+				requestId: 'req-empty',
+				capturedAt: expect.any(Number),
+			});
+			expect(response.capturedAt).toBeGreaterThanOrEqual(before);
+			expect(response.capturedAt).toBeLessThanOrEqual(Date.now());
 		});
 	});
 
@@ -8066,7 +8302,7 @@ describe('WebSocketMessageHandler - plugin MCP tool bridge', () => {
 		}
 	});
 
-	it('runs a local CLI request through the host runner and returns its provider session', async () => {
+	it('host-stamps a local CLI request as automatic and returns its provider session', async () => {
 		const run = vi.fn(async () => ({ success: true, response: 'hello', sessionId: 'provider-1' }));
 		vi.mocked(getHeadlessAgentRunner).mockReturnValue(run);
 		client.cliAuthenticated = true;
@@ -8077,6 +8313,7 @@ describe('WebSocketMessageHandler - plugin MCP tool bridge', () => {
 			type: 'plugins_send_agent',
 			agentId: 'agent-a',
 			prompt: 'hello',
+			querySource: 'user',
 		});
 		await vi.waitFor(() => expect(run).toHaveBeenCalled());
 		expect(run).toHaveBeenCalledWith(
@@ -8084,7 +8321,7 @@ describe('WebSocketMessageHandler - plugin MCP tool bridge', () => {
 			'hello',
 			undefined,
 			expect.any(AbortSignal),
-			'user',
+			'auto',
 			undefined,
 			undefined
 		);
@@ -8163,7 +8400,7 @@ describe('WebSocketMessageHandler - plugin MCP tool bridge', () => {
 			'report',
 			undefined,
 			expect.any(AbortSignal),
-			'user',
+			'auto',
 			undefined,
 			'acme/dostuff'
 		);

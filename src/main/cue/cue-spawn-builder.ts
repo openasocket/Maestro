@@ -21,6 +21,11 @@ import {
 } from '../../shared/maestro-lib/launch/launch-plan';
 import type { LaunchPermissionMode } from '../../shared/maestro-lib/launch/env';
 import { buildSpawnPath } from '../utils/spawnPath';
+import {
+	cmdShellArgsRefusal,
+	windowsShellReason,
+} from '../../shared/maestro-lib/launch/windows-command';
+import { isWindows } from '../../shared/platformDetection';
 import { QUERY_SOURCE_ENV_VAR } from '../../shared/querySource';
 import {
 	delegationContextEnv,
@@ -198,16 +203,24 @@ export async function buildSpawnSpec(
 	const sanitizeLayer = (vars: Record<string, string> | undefined) =>
 		vars === undefined ? undefined : sanitizeCustomEnvVars(vars, config.onLog).sanitized;
 
+	// A Windows `.cmd` / `.bat` shim (claude.cmd, codex.cmd) only starts
+	// through cmd.exe (cue-process-lifecycle applies the shell), and cmd.exe ends
+	// a command at a line break, so its prompt goes over stdin for a provider
+	// that reads it there, as the desktop and the CLI session turn send it.
+	const cmdShellLaunch =
+		isWindows() && windowsShellReason(customPath || agentDef.command).reason !== null;
+
 	// 4. The launch plan decides where the run happens, what it execs, its
 	// environment and how the prompt reaches it, as the `cue` surface: the
 	// inherited environment, then the provider defaults, then the agent's own
-	// vars, with the prompt on the command line. An SSH remote that cannot be
-	// resolved fails the run here: it never falls back to running the agent on
-	// this machine.
+	// vars, with the prompt on the command line (on stdin for a cmd.exe launch,
+	// above). An SSH remote that cannot be resolved fails the run here: it never
+	// falls back to running the agent on this machine.
 	const planResult = buildAgentLaunchPlan({
 		surface: 'cue',
 		agent: { ...agentDef, capabilities: agentConfig.capabilities },
 		command: customPath || agentDef.command,
+		cmdShellLaunch,
 		args: finalArgs,
 		cwd: projectRoot,
 		prompt: promptToSend,
@@ -356,6 +369,9 @@ export async function buildSpawnSpec(
 		// claude TUI, and reads the trailing positional as the prompt). The vars
 		// it adds (MAESTRO_CLAUDE_BIN and its Node settings) are merged over the
 		// planned env, which already holds the agent's own.
+		// A prompt the plan sent to stdin (a cmd.exe launch, or one too long for
+		// the command line) stays there: with no trailing positional, maestro-p
+		// reads it from its non-TTY stdin, as in run-agent-turn.
 		const applied = applyClaudeSpawnDecision({
 			decision: claudeSpawnDecision,
 			interactiveModeArgs: agentDef.interactiveModeArgs,
@@ -384,7 +400,12 @@ export async function buildSpawnSpec(
 		isPluginsFeatureEnabled() &&
 		(getActivePluginManager()?.getContributions().tools.length ?? 0) > 0
 	) {
-		pluginRunToken = pluginToolRunIdentity.issue(session.id, config.timeoutMs + 60_000);
+		pluginRunToken = pluginToolRunIdentity.issue(
+			session.id,
+			config.timeoutMs + 60_000,
+			undefined,
+			true
+		);
 		try {
 			pluginRunProofFile = createPluginRunProofFile(pluginRunToken, config.timeoutMs + 60_000);
 		} catch (error) {
@@ -424,6 +445,35 @@ export async function buildSpawnSpec(
 			}
 			pluginRunToken = undefined;
 			pluginRunProofFile = undefined;
+		}
+	}
+
+	// 7. A local run whose command only starts through cmd.exe gets the shell in
+	// cue-process-lifecycle (applyWindowsShellRules, same condition), and every
+	// argument then rides the cmd.exe command line: the agent's own flags, the
+	// model, custom args, the MCP injection, and the prompt when the provider
+	// cannot read it from stdin (omp). One that cmd.exe would cut off or
+	// rewrite fails the run here rather than handing the agent different
+	// instructions, as planSessionTurn does.
+	if (!sshRemoteUsed && isWindows() && windowsShellReason(command).reason !== null) {
+		const promptArgs = plan.prompt.via === 'argv' ? new Set(plan.prompt.args) : new Set<string>();
+		const refusal = cmdShellArgsRefusal(spawnArgs, promptArgs);
+		if (refusal) {
+			// The run never starts, so nothing else would release its MCP identity.
+			if (pluginRunToken) pluginToolRunIdentity.revoke(pluginRunToken);
+			if (pluginRunProofFile) {
+				try {
+					removePluginRunProofFile(pluginRunProofFile);
+				} catch (error) {
+					logger.warn('Could not remove plugin run proof file', '[PluginRunIdentity]', {
+						error: String(error),
+					});
+				}
+			}
+			return {
+				ok: false,
+				message: `${agentDef.name} at ${command} only starts through cmd.exe, which ${refusal}`,
+			};
 		}
 	}
 

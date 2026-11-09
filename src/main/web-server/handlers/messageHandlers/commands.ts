@@ -22,6 +22,128 @@ import { parseMentionRoutingField } from '../../../../shared/crossAgentContext';
 import { findSessionForParticipantName } from '../../../../shared/group-chat-types';
 import type { WebClient, WebClientMessage, MessageHandlerContext } from './types';
 
+import { getSettingsStore } from '../../../stores';
+import * as pianolaStore from '../../../pianola/pianola-store-main';
+import {
+	deliverPianolaScopeDecision,
+	resolvePianolaDecision,
+} from '../../../pianola/pianola-decisions';
+import { updatePianolaDecision } from '../../../../shared/pianola/pianola-decision-lifecycle';
+import { readCallerMessageFields } from '../../../../shared/agentDelegation';
+import { dispatchSupervision } from './dispatchSupervision';
+import { isPianolaScopeId } from '../../../../shared/pianola/pianola-scope';
+import { bindSupervisedDispatch, newTabAdmission } from './tabs';
+import { generateUUID } from '../../../../shared/uuid';
+
+/** Scope delivery never falls back to unguarded send_command on older hosts. */
+export async function handlePianolaScopeReply(
+	ctx: MessageHandlerContext,
+	client: WebClient,
+	message: WebClientMessage
+): Promise<void> {
+	let result;
+	try {
+		if (!client.cli) throw new Error('Scope admission requires the native CLI');
+		const flags = getSettingsStore().get('encoreFeatures', {}) as Record<string, boolean>;
+		if (flags.pianola !== true) throw new Error('Pianola disabled');
+		if (typeof message.answer !== 'string' || !message.answer.trim())
+			throw new Error('Decision message unavailable');
+		const raw = message.guard as Record<string, unknown> | undefined;
+		if (!raw || raw.agentId !== message.sessionId || raw.tabId !== message.tabId)
+			throw new Error('Scope recipient mismatch');
+		result = await deliverPianolaScopeDecision(
+			ctx.callbacks,
+			raw,
+			message.answer,
+			message.judgment === true
+		);
+	} catch (error) {
+		result = {
+			status: 'rejected',
+			error: error instanceof Error ? error.message : 'Scope admission failed',
+		};
+		const raw = message.guard as Record<string, unknown> | undefined;
+		const record =
+			client.cli && raw
+				? pianolaStore
+						.readDecisions()
+						.find(
+							(candidate) =>
+								candidate.id === raw.decisionId &&
+								candidate.agentId === message.sessionId &&
+								candidate.tabId === message.tabId
+						)
+				: undefined;
+		if (record?.lifecycle?.delivery === 'intent') {
+			if (record.deliveryStatus === 'admitted')
+				result = {
+					status: 'unknown',
+					error: 'Native admission was recorded; reconcile before retrying',
+				};
+			await pianolaStore.appendDecisionAsync(
+				updatePianolaDecision(
+					record,
+					{
+						delivery: result.status === 'unknown' ? 'unknown' : 'rejected',
+						status:
+							result.status !== 'unknown' && record.lifecycle.phase === 'judgment'
+								? 'waiting_human'
+								: 'blocked',
+						nextActor:
+							result.status !== 'unknown' && record.lifecycle.phase === 'judgment'
+								? 'human'
+								: 'operator',
+						nextAction: result.error,
+					},
+					new Date().toISOString()
+				)
+			);
+		}
+	}
+	ctx.send(client, { type: 'pianola_scope_reply_result', ...result, requestId: message.requestId });
+}
+
+/** CLI answers are attributable only to the configured manager and its bound tab. */
+export async function handlePianolaDecisionResolve(
+	ctx: MessageHandlerContext,
+	client: WebClient,
+	message: WebClientMessage
+): Promise<void> {
+	try {
+		if (!client.cli) throw new Error('Manager resolution requires the native CLI');
+		const flags = getSettingsStore().get('encoreFeatures', {}) as Record<string, boolean>;
+		if (flags.pianola !== true) throw new Error('Pianola disabled');
+		const caller = readCallerMessageFields(message);
+		if (!caller?.fromTabId) throw new Error('Manager agent and tab identity required');
+		const result = await resolvePianolaDecision(ctx.callbacks, message, {
+			kind: 'manager',
+			agentId: caller.fromSessionId,
+			tabId: caller.fromTabId,
+		});
+		ctx.send(client, {
+			type: 'pianola_decision_resolve_result',
+			...result,
+			success: result.status === 'accepted',
+			requestId: message.requestId,
+		});
+	} catch (error) {
+		const record = pianolaStore
+			.readDecisions()
+			.find((candidate) => candidate.id === message.decisionId);
+		const uncertain =
+			record?.deliveryStatus === 'admitted' &&
+			record.lifecycle?.phase === 'answer' &&
+			(record.lifecycle.delivery === 'intent' || record.lifecycle.delivery === 'unknown');
+		ctx.send(client, {
+			type: 'pianola_decision_resolve_result',
+			success: false,
+			status: uncertain ? 'unknown' : 'rejected',
+			error: error instanceof Error ? error.message : 'Decision resolution failed',
+			requestId: message.requestId,
+		});
+	}
+}
+
 /**
  * Timeout bounds for a cross-agent consult. A consult spawns a whole agent turn,
  * so the floor is generous and the ceiling is an hour - past that the caller has
@@ -47,9 +169,10 @@ export function handleSendCommand(
 	// the active tab (legacy `send --live` behavior). Used by
 	// `maestro-cli dispatch --session <tabId>` to address a specific tab.
 	const requestedTabId = typeof message.tabId === 'string' ? message.tabId : undefined;
-	// force=true bypasses the busy-state guard below, allowing callers to
-	// dispatch concurrent writes to an already-running agent. Used by
-	// `maestro-cli dispatch --force`. That is the WHOLE of what it bypasses: it
+	// force=true lets the prompt land in a tab that is itself mid-turn
+	// (`maestro-cli dispatch --force`, gated CLI-side by `allowConcurrentSend`).
+	// The busy guard is per tab and lives in the renderer, the only place that
+	// knows which tab is working. That is the WHOLE of what it bypasses: it
 	// is a scheduling hint, not authority. The turn it dispatches is admitted
 	// at the spawn sink for the transport that sent it exactly as an unforced
 	// one is, and a managed refusal there comes back as a failed command_result
@@ -77,6 +200,21 @@ export function handleSendCommand(
 		LOG_CONTEXT
 	);
 
+	// Every refusal answers as `command_result` carrying the caller's
+	// requestId. A bare `error` frame has no requestId and no matching type, so
+	// the CLI never matched it and sat there until its own timeout.
+	const reject = (error: string, code?: string) => {
+		ctx.send(client, {
+			type: 'command_result',
+			success: false,
+			sessionId,
+			...(requestedTabId ? { tabId: requestedTabId } : {}),
+			error,
+			...(code ? { code } : {}),
+			requestId: message.requestId,
+		});
+	};
+
 	// Image-only sends are valid in AI mode (the composer lets users paste
 	// images and submit without typing), so the guard accepts either a
 	// non-empty command OR at least one image. Normalize a missing command
@@ -87,7 +225,7 @@ export function handleSendCommand(
 			`[Web Command] Missing sessionId or command/images: sessionId=${sessionId}, commandLen=${command?.length}, images=${images?.length ?? 0}`,
 			LOG_CONTEXT
 		);
-		ctx.sendError(client, 'Missing sessionId or command');
+		reject('Missing sessionId or command', 'INVALID_OPTIONS');
 		return;
 	}
 	const effectiveCommand = command ?? '';
@@ -97,7 +235,7 @@ export function handleSendCommand(
 	// behind a caller who asked for another.
 	const routingField = parseMentionRoutingField(message.mentionRouting);
 	if (!routingField.ok) {
-		ctx.sendError(client, routingField.error, { sessionId });
+		reject(routingField.error, 'INVALID_OPTIONS');
 		return;
 	}
 	const mentionRouting = routingField.routing;
@@ -105,26 +243,140 @@ export function handleSendCommand(
 	// Get session details to check state and determine how to handle
 	const sessionDetail = ctx.callbacks.getSessionDetail?.(sessionId);
 	if (!sessionDetail) {
-		ctx.sendError(client, 'Session not found');
+		reject(`Session not found: ${sessionId}`, 'SESSION_NOT_FOUND');
 		return;
 	}
 
-	// Check if session is busy - prevent race conditions between desktop and web.
-	// `force: true` opts out of this guard (see `maestro-cli send --live --force`).
-	if (sessionDetail.state === 'busy' && !force) {
-		ctx.sendError(client, 'Session is busy - please wait for the current operation to complete', {
-			sessionId,
-		});
-		logger.debug(`Command rejected - session ${sessionId} is busy`, LOG_CONTEXT);
+	const dispatchId = typeof message.dispatchId === 'string' ? message.dispatchId : generateUUID();
+	const priorDispatch = isPianolaScopeId(dispatchId)
+		? pianolaStore.readDispatchAdmission(dispatchId)
+		: undefined;
+
+	// Use client's inputMode if provided, otherwise fall back to server state
+	const effectiveMode = clientInputMode || sessionDetail.inputMode;
+	const isAiMode = effectiveMode === 'ai';
+	const coverage =
+		clientInputMode === 'terminal'
+			? { managed: false, receipt: undefined, error: undefined }
+			: dispatchSupervision(
+					ctx,
+					client,
+					sessionId,
+					dispatchId,
+					requestedTabId ?? priorDispatch?.targetTabId ?? sessionDetail.activeTabId
+				);
+	// No agent-level busy guard here. A busy AGENT only means some tab of it
+	// is working; an idle tab beside it takes its own turn in parallel, the way
+	// the desktop's tabs do. Only a busy TARGET tab is refused, and the renderer
+	// decides that (see handleRemoteCommand) because this snapshot has no
+	// per-tab state.
+	//
+	// Supervised (Pianola-managed) dispatch is the exception: its admission
+	// enrolls the target before the renderer sees the prompt, and the release
+	// step refuses a busy agent anyway, so a busy agent is refused here, before
+	// anything is enrolled. A reconcile of an admission already on record
+	// (`priorDispatch`) is never refused: it answers with the recorded outcome.
+	if (coverage.managed && !priorDispatch && sessionDetail.state === 'busy' && !force) {
+		reject('Session is busy - please wait for the current operation to complete', 'SESSION_BUSY');
+		logger.debug(`Supervised command rejected - session ${sessionId} is busy`, LOG_CONTEXT);
 		return;
 	}
 	if (sessionDetail.state === 'busy' && force) {
 		logger.info(`[Web Command] Force-dispatching to busy session ${sessionId}`, LOG_CONTEXT);
 	}
 
-	// Use client's inputMode if provided, otherwise fall back to server state
-	const effectiveMode = clientInputMode || sessionDetail.inputMode;
-	const isAiMode = effectiveMode === 'ai';
+	if (coverage.managed) {
+		const targetTabId = requestedTabId ?? priorDispatch?.targetTabId ?? sessionDetail.activeTabId;
+		if (coverage.error || !targetTabId || !isAiMode) {
+			ctx.send(client, {
+				type: 'command_result',
+				success: false,
+				sessionId,
+				dispatchId,
+				admission: coverage.receipt,
+				error: coverage.error ?? 'DispatchTargetUnavailable',
+				requestId: message.requestId,
+			});
+			return;
+		}
+		// The release reaches the renderer over IPC, outside this client's context: bind
+		// the dispatching operation and a ticket for the target tab the way the unmanaged
+		// send does, refusing an invalid context before anything is enrolled (MCOMP-33-00S6).
+		const supervisedDelegation = readDispatchDelegation(message);
+		if (!supervisedDelegation.ok) {
+			reject(supervisedDelegation.error, 'INVALID_OPTIONS');
+			return;
+		}
+		const supervisedTicket = issueDispatchTicket(admission, {
+			agentId: sessionId,
+			tabId: targetTabId,
+		});
+		const settleBinding = bindSupervisedDispatch(
+			dispatchId,
+			supervisedDelegation.delegation,
+			supervisedTicket
+		);
+		if (!settleBinding) withdrawDispatchTicket(supervisedTicket);
+		void newTabAdmission(ctx)
+			.runExisting(
+				client,
+				{
+					dispatchId,
+					targetAgentId: sessionId,
+					targetTabId,
+					prompt: effectiveCommand,
+					background,
+					hidden: false,
+					images,
+					mentionRouting,
+				},
+				(tabId) => {
+					const armed = armDispatchCallback(ctx, message, {
+						agentId: sessionId,
+						tabId,
+						prompt: effectiveCommand,
+						isNewTab: false,
+					});
+					if (armed.error) throw new Error(armed.error);
+					return armed.callbackId;
+				}
+			)
+			.then(({ receipt, callbackId }) => {
+				settleBinding?.(receipt.outcome === 'accepted' || receipt.outcome === 'unknown');
+				ctx.send(client, {
+					type: 'command_result',
+					success: receipt.outcome === 'accepted',
+					sessionId,
+					tabId: receipt.targetTabId,
+					dispatchId,
+					admission: receipt,
+					unknown: receipt.outcome === 'unknown',
+					callbackId,
+					requestId: message.requestId,
+				});
+				if (receipt.outcome === 'rejected' && callbackId)
+					getDispatchCallbackRegistry()?.cancel(callbackId);
+				if (receipt.outcome === 'accepted')
+					noteDispatchDelegation(ctx, message, {
+						targetSessionId: sessionId,
+						targetTabId: receipt.targetTabId,
+						prompt: effectiveCommand,
+					});
+			})
+			.catch((error) => {
+				settleBinding?.(false);
+				ctx.send(client, {
+					type: 'command_result',
+					success: false,
+					sessionId,
+					dispatchId,
+					error: error instanceof Error ? error.message : 'DispatchAdmissionFailed',
+					requestId: message.requestId,
+				});
+			});
+		return;
+	}
+
 	const mode = isAiMode ? 'AI' : 'CLI';
 	const claudeId = sessionDetail.agentSessionId || 'none';
 
@@ -173,9 +425,7 @@ export function handleSendCommand(
 	let sendCallbackId: string | undefined;
 	if (typeof message.notifyOnComplete === 'string' && message.notifyOnComplete) {
 		if (!requestedTabId) {
-			ctx.sendError(client, '--notify-on-complete requires an explicit target tab', {
-				sessionId,
-			});
+			reject('--notify-on-complete requires an explicit target tab', 'INVALID_OPTIONS');
 			return;
 		}
 		const armed = armDispatchCallback(ctx, message, {
@@ -185,7 +435,7 @@ export function handleSendCommand(
 			isNewTab: false,
 		});
 		if (armed.error) {
-			ctx.sendError(client, armed.error, { sessionId });
+			reject(armed.error, 'INVALID_OPTIONS');
 			return;
 		}
 		sendCallbackId = armed.callbackId;
@@ -221,6 +471,8 @@ export function handleSendCommand(
 				images,
 				background,
 				mentionRouting,
+				undefined,
+				undefined,
 				delegation,
 				dispatchTicket
 			)
@@ -233,8 +485,21 @@ export function handleSendCommand(
 					type: 'command_result',
 					success,
 					sessionId,
+					...(coverage.receipt
+						? {
+								dispatchId,
+								admission: { ...coverage.receipt, outcome: success ? 'accepted' : 'rejected' },
+							}
+						: {}),
 					...(resolvedTabId ? { tabId: resolvedTabId } : {}),
 					...(success && sendCallbackId ? { callbackId: sendCallbackId } : {}),
+					...(success
+						? {}
+						: {
+								error:
+									'Maestro declined the dispatch: the target tab is mid-turn (use --queue to wait, or --force with allowConcurrentSend), the tab no longer exists, or the agent cannot take a remote prompt',
+								code: 'DISPATCH_REFUSED',
+							}),
 					requestId: message.requestId,
 				});
 				if (!success) {
@@ -260,10 +525,15 @@ export function handleSendCommand(
 					{ sessionId, mode, requestId: message.requestId },
 					'Failed to execute command'
 				);
+				// reportHandlerError's frame carries no requestId; answer the caller too.
+				reject(
+					`Failed to execute command: ${error instanceof Error ? error.message : String(error)}`,
+					'COMMAND_FAILED'
+				);
 			});
 	} else {
 		cancelArmedCallback();
-		ctx.sendError(client, 'Command execution not configured');
+		reject('Command execution not configured', 'COMMAND_FAILED');
 	}
 }
 

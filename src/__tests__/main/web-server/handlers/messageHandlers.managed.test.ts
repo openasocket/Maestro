@@ -28,6 +28,7 @@ vi.mock('../../../../main/plugins/plugin-manager-singleton', () => ({
 	getHeadlessAgentRunner: vi.fn(() => null),
 }));
 
+import { WebSocket } from 'ws';
 import { WebSocketMessageHandler } from '../../../../main/web-server/handlers/messageHandlers';
 import type { WebClient } from '../../../../main/web-server/handlers/messageHandlers';
 import {
@@ -68,7 +69,7 @@ function createClient(extra: Partial<WebClient> = {}): WebClient {
 	return {
 		id: 'client-1',
 		connectedAt: 0,
-		socket: { send: vi.fn() } as unknown as WebClient['socket'],
+		socket: { readyState: WebSocket.OPEN, send: vi.fn() } as unknown as WebClient['socket'],
 		...extra,
 	};
 }

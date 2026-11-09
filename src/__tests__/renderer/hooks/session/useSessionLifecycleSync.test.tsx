@@ -20,6 +20,8 @@ import { useSessionLifecycleSync } from '../../../../renderer/hooks/session/useS
 import type { Session } from '../../../../renderer/types';
 import { createMockSession, createMockAITab, resetStore } from '../../../helpers';
 
+import { releaseConnectionHeldQueueItems } from '../../../../renderer/utils/executionQueue';
+
 type Payload = {
 	added?: Session[];
 	removedIds?: string[];
@@ -65,6 +67,44 @@ describe('useSessionLifecycleSync', () => {
 				setActiveSessionId,
 			},
 		};
+	});
+
+	it('removes consumed work after reconnect without losing new unsent work or client state', async () => {
+		const item = {
+			id: 'consumed',
+			type: 'message' as const,
+			text: 'Ja bitte',
+			timestamp: 1,
+			tabId: 'one',
+			waitingForConnection: true,
+		};
+		const baseline = createMockSession({
+			id: 'shared',
+			executionQueue: [item],
+			aiTabs: [createMockAITab({ id: 'one' })],
+		});
+		const unsent = { ...item, id: 'unsent', text: 'new work', waitingForConnection: true };
+		const local = {
+			...baseline,
+			state: 'busy' as const,
+			activeTabId: 'one',
+			aiTabs: [{ ...baseline.aiTabs[0], inputValue: 'draft' }],
+			executionQueue: [...releaseConnectionHeldQueueItems([item]), unsent],
+		};
+		useSessionStore.setState({ sessions: [local], activeSessionId: 'shared' });
+		renderHook(() => useSessionLifecycleSync(restoreSession));
+		handler!({ updated: [{ ...baseline, executionQueue: [] }], baselines: [baseline] });
+		await waitFor(() =>
+			expect(useSessionStore.getState().sessions[0].executionQueue).toEqual([unsent])
+		);
+		const current = useSessionStore.getState().sessions[0];
+		expect(current.state).toBe('busy');
+		expect(current.aiTabs[0].inputValue).toBe('draft');
+		expect(current.activeTabId).toBe('one');
+		// A duplicate push must not remove the new ID or revive the consumed one.
+		handler!({ updated: [{ ...baseline, executionQueue: [] }], baselines: [baseline] });
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(useSessionStore.getState().sessions[0].executionQueue).toEqual([unsent]);
 	});
 
 	it('adds an agent another client created', async () => {
@@ -235,6 +275,36 @@ describe('useSessionLifecycleSync', () => {
 		await new Promise((resolve) => setTimeout(resolve, 20));
 
 		expect(useSessionStore.getState().sessions.map((s) => s.id)).toEqual(['a']);
+	});
+
+	it('retires in-flight and queued lifecycle work without blocking post-recovery events', async () => {
+		let release!: () => void;
+		restoreSession.mockImplementationOnce(async (session: Session) => {
+			await new Promise<void>((resolve) => {
+				release = resolve;
+			});
+			return session;
+		});
+		const kept = createMockSession({ id: 'kept' });
+		useSessionStore.setState({ sessions: [kept], activeSessionId: 'kept' });
+		renderHook(() => useSessionLifecycleSync(restoreSession));
+		const inFlight = handler!({ added: [createMockSession({ id: 'deleted-during-outage' })] });
+		await waitFor(() => expect(release).toBeDefined());
+		const queued = handler!({ added: [createMockSession({ id: 'old-queued-addition' })] });
+		useSessionStore.setState((state) => ({
+			sessions: [kept],
+			sessionReconciliationGeneration: (state.sessionReconciliationGeneration ?? 0) + 1,
+		}));
+		try {
+			handler!({ added: [createMockSession({ id: 'new-peer' })] });
+			await waitFor(() =>
+				expect(useSessionStore.getState().sessions.map((s) => s.id)).toEqual(['kept', 'new-peer'])
+			);
+		} finally {
+			release();
+			await Promise.all([inFlight, queued]);
+		}
+		expect(useSessionStore.getState().sessions.map((s) => s.id)).toEqual(['kept', 'new-peer']);
 	});
 
 	it('keeps following its peers after one delta fails', async () => {

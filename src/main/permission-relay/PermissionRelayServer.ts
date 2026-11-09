@@ -23,8 +23,11 @@ import * as path from 'path';
 import { randomUUID } from 'crypto';
 import { logger } from '../utils/logger';
 import { holdListener } from '../enterprise/listener-gate';
-import { createPending, lookupBinding } from './registry';
-import { parseQuestionRequest } from './question-request';
+import { createPending, lookupBinding, resolvePending } from './registry';
+import { parseQuestionRequest, parseAutomatableQuestionRequest } from './question-request';
+import { rateRisk } from '../../shared/pianola/pianola-risk';
+import { canonicalJson } from '../../shared/canonicalJson';
+import { nativeCurrentTurns } from '../pianola/current-turn';
 import type {
 	BridgeToServerMessage,
 	PermissionDecision,
@@ -71,11 +74,18 @@ export interface RelayManagedGate {
 }
 
 export class PermissionRelayServer {
+	private readonly socketId = randomUUID();
 	private server: net.Server | null = null;
 	private socketPath: string | null = null;
 	private onRequest: OnPermissionRequest | null = null;
 	private managedGate: RelayManagedGate | null = null;
 	private starting: Promise<string> | null = null;
+	private questionAuthority?: () => string;
+
+	/** Native host policy/owner census; absence keeps question automation unsupported. */
+	setQuestionAuthority(read: () => string): void {
+		this.questionAuthority = read;
+	}
 
 	/** Set the callback that surfaces requests to the user (renderer). */
 	setOnRequest(cb: OnPermissionRequest): void {
@@ -116,15 +126,15 @@ export class PermissionRelayServer {
 	private resolveSocketPath(userDataDir: string): string {
 		if (process.platform === 'win32') {
 			// Named pipes are per-user by default ACL; unique per app instance.
-			return `\\\\.\\pipe\\maestro-permission-relay-${process.pid}`;
+			return `\\\\.\\pipe\\maestro-permission-relay-${process.pid}-${this.socketId}`;
 		}
 		// Prefer userData, but macOS caps unix socket paths at ~104 bytes. Fall
 		// back to tmpdir when the userData-based path would be too long.
 		const preferred = path.join(userDataDir, 'permission-relay.sock');
-		if (preferred.length <= 100) {
+		if (Buffer.byteLength(preferred, 'utf8') <= 100) {
 			return preferred;
 		}
-		return path.join(os.tmpdir(), `maestro-relay-${process.pid}.sock`);
+		return path.join(os.tmpdir(), `mr-${process.pid}-${this.socketId.slice(0, 8)}.sock`);
 	}
 
 	private async start(userDataDir: string): Promise<string> {
@@ -302,9 +312,51 @@ export class PermissionRelayServer {
 			return;
 		}
 
-		const decisionPromise = createPending(requestId, msg.token);
+		const native = nativeCurrentTurns.readProcessTurn(binding.sessionId, binding.tabId);
+		// Raw automation admission must not inherit the human picker's lossy coercions.
+		const question = parseAutomatableQuestionRequest(msg.toolName, input);
+		let authority: string | undefined;
+		try {
+			authority = native && question ? this.questionAuthority?.() : undefined;
+		} catch {
+			/* Human relay remains available. */
+		}
+		let authorityCurrent = !!authority;
+		const decisionPromise = createPending(
+			requestId,
+			msg.token,
+			undefined,
+			native && question
+				? {
+						requestId,
+						processId: binding.sessionId,
+						cursor: native.cursor,
+						createdAt: request.createdAt,
+						question: question.question,
+						observedRisk: rateRisk(canonicalJson(input)),
+						options: question.options.map((o) =>
+							o.description ? `${o.label}: ${o.description}` : o.label
+						),
+					}
+				: undefined,
+			(readAuthority = (read) => read()) => {
+				try {
+					authorityCurrent =
+						authorityCurrent &&
+						!!this.questionAuthority &&
+						readAuthority(this.questionAuthority) === authority;
+				} catch {
+					authorityCurrent = false;
+				}
+				return authorityCurrent && !socket.destroyed && socket.writable;
+			}
+		);
+		const onClose = () =>
+			resolvePending(requestId, { behavior: 'deny', message: 'Question transport disconnected.' });
+		socket.once('close', onClose);
 		this.onRequest(request);
 		let decision: PermissionDecision = await decisionPromise;
+		socket.removeListener('close', onClose);
 
 		// Consent is intersected with the admission as it stands NOW: a lease
 		// that ended while the prompt was open denies, whatever the user said.

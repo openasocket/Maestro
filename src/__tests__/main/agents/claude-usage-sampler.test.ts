@@ -522,7 +522,7 @@ describe('claude-usage-sampler', () => {
 				wireEnvelope();
 			primeSuccess(noisy);
 			const snap = await sampleUsage({ binPath: '/bin/maestro-p.js' });
-			expect(snap?.session.percent).toBe(42);
+			expect(snap?.session?.percent).toBe(42);
 		});
 
 		it('tolerates whitespace before the JSON line', async () => {
@@ -626,8 +626,19 @@ describe('claude-usage-sampler', () => {
 			expect(snap).toBeNull();
 		});
 
-		it('returns null when session window is missing', async () => {
+		// claude 2.1.317 stopped painting the 5-hour window on /usage, so an
+		// envelope with no `session` is a complete reading, not a malformed one.
+		// Rejecting it froze every account's dashboard row at its last sample.
+		it('keeps the snapshot when the session window is absent, omitting `session`', async () => {
 			primeSuccess(wireEnvelope({ session: undefined }));
+			const snap = await sampleUsage({ binPath: '/bin/maestro-p.js' });
+			expect(snap).not.toBeNull();
+			expect(snap).not.toHaveProperty('session');
+			expect(snap?.weekAllModels.percent).toEqual(expect.any(Number));
+		});
+
+		it('returns null when a present session window is malformed', async () => {
+			primeSuccess(wireEnvelope({ session: { resets_at: '2026-05-15T17:00:00.000Z' } }));
 			const snap = await sampleUsage({ binPath: '/bin/maestro-p.js' });
 			expect(snap).toBeNull();
 		});
@@ -651,7 +662,7 @@ describe('claude-usage-sampler', () => {
 			primeSuccess(wireEnvelope({ week_all_models: { percent: 50 } }));
 			const snap = await sampleUsage({ binPath: '/bin/maestro-p.js' });
 			expect(snap?.weekAllModels).toEqual({ percent: 50 });
-			expect(snap?.session.resetsAt).toBeTruthy();
+			expect(snap?.session?.resetsAt).toBeTruthy();
 		});
 
 		it('returns null when a resets_at field is present but not a string', async () => {
@@ -760,14 +771,32 @@ describe('claude-usage-sampler', () => {
 			expect(captureMessageMock).toHaveBeenCalledTimes(2);
 		});
 
-		it('forgets the history after a success so a flapping account reports again', async () => {
-			primeFailure(Object.assign(new Error('boom'), { code: 1 }));
-			await sampleUsage(OPTS);
+		it('does not re-report a failure that alternates with another on the same dir', async () => {
+			// Field shape behind the post-fix MAESTRO-Q2 volume: one account flipping
+			// between two exit codes reported on every flip.
+			for (let i = 0; i < 6; i++) {
+				const code = i % 2 === 0 ? 1 : 143;
+				primeFailure(Object.assign(new Error('boom'), { code }));
+				await sampleUsage(OPTS);
+			}
+
+			expect(captureMessageMock).toHaveBeenCalledTimes(2);
+			expect(captureMessageMock.mock.calls.map((c) => (c[2] as { reason: string }).reason)).toEqual(
+				['exit: 1', 'exit: 143']
+			);
+		});
+
+		it('does not let a success between failures reset the re-report interval', async () => {
+			for (let i = 0; i < 3; i++) {
+				primeFailure(Object.assign(new Error('boom'), { code: 1 }));
+				await sampleUsage(OPTS);
+				primeSuccess(wireEnvelope());
+				expect(await sampleUsage(OPTS)).not.toBeNull();
+			}
 			expect(captureMessageMock).toHaveBeenCalledTimes(1);
 
-			primeSuccess(wireEnvelope());
-			expect(await sampleUsage(OPTS)).not.toBeNull();
-
+			// The interval still bounds the silence for a flapping account.
+			vi.setSystemTime(new Date(FROZEN_NOW + FAILURE_REREPORT_INTERVAL_MS));
 			primeFailure(Object.assign(new Error('boom'), { code: 1 }));
 			await sampleUsage(OPTS);
 			expect(captureMessageMock).toHaveBeenCalledTimes(2);

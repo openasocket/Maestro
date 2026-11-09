@@ -27,6 +27,7 @@ import {
 } from '../../utils/providerAvailability';
 import { logger } from '../../utils/logger';
 import type { CodexTransport } from '../../../shared/codexTransport';
+import type { HarnessControlMode } from '../../../shared/maestro-lib/providers/native-control';
 import { getEffortConfigKey, readEffortFromConfig } from '../../utils/agentEffort';
 import { gitService } from '../../services/git';
 import { withBlankEnvVarRow } from '../../../shared/envVarCatalog';
@@ -208,6 +209,9 @@ export function NewInstanceModal({
 	// Codex transport, per provider. Absent means `exec`, the default.
 	const [codexTransportByAgent, setCodexTransportByAgent] = useState<
 		Record<string, CodexTransport>
+	>({});
+	const [harnessControlModeByAgent, setHarnessControlModeByAgent] = useState<
+		Record<string, HarnessControlMode>
 	>({});
 	const [agentConfigs, setAgentConfigs] = useState<Record<string, Record<string, any>>>({});
 	const [availableModels, setAvailableModels] = useState<Record<string, string[]>>({});
@@ -478,6 +482,10 @@ export function NewInstanceModal({
 					[toolType]: duplicate.codexAutoResetOnExhaustion,
 				}));
 				setCodexTransportByAgent((prev) => ({ ...prev, [toolType]: duplicate.codexTransport }));
+				setHarnessControlModeByAgent((prev) => ({
+					...prev,
+					[toolType]: duplicate.harnessControlMode ?? 'current',
+				}));
 
 				// Pre-fill SSH remote configuration if source session has it
 				const ssh = duplicate.sessionSshRemoteConfig;
@@ -761,6 +769,7 @@ export function NewInstanceModal({
 				normalizeAdditionalDirectories(additionalDirectories, homeDir),
 				codexAutoResetByAgent[selectedAgent] ?? false,
 				codexTransportByAgent[selectedAgent] ?? 'exec',
+				harnessControlModeByAgent[selectedAgent] === 'native' ? 'native' : undefined,
 				sourceSession ? 'clone' : 'create',
 				{
 					expectedPolicyRevision: formPolicyRevision,
@@ -850,6 +859,7 @@ export function NewInstanceModal({
 		retryAvailabilityByAgent,
 		retryTokenByAgent,
 		codexAutoResetByAgent,
+		harnessControlModeByAgent,
 		codexTransportByAgent,
 		sourceSession,
 		creating,
@@ -1207,6 +1217,17 @@ export function NewInstanceModal({
 							[agentId]: withBlankEnvVarRow(prev[agentId] ?? {}),
 						}));
 					}}
+					onEnvVarsReplace={(agentId, vars) => {
+						setCustomAgentEnvVars((prev) => {
+							const newVars = { ...prev };
+							if (Object.keys(vars).length > 0) {
+								newVars[agentId] = vars;
+							} else {
+								delete newVars[agentId];
+							}
+							return newVars;
+						});
+					}}
 					onConfigChange={(agentId, key, value) => {
 						setAgentConfigs((prev) => ({
 							...prev,
@@ -1249,6 +1270,10 @@ export function NewInstanceModal({
 					codexTransportByAgent={codexTransportByAgent}
 					onCodexTransportChange={(agentId, value) =>
 						setCodexTransportByAgent((prev) => ({ ...prev, [agentId]: value }))
+					}
+					harnessControlModeByAgent={harnessControlModeByAgent}
+					onHarnessControlModeChange={(agentId, value) =>
+						setHarnessControlModeByAgent((prev) => ({ ...prev, [agentId]: value }))
 					}
 				/>
 

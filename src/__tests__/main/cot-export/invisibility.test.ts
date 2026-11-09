@@ -320,9 +320,20 @@ function stringsIn(
  */
 const SYSTEM_PROMPT_TEMP_SUFFIX = /(maestro-sysprompt-[A-Za-z0-9_-]+-\d+-)[0-9a-f]{8}(\.txt)/g;
 
+/**
+ * The random folder of the caller run proof every local AI tab spawn is issued
+ * (`MAESTRO_CALLER_RUN_PROOF_FILE`, a `mkdtemp` under `plugin-tool-run-proofs`).
+ * Each spawn gets its own whatever the export says, so only the random part is
+ * taken out: the variable, its folder and the file name are still compared.
+ */
+const CALLER_RUN_PROOF_DIR = /([\\/]plugin-tool-run-proofs[\\/]run-)[A-Za-z0-9]{6}(?=[\\/]proof$)/;
+
 /** `value` with what differs between any two spawns taken out, at any depth. */
 function withoutSpawnNoise(value: unknown): unknown {
-	if (typeof value === 'string') return value.replace(SYSTEM_PROMPT_TEMP_SUFFIX, '$1<random>$2');
+	if (typeof value === 'string')
+		return value
+			.replace(SYSTEM_PROMPT_TEMP_SUFFIX, '$1<random>$2')
+			.replace(CALLER_RUN_PROOF_DIR, '$1<random>');
 	if (Array.isArray(value)) return value.map(withoutSpawnNoise);
 	if (
 		value !== null &&
@@ -591,6 +602,7 @@ describe.each(SCENARIOS)('a turn of $label', (scenario) => {
 		mocks.userDataPath = userData;
 		previousUserData = process.env.MAESTRO_USER_DATA;
 		process.env.MAESTRO_USER_DATA = userData;
+		vi.stubEnv(COWORKING_SESSION_ID_ENV_VAR, undefined);
 
 		// One instant for all three runs. On Windows the handler names a temp
 		// file after the clock, and that name is one of the arguments.
@@ -621,6 +633,7 @@ describe.each(SCENARIOS)('a turn of $label', (scenario) => {
 		__resetCotConfigStoreForTests();
 		__resetCotWriterForTests();
 		vi.useRealTimers();
+		vi.unstubAllEnvs();
 		if (previousUserData === undefined) delete process.env.MAESTRO_USER_DATA;
 		else process.env.MAESTRO_USER_DATA = previousUserData;
 		fs.rmSync(root, { recursive: true, force: true });

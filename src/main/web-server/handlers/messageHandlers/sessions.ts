@@ -8,6 +8,7 @@
  */
 
 import { AGENT_IDS } from '../../../../shared/agentIds';
+import { isCurrentTurnCursor, type CurrentTurnCursor } from '../../../../shared/currentTurn';
 import { readBackgroundField } from '../../../../shared/focusPlacement';
 import { SESSION_CONFIG_LOCK_FIELDS } from '../../../../shared/managedSettingsLock';
 import { holdAgentConfigWrite } from '../../../enterprise/settings-policy';
@@ -126,6 +127,9 @@ export function handleCreateSession(
 	}
 	// `duplicate-agent` creates a clone; the host checks it as one (MCOMP-23-02C).
 	if (message.operation === 'clone') config.operation = 'clone';
+	if (message.harnessControlMode === 'native' || message.harnessControlMode === 'current') {
+		config.harnessControlMode = message.harnessControlMode;
+	}
 	const hasConfig = Object.keys(config).length > 0;
 
 	ctx.callbacks
@@ -531,11 +535,27 @@ export function handleListDesktopSessions(
 	client: WebClient,
 	message: WebClientMessage
 ): void {
-	const sessions = ctx.callbacks.listDesktopSessions ? ctx.callbacks.listDesktopSessions() : [];
+	// A missing callback is distinct from a valid snapshot with no open tabs.
+	// Treating both as an empty list could retire a scoped watch's baselines.
+	const capturedAt = Date.now();
+	const snapshot = ctx.callbacks.listDesktopSessions?.();
+	if (!snapshot) {
+		ctx.send(client, {
+			type: 'desktop_sessions_list',
+			success: false,
+			error: 'Desktop sessions not configured',
+			requestId: message.requestId,
+		});
+		return;
+	}
+	// The callback is synchronous: timestamp and membership/cursors share one
+	// main-process turn instead of using a timestamp invented after the response.
 	ctx.send(client, {
 		type: 'desktop_sessions_list',
 		success: true,
-		sessions,
+		// Old callbacks remain usable for ordinary tab-list clients, but must
+		// never masquerade as a complete supervision census.
+		...(Array.isArray(snapshot) ? { sessions: snapshot, capturedAt } : snapshot),
 		requestId: message.requestId,
 	});
 }
@@ -583,7 +603,36 @@ export function handleGetSessionHistory(
 			? Math.floor(message.tail)
 			: undefined;
 
-	const result = ctx.callbacks.getSessionHistory(tabId, { sinceMs, tail });
+	const currentTurn = message.currentTurn === true;
+	let expectedCursor: CurrentTurnCursor | undefined;
+	let deltaBase: CurrentTurnCursor | undefined;
+	for (const field of ['expectedCursor', 'deltaBase'] as const) {
+		const value = message[field];
+		if (value === undefined) continue;
+		if (!currentTurn || !isCurrentTurnCursor(value)) {
+			ctx.send(client, {
+				type: 'session_history_result',
+				success: false,
+				code: 'INVALID_CURSOR',
+				requestId: message.requestId,
+			});
+			return;
+		}
+		if (field === 'expectedCursor') expectedCursor = value;
+		else deltaBase = value;
+	}
+	const result = ctx.callbacks.getSessionHistory(
+		tabId,
+		currentTurn
+			? {
+					currentTurn,
+					expectedCursor,
+					deltaBase,
+					currentTurnInterest: message.currentTurnInterest === 'pianola' ? 'pianola' : undefined,
+					observationClient: client.socket,
+				}
+			: { sinceMs, tail }
+	);
 	if (!result) {
 		ctx.send(client, {
 			type: 'session_history_result',
@@ -604,6 +653,7 @@ export function handleGetSessionHistory(
 		agentSessionId: result.agentSessionId,
 		projectPath: result.projectPath,
 		messages: result.messages,
+		...(result.currentTurn && { currentTurn: result.currentTurn }),
 		requestId: message.requestId,
 	});
 }

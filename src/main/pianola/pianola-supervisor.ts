@@ -1,3 +1,4 @@
+import { sweepQueueConsultReleases } from './pianola-queue-routing';
 /**
  * Pianola supervised daemon.
  *
@@ -27,6 +28,11 @@
  */
 
 import * as fs from 'fs';
+import { generateUUID } from '../../shared/uuid';
+import { hostCallerRuns } from '../agent-run/caller-identity';
+import { CALLER_RUN_PROOF_FILE_ENV_VAR } from '../../shared/agentDelegation';
+import type { PluginToolRunProofFile } from '../plugins/plugin-tool-run-proof-file';
+import { PluginAuthorityError } from '../plugins/plugin-authority';
 import * as path from 'path';
 import { spawn, type ChildProcess, type SpawnOptions } from 'child_process';
 import { resolveMaestroCliScriptPath } from '../cue/cue-cli-executor';
@@ -45,14 +51,24 @@ import {
 } from '../../shared/maestro-lib/managed/host-adapter';
 import type { DispatchSpecLike } from '../../shared/maestro-lib/managed/authority';
 import {
+	compactDispatchArtifacts,
 	readSupervisorTargets,
-	removeSupervisorTarget,
-	writeSupervisorTargets,
+	readSupervisorTarget,
+	removeSupervisorTargetAsync,
+	updateSupervisorTargetsAsync,
+	readPrograms,
+	readPlans,
 	supervisorFilePath,
+	readScopeCheckpoint,
+	writeScopeCheckpoint,
+	readDecisions,
+	appendDecision,
 } from './pianola-store-main';
 import { PIANOLA_WATCH_RETIRED_EXIT_CODE } from '../../shared/pianola/pianola-watcher';
+import { pausePianolaScopeDecisions } from '../../shared/pianola/pianola-decision-lifecycle';
+import { planProgress } from '../../shared/pianola/pianola-tasks';
+import { PIANOLA_PROGRAMS_FILENAME, PIANOLA_PLANS_FILENAME } from '../../shared/pianola/storage';
 import type { PianolaSupervisedTarget, PianolaSupervisedKind } from '../../shared/pianola/storage';
-import { generateUUID } from '../../shared/uuid';
 
 const LOG_CONTEXT = '[PianolaSupervisor]';
 
@@ -122,6 +138,7 @@ interface SupervisedChild {
 	admitting: boolean;
 	/** The managed host's refusal, while the state is `denied`. */
 	managed?: SupervisorChildRefusal;
+	legacyProof?: PluginToolRunProofFile;
 }
 
 /**
@@ -153,9 +170,14 @@ export interface PianolaSupervisorDeps {
 	managedPort?: () => SupervisorChildPort | null;
 }
 
-/** Only fields needed to register a newly persisted agent's first AI tab. */
+/** Native session metadata passed by persistence and plugin lifecycle consumers. */
 export interface AutoWatchSession {
 	id: string;
+	cwd?: string;
+	groupId?: string;
+	sshRemoteId?: string;
+	sshRemote?: unknown;
+	sessionSshRemoteConfig?: { enabled?: boolean };
 	isPianola?: boolean;
 	parentSessionId?: string;
 	activeTabId?: string;
@@ -182,12 +204,6 @@ export function staleTargets(
 export class PianolaSupervisor {
 	private readonly deps: PianolaSupervisorDeps;
 	private readonly children = new Map<string, SupervisedChild>();
-	/**
-	 * Defensive same-process retry for incomplete writes. All supported creation
-	 * paths (modal, wizard, CLI/remote, plugin) persist their initial AI tab with
-	 * the agent, so no supported creation path relies on this set across restart.
-	 */
-	private readonly pendingAutoWatchIds = new Set<string>();
 	private watcher: fs.FSWatcher | null = null;
 	private reconcileTimer: ReturnType<typeof setTimeout> | undefined;
 	private started = false;
@@ -197,88 +213,85 @@ export class PianolaSupervisor {
 		this.deps = deps;
 		this.spawnChild = deps.spawnChild ?? ((command, args, opts) => spawn(command, args, opts));
 	}
+	private runnableTargets(): PianolaSupervisedTarget[] {
+		const programs = readPrograms();
+		const plans = readPlans();
+		const paused = new Set(
+			programs.filter((program) => program.status === 'paused').map((program) => program.id)
+		);
+		const pausedLeads = new Set(
+			programs.filter((program) => paused.has(program.id)).map((program) => program.leadAgentId)
+		);
+		return readSupervisorTargets().filter((target) => {
+			if (target.kind === 'program') return !paused.has(target.programId ?? '');
+			if (target.kind === 'watch')
+				return !target.migratedToScopeId && !pausedLeads.has(target.agentId);
+			const plan = plans.find((plan) => plan.id === target.planId);
+			return !plan || (!planProgress(plan).complete && !paused.has(plan.programId ?? ''));
+		});
+	}
 
-	/** Register future top-level agents and retire their watches when they close. */
-	autoWatchNewSessions(
-		added: readonly AutoWatchSession[],
+	/** A running pre-proof worker cannot be migrated by killing it and guessing. */
+	canFenceLegacyWatch(id: string): boolean {
+		const entry = this.children.get(id);
+		return !!entry?.child && !entry.stopping && !!entry.legacyProof;
+	}
+
+	/** Both persistence and plugin creation use the same dynamic whole-agent registry.
+	 * The legacy boolean cannot grant authority or choose a manager. Scope cycles
+	 * discover new agents/chats and enroll them under the standing owner policy.
+	 */
+	async autoWatchNewSessions(
+		_added: readonly AutoWatchSession[],
 		current: readonly AutoWatchSession[],
-		autoWatchEnabled: boolean,
 		removedIds: readonly string[] = []
-	): void {
-		const canAdd = autoWatchEnabled && this.deps.isEnabled();
-		if (!canAdd) {
-			this.pendingAutoWatchIds.clear();
-		} else {
-			for (const session of added) {
-				if (session.id && !session.isPianola && !session.parentSessionId) {
-					this.pendingAutoWatchIds.add(session.id);
-				}
-			}
+	): Promise<void> {
+		if (removedIds.length) {
+			const live = new Set(current.map((session) => session.id));
+			const removed = new Set(removedIds.filter((id) => !live.has(id)));
+			await updateSupervisorTargetsAsync((targets) =>
+				targets.filter(
+					(target) =>
+						!(target.kind === 'watch' && target.autoCreated && removed.has(target.agentId ?? ''))
+				)
+			);
 		}
-		if (this.pendingAutoWatchIds.size === 0 && removedIds.length === 0) return;
-
-		const sessionsById = new Map(current.map((session) => [session.id, session]));
-		const targets = readSupervisorTargets();
-		const removed = new Set(removedIds.filter((id) => !sessionsById.has(id)));
-		const next = targets.filter(
-			(target) =>
-				!(target.kind === 'watch' && target.autoCreated && removed.has(target.agentId ?? ''))
-		);
-		const changed = next.length !== targets.length;
-		const watchedIds = new Set(
-			next.filter((target) => target.kind === 'watch').map((target) => target.agentId)
-		);
-		const registered: string[] = [];
-		for (const id of this.pendingAutoWatchIds) {
-			const session = sessionsById.get(id);
-			if (!session || session.isPianola || session.parentSessionId || watchedIds.has(id)) {
-				this.pendingAutoWatchIds.delete(id);
-				continue;
-			}
-			const aiTabIds = Array.isArray(session.aiTabs)
-				? session.aiTabs.flatMap((tab) => (typeof tab?.id === 'string' && tab.id ? [tab.id] : []))
-				: [];
-			const tabId =
-				session.activeTabId && aiTabIds.includes(session.activeTabId)
-					? session.activeTabId
-					: aiTabIds[0];
-			if (!tabId) continue;
-			next.push({
-				id: generateUUID(),
-				kind: 'watch',
-				agentId: id,
-				tabId,
-				enabled: true,
-				createdAt: Date.now(),
-				autoCreated: true,
-			});
-			watchedIds.add(id);
-			registered.push(id);
-		}
-		if (!changed && registered.length === 0) return;
-		writeSupervisorTargets(next);
-		for (const id of registered) this.pendingAutoWatchIds.delete(id);
 		this.reconcile();
 	}
 
+	private hasUnfinishedPlan(target: PianolaSupervisedTarget): boolean {
+		return (
+			target.kind === 'orchestrate' &&
+			readPlans().some((plan) => plan.id === target.planId && !planProgress(plan).complete)
+		);
+	}
+
 	/** Begin watching the store file and reconcile immediately. Idempotent. */
-	start(): void {
+	async start(): Promise<void> {
 		if (this.started) return;
+		this.started = true;
+		void compactDispatchArtifacts().catch((error) => {
+			void captureException(error, { operation: 'pianola:startupArtifactCleanup' });
+		});
 		if (this.deps.getStoredSessions) {
 			try {
 				const storedIds = new Set(this.deps.getStoredSessions().map((session) => session.id));
-				const targets = readSupervisorTargets();
-				const retained = targets.filter(
-					(target) =>
-						!(target.kind === 'watch' && target.autoCreated && !storedIds.has(target.agentId ?? ''))
+				await updateSupervisorTargetsAsync((targets) =>
+					targets.filter(
+						(target) =>
+							!(
+								target.kind === 'watch' &&
+								target.autoCreated &&
+								!storedIds.has(target.agentId ?? '')
+							)
+					)
 				);
-				if (retained.length !== targets.length) writeSupervisorTargets(retained);
 			} catch (error) {
 				// Cleanup must not prevent retained/manual targets from starting.
 				void captureException(error, { operation: 'pianola:supervisor:pruneAutoWatches' });
 			}
 		}
-		this.started = true;
+		if (!this.started) return;
 		this.startWatching();
 		this.reconcile();
 	}
@@ -290,12 +303,13 @@ export class PianolaSupervisor {
 	 * spawns nothing.
 	 */
 	reconcile(): void {
+		sweepQueueConsultReleases();
 		if (!this.deps.isEnabled()) {
 			this.killAll();
 			return;
 		}
 
-		const targets = readSupervisorTargets();
+		const targets = this.runnableTargets();
 		const byId = new Map(targets.map((t) => [t.id, t] as const));
 
 		// Stop and forget children whose target was removed or disabled.
@@ -303,6 +317,7 @@ export class PianolaSupervisor {
 			const target = byId.get(id);
 			if (!target || !target.enabled) {
 				this.stopChild(id);
+				if (this.children.get(id)?.target.kind === 'watch-scope') this.suspendScopeCheckpoint(id);
 				this.children.delete(id);
 			}
 		}
@@ -312,13 +327,33 @@ export class PianolaSupervisor {
 		// its scheduled restart; a stopped/failed target is not auto-restarted here.
 		// A denied target is asked again: a reconcile is a person's or the CLI's
 		// change to the store, and the authority's answer may have changed since.
+		// Rebind running children when their command changes (not on metadata-only writes).
 		for (const target of targets) {
-			if (!target.enabled) continue;
+			if (!target.enabled) {
+				// Paused before startup also needs a fresh baseline on resume.
+				if (target.kind === 'watch-scope') this.suspendScopeCheckpoint(target.id);
+				continue;
+			}
 			const existing = this.children.get(target.id);
-			if (!existing || existing.state === 'denied') {
+			if (
+				!existing ||
+				existing.state === 'denied' ||
+				(existing.state === 'stopped' && this.hasUnfinishedPlan(target))
+			) {
 				this.spawn(target);
 			} else {
-				existing.target = target;
+				const previousArgs = this.buildArgs(existing.target);
+				const nextArgs = this.buildArgs(target);
+				if (
+					previousArgs?.length !== nextArgs?.length ||
+					previousArgs?.some((arg, index) => arg !== nextArgs?.[index])
+				) {
+					this.stopChild(target.id);
+					this.children.delete(target.id);
+					this.spawn(target);
+				} else {
+					existing.target = target;
+				}
 			}
 		}
 	}
@@ -328,14 +363,14 @@ export class PianolaSupervisor {
 	 * be running but whose supervised child is not alive - one that crashed and
 	 * gave up after the restart cap, or was never spawned. Returns the count
 	 * relaunched. No-op when the Encore flag is off. The rapid-flap protection is
-	 * preserved: a target mid-backoff (a restart already scheduled) and a target
-	 * that finished cleanly are both treated as alive and left alone. Because a
+	 * preserved: mid-backoff targets retain their scheduled restart. Cleanly
+	 * finished plans are left alone unless revision reopens their work. Because a
 	 * cadenced relaunch is not rapid flapping, a relaunched target's failure
 	 * streak is reset so it gets a full restart budget again.
 	 */
 	relaunchStale(): number {
 		if (!this.deps.isEnabled()) return 0;
-		const targets = readSupervisorTargets();
+		const targets = this.runnableTargets();
 		const stale = staleTargets(targets, (id) => this.isAlive(id));
 		for (const target of stale) {
 			const existing = this.children.get(target.id);
@@ -359,9 +394,9 @@ export class PianolaSupervisor {
 	 * that must not be disturbed. A live process is alive; a target mid-backoff
 	 * (restart pending) is alive regardless of kind. A cleanly/intentionally
 	 * stopped target is kind-aware: a 'watch' should keep running, so a stopped
-	 * watch is NOT alive (stale -> relaunch); an 'orchestrate' clean exit is
-	 * terminal, so a stopped orchestrate stays alive. A failed or never-spawned
-	 * target is not alive and therefore stale. A target whose managed admission
+	 * watch is NOT alive (stale -> relaunch). A stopped orchestrate is stale when
+	 * its saved plan has unfinished work; completed or legacy absent plans stay
+	 * stopped. A failed or never-spawned target is not alive and therefore stale. A target whose managed admission
 	 * is in flight is alive (nothing may start beside it); a denied one is not,
 	 * so the cadenced relaunch asks the authority again, once per cadence.
 	 */
@@ -373,12 +408,14 @@ export class PianolaSupervisor {
 		if (hasLiveChild) return true;
 		if (entry.admitting) return true;
 		if (entry.state === 'backing-off') return true;
-		if (entry.state === 'stopped') return entry.target.kind === 'orchestrate';
+		if (entry.state === 'stopped')
+			return entry.target.kind === 'orchestrate' && !this.hasUnfinishedPlan(entry.target);
 		return false;
 	}
 
 	/** Per-target health for the dashboard. Returns fresh objects (no internal refs). */
 	getHealth(): PianolaSupervisorHealth[] {
+		sweepQueueConsultReleases();
 		const out: PianolaSupervisorHealth[] = [];
 		for (const entry of this.children.values()) {
 			const health: PianolaSupervisorHealth = {
@@ -400,6 +437,7 @@ export class PianolaSupervisor {
 
 	/** Kill all children and tear down the watcher (app quit). Idempotent. */
 	stopAll(): void {
+		sweepQueueConsultReleases(true);
 		if (this.watcher) {
 			this.watcher.close();
 			this.watcher = null;
@@ -414,6 +452,8 @@ export class PianolaSupervisor {
 				entry.backoffTimer = undefined;
 			}
 			entry.stopping = true;
+			entry.legacyProof?.dispose();
+			entry.legacyProof = undefined;
 			entry.state = 'stopped';
 			const child = entry.child;
 			if (child && child.exitCode === null && child.signalCode === null) {
@@ -436,7 +476,13 @@ export class PianolaSupervisor {
 			// file throws, and atomic temp+rename writes replace the inode anyway.
 			this.watcher = fs.watch(dir, (_event, changed) => {
 				// Some platforms report a null filename; reconcile to be safe.
-				if (changed && changed !== filename) return;
+				if (
+					changed &&
+					changed !== filename &&
+					changed !== PIANOLA_PROGRAMS_FILENAME &&
+					changed !== PIANOLA_PLANS_FILENAME
+				)
+					return;
 				this.scheduleReconcile();
 			});
 			this.watcher.on('error', (error) => {
@@ -473,6 +519,18 @@ export class PianolaSupervisor {
 			if (target.idleHours !== undefined) args.push('--idle-hours', String(target.idleHours));
 			return args;
 		}
+		// One worker owns all chats in the selection, including future members.
+		if (target.kind === 'watch-scope') return ['pianola', 'watch-scope', target.id];
+		if (target.kind === 'program') {
+			if (!target.programId) return null;
+			return [
+				'pianola',
+				'program-loop',
+				target.programId,
+				'--interval',
+				String(target.intervalSeconds ?? 120),
+			];
+		}
 		if (!target.planId) return null;
 		return [
 			'pianola',
@@ -486,7 +544,12 @@ export class PianolaSupervisor {
 	}
 
 	/** The spawn exactly as it will be made, so a managed authority admits what runs. */
-	private buildLaunch(cliScriptPath: string, args: string[]): PianolaChildLaunch {
+	private buildLaunch(
+		cliScriptPath: string,
+		args: string[],
+		target: PianolaSupervisedTarget,
+		proofFile: string
+	): PianolaChildLaunch {
 		return {
 			command: process.execPath,
 			args: [cliScriptPath, ...args],
@@ -496,10 +559,14 @@ export class PianolaSupervisor {
 				// In packaged Electron, process.execPath is the app binary, not
 				// Node; without this it would launch the app instead of the CLI.
 				ELECTRON_RUN_AS_NODE: '1',
+				[CALLER_RUN_PROOF_FILE_ENV_VAR]: proofFile,
 				// Tell the watch/orchestrate process which agent IS Pianola (so it
 				// never acts on itself and can route decision handoffs) and where the
 				// bundled CLI is for any sub-invocations.
-				MAESTRO_AGENT_ID: this.deps.getPianolaAgentId() ?? '',
+				MAESTRO_AGENT_ID:
+					target.kind === 'watch-scope'
+						? (target.managerAgentId ?? '')
+						: (this.deps.getPianolaAgentId() ?? ''),
 				MAESTRO_CLI_JS: cliScriptPath,
 			},
 			shell: false,
@@ -539,7 +606,53 @@ export class PianolaSupervisor {
 		entry.stopping = false;
 		if (entry.admitting) return;
 
-		const launch = this.buildLaunch(cliScriptPath, args);
+		// Bind legacy workers to the ordinary host caller ingress. Its assertActive
+		// executes at every send, so registry publication fences even a late reply.
+		// Issued before the launch is built: its run-token file rides in the env
+		// the managed authority digests, so the lease admits exactly what spawns.
+		entry.legacyProof?.dispose();
+		entry.legacyProof = undefined;
+		if (target.kind === 'watch') {
+			try {
+				entry.legacyProof = hostCallerRuns.issue(
+					{ agentId: target.agentId!, tabId: target.tabId!, spawnGeneration: generateUUID() },
+					{
+						signal: new AbortController().signal,
+						unattended: true,
+						/**
+						 * Recheck the supervised child's identity and stored legacy-watch ownership before a native
+						 * send. Disabled, stopping, replaced or migrated watches lose authority immediately.
+						 */
+						assertActive: () => {
+							const current = readSupervisorTarget(target.id);
+							if (
+								!this.deps.isEnabled() ||
+								entry!.stopping ||
+								this.children.get(target.id) !== entry ||
+								!current?.enabled ||
+								current.migratedToScopeId ||
+								current.agentId !== target.agentId ||
+								current.tabId !== target.tabId
+							)
+								throw new PluginAuthorityError('PLUGIN_DENIED');
+						},
+					},
+					path.dirname(supervisorFilePath())
+				);
+			} catch (error) {
+				if (!(error instanceof PluginAuthorityError)) throw error;
+				logger.warn(
+					'Legacy watcher has no verified send fence; takeover requires configuration',
+					LOG_CONTEXT
+				);
+			}
+		}
+		const launch = this.buildLaunch(
+			cliScriptPath,
+			args,
+			target,
+			entry.legacyProof?.runTokenFile ?? ''
+		);
 		const port = this.deps.managedPort?.() ?? null;
 		if (!port || port.standing() !== 'managed') {
 			this.launch(entry, launch, null);
@@ -569,7 +682,11 @@ export class PianolaSupervisor {
 						`pianola-target:${target.id}`,
 						target.kind === 'watch'
 							? `agent:${target.agentId ?? ''}`
-							: `pianola-plan:${target.planId ?? ''}`,
+							: target.kind === 'watch-scope'
+								? `pianola-scope:${target.id}`
+								: target.kind === 'program'
+									? `pianola-program:${target.programId ?? ''}`
+									: `pianola-plan:${target.planId ?? ''}`,
 					],
 				},
 			});
@@ -589,6 +706,8 @@ export class PianolaSupervisor {
 			if (admission.state === 'admitted') {
 				admission.lifetime.withdraw('the target was stopped before its child started');
 			}
+			entry.legacyProof?.dispose();
+			entry.legacyProof = undefined;
 			return;
 		}
 		if (admission.state === 'standalone') {
@@ -609,6 +728,8 @@ export class PianolaSupervisor {
 	 */
 	private refuse(entry: SupervisedChild, refusal: SupervisorChildRefusal): void {
 		entry.child = null;
+		entry.legacyProof?.dispose();
+		entry.legacyProof = undefined;
 		entry.state = 'denied';
 		entry.managed = { state: refusal.state, code: refusal.code, message: refusal.message };
 		entry.lastError = `[managed-${refusal.state}] ${refusal.message}`;
@@ -645,6 +766,8 @@ export class PianolaSupervisor {
 			});
 		} catch (error) {
 			lifetime?.spawnFailed(error instanceof Error ? error : new Error(String(error)));
+			entry.legacyProof?.dispose();
+			entry.legacyProof = undefined;
 			entry.lastError = error instanceof Error ? error.message : String(error);
 			const errCode = (error as NodeJS.ErrnoException)?.code;
 			if (errCode !== 'ENOENT') {
@@ -692,6 +815,8 @@ export class PianolaSupervisor {
 				signal,
 				stoppedBy: revokedReason !== null ? 'authority' : entry.stopping ? 'caller' : undefined,
 			});
+			entry.legacyProof?.dispose();
+			entry.legacyProof = undefined;
 			entry.child = null;
 			// The managed host revoked the lease: stopped by the authority, denied
 			// from here on, never restarted.
@@ -722,13 +847,15 @@ export class PianolaSupervisor {
 			// target from the store so it is neither restarted nor relaunched on the
 			// next app start.
 			if (code === PIANOLA_WATCH_RETIRED_EXIT_CODE && entry.target.kind === 'watch') {
-				this.retireTarget(entry);
+				void this.retireTarget(entry);
 				return;
 			}
 			// Clean exit (code 0): success. An orchestrate run finishing its plan is
 			// expected; do not restart.
+			// A clean exit stops completed work; a revision can already have reopened the plan.
 			if (code === 0) {
 				entry.state = 'stopped';
+				if (this.hasUnfinishedPlan(entry.target)) this.scheduleReconcile();
 				return;
 			}
 			// Unexpected exit: back off and retry, capped at MAX_RESTARTS.
@@ -760,7 +887,7 @@ export class PianolaSupervisor {
 				entry.state = 'stopped';
 				return;
 			}
-			const target = readSupervisorTargets().find((t) => t.id === entry.target.id);
+			const target = this.runnableTargets().find((t) => t.id === entry.target.id);
 			if (!target || !target.enabled) {
 				entry.state = 'stopped';
 				this.children.delete(entry.target.id);
@@ -771,12 +898,12 @@ export class PianolaSupervisor {
 	}
 
 	/** Forget a watch target that retired itself and remove it from the store. */
-	private retireTarget(entry: SupervisedChild): void {
+	private async retireTarget(entry: SupervisedChild): Promise<void> {
 		entry.state = 'stopped';
 		this.children.delete(entry.target.id);
 		logger.info(`Supervised watch ${entry.target.id} retired; removing target`, LOG_CONTEXT);
 		try {
-			removeSupervisorTarget(entry.target.id);
+			await removeSupervisorTargetAsync(entry.target.id);
 		} catch (error) {
 			void captureException(error, {
 				operation: 'pianola:supervisor:retire',
@@ -805,6 +932,8 @@ export class PianolaSupervisor {
 			entry.backoffTimer = undefined;
 		}
 		entry.stopping = true;
+		entry.legacyProof?.dispose();
+		entry.legacyProof = undefined;
 		entry.state = 'stopped';
 		const child = entry.child;
 		if (child && child.exitCode === null && child.signalCode === null) {
@@ -814,9 +943,34 @@ export class PianolaSupervisor {
 
 	/** Kill all children but leave the watcher running (so a re-enable reconciles). */
 	private killAll(): void {
+		// Feature-off at startup has no live children, but must still suspend the
+		// previous boot's cursors before a later opt-in can resume them.
+		const scopeIds = new Set(
+			readSupervisorTargets()
+				.filter((target) => target.kind === 'watch-scope')
+				.map((target) => target.id)
+		);
 		for (const id of [...this.children.keys()]) {
+			if (this.children.get(id)?.target.kind === 'watch-scope') scopeIds.add(id);
 			this.stopChild(id);
 			this.children.delete(id);
+		}
+		for (const id of scopeIds) this.suspendScopeCheckpoint(id);
+	}
+
+	/** Pause is durable even if the worker is stopped during an I/O wait. */
+	private suspendScopeCheckpoint(id: string): void {
+		try {
+			pausePianolaScopeDecisions(id, { readDecisions, appendDecision }, new Date().toISOString());
+			const checkpoint = readScopeCheckpoint(id);
+			if (checkpoint) {
+				checkpoint.status = 'suspended';
+				writeScopeCheckpoint(checkpoint);
+			}
+		} catch (error) {
+			// Corruption in one scope must not prevent stopping the other children.
+			void captureException(error, { operation: 'pianola:supervisor:suspendScope', id });
+			logger.error(`Cannot suspend scope checkpoint ${id}`, LOG_CONTEXT);
 		}
 	}
 

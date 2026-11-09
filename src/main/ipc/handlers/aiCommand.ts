@@ -199,6 +199,9 @@ export function registerAiCommandHandlers(deps: AiCommandHandlerDependencies): v
 							sessionCustomModel: config.customModel,
 							sessionCustomEffort: config.customEffort,
 							claudeTokenSource: config.claudeTokenSource,
+							// `cwd` is always the requesting agent's own directory
+							// (resolveCommandCwd), so the folder-trust opt-in applies.
+							acceptWorkspaceTrust: true,
 							agentConfigValues,
 							lineage,
 						},

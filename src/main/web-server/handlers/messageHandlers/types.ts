@@ -44,7 +44,6 @@ import type {
 	NotifyCenterFlashParams,
 	MarketplaceManifestResult,
 	MarketplaceImportResult,
-	DesktopSessionEntry,
 	SessionHistoryResult,
 	GetSessionHistoryOptions,
 	EnqueueCommandResult,
@@ -55,6 +54,7 @@ import type {
 	RenameTabResult,
 	SnoozeCommandCallback,
 	ClosedTabCommandCallback,
+	MessagePinCommandCallback,
 	TabContextOpCallback,
 	AutoRunSteeringCommandCallback,
 	WindowCommandCallback,
@@ -176,6 +176,8 @@ export interface MessageHandlerCallbacks {
 		images?: string[],
 		background?: boolean,
 		mentionRouting?: MentionRouting,
+		requireDeliveryReceipt?: boolean,
+		pianolaDispatchId?: string,
 		/** The context of the operation that dispatched the prompt (see `readDispatchDelegation`). */
 		delegation?: ManagedDelegationContext,
 		/** The host-minted ticket the spawn sink claims the transport with (see `issueDispatchTicket`). */
@@ -200,6 +202,8 @@ export interface MessageHandlerCallbacks {
 	snoozeCommand: SnoozeCommandCallback;
 	/** `maestro-cli tab closed` / `tab reopen` - read and reopen the closed-tab stack. */
 	closedTabCommand: ClosedTabCommandCallback;
+	/** `maestro-cli tab pins` - list, add, remove, rename, and show a tab's message pins. */
+	messagePinCommand: MessagePinCommandCallback;
 	/** `maestro-cli steer-auto-run` - send a note, list notes and replies, cancel. */
 	autoRunSteeringCommand: AutoRunSteeringCommandCallback;
 	/** `maestro-cli window` - list windows, move an agent or a group between them. */
@@ -263,10 +267,11 @@ export interface MessageHandlerCallbacks {
 		background?: boolean,
 		hidden?: boolean,
 		mentionRouting?: MentionRouting,
+		control?: import('../../../../shared/pianola/pianola-dispatch').PianolaNewTabControl,
 		delegation?: ManagedDelegationContext,
 		/** The host-minted ticket the spawn sink claims the transport with (see `issueDispatchTicket`). */
 		dispatchTicket?: string
-	) => Promise<{ success: boolean; tabId?: string; queued?: boolean; error?: string }>;
+	) => Promise<import('../../types').NewAITabWithPromptResult>;
 	/** Stop a running turn, the agent's or one tab's (`maestro-cli interrupt`). */
 	interruptSession: InterruptSessionCallback;
 	/** Consult another agent and return its answer (`maestro-cli ask`). */
@@ -282,10 +287,14 @@ export interface MessageHandlerCallbacks {
 		background?: boolean,
 		held?: boolean,
 		mentionRouting?: MentionRouting,
+		dispatchCallback?: boolean,
+		control?: import('../../../../shared/pianola/pianola-dispatch').PianolaQueueControl,
 		delegation?: ManagedDelegationContext,
 		/** The host-minted ticket the spawn sink claims the transport with (see `issueDispatchTicket`). */
 		dispatchTicket?: string
 	) => Promise<EnqueueCommandResult>;
+	confirmQueueItem?: import('../../../stores/queue-item-receipt').ConfirmQueueItem;
+	releaseQueueItem?: import('../../../stores/queue-item-receipt').ReleaseQueueItem;
 	listQueue: (sessionId?: string) => Promise<{
 		success: boolean;
 		queues: unknown[];
@@ -487,9 +496,9 @@ export interface MessageHandlerCallbacks {
 	removeCuePipeline: (
 		identifier: string
 	) => Promise<{ ok: true } | { ok: false; code: string; message: string }>;
-	/** Same function as the Cue modal's Bundles tab. */
+	/** Same function as the Export Agent and Import Agent modals. */
 	exportCueBundle: (request: CueBundleExportRequest) => Promise<CueBundleExportOutcome>;
-	/** Same function as the Cue modal's Bundles tab; agents land in the running app. */
+	/** Same function as the Export Agent and Import Agent modals; agents land in the running app. */
 	importCueBundle: (request: CueBundleImportRequest) => Promise<CueBundleImportOutcome>;
 	getUsageDashboard: (timeRange: 'day' | 'week' | 'month' | 'all') => Promise<UsageDashboardData>;
 	getAchievements: () => Promise<AchievementData[]>;
@@ -534,7 +543,7 @@ export interface MessageHandlerCallbacks {
 	/** External-pickup primitive used by `maestro-cli session list`. Surfaces every
 	 *  open AI tab across all desktop agents so consumers (Maestro-Discord, Cue)
 	 *  can address tabs by id without owning a persistent channel. */
-	listDesktopSessions: () => DesktopSessionEntry[];
+	listDesktopSessions: () => ReturnType<import('../../types').ListDesktopSessionsCallback> | null;
 	/** Read-only conversation history fetch used by `maestro-cli session show
 	 *  <tabId>`. Filters (`sinceMs`, `tail`) live alongside the read so we don't
 	 *  ship the full transcript over the wire on every poll. */

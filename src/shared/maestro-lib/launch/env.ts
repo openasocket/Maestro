@@ -5,7 +5,11 @@ import { isWindows } from '../../platformDetection';
 import { DEFAULT_QUERY_SOURCE, QUERY_SOURCE_ENV_VAR, type QuerySource } from '../../querySource';
 import { buildSpawnPath, STANDARD_UNIX_PATHS } from './spawn-path';
 import { isBlankEnvKey, isBlankEnvValue, isSecretEnvKey } from '../../agentEnvironment';
-import { CALLER_AGENT_ID_ENV_VAR, CALLER_TAB_ID_ENV_VAR } from '../../agentDelegation';
+import {
+	CALLER_AGENT_ID_ENV_VAR,
+	CALLER_TAB_ID_ENV_VAR,
+	CALLER_RUN_PROOF_FILE_ENV_VAR,
+} from '../../agentDelegation';
 import { PROVIDER_ENV_VAR_SUGGESTIONS } from '../../envVarCatalog';
 import { MANAGED_DELEGATION_ENV_VAR } from '../managed/delegation';
 import { getAgentDefinition } from '../providers/definitions';
@@ -116,6 +120,7 @@ export function buildPtyTerminalEnv(shellEnvVars?: Record<string, string>): Node
 	// And for a delegation record: a dispatch typed into a terminal is not the
 	// child of whatever operation launched Maestro.
 	delete env[MANAGED_DELEGATION_ENV_VAR];
+	delete env[CALLER_RUN_PROOF_FILE_ENV_VAR];
 
 	// Vim arrow-key ergonomics: when users launch `vi`/`vim` with distro defaults
 	// that force compatible mode, insert-mode arrows can degrade to literal ABCD.
@@ -178,6 +183,7 @@ const STRIPPED_ENV_VARS = [
 	// is merged after this list is stripped, so only a stale inherited copy dies.
 	CALLER_AGENT_ID_ENV_VAR,
 	CALLER_TAB_ID_ENV_VAR,
+	CALLER_RUN_PROOF_FILE_ENV_VAR,
 	// The delegation record of whatever operation launched Maestro, likewise: a
 	// dispatched turn is stamped with its own child record from the session
 	// layer, and a turn the user started is the child of nothing.
@@ -1256,6 +1262,7 @@ const SERVER_ENV_ALLOWED_PREFIXES: readonly string[] = ['LC_', 'XDG_', 'SSH_', '
 const SERVER_ENV_DENIED_NAMES: readonly string[] = [
 	CALLER_AGENT_ID_ENV_VAR,
 	CALLER_TAB_ID_ENV_VAR,
+	CALLER_RUN_PROOF_FILE_ENV_VAR,
 	QUERY_SOURCE_ENV_VAR,
 ];
 

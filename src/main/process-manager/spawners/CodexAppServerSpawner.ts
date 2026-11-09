@@ -84,6 +84,14 @@ import {
 	codexManagedRequestSession,
 	codexRequestEffect,
 } from '../../codex-app-server/server-requests';
+import { steerCodexAppServerTurn } from '../../codex-app-server/steering';
+import {
+	codexServerInteraction,
+	type CodexServerInteraction,
+} from '../../codex-app-server/interaction-requests';
+import { harnessInteractionBroker } from '../../harness-control/integration';
+import type { CodexAppServerRequest } from '../../../shared/maestro-lib/codex/protocol';
+import type { CodexServerRequestAnswer } from '../../../shared/maestro-lib/codex/server-requests';
 import {
 	EFFECT_REVOKED,
 	effectDigest,
@@ -210,6 +218,13 @@ export class CodexAppServerSpawner {
 					reason: parsed.reason,
 				}
 			);
+			if (config.permissionMode === 'standard') {
+				return {
+					pid: -1,
+					success: false,
+					error: `Codex Standard mode requires app-server: ${parsed.reason}`,
+				};
+			}
 			return this.fallbackToCli(config);
 		}
 		try {
@@ -221,6 +236,13 @@ export class CodexAppServerSpawner {
 				sessionId: config.sessionId,
 				error: String(error),
 			});
+			if (config.permissionMode === 'standard') {
+				return {
+					pid: -1,
+					success: false,
+					error: 'Codex Standard mode could not start app-server.',
+				};
+			}
 			return this.fallbackToCli(config);
 		}
 	}
@@ -334,6 +356,26 @@ class CodexAppServerTurn {
 				) => rpc.request<T>(method, params, options),
 				onUserMessage: (listener) => translator.onUserMessage(listener),
 				onTurnEnd: (listener) => this.onTurnEnd(listener),
+			},
+			harnessControl: {
+				getCapabilities: () => ({
+					protocol: 'codex-app-server',
+					protocolVersion: 'experimental',
+					steering: 'in-turn',
+					permissionRequests: true,
+					questions: true,
+					elicitations: true,
+					modelSwitch: false,
+					modeSwitch: false,
+					imagePrompts: false,
+					resume: true,
+				}),
+				steer: ({ id, text }) =>
+					steerCodexAppServerTurn(this.managedProcess.codexAppServer!, { id, text }, (verdict) =>
+						this.ctx.emitter.emit('steering-verdict', sessionId, verdict)
+					),
+				interrupt: async () => this.interrupt(),
+				close: async (options) => this.kill(options),
 			},
 		};
 	}
@@ -465,7 +507,7 @@ class CodexAppServerTurn {
 
 			const threadParams = {
 				cwd: invocation.cwd,
-				approvalPolicy: 'never',
+				approvalPolicy: config.permissionMode === 'standard' ? 'on-request' : 'never',
 				...(invocation.sandbox ? { sandbox: invocation.sandbox } : {}),
 				...(invocation.model ? { model: invocation.model } : {}),
 			};
@@ -566,15 +608,52 @@ class CodexAppServerTurn {
 	 * Answer a server request at once, by policy. An unanswered request stalls
 	 * the turn forever, so even a method Maestro does not know gets an error.
 	 */
-	private answerServerRequest(request: Parameters<typeof answerCodexServerRequest>[0]): void {
+	private answerServerRequest(request: CodexAppServerRequest): void {
 		const admission = this.config.admission;
-		if (!admission) {
-			// Unmanaged: the standalone table, full access granting as exec does.
-			this.respondToServerRequest(request, {
-				grantApprovals: this.invocation.sandbox === 'danger-full-access',
-			});
+		if (admission) {
+			// Managed: the effect authority decides, never the Standard-mode
+			// interaction broker (a person answering there could grant an effect
+			// the authority never decided).
+			this.answerManagedServerRequest(request, admission);
 			return;
 		}
+		if (this.config.permissionMode === 'standard') {
+			const interaction = codexServerInteraction(request, {
+				sessionId: this.config.sessionId,
+				tabId: this.config.tabId,
+				spawnGeneration: this.managedProcess.spawnGeneration ?? 1,
+			});
+			if (interaction) {
+				void this.answerInteractiveServerRequest(request, interaction).catch((error) => {
+					logger.warn(
+						'[CodexAppServerSpawner] Interactive request failed; declining',
+						LOG_CONTEXT,
+						{
+							sessionId: this.config.sessionId,
+							method: request.method,
+							error: String(error),
+						}
+					);
+					this.respondToServerRequest(
+						request,
+						answerCodexServerRequest(request, { grantApprovals: false })
+					);
+				});
+				return;
+			}
+		}
+		this.respondToServerRequest(
+			request,
+			answerCodexServerRequest(request, {
+				grantApprovals: this.invocation.sandbox === 'danger-full-access',
+			})
+		);
+	}
+
+	private answerManagedServerRequest(
+		request: CodexAppServerRequest,
+		admission: NonNullable<ProcessConfig['admission']>
+	): void {
 		// Managed: the exact effect, bound to this lease, actor, thread, turn and
 		// request, decided live. Full access grants nothing here; only `allow`
 		// does, and the request stays pending (never silently granted) until the
@@ -597,7 +676,7 @@ class CodexAppServerTurn {
 					reason: session.problem,
 				}
 			);
-			this.respondToServerRequest(request, {
+			this.respondWithPolicy(request, {
 				grantApprovals: false,
 				managed: { decision: 'deny', reason: session.problem },
 			});
@@ -630,7 +709,7 @@ class CodexAppServerTurn {
 				decision: decision.decision,
 				reason: decision.decision === 'allow' ? undefined : decision.reason,
 			});
-			this.respondToServerRequest(request, { grantApprovals: false, managed: decision });
+			this.respondWithPolicy(request, { grantApprovals: false, managed: decision });
 		};
 		Promise.resolve()
 			.then(() => authority.decide(effect, binding, controller.signal))
@@ -655,18 +734,34 @@ class CodexAppServerTurn {
 				requestId: String(id),
 			});
 			// The request's own method decides the shape of a decline.
-			this.respondToServerRequest(pending.request, {
+			this.respondWithPolicy(pending.request, {
 				grantApprovals: false,
 				managed: EFFECT_REVOKED,
 			});
 		}
 	}
 
-	private respondToServerRequest(
-		request: Parameters<typeof answerCodexServerRequest>[0],
+	/** Answer a request by policy: the grant table, plus the managed decision when there is one. */
+	private respondWithPolicy(
+		request: CodexAppServerRequest,
 		policy: Parameters<typeof answerCodexServerRequest>[1]
 	): void {
-		const answer = answerCodexServerRequest(request, policy);
+		this.respondToServerRequest(request, answerCodexServerRequest(request, policy));
+	}
+
+	private async answerInteractiveServerRequest(
+		request: CodexAppServerRequest,
+		interaction: CodexServerInteraction
+	): Promise<void> {
+		const opened = harnessInteractionBroker.open(interaction.request);
+		const resolution = await opened.completion;
+		this.respondToServerRequest(request, interaction.answer(resolution));
+	}
+
+	private respondToServerRequest(
+		request: CodexAppServerRequest,
+		answer: CodexServerRequestAnswer
+	): void {
 		logger.debug('[CodexAppServerSpawner] Answering server request', LOG_CONTEXT, {
 			sessionId: this.config.sessionId,
 			method: request.method,
@@ -675,7 +770,6 @@ class CodexAppServerTurn {
 		try {
 			this.rpc.respond(request.id, answer);
 		} catch (error) {
-			// The child is gone; its exit reports what happened to the turn.
 			logger.debug('[CodexAppServerSpawner] Could not answer server request', LOG_CONTEXT, {
 				sessionId: this.config.sessionId,
 				method: request.method,
@@ -950,6 +1044,11 @@ class CodexAppServerTurn {
 			return;
 		}
 		this.ctx.processes.delete(sessionId);
+		if (this.config.permissionMode === 'standard') {
+			this.emitAgentError(new Error(`Codex Standard mode requires app-server: ${String(error)}`));
+			this.finish(1);
+			return;
+		}
 		try {
 			if (this.ctx.fallbackToCli(this.config).success) {
 				// exec owns the turn now; this child's exit must report nothing.

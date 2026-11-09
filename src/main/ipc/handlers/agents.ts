@@ -11,7 +11,6 @@ import {
 	AGENT_DEFINITIONS,
 	getAgentCapabilities,
 	parseOpenCodeConfig,
-	extractModelsFromConfig,
 	getOpenCodeConfigPaths,
 	getOpenCodeCommandDirs,
 	getCodexSkillDirs,
@@ -21,13 +20,8 @@ import {
 import { capabilitySnapshots } from '../../agents/capability-snapshot';
 import type { AgentCapabilitiesSnapshotMap } from '../../../shared/agentCapabilities';
 import { probeRemoteMaestroP, ensureRemoteMaestroPProbed } from '../../agents/probeRemoteMaestroP';
-import { execFileNoThrow, type ExecResult } from '../../utils/execFile';
-import {
-	holdRemoteAccess,
-	isRemoteAccessRefusal,
-	remoteAccessRefusal,
-} from '../../ssh-remote-manager';
-import type { RemoteAccessRequest } from '../../enterprise/remote';
+import { execFileNoThrow } from '../../utils/execFile';
+import { isRemoteAccessRefusal } from '../../ssh-remote-manager';
 import { discoverCodexSkills } from '../../agents/codex-skills';
 import { providerProbeManaged, type ProviderProbeManaged } from '../../agents/provider-probe';
 import { DispatchRefusedError } from '../../../shared/maestro-lib/run/start-turn';
@@ -44,25 +38,36 @@ import {
 	requireDependency,
 	CreateHandlerOptions,
 } from '../../utils/ipcHandler';
-import { buildSshCommand, RemoteCommandOptions } from '../../utils/ssh-command-builder';
+import { RemoteCommandOptions } from '../../utils/ssh-command-builder';
 import { stripAnsi } from '../../utils/stripAnsi';
+import {
+	discoverAgentModels,
+	execRemoteProbeCommand,
+	holdRemoteProbe,
+	remoteAccessRefusedError,
+	SSH_MODEL_TIMEOUT_MS,
+} from '../../agents/model-discovery';
 import { SshRemoteConfig } from '../../../shared/types';
 import type { AgentCapabilities } from '../../../shared/types';
 import { MaestroSettings } from './persistence';
 import { captureException } from '../../utils/sentry';
-import { parseJsonWithBom } from '../../../shared/jsonUtils';
 import {
+	forgetSnapshots as forgetClaudeUsageSnapshots,
 	getAllSnapshots as getAllClaudeUsageSnapshots,
 	getRetainedSnapshots as getRetainedClaudeUsageSnapshots,
 	resolveConfigDirKey,
 } from '../../stores/claudeUsageStore';
 import { getLimitResetAt } from '../../agents/limitResetEstimator';
 import {
+	forgetCodexUsageSnapshots,
 	getAllCodexUsageSnapshots,
 	getRetainedCodexUsageSnapshots,
 	resolveCodexHomeKey,
 } from '../../stores/codexUsageStore';
-import { pruneMissingQuotaAccounts } from '../../stores/quotaAccountsStore';
+import {
+	dropSnapshotsForMissingAccounts,
+	pruneMissingQuotaAccounts,
+} from '../../stores/quotaAccountsStore';
 import { filterLiveAgents } from '../../../shared/agentVisibility';
 import type { UsageSnapshot } from '../../agents/claude-mode-selector';
 import type { CodexUsageSnapshot } from '../../stores/codexUsageStore';
@@ -582,50 +587,6 @@ function getSshRemoteById(
 	return config;
 }
 
-/**
- * Hold one probe or config read of an SSH remote to the managed remote
- * identity (MRC2-05-07A) BEFORE any ssh command is built, so a refused
- * remote opens no session, takes no timer and is never retried. Answers the
- * refusal as the `ExecResult` `remoteAccessRefusal()` spells (exit `EMANAGED`,
- * the hold's line on stderr), which a caller reads with
- * `isRemoteAccessRefusal()`; null when the session may open. Standalone, or
- * with no authority installed, nothing is consulted. The holder records and
- * warns once per remote, class and code.
- */
-async function holdRemoteProbe(
-	sshRemote: SshRemoteConfig,
-	access: Omit<RemoteAccessRequest, 'remote'>
-): Promise<ExecResult | null> {
-	const hold = await holdRemoteAccess({ ...access, remote: sshRemote });
-	return hold ? remoteAccessRefusal(hold) : null;
-}
-
-/** The line a refused remote discovery is thrown as: the hold's own, so the caller names the policy. */
-function remoteAccessRefusedError(refusal: ExecResult): Error {
-	const error = new Error(refusal.stderr);
-	error.name = 'RemoteAccessRefusedError';
-	return error;
-}
-
-/**
- * Build and run one short command on an SSH remote, racing a timeout the
- * caller names. The caller holds the remote identity first (`holdRemoteProbe`);
- * this runs only an admitted command.
- */
-async function execRemoteProbeCommand(
-	sshRemote: SshRemoteConfig,
-	remoteOptions: RemoteCommandOptions,
-	timeoutMs: number,
-	timeoutMessage: string
-): Promise<ExecResult> {
-	const sshCommand = await buildSshCommand(sshRemote, remoteOptions);
-	const resultPromise = execFileNoThrow(sshCommand.command, sshCommand.args);
-	const timeoutPromise = new Promise<ExecResult>((_, reject) => {
-		setTimeout(() => reject(new Error(timeoutMessage)), timeoutMs);
-	});
-	return Promise.race([resultPromise, timeoutPromise]);
-}
-
 /** Drop every function-valued property so the object survives structured clone. */
 function withoutFunctionProps(obj: any) {
 	return Object.fromEntries(Object.entries(obj).filter(([, value]) => typeof value !== 'function'));
@@ -799,250 +760,6 @@ async function detectAgentsRemote(sshRemote: SshRemoteConfig): Promise<any[]> {
 	}
 
 	return agents;
-}
-
-// Remote model discovery cache
-const remoteModelCache = new Map<string, { models: string[]; timestamp: number }>();
-const REMOTE_MODEL_CACHE_TTL_MS = 5 * 60 * 1000;
-const SSH_MODEL_TIMEOUT_MS = 10000;
-
-/**
- * Read OpenCode config files from a remote SSH host and extract model IDs.
- *
- * Probes the same config paths OpenCode uses on POSIX systems:
- *   ~/.opencode/opencode.json, ~/.opencode.json, ~/.config/opencode/opencode.json
- *
- * Uses a single SSH command with a shell script that cats each file, avoiding
- * multiple round-trips. Returns unique model IDs in provider/model format.
- */
-async function discoverModelsFromRemoteConfigs(sshRemote: SshRemoteConfig): Promise<string[]> {
-	// Shell script that probes each config path and prints its content with delimiters.
-	// We use a delimiter so we can split multiple config files from a single stdout.
-	const configPaths = [
-		'~/.opencode/opencode.json',
-		'~/.opencode.json',
-		'${XDG_CONFIG_HOME:-$HOME/.config}/opencode/opencode.json',
-	];
-
-	// Build a script that cats each config file if it exists
-	const catScript = configPaths
-		.map(
-			(p) =>
-				`if [ -f ${p} ]; then echo "___OPENCODE_CONFIG_START___"; cat ${p}; echo "___OPENCODE_CONFIG_END___"; fi`
-		)
-		.join('; ');
-
-	const remoteOptions: RemoteCommandOptions = {
-		command: 'sh',
-		args: ['-c', catScript],
-		env: sshRemote.remoteEnv,
-	};
-
-	// A read of the remote's files (MRC2-05-07A), held outside the try so a
-	// refusal reaches the caller by name instead of reading as a failed read.
-	const refusal = await holdRemoteProbe(sshRemote, {
-		class: 'read',
-		operation: 'read-opencode-configs',
-		target: null,
-		count: configPaths.length,
-	});
-	if (refusal) throw remoteAccessRefusedError(refusal);
-
-	try {
-		const result = await execRemoteProbeCommand(
-			sshRemote,
-			remoteOptions,
-			SSH_MODEL_TIMEOUT_MS,
-			'SSH config read timed out'
-		);
-
-		if (result.exitCode !== 0 || !result.stdout.includes('___OPENCODE_CONFIG_START___')) {
-			return [];
-		}
-
-		// Parse delimited config blocks from stdout
-		const seen = new Set<string>();
-		const models: string[] = [];
-		const blocks = result.stdout.split('___OPENCODE_CONFIG_START___').slice(1);
-
-		for (const block of blocks) {
-			const endIdx = block.indexOf('___OPENCODE_CONFIG_END___');
-			const jsonStr = endIdx >= 0 ? block.slice(0, endIdx).trim() : block.trim();
-			if (!jsonStr) continue;
-
-			const config = parseOpenCodeConfig(jsonStr);
-			if (!config) continue;
-
-			for (const modelId of extractModelsFromConfig(config)) {
-				if (!seen.has(modelId)) {
-					seen.add(modelId);
-					models.push(modelId);
-				}
-			}
-		}
-
-		if (models.length > 0) {
-			logger.info(
-				`Extracted ${models.length} models from remote OpenCode configs on ${sshRemote.host}`,
-				LOG_CONTEXT,
-				{ models }
-			);
-		}
-
-		return models;
-	} catch (error) {
-		if (error instanceof Error && error.message.includes('timed out')) {
-			logger.warn(`Timed out reading remote OpenCode configs on ${sshRemote.host}`, LOG_CONTEXT);
-			return [];
-		}
-		// Non-fatal: config reading failure shouldn't block CLI-based discovery
-		logger.warn(`Failed to read remote OpenCode configs on ${sshRemote.host}`, LOG_CONTEXT, {
-			error,
-		});
-		return [];
-	}
-}
-
-/**
- * Discover available models for an agent on a remote SSH host.
- * Uses the agent's `models` subcommand over SSH, supplemented by models
- * from remote opencode.json config files for OpenCode agents.
- * Returns an empty array on timeout, non-zero exit, or unknown agent.
- * Throws on unexpected errors (e.g., SSH config issues, parsing bugs).
- */
-async function discoverModelsRemote(
-	agentId: string,
-	sshRemote: SshRemoteConfig,
-	forceRefresh: boolean
-): Promise<string[]> {
-	const cacheKey = `${agentId}:${sshRemote.id}`;
-
-	// Check cache unless force refresh
-	if (!forceRefresh) {
-		const cached = remoteModelCache.get(cacheKey);
-		if (cached && Date.now() - cached.timestamp < REMOTE_MODEL_CACHE_TTL_MS) {
-			logger.info(`Using cached remote models for ${agentId} on ${sshRemote.host}`, LOG_CONTEXT);
-			return cached.models;
-		}
-	}
-
-	// Look up the agent's binary name
-	const agentDef = AGENT_DEFINITIONS.find((a) => a.id === agentId);
-	if (!agentDef) {
-		logger.warn(`Unknown agent for remote model discovery: ${agentId}`, LOG_CONTEXT);
-		return [];
-	}
-
-	const remoteOptions: RemoteCommandOptions = {
-		command: agentDef.binaryName,
-		args: agentId === 'omp' ? ['models', '--json'] : ['models'],
-		env: sshRemote.remoteEnv,
-	};
-
-	// The version-shaped probe of the remote's binary (MRC2-05-07A): a refused
-	// remote is thrown by name to the caller (never an empty model list), and
-	// the cached models above are served without a hold since no session opens.
-	const refusal = await holdRemoteProbe(sshRemote, {
-		class: 'probe',
-		operation: 'discover-models',
-		target: null,
-	});
-	if (refusal) throw remoteAccessRefusedError(refusal);
-
-	try {
-		logger.info(
-			`Discovering models for "${agentDef.name}" on remote ${sshRemote.host}`,
-			LOG_CONTEXT
-		);
-
-		// Execute with timeout matching detectAgentsRemote pattern
-		const result = await execRemoteProbeCommand(
-			sshRemote,
-			remoteOptions,
-			SSH_MODEL_TIMEOUT_MS,
-			`SSH model discovery timed out after ${SSH_MODEL_TIMEOUT_MS / 1000}s`
-		);
-
-		if (result.exitCode !== 0) {
-			logger.warn(
-				`Remote model discovery for "${agentDef.name}" exited with code ${result.exitCode}`,
-				LOG_CONTEXT,
-				{ stderr: result.stderr }
-			);
-			return [];
-		}
-
-		const seen = new Set<string>();
-		const models: string[] = [];
-		const sanitizedStdout = stripAnsi(result.stdout);
-
-		if (agentId === 'omp') {
-			// `omp models` prints a human table; the machine-readable form is
-			// `omp models --json` -> { models: [{ selector, id, ... }] }. Use the
-			// provider-qualified selector, mirroring the local discovery path so the
-			// remote picker is not filled with table headings/box rows.
-			try {
-				const parsed = parseJsonWithBom<{ models?: Array<{ id?: string; selector?: string }> }>(
-					sanitizedStdout
-				);
-				for (const entry of parsed.models ?? []) {
-					const modelId = entry.selector || entry.id;
-					if (modelId && !seen.has(modelId)) {
-						seen.add(modelId);
-						models.push(modelId);
-					}
-				}
-			} catch (parseError) {
-				logger.warn('Failed to parse remote omp models --json output', LOG_CONTEXT, {
-					error: parseError,
-				});
-			}
-		} else {
-			// Source 1: CLI-discovered models (one per line)
-			const cliModels = sanitizedStdout
-				.split('\n')
-				.map((l) => l.trim())
-				.filter((l) => l.length > 0);
-			for (const m of cliModels) {
-				if (!seen.has(m)) {
-					seen.add(m);
-					models.push(m);
-				}
-			}
-		}
-
-		// Source 2: Remote opencode.json config files (OpenCode only)
-		if (agentId === 'opencode') {
-			const configModels = await discoverModelsFromRemoteConfigs(sshRemote);
-			for (const m of configModels) {
-				if (!seen.has(m)) {
-					seen.add(m);
-					models.push(m);
-				}
-			}
-		}
-
-		logger.info(
-			`Discovered ${models.length} models for "${agentDef.name}" on remote ${sshRemote.host}`,
-			LOG_CONTEXT
-		);
-
-		// Cache the result
-		remoteModelCache.set(cacheKey, { models, timestamp: Date.now() });
-
-		return models;
-	} catch (error) {
-		// Timeout is an expected SSH failure - return empty gracefully
-		if (error instanceof Error && error.message.includes('SSH model discovery timed out')) {
-			logger.warn(
-				`Timed out discovering models for "${agentDef.name}" on ${sshRemote.host}`,
-				LOG_CONTEXT
-			);
-			return [];
-		}
-		// Unexpected errors should propagate to withIpcErrorLogging / Sentry
-		throw error;
-	}
 }
 
 /**
@@ -1880,24 +1597,14 @@ export function registerAgentsHandlers(deps: AgentsHandlerDependencies): void {
 		withIpcErrorLogging(
 			handlerOpts('getModels'),
 			async (agentId: string, forceRefresh?: boolean, sshRemoteId?: string) => {
-				logger.info(`Discovering models for agent: ${agentId}`, LOG_CONTEXT, {
-					forceRefresh,
-					sshRemoteId,
-				});
-
-				// If SSH remote ID provided, discover models on remote host
-				if (sshRemoteId) {
-					const sshConfig = getSshRemoteById(settingsStore, sshRemoteId);
-					if (!sshConfig) {
-						throw new Error(`SSH remote not found: ${sshRemoteId}`);
-					}
-					return discoverModelsRemote(agentId, sshConfig, forceRefresh ?? false);
-				}
-
-				// Local discovery
-				const agentDetector = requireDependency(getAgentDetector, 'Agent detector');
-				const models = await agentDetector.discoverModels(agentId, forceRefresh ?? false);
-				return models;
+				// A forced discovery also broadcasts the list to every open picker.
+				return discoverAgentModels(
+					{
+						getAgentDetector: () => requireDependency(getAgentDetector, 'Agent detector'),
+						getSshRemote: (id) => getSshRemoteById(settingsStore, id),
+					},
+					{ agentId, forceRefresh: forceRefresh ?? false, sshRemoteId }
+				);
 			}
 		)
 	);
@@ -2172,13 +1879,18 @@ export function registerAgentsHandlers(deps: AgentsHandlerDependencies): void {
 	// (mode selector, spawner) read the live map instead. The renderer's
 	// claudeUsageStore lazily fetches via this handler on first read and re-fetches
 	// whenever `process:claude-mode-resolved` arrives (the only signal that
-	// `sampleUsage()` may have refreshed the on-disk map).
+	// `sampleUsage()` may have refreshed the on-disk map). A snapshot whose
+	// config dir was deleted is forgotten here, or its row would outlive the
+	// account by the whole retention period.
 	ipcMain.handle(
 		'agents:getClaudeUsageSnapshots',
 		withIpcErrorLogging(
 			handlerOpts('getClaudeUsageSnapshots'),
 			async (): Promise<Record<string, UsageSnapshot>> => {
-				return getRetainedClaudeUsageSnapshots();
+				return dropSnapshotsForMissingAccounts(
+					getRetainedClaudeUsageSnapshots(),
+					forgetClaudeUsageSnapshots
+				);
 			}
 		)
 	);
@@ -2262,14 +1974,17 @@ export function registerAgentsHandlers(deps: AgentsHandlerDependencies): void {
 
 	// Snapshot mirror for the renderer: returns every RETAINED Codex quota usage
 	// snapshot keyed by canonical CODEX_HOME (expired included, same reasoning as
-	// the Claude mirror above). The auth-sensitive auth.json read and ChatGPT
+	// the Claude mirror above, deleted homes forgotten the same way). The auth-sensitive auth.json read and ChatGPT
 	// metadata request stay in the main process.
 	ipcMain.handle(
 		'agents:getCodexUsageSnapshots',
 		withIpcErrorLogging(
 			handlerOpts('getCodexUsageSnapshots'),
 			async (): Promise<Record<string, CodexUsageSnapshot>> => {
-				return getRetainedCodexUsageSnapshots();
+				return dropSnapshotsForMissingAccounts(
+					getRetainedCodexUsageSnapshots(),
+					forgetCodexUsageSnapshots
+				);
 			}
 		)
 	);

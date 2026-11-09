@@ -479,6 +479,18 @@ export class AuthorizationStore {
 					? { legacy: parsed.legacy }
 					: {}),
 		};
+		// Read-time effective migration only: preserve bytes/anchor until the next
+		// authorized mutation. Legacy scope membership never proves separate consent.
+		for (const entry of Object.values(this.ledger.entries)) {
+			entry.caps = entry.caps.flatMap((grant) => {
+				if (grant.capability !== 'media:tools' || grant.originalAudioExport === true)
+					return [grant];
+				const members = parseAllowlistScope(grant.scope)?.filter(
+					(member) => member !== 'discord-original-audio'
+				);
+				return members?.length ? [{ ...grant, scope: members.join(',') }] : [];
+			});
+		}
 		this.storageMode = 'persistent';
 		// Loading never rewrites prior state. A fresh authoritative user action persists schema3.
 	}

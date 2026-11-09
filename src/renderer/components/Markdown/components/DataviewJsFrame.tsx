@@ -26,13 +26,16 @@
  *
  * A run. Once the guest is ready and the index snapshot (`dataview:jsSnapshot`,
  * refused in main unless DataviewJS is on and the root trusted) is in, the host
- * sends `run` and arms a {@link DATAVIEW_JS_RUN_TIMEOUT_MS} wall-clock
- * watchdog. No answer in time, or a guest process that dies, destroys the guest
+ * sends `run` and arms a {@link DATAVIEW_JS_INDEX_TIMEOUT_MS} watchdog for
+ * the index build. The guest's first `index.ready` for the run re-arms it
+ * with the script's own {@link DATAVIEW_JS_RUN_TIMEOUT_MS}; a later one is
+ * ignored, so a script cannot keep its guest alive. No answer in time, or a guest process that dies, destroys the guest
  * (a new key remounts the tag) and shows the error on this block only; the
  * block then waits for a source change or Run again, rather than burning
  * another five seconds on the next save. A `dataview:changed` event for the
  * snapshot's root fetches a new snapshot (debounced) and runs the script again,
- * keeping the old output on screen until the new run answers.
+ * keeping the old output on screen, dimmed under `DataviewLoading`'s "Recalculating" pill, until the new run
+ * answers. Before the first output the block shows `DataviewSkeleton`.
  *
  * Mounting. A guest mounts only while the block holds one of the window's guest
  * slots, which it asks for only while near the viewport
@@ -43,6 +46,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Theme } from '../../../types';
 import {
 	DATAVIEW_GUEST_URL,
+	DATAVIEW_JS_INDEX_TIMEOUT_MS,
 	DATAVIEW_JS_MAX_FRAME_HEIGHT,
 	DATAVIEW_JS_RUN_TIMEOUT_MS,
 	SANDBOX_TO_GUEST_CHANNEL,
@@ -69,6 +73,12 @@ import { logger } from '../../../utils/logger';
 import { AlertCallout } from './AlertCallout';
 import type { DataviewDocumentScope } from './DataviewDocumentContext';
 import {
+	DATAVIEW_REFRESH_DIM_OPACITY,
+	DataviewCalculatingPill,
+	DataviewSkeleton,
+	useDataviewRefreshIndicator,
+} from './DataviewLoading';
+import {
 	ERR_ABORTED,
 	answerGuestRequest,
 	createGuestRequestQueue,
@@ -84,9 +94,6 @@ import {
 export { DATAVIEW_JS_MAX_REQUESTS_IN_FLIGHT } from './dataviewJsGuestBridge';
 
 const LOG_CONTEXT = 'DataviewJsFrame';
-
-/** Height of the loading placeholder, as `DataviewBlock` uses. */
-const PLACEHOLDER_HEIGHT = '2.5em';
 
 /** How far past the viewport a block starts asking for a guest (clipping scroll containers still apply). */
 const NEAR_VIEWPORT_MARGIN = '600px 0px';
@@ -111,6 +118,8 @@ interface Run {
 	guest: GuestWebviewElement;
 	/** Answered, failed, timed out, or replaced. Requests are refused after. */
 	settled: boolean;
+	/** The guest said `index.ready`: the watchdog now holds the script's budget, and never moves again. */
+	indexed: boolean;
 	watchdog: IdleWatchdog;
 }
 
@@ -147,6 +156,8 @@ function DataviewJsGuestFrame({ code, theme, doc }: DataviewJsFrameProps) {
 	const [height, setHeight] = useState<number | null>(null);
 	/** Bumped to run again with the same snapshot (a task toggle that did not write). */
 	const [rerunToken, setRerunToken] = useState(0);
+	/** A run was sent and has not settled: drives the "Recalculating" look over output already on screen. */
+	const [running, setRunning] = useState(false);
 
 	const runRef = useRef<Run | null>(null);
 	const [requests] = useState(createGuestRequestQueue);
@@ -162,6 +173,8 @@ function DataviewJsGuestFrame({ code, theme, doc }: DataviewJsFrameProps) {
 			run.settled = true;
 			run.watchdog.disarm();
 			requests.dropRun(run.runId);
+			// A settled run that was replaced already has its successor running; only the current one stops the look.
+			if (runRef.current === run || runRef.current === null) setRunning(false);
 		},
 		[requests]
 	);
@@ -179,6 +192,24 @@ function DataviewJsGuestFrame({ code, theme, doc }: DataviewJsFrameProps) {
 			setGuestKey((key) => key + 1);
 		},
 		[settleRun]
+	);
+
+	/**
+	 * A watchdog that stops the guest when the run `current()` returns is still the current one, unsettled, and
+	 * has gone `idleMs` without an answer. A thunk, so a run can arm its first watchdog as it is built.
+	 */
+	const runWatchdog = useCallback(
+		(idleMs: number, current: () => Run): IdleWatchdog =>
+			createIdleWatchdog({
+				idleMs,
+				onIdle: () => {
+					const run = current();
+					if (runRef.current !== run || run.settled) return;
+					logger.warn(`A DataviewJS script in ${doc.filePath} timed out`, LOG_CONTEXT);
+					stopGuest({ kind: 'timeout' });
+				},
+			}),
+		[doc.filePath, stopGuest]
 	);
 
 	// --- Guest slots: mount only near the viewport, and never more than the window's cap. ---
@@ -270,14 +301,8 @@ function DataviewJsGuestFrame({ code, theme, doc }: DataviewJsFrameProps) {
 			runId,
 			guest: webview,
 			settled: false,
-			watchdog: createIdleWatchdog({
-				idleMs: DATAVIEW_JS_RUN_TIMEOUT_MS,
-				onIdle: () => {
-					if (runRef.current !== run || run.settled) return;
-					logger.warn(`A DataviewJS script in ${doc.filePath} timed out`, LOG_CONTEXT);
-					stopGuest({ kind: 'timeout' });
-				},
-			}),
+			indexed: false,
+			watchdog: runWatchdog(DATAVIEW_JS_INDEX_TIMEOUT_MS, () => run),
 		};
 		runRef.current = run;
 		const sent = pushToGuest(webview, SANDBOX_TO_GUEST_CHANNEL, {
@@ -289,19 +314,9 @@ function DataviewJsGuestFrame({ code, theme, doc }: DataviewJsFrameProps) {
 			snapshot: snapshot.result,
 		});
 		// The guest went away before it took the run; its replacement's dom-ready runs again.
-		if (!sent) settleRun(run);
-	}, [
-		ready,
-		webview,
-		snapshot,
-		code,
-		halted,
-		rerunToken,
-		blockId,
-		doc.filePath,
-		settleRun,
-		stopGuest,
-	]);
+		if (sent) setRunning(true);
+		else settleRun(run);
+	}, [ready, webview, snapshot, code, halted, rerunToken, blockId, settleRun, runWatchdog]);
 
 	// The watchdog's timer must not outlive the block.
 	useEffect(
@@ -335,6 +350,13 @@ function DataviewJsGuestFrame({ code, theme, doc }: DataviewJsFrameProps) {
 				settleRun(run);
 				setProblem({ kind: 'script', message: message.message });
 				setHeight(null);
+				return;
+			case 'index.ready':
+				if (!run || run.settled || run.indexed || run.guest !== guest) return;
+				if (message.runId !== run.runId) return;
+				run.indexed = true;
+				run.watchdog.disarm();
+				run.watchdog = runWatchdog(DATAVIEW_JS_RUN_TIMEOUT_MS, () => run);
 				return;
 			case 'query.dql':
 			case 'io.load':
@@ -395,30 +417,25 @@ function DataviewJsGuestFrame({ code, theme, doc }: DataviewJsFrameProps) {
 
 	const partition = snapshot ? dataviewGuestPartition(snapshot.root, snapshot.sshRemoteId) : null;
 	const mountGuest = hasSlot && partition !== null;
+	const omittedListPages = snapshot?.result.omittedListPages ?? 0;
 	const background = isPanelThemeColor(theme.colors.bgMain) ? theme.colors.bgMain : 'transparent';
-	const placeholder = (
-		<div
-			data-dataview-placeholder=""
-			aria-busy="true"
-			aria-label="Running DataviewJS"
-			style={{
-				height: PLACEHOLDER_HEIGHT,
-				borderRadius: '6px',
-				background: theme.colors.bgActivity,
-				opacity: 0.5,
-			}}
-		/>
-	);
+	// Output on screen and a run re-computing it: keep the output, dimmed, under the "Recalculating" pill.
+	const refreshShown = useDataviewRefreshIndicator(running && height !== null && !problem);
 
 	return (
 		<div
 			ref={containerRef}
 			className="dataview dataview-js"
 			data-dataview-js-block=""
-			style={{ margin: '0.5em 0' }}
+			data-dataview-refreshing={refreshShown ? '' : undefined}
+			aria-busy={refreshShown || undefined}
+			style={{ margin: '0.5em 0', position: 'relative' }}
 		>
+			{refreshShown && <DataviewCalculatingPill theme={theme} label="Recalculating" />}
 			{problem && <DataviewJsProblem problem={problem} theme={theme} onRunAgain={runAgain} />}
-			{!problem && height === null && placeholder}
+			{!problem && height === null && (
+				<DataviewSkeleton theme={theme} ariaLabel="Running DataviewJS" />
+			)}
 			{mountGuest ? (
 				<webview
 					key={`${partition}:${guestKey}`}
@@ -433,10 +450,21 @@ function DataviewJsGuestFrame({ code, theme, doc }: DataviewJsFrameProps) {
 						height: `${Math.max(1, height ?? 0)}px`,
 						border: 0,
 						backgroundColor: background,
+						opacity: refreshShown ? DATAVIEW_REFRESH_DIM_OPACITY : 1,
+						transition: 'opacity 150ms ease',
 					}}
 				/>
 			) : (
 				height !== null && <div data-dataview-js-spacer="" style={{ height: `${height}px` }} />
+			)}
+			{omittedListPages > 0 && (
+				<div
+					data-dataview-js-trimmed=""
+					className="text-xs"
+					style={{ color: theme.colors.textDim, marginTop: '0.25em' }}
+				>
+					{`Tasks and lists of ${omittedListPages} large ${omittedListPages === 1 ? 'page were' : 'pages were'} left out to keep this script fast.`}
+				</div>
 			)}
 		</div>
 	);

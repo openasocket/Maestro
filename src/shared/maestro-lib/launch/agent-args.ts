@@ -79,6 +79,8 @@ export type AgentConfigResolution = {
 	customArgsSource: 'session' | 'agent' | 'none';
 	customEnvSource: 'session' | 'agent' | 'none';
 	modelSource: 'session' | 'agent' | 'default';
+	modelId?: string;
+	effort?: string;
 };
 
 /** Parse a space-separated custom args string into an array, respecting quoted segments. */
@@ -256,8 +258,18 @@ export function buildAgentArgs(
 			// Standard managed turns keep the provider's prompting mode. Only
 			// remove bypass defaults we introduce here; caller args stay intact
 			// so the launch guard can refuse an explicit widening request.
-			const batchArgs =
-				(options.managedCeiling && !isFullAccess) || standardArgs
+			// A provider whose batch args are all approval bypasses (Codex, Qwen3
+			// Coder, Hermes, Factory Droid, Grok) runs a Standard turn named by the
+			// user with none of them: its native approval prompts are brokered. A
+			// managed turn never reaches that broker, so under a ceiling the managed
+			// filter and its refusal below still decide, never this skip.
+			const skipBatchArgsInStandard =
+				!options.managedCeiling &&
+				options.permissionMode === 'standard' &&
+				agent.skipBatchModeArgsInStandardMode === true;
+			const batchArgs = skipBatchArgsInStandard
+				? []
+				: (options.managedCeiling && !isFullAccess) || standardArgs
 					? filterYoloArgs(agent.batchModeArgs, {
 							yoloModeArgs: agent.fullAccessArgs ?? agent.yoloModeArgs,
 						})
@@ -418,6 +430,8 @@ export function applyAgentConfigOverrides(
 	let finalArgs = [...baseArgs];
 	const agentConfigValues = overrides.agentConfigValues ?? {};
 	let modelSource: AgentConfigResolution['modelSource'] = 'default';
+	let modelId: string | undefined;
+	let effort: string | undefined;
 
 	// Flags that read-only mode pins (e.g. OpenCode's `--agent plan`). Config
 	// options and custom args repeating one of these are dropped below so the
@@ -459,6 +473,14 @@ export function applyAgentConfigOverrides(
 					agentConfigValues[option.key] !== undefined
 						? agentConfigValues[option.key]
 						: option.default;
+			}
+			if (option.key === 'model' && typeof value === 'string' && value) modelId = value;
+			if (
+				(option.key === 'effort' || option.key === 'reasoningEffort') &&
+				typeof value === 'string' &&
+				value
+			) {
+				effort = value;
 			}
 
 			// Type assertion needed because AgentConfigOption is a discriminated union
@@ -531,6 +553,8 @@ export function applyAgentConfigOverrides(
 		customArgsSource,
 		customEnvSource: hasEnvVars ? customEnvSource : 'none',
 		modelSource,
+		modelId,
+		effort,
 	};
 }
 

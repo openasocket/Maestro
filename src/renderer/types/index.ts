@@ -78,6 +78,8 @@ import type { AgentError, SessionCliActivity } from '../../shared/types';
 import type { AgentDelegationKind } from '../../shared/agentDelegation';
 import type { MentionRouting } from '../../shared/crossAgentContext';
 import type { CodexTransport } from '../../shared/codexTransport';
+import type { HarnessControlMode } from '../../shared/maestro-lib/providers/native-control';
+import type { LiftedToPointer } from '../../shared/maestro-lib/agents/lift-pointer';
 import type { ComposerCommandMode } from '../utils/shellCommandInput';
 import type { MindMapLayoutType } from '../components/DocumentGraph/layoutTypes';
 
@@ -511,9 +513,13 @@ export interface MentionHandoff {
 
 export interface QueuedItem {
 	id: string; // Unique item ID
+	/** Increases only when a failed dispatch restores this ID. Older removals must not erase it. */
+	dispatchRecoveryGeneration?: number;
 	timestamp: number; // When it was queued (for ordering)
 	tabId: string; // Target tab for this item
 	type: QueuedItemType; // 'message' or 'command'
+	/** Set by known send paths; absent on legacy/programmatic items, which remain unattended. */
+	querySource?: ProcessConfig['querySource'];
 	// For messages
 	text?: string; // Message text
 	images?: string[]; // Attached images (base64)
@@ -534,6 +540,11 @@ export interface QueuedItem {
 	// Held/paused: kept in the queue (preserving order) but skipped by every
 	// dispatch path until the user resumes it. See utils/executionQueue.ts.
 	paused?: boolean;
+	/** Dispatch ID held until host admission and its pre-start baseline are complete. */
+	pendingAdmissionId?: string;
+	/** Host-journaled release revision. Pending ID remains provenance and a
+	 * renderer safety barrier until the guarded native queue consumer claims it. */
+	admissionRelease?: { generation: string };
 	// Hold set when the process ownership probe cannot reach main. The
 	// item becomes runnable only after bridge reconciliation confirms ownership.
 	waitingForConnection?: boolean;
@@ -565,6 +576,11 @@ export interface QueuedItem {
 	// transcript. Carries a consult's replies verbatim without repeating them in
 	// the user bubble, where they are already shown as the consult's own reply.
 	agentContext?: string;
+	// A `dispatch --notify-on-complete` wake that main queued because this tab was
+	// mid-turn: another agent reporting back, not the user's message. It runs as
+	// its own turn when the tab goes idle and is never steered into the running
+	// one (see getSteerEligibility).
+	dispatchCallback?: boolean;
 	// Model/effort captured when the user queued this item. Both the spawn and
 	// the transcript pills read it, so a queued turn runs under - and is labeled
 	// with - the configuration it was queued with, not whatever is selected by
@@ -806,6 +822,7 @@ export interface OnboardingStats {
 // AI Tab for multi-tab support within a Maestro session
 // Each tab represents a separate AI agent conversation (Claude Code, OpenCode, etc.)
 export interface AITab {
+	relayConversation?: import('../../shared/relayConversation').RelayConversationState;
 	/** Durable conversation provenance, independent of whether a turn is running. */
 	origin?: 'user' | 'auto' | 'relay';
 	id: string; // Unique tab ID (generated UUID)
@@ -813,6 +830,13 @@ export interface AITab {
 	name: string | null; // User-defined name (null = show UUID octet)
 	starred: boolean; // Whether session is starred (for pill display)
 	logs: LogEntry[]; // Conversation history
+	/**
+	 * Messages pinned in this tab (see `src/shared/messagePins.ts`). Belongs to
+	 * this tab only: forking or sending the tab elsewhere does not copy it. The
+	 * closed-tab stack keeps it, and it is mirrored to the provider session's
+	 * origin record so a conversation reopened from History gets it back.
+	 */
+	pinnedMessages?: import('../../shared/messagePins').MessagePin[];
 	agentError?: AgentError; // Tab-specific agent error (shown in banner)
 	/**
 	 * The managed run the tab's latest send started (identifiers only), as
@@ -998,6 +1022,10 @@ export interface FilePreviewTab {
 	editMode: boolean; // Whether tab was in edit mode
 	editContent: string | undefined; // Unsaved edit content (undefined if no pending changes)
 	createdAt: number; // Timestamp for ordering
+	// When the tab started showing its current path (ms). Differs from createdAt
+	// once an open replaces the file in this tab. The User Journey dwell time on
+	// close counts from here; tabs that predate it fall back to createdAt.
+	openedAt?: number;
 	lastModified: number; // Timestamp (ms) when file was last modified on disk (for refresh detection)
 	// SSH remote support
 	sshRemoteId?: string; // SSH remote ID for re-fetching content if needed
@@ -1334,6 +1362,10 @@ export interface PendingSteer {
 }
 
 export interface Session {
+	/** Named exclusions override the group and worktree grants. */
+	peerAgents?: import('../../shared/types').PeerAgent[];
+	groupPeerAccess?: import('../../shared/types').PeerAccess;
+	worktreePeerAccess?: import('../../shared/types').PeerAccess;
 	providerMigration?: ProviderMigrationState;
 	providerTranslationQueuedOrigins?: Record<string, ToolType>;
 	providerTranslationHistoryMappings?: HistoryTranslationMapping[];
@@ -1576,6 +1608,9 @@ export interface Session {
 	// SSH Remote context (session-wide, for all operations - file explorer, git, auto run, etc.)
 	sshRemoteId?: string; // ID of SSH remote config being used (flattened from sshRemote.id)
 	remoteCwd?: string; // Current working directory on remote host
+	// Federation: set once this SSH agent was lifted onto its remote's host. Every tab and
+	// transcript stays; sends are refused with a pointer at `peer:agentId` (liftedSendRefusal()).
+	liftedTo?: LiftedToPointer;
 
 	// Inline wizard state for /wizard command
 	// Keeps per-session/per-tab wizard state for creating or iterating on Auto Run documents
@@ -1646,6 +1681,8 @@ export interface Session {
 	// Absent means 'exec'. Experimental. Always read it through
 	// `resolveCodexTransport` in shared/codexTransport, never directly.
 	codexTransport?: CodexTransport;
+	/** Optional native protocol control mode. Absent means the current transport. */
+	harnessControlMode?: HarnessControlMode;
 	/**
 	 * Parked agent-level overrides (the per-session fields above that belong to
 	 * one provider: path, args, env, model, effort, context window, token
@@ -1690,7 +1727,12 @@ export interface Session {
 
 // Process spawning configuration
 export interface ProcessConfig {
+	/** Submitted native transcript row; a missing boundary disables full-turn observation. */
+	transcriptBoundaryId?: string;
 	sessionId: string;
+	pianolaDispatchId?: string;
+	/** Owning desktop queue consumer only; host releases and claims within this spawn request. */
+	pianolaQueueItemId?: string;
 	toolType: string;
 	cwd: string;
 	command: string;
@@ -1903,6 +1945,10 @@ export interface EncoreFeatureFlags {
 	// Run preview. Off by default. Optional so older fixtures and persisted
 	// settings remain valid.
 	dataview?: boolean;
+	// Federation - reach a `maestro-cli host` on an SSH remote and drive its
+	// agents from this machine. Off by default. Optional so older fixtures and
+	// persisted settings remain valid.
+	federation?: boolean;
 }
 
 // Director's Notes settings for synopsis generation

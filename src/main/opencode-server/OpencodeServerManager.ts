@@ -64,6 +64,21 @@ const AUTO_APPROVE_CONFIG = {
 	tools: { question: false },
 } as const;
 
+/**
+ * Standard mode on a STANDALONE session: every tool asks, so OpenCode's
+ * native approval requests reach the harness interaction broker. A managed
+ * scope never reads this: it always starts with
+ * `OPENCODE_MANAGED_PERMISSION_CONFIG`.
+ */
+const STANDARD_ASK_CONFIG = {
+	permission: { '*': 'ask', external_directory: 'ask', question: 'deny' },
+	tools: { question: false },
+} as const;
+
+function permissionConfig(mode: EnsureServerOptions['permissionMode']) {
+	return mode === 'standard' ? STANDARD_ASK_CONFIG : AUTO_APPROVE_CONFIG;
+}
+
 // COWORKING FOLLOW-UP (gated behind encoreFeatures.opencodeServer): the shared
 // serve process gets no per-session coworking env, so its env-less MCP
 // subprocess fails the bridge handshake (ppid → serve PID, untracked) and
@@ -102,6 +117,8 @@ export interface EnsureServerOptions {
 	shellEnvVars?: Record<string, string>;
 	/** Extra PATH dirs (ProcessConfig.extraPathDirs). */
 	extraPathDirs?: string[];
+	/** Standard uses native approval requests; other modes preserve auto-approval. */
+	permissionMode?: 'full' | 'standard' | 'readonly';
 	/** Working directory to spawn the server in (any workspace; requests are
 	 *  scoped per-call via `directory`). */
 	cwd: string;
@@ -111,9 +128,13 @@ export interface EnsureServerOptions {
 
 /** The permission configuration a server instance starts with, by scope. */
 export function opencodeServerPermissionConfig(
-	managed: OpencodeManagedServerScope | undefined
-): typeof AUTO_APPROVE_CONFIG | typeof OPENCODE_MANAGED_PERMISSION_CONFIG {
-	return managed ? OPENCODE_MANAGED_PERMISSION_CONFIG : AUTO_APPROVE_CONFIG;
+	managed: OpencodeManagedServerScope | undefined,
+	permissionMode?: EnsureServerOptions['permissionMode']
+):
+	| typeof AUTO_APPROVE_CONFIG
+	| typeof STANDARD_ASK_CONFIG
+	| typeof OPENCODE_MANAGED_PERMISSION_CONFIG {
+	return managed ? OPENCODE_MANAGED_PERMISSION_CONFIG : permissionConfig(permissionMode);
 }
 
 class OpencodeServerManager {
@@ -161,7 +182,9 @@ class OpencodeServerManager {
 			opts.shellEnvVars,
 			opts.extraPathDirs
 		);
-		env.OPENCODE_CONFIG_CONTENT = JSON.stringify(opencodeServerPermissionConfig(opts.managed));
+		env.OPENCODE_CONFIG_CONTENT = JSON.stringify(
+			opencodeServerPermissionConfig(opts.managed, opts.permissionMode)
+		);
 
 		logger.info('[OpencodeServer] Starting shared server', 'OpencodeServer', {
 			binaryPath: opts.binaryPath,
@@ -358,6 +381,7 @@ export function buildServerKey(opts: EnsureServerOptions): string {
 		fingerprint(opts.shellEnvVars),
 		(opts.extraPathDirs ?? []).join(':'),
 		scope,
+		opts.permissionMode ?? 'current',
 	].join('\u0001');
 }
 

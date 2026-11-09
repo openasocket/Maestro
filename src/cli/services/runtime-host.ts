@@ -15,6 +15,7 @@ import {
 	createMaestroRuntime,
 	createPromptLoaderFor,
 	deleteCliServerInfoFrom,
+	hostHasWork,
 	resolveRuntimeTurnOptions,
 	startRuntimeServer,
 	writeCliServerInfoTo,
@@ -46,12 +47,14 @@ import {
 	createManagedCommunicationsPort,
 } from '../../main/enterprise/service';
 import { PROMPT_IDS } from '../../shared/promptDefinitions';
+import { cueEngineLockOwnerToken } from '../../main/cue/cue-engine-lock';
 import { startHostCue, type HostCue } from './host-cue';
 import {
 	composeHostManaged,
 	type HostManagedComposition,
 	type HostManagedLifecycle,
 } from './host-managed';
+import { createHostSleepGuard, type HostSleepGuard } from './host-sleep-guard';
 
 /** The runtime refused the directory: another host, a desktop, a held lock, a corrupt store. */
 export class HostStartError extends Error {
@@ -130,6 +133,11 @@ export interface RuntimeHostOptions {
 	 * endpoint socket on stop, after the server and before the runtime releases the directory.
 	 */
 	managedLifecycle?: HostManagedLifecycle;
+	/**
+	 * Hold the Mac awake while work is in flight (`caffeinate`). Default `true`; `false` for
+	 * `host start --no-prevent-sleep`. No effect on other platforms.
+	 */
+	preventSleep?: boolean;
 	log(line: string): void;
 }
 
@@ -155,6 +163,7 @@ export interface RuntimeHostDeps {
 	startCue: typeof startHostCue;
 	/** What the bridge's listener is held to. Default: `runtimeHostListenerAuthority`. */
 	listenerAuthority(runtime: MaestroRuntime): ListenerAuthority;
+	createSleepGuard: typeof createHostSleepGuard;
 	/** Can the runtime load its bundled prompts, looked for the way it looks for them? */
 	promptsLoad(moduleDirectory: string, userDataDir: string): boolean;
 	randomToken(): string;
@@ -189,6 +198,7 @@ const defaultDeps: RuntimeHostDeps = {
 	startServer: startRuntimeServer,
 	startCue: startHostCue,
 	listenerAuthority: runtimeHostListenerAuthority,
+	createSleepGuard: createHostSleepGuard,
 	promptsLoad: (moduleDirectory, userDataDir) =>
 		createPromptLoaderFor({ userDataDir, moduleDirectory })?.get(
 			PROMPT_IDS.MAESTRO_SYSTEM_PROMPT
@@ -283,7 +293,28 @@ export async function startRuntimeHost(
 	let cue: HostCue = {
 		state: () => ({ state: 'disabled' }),
 		activeRuns: () => 0,
+		drain: async () => undefined,
+		forceStop: () => undefined,
 		stop: async () => undefined,
+		answer: async () => undefined,
+	};
+	const sleepGuard: HostSleepGuard = deps.createSleepGuard({
+		enabled: options.preventSleep !== false,
+		pid: deps.pid,
+		log,
+	});
+	// Every work change (a turn's events, a run's progress, a Cue run beginning or ending) asks for
+	// one look at the work, after the change has settled: the registry forgets a turn a few
+	// microtasks after its last event, so the look waits for the next turn of the event loop. A
+	// burst of streaming events costs one look.
+	let checkQueued = false;
+	const checkWork = (): void => {
+		if (checkQueued) return;
+		checkQueued = true;
+		setImmediate(() => {
+			checkQueued = false;
+			if (server && !stopping) sleepGuard.update(hostHasWork(server.work()));
+		});
 	};
 	let telemetry: TelemetryClient | null = null;
 	let unsubscribeTelemetryWake = (): void => undefined;
@@ -296,8 +327,12 @@ export async function startRuntimeHost(
 		stopping ??= (async () => {
 			// Unpublish first: nothing new should find a host that is going away.
 			deleteCliServerInfoFrom(paths.userDataDir, deps.pid);
+			unsubscribeWork();
+			sleepGuard.stop();
 			// Cue first, and waited for: its runs are stopped and their processes gone before the
-			// runtime closes, so none outlives the host. A failure here must not strand the rest.
+			// runtime closes, so none outlives the host. After a signal this is the drain the signal
+			// started; otherwise (`host stop`, a lost directory) a drain with no wait, which still
+			// persists the queue. A failure here must not strand the rest.
 			try {
 				await cue.stop();
 			} catch (error) {
@@ -339,6 +374,7 @@ export async function startRuntimeHost(
 		},
 		{ types: ['host.lost'] }
 	);
+	const unsubscribeWork = runtime.events.subscribe(() => checkWork());
 
 	let server: RuntimeServer | undefined;
 	try {
@@ -407,6 +443,7 @@ export async function startRuntimeHost(
 			userDataDir: paths.userDataDir,
 			settingsFile: paths.settingsFile,
 			runtime,
+			onWorkChanged: checkWork,
 		});
 		server = await deps.startServer({
 			runtime,
@@ -417,9 +454,12 @@ export async function startRuntimeHost(
 			onStopRequested: () => void stop(),
 			...(roundParents ? { roundParents } : {}),
 			...(communications ? { communications } : {}),
+			// `cue list`, `cue activity`, `cue enable|disable`: the host runs the engine they ask about.
+			answer: (message) => cue.answer(message),
 			describe: () => ({
 				cue: cue.state(),
 				cueRuns: cue.activeRuns(),
+				preventingSleep: sleepGuard.holding(),
 				...(options.version ? { version: options.version } : {}),
 				...(managedUnavailable ? { managedUnavailable } : {}),
 			}),
@@ -431,6 +471,9 @@ export async function startRuntimeHost(
 			startedAt: deps.now(),
 			cliSecret,
 			hostKind: 'headless',
+			// The engine this host runs writes this token into the Cue lock, so the CLI can tell that
+			// lock from another engine's on the same directory (`cue trigger` routes by it).
+			cueLockToken: cueEngineLockOwnerToken(),
 			...(options.version ? { version: options.version } : {}),
 		});
 		log(`Host serving ${paths.userDataDir} on 127.0.0.1:${server.port} (pid ${deps.pid}).`);

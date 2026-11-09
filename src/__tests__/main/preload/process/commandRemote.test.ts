@@ -30,6 +30,37 @@ describe('Process CommandRemote Preload API', () => {
 	});
 
 	describe('onRemoteCommand', () => {
+		it('keeps the host dispatch marker separate from the reply channel', () => {
+			const callback = vi.fn();
+			api.onRemoteCommand(callback);
+			const handler = mockOn.mock.calls.find((c) => c[0] === 'remote:executeCommand')![1];
+			handler(
+				{},
+				'worker',
+				'work',
+				'ai',
+				'tab',
+				false,
+				undefined,
+				true,
+				undefined,
+				'dispatch-id',
+				'reply-channel'
+			);
+			expect(callback).toHaveBeenCalledWith(
+				'worker',
+				'work',
+				'ai',
+				'tab',
+				false,
+				undefined,
+				true,
+				undefined,
+				'reply-channel',
+				'dispatch-id'
+			);
+		});
+
 		it('should register listener and invoke callback with all parameters including tabId, force, images, background, and mentionRouting', () => {
 			const callback = vi.fn();
 			let registeredHandler: (
@@ -42,8 +73,6 @@ describe('Process CommandRemote Preload API', () => {
 				images?: string[],
 				background?: boolean,
 				mentionRouting?: string,
-				delegation?: unknown,
-				dispatchTicket?: string,
 				receiptChannel?: string
 			) => void;
 
@@ -55,6 +84,9 @@ describe('Process CommandRemote Preload API', () => {
 
 			api.onRemoteCommand(callback);
 			const images = ['data:image/png;base64,abc'];
+			// With no dispatch id, delegation or ticket set, main omits those slots
+			// and requestFromRenderer appends the receipt channel right after the
+			// routing; the callback then ends at the receipt channel.
 			registeredHandler!(
 				{},
 				'session-123',
@@ -65,8 +97,6 @@ describe('Process CommandRemote Preload API', () => {
 				images,
 				true,
 				'handoff',
-				undefined,
-				undefined,
 				'receipt-channel'
 			);
 
@@ -79,15 +109,16 @@ describe('Process CommandRemote Preload API', () => {
 				images,
 				true,
 				'handoff',
-				undefined,
-				undefined,
 				'receipt-channel'
 			);
 		});
 
 		it('forwards the delegation context in the slot after the routing and before the ticket and the receipt channel (MRC-07-04C)', () => {
 			// The dispatching operation's record rides beside the prompt; main
-			// appends the receipt channel after it, so the two must not swap.
+			// pads the absent Pianola dispatch id ahead of it and appends the
+			// receipt channel last. The callback takes the receipt channel right
+			// after the routing (upstream's slot), then the dispatch id, the
+			// record and the ticket, so the record and the channel must not swap.
 			const callback = vi.fn();
 			let registeredHandler: (...args: unknown[]) => void;
 			mockOn.mockImplementation((channel: string, handler: typeof registeredHandler) => {
@@ -105,6 +136,7 @@ describe('Process CommandRemote Preload API', () => {
 				undefined,
 				true,
 				undefined,
+				undefined,
 				delegation,
 				undefined,
 				'receipt-channel'
@@ -118,17 +150,20 @@ describe('Process CommandRemote Preload API', () => {
 				undefined,
 				true,
 				undefined,
-				delegation,
+				'receipt-channel',
 				undefined,
-				'receipt-channel'
+				delegation,
+				undefined
 			);
 		});
 
 		it('forwards the routing, the delegation record and the dispatch ticket in that order, logging the record and the ticket by presence only', () => {
-			// The wire main sends is `..., background, mentionRouting, delegation,
-			// dispatchTicket, receiptChannel`; the preload hands every slot over as
-			// is, and its debug log names the routing (a closed vocabulary) but
-			// never the record or the ticket by value.
+			// The wire main sends is `..., background, mentionRouting,
+			// pianolaDispatchId, delegation, dispatchTicket, receiptChannel`; the
+			// preload hands the callback `..., mentionRouting, receiptChannel,
+			// pianolaDispatchId, delegation, dispatchTicket`, and its debug log
+			// names the routing (a closed vocabulary) but never the record or the
+			// ticket by value.
 			const callback = vi.fn();
 			let registeredHandler: (...args: unknown[]) => void;
 			mockOn.mockImplementation((channel: string, handler: typeof registeredHandler) => {
@@ -146,6 +181,7 @@ describe('Process CommandRemote Preload API', () => {
 				undefined,
 				false,
 				'only',
+				'dispatch-9',
 				delegation,
 				'tkt-1',
 				'receipt-channel'
@@ -159,9 +195,10 @@ describe('Process CommandRemote Preload API', () => {
 				undefined,
 				false,
 				'only',
+				'receipt-channel',
+				'dispatch-9',
 				delegation,
-				'tkt-1',
-				'receipt-channel'
+				'tkt-1'
 			);
 			const received = mockInvoke.mock.calls.find(
 				(call) => call[2] === 'Received remote:executeCommand IPC'
@@ -188,8 +225,6 @@ describe('Process CommandRemote Preload API', () => {
 				images?: string[],
 				background?: boolean,
 				mentionRouting?: string,
-				delegation?: unknown,
-				dispatchTicket?: string,
 				receiptChannel?: string
 			) => void;
 
@@ -202,12 +237,12 @@ describe('Process CommandRemote Preload API', () => {
 			api.onRemoteCommand(callback);
 			registeredHandler!({}, 'session-123', 'test command', 'ai');
 
+			// The routing and the receipt channel stay as undefined slots; the
+			// dispatch id, delegation and ticket are not handed over when unset.
 			expect(callback).toHaveBeenCalledWith(
 				'session-123',
 				'test command',
 				'ai',
-				undefined,
-				undefined,
 				undefined,
 				undefined,
 				undefined,
@@ -232,8 +267,6 @@ describe('Process CommandRemote Preload API', () => {
 				images?: string[],
 				background?: boolean,
 				mentionRouting?: string,
-				delegation?: unknown,
-				dispatchTicket?: string,
 				receiptChannel?: string
 			) => void;
 
@@ -263,8 +296,6 @@ describe('Process CommandRemote Preload API', () => {
 				undefined,
 				undefined,
 				false,
-				undefined,
-				undefined,
 				undefined,
 				undefined
 			);

@@ -44,6 +44,7 @@ import {
 	useRetryStore,
 } from '../../../renderer/stores/retryStore';
 import { useSessionStore } from '../../../renderer/stores/sessionStore';
+import { useNotificationStore } from '../../../renderer/stores/notificationStore';
 import { agentAlreadyRunningMessage } from '../../../shared/processErrors';
 import {
 	releaseConnectionHeldQueueItems,
@@ -694,6 +695,7 @@ describe('useInputProcessing', () => {
 			expect(updatedSessions[0].executionQueue.length).toBe(1);
 			expect(updatedSessions[0].executionQueue[0].type).toBe('command');
 			expect(updatedSessions[0].executionQueue[0].command).toBe('/test');
+			expect(updatedSessions[0].executionQueue[0].querySource).toBe('user');
 		});
 
 		describe('forced parallel for slash commands', () => {
@@ -1154,6 +1156,65 @@ describe('useInputProcessing', () => {
 		});
 	});
 
+	describe('a lifted agent (Federation)', () => {
+		const liftedTo = { peer: 'build-box', agentId: 'host-1', at: 1 };
+
+		beforeEach(() => {
+			useNotificationStore.setState({ toasts: [] });
+		});
+
+		it('refuses an AI message with a pointer at peer:agentId, spawns nothing, and keeps the draft', async () => {
+			const session = createMockSession({ liftedTo });
+			const deps = createDeps({ activeSession: session, inputValue: 'hello' });
+			const { result } = renderHook(() => useInputProcessing(deps));
+
+			await act(async () => {
+				await result.current.processInput();
+			});
+
+			expect(window.maestro.process.spawn).not.toHaveBeenCalled();
+			expect(mockSetSessions).not.toHaveBeenCalled();
+			expect(mockSetInputValue).not.toHaveBeenCalled();
+			expect(useNotificationStore.getState().toasts).toEqual(
+				expect.arrayContaining([
+					expect.objectContaining({
+						title: 'Message not sent',
+						message: expect.stringContaining('Send to build-box:host-1 instead.'),
+					}),
+				])
+			);
+		});
+
+		it('still runs a terminal command: the local shell is not the lifted conversation', async () => {
+			const session = createMockSession({ inputMode: 'terminal', liftedTo });
+			const deps = createDeps({ activeSession: session, inputValue: 'ls', isAiMode: false });
+			const { result } = renderHook(() => useInputProcessing(deps));
+
+			await act(async () => {
+				await result.current.processInput();
+			});
+
+			expect(mockSetSessions).toHaveBeenCalled();
+			expect(useNotificationStore.getState().toasts).not.toEqual(
+				expect.arrayContaining([expect.objectContaining({ title: 'Message not sent' })])
+			);
+		});
+
+		it('sends normally once the pointer is malformed: a broken record never blocks the user', async () => {
+			const session = createMockSession({
+				liftedTo: { peer: '', agentId: 'host-1', at: 1 },
+			});
+			const deps = createDeps({ activeSession: session, inputValue: 'hello' });
+			const { result } = renderHook(() => useInputProcessing(deps));
+
+			await act(async () => {
+				await result.current.processInput();
+			});
+
+			expect(mockSetSessions).toHaveBeenCalled();
+		});
+	});
+
 	describe('override input value', () => {
 		it('uses overrideInputValue when provided', async () => {
 			vi.useFakeTimers();
@@ -1372,6 +1433,51 @@ describe('useInputProcessing', () => {
 			expect([first.item?.text, second.item?.text]).toEqual(['A', 'B']);
 		});
 
+		it('stamps human composer sends as user turns', async () => {
+			const session = createMockSession({ state: 'idle' });
+			const deps = createDeps({ activeSession: session, inputValue: 'Read my mail' });
+			const { result } = renderHook(() => useInputProcessing(deps));
+			await act(async () => {
+				await result.current.processInput();
+			});
+			expect(window.maestro.process.spawn).toHaveBeenCalledWith(
+				expect.objectContaining({ querySource: 'user' })
+			);
+		});
+
+		it.each(['idle', 'busy'] as const)(
+			'preserves automatic context provenance when the tab is %s',
+			async (state) => {
+				const session = createMockSession({ state });
+				if (state === 'busy') {
+					vi.mocked(window.maestro.process.getActiveProcesses).mockResolvedValue([
+						{
+							sessionId: `${session.id}-ai-${session.activeTabId}`,
+							toolType: session.toolType,
+							pid: 32828,
+							cwd: session.cwd,
+							isTerminal: false,
+							isBatchMode: true,
+							startTime: 1700000000000,
+						},
+					]);
+				}
+				const deps = createDeps({ activeSession: session, inputValue: 'Transferred context' });
+				const { result } = renderHook(() => useInputProcessing(deps));
+				await act(async () => {
+					await result.current.processInput(undefined, { querySource: 'auto' });
+				});
+				if (state === 'idle') {
+					expect(window.maestro.process.spawn).toHaveBeenCalledWith(
+						expect.objectContaining({ querySource: 'auto' })
+					);
+				} else {
+					expect(window.maestro.process.spawn).not.toHaveBeenCalled();
+					expect(useSessionStore.getState().sessions[0].executionQueue[0].querySource).toBe('auto');
+				}
+			}
+		);
+
 		it('re-queues the message when the spawn collides with a live turn', async () => {
 			// "Agent process already running" means the tab was mid-turn when this
 			// dispatch landed - the provider never saw the message. Dropping it is
@@ -1398,6 +1504,7 @@ describe('useInputProcessing', () => {
 			const [live] = useSessionStore.getState().sessions;
 			expect(live.executionQueue).toHaveLength(1);
 			expect(live.executionQueue[0].text).toBe('do not lose me');
+			expect(live.executionQueue[0].querySource).toBe('user');
 			// A collision leaves the busy state alone: a live process is still
 			// streaming into that tab, and clearing it told every busy-based rule in
 			// the app that the agent was free.
@@ -1459,6 +1566,7 @@ describe('useInputProcessing', () => {
 			const [live] = useSessionStore.getState().sessions;
 			expect(live.executionQueue).toHaveLength(1);
 			expect(live.executionQueue[0].text).toBe('first');
+			expect(live.executionQueue[0].querySource).toBe('user');
 		});
 
 		describe('repeat submit while the ownership probe is out', () => {
@@ -2431,6 +2539,19 @@ describe('useInputProcessing', () => {
 				'IMPORTANT: You are in read-only/plan mode. Do NOT write a plan file. Instead, return your plan directly to the user in beautiful markdown formatting.'
 			);
 			expect(spawnCall.readOnlyMode).toBe(true);
+			expect(typeof spawnCall.transcriptBoundaryId).toBe('string');
+			const recorded = mockSetSessions.mock.calls
+				.map(([updater]) => (typeof updater === 'function' ? updater([session]) : updater))
+				.flatMap((sessions) =>
+					sessions.flatMap((agent: Session) => agent.aiTabs.flatMap((tab) => tab.logs))
+				);
+			expect(recorded).toContainEqual(
+				expect.objectContaining({
+					id: spawnCall.transcriptBoundaryId,
+					source: 'user',
+					text: 'explain this code',
+				})
+			);
 		});
 
 		it('appends read-only instruction suffix when Auto Run is active without worktree (read-only tab)', async () => {
@@ -2602,8 +2723,6 @@ describe('useInputProcessing', () => {
 		});
 
 		it('sends permissionMode "standard" when tab permissionMode is "standard"', async () => {
-			// standard mode must propagate to the spawn config so the main process
-			// can wire up the permission relay (rather than defaulting to full).
 			const standardTab = createMockTab({
 				readOnlyMode: false,
 				permissionMode: 'standard',
@@ -2627,6 +2746,33 @@ describe('useInputProcessing', () => {
 			expect(window.maestro.process.spawn).toHaveBeenCalled();
 			const spawnCall = (window.maestro.process.spawn as ReturnType<typeof vi.fn>).mock.calls[0][0];
 			expect(spawnCall.permissionMode).toBe('standard');
+		});
+
+		it('preserves Standard on image turns so main can refuse without escalating', async () => {
+			const standardTab = createMockTab({
+				permissionMode: 'standard',
+				agentSessionId: 'opencode-session',
+			});
+			const session = createMockSession({
+				toolType: 'opencode',
+				aiTabs: [standardTab],
+				activeTabId: standardTab.id,
+			});
+			const deps = createDeps({
+				activeSession: session,
+				sessionsRef: { current: [session] },
+				inputValue: 'describe this image',
+				stagedImages: ['data:image/png;base64,abc'],
+			});
+			const { result } = renderHook(() => useInputProcessing(deps));
+
+			await act(async () => {
+				await result.current.processInput();
+			});
+
+			const spawnCall = vi.mocked(window.maestro.process.spawn).mock.calls[0][0];
+			expect(spawnCall.permissionMode).toBe('standard');
+			expect(spawnCall.images).toEqual(['data:image/png;base64,abc']);
 		});
 
 		it('does not append read-only suffix when in normal write mode', async () => {

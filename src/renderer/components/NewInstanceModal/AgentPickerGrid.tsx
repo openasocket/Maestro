@@ -47,6 +47,7 @@ export const AgentPickerGrid = React.memo(function AgentPickerGrid({
 	onEnvVarValueChange,
 	onEnvVarRemove,
 	onEnvVarAdd,
+	onEnvVarsReplace,
 	onConfigChange,
 	onConfigBlur,
 	onRefreshModels,
@@ -59,6 +60,8 @@ export const AgentPickerGrid = React.memo(function AgentPickerGrid({
 	onCodexAutoResetChange,
 	codexTransportByAgent,
 	onCodexTransportChange,
+	harnessControlModeByAgent,
+	onHarnessControlModeChange,
 }: AgentPickerGridProps) {
 	return (
 		<div>
@@ -269,6 +272,9 @@ export const AgentPickerGrid = React.memo(function AgentPickerGrid({
 											onEnvVarAdd={() => {
 												onEnvVarAdd(agent.id);
 											}}
+											onEnvVarsReplace={(vars) => {
+												onEnvVarsReplace(agent.id, vars);
+											}}
 											onEnvVarsBlur={() => {
 												/* Saved on agent create */
 											}}
@@ -305,6 +311,12 @@ export const AgentPickerGrid = React.memo(function AgentPickerGrid({
 											onCodexTransportChange={
 												onCodexTransportChange
 													? (value) => onCodexTransportChange(agent.id, value)
+													: undefined
+											}
+											harnessControlMode={harnessControlModeByAgent?.[agent.id] ?? 'current'}
+											onHarnessControlModeChange={
+												onHarnessControlModeChange
+													? (value) => onHarnessControlModeChange(agent.id, value)
 													: undefined
 											}
 											maestroPMode={maestroPModeByAgent?.[agent.id] ?? 'dynamic'}

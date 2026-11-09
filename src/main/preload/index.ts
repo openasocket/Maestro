@@ -21,6 +21,7 @@ import { createWebApi, createWebserverApi, createLiveApi } from './web';
 import { createWebLoginApi } from './webLogin';
 import { createEnterpriseApi } from './enterprise';
 import { createComputerHistoryApi } from './computerHistory';
+import { createFederationApi } from './federation';
 import { createMaestroRunApi } from './maestroRun';
 import { createDataviewApi } from './dataview';
 import {
@@ -58,6 +59,7 @@ import { createAgentsApi } from './agents';
 import { createSymphonyApi } from './symphony';
 import { createTabNamingApi } from './tabNaming';
 import { createTabsApi } from './tabs';
+import { createJourneyApi } from './journey';
 import { createAiCommandApi } from './aiCommand';
 import { createDirectorNotesApi } from './directorNotes';
 import { createCueApi } from './cue';
@@ -139,6 +141,9 @@ contextBridge.exposeInMainWorld('maestro', {
 
 	// Computer History API (desktop-only; the web bridge refuses these channels)
 	computerHistory: createComputerHistoryApi(),
+
+	// Federation peer mirror API (desktop-only; read-only mirror of Federation peers)
+	federation: createFederationApi(),
 
 	// MaestroRun API (macOS launcher install + Full Disk Access walkthrough)
 	maestroRun: createMaestroRunApi(),
@@ -260,6 +265,8 @@ contextBridge.exposeInMainWorld('maestro', {
 
 	// Tab lifecycle API (renderer -> main tab-close notification)
 	tabs: createTabsApi(),
+	// User Journey API (per-agent log of user actions inside Maestro)
+	journey: createJourneyApi(),
 	// AI Command API (plain-English request -> one shell command line)
 	aiCommand: createAiCommandApi(),
 
@@ -272,7 +279,7 @@ contextBridge.exposeInMainWorld('maestro', {
 	// Cue Backup API (Cue modal Backup tab - snapshot/restore cue.yaml + prompts)
 	cueBackup: createCueBackupApi(),
 
-	// Cue Bundle API (Cue modal Bundles tab - export / import pipelines and agents)
+	// Cue Bundle API (Export Agent and Import Agent modals - export / import pipelines and agents)
 	cueBundle: createCueBundleApi(),
 
 	// Pianola API (autonomous manager: rules + decision log)
@@ -332,6 +339,8 @@ export {
 	createWebLoginApi,
 	// Computer History
 	createComputerHistoryApi,
+	// Federation peer mirror
+	createFederationApi,
 	createMaestroRunApi,
 	// Dataview
 	createDataviewApi,
@@ -417,6 +426,8 @@ export {
 	createPromptsApi,
 	// Memory Viewer
 	createMemoryApi,
+	// User Journey
+	createJourneyApi,
 	// AgentRun
 	createAgentRunApi,
 	// Coworking
@@ -647,6 +658,11 @@ export type {
 	// From tabs
 	TabsApi,
 } from './tabs';
+export type {
+	// From journey
+	JourneyApi,
+	JourneyReadOptions,
+} from './journey';
 export type {
 	// From aiCommand
 	AiCommandApi,

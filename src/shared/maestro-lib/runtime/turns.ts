@@ -58,6 +58,7 @@
 import { getClaudeTokenSourceFields, type ClaudeTokenSourceFields } from '../../claudeTokenMode';
 import type { ToolType } from '../../types';
 import type { AgentRepository } from '../agents/repository';
+import { liftedSendRefusal } from '../agents/lift-pointer';
 import { DEFAULT_RULE_CONTEXT, type RuleContext } from '../agents/rules';
 import type { EventBus } from '../client/event-bus';
 import type {
@@ -406,6 +407,8 @@ export function createRuntimeTurns(options: RuntimeTurnsOptions): RuntimeTurns {
 	async function startItem(agentId: string, item: TurnItem): Promise<QueuedTurnHandle> {
 		const record = repository.getAgent(agentId);
 		if (!record) throw new Error(`No agent ${agentId}.`);
+		const lifted = liftedSendRefusal(record);
+		if (lifted) throw new Error(lifted);
 		const tabRecord = repository.getTab(agentId, item.tabId);
 		if (!tabRecord) throw new Error(`The tab ${item.tabId} no longer exists.`);
 		// The tab's previous process has not gone yet: a timing collision, not a verdict on the item.
@@ -1006,6 +1009,9 @@ export function createRuntimeTurns(options: RuntimeTurnsOptions): RuntimeTurns {
 	): Promise<Submission> {
 		const record = repository.getAgent(agentId);
 		if (!record) return { status: 'not-found', message: `No agent ${agentId}.` };
+		// A lifted agent runs on its host now: a turn here would resume the session the host owns.
+		const lifted = liftedSendRefusal(record);
+		if (lifted) return { status: 'rejected', message: lifted };
 		const tabRecord = repository.getTab(agentId, tabId);
 		if (!tabRecord) return { status: 'not-found', message: `No tab ${tabId}.` };
 		const agent = toTurnAgent(record);

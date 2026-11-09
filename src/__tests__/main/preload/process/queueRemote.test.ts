@@ -4,9 +4,9 @@
  * Like browserTabRemote.test.ts, these drive the registered IPC handler with
  * exactly what the main process sends (`remote:enqueueCommand` from
  * queueCallbacks.ts) and check what the renderer callback receives, because a
- * bridge that drops a trailing argument still type-checks clean. The three
- * dispatch slots after `held` (mentionRouting, delegation, dispatchTicket)
- * are the MCOMP-01-03J wire.
+ * bridge that drops a trailing argument still type-checks clean. After `held`
+ * the merged wire carries mentionRouting, upstream's dispatchCallback and
+ * Pianola queue control, then the MCOMP-01-03J delegation and dispatchTicket.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -63,10 +63,14 @@ describe('Process QueueRemote Preload API', () => {
 				false,
 				true,
 				'parallel',
+				undefined,
+				undefined,
 				delegation,
 				'tkt-3'
 			);
 
+			// Upstream's dispatchCallback and Pianola queue control keep the two
+			// slots after the routing; the delegation and the ticket follow them.
 			expect(callback).toHaveBeenCalledTimes(1);
 			expect(callback).toHaveBeenCalledWith(
 				'session-1',
@@ -78,6 +82,8 @@ describe('Process QueueRemote Preload API', () => {
 				false,
 				true,
 				'parallel',
+				undefined,
+				undefined,
 				delegation,
 				'tkt-3'
 			);
@@ -109,9 +115,10 @@ describe('Process QueueRemote Preload API', () => {
 				true,
 				false,
 				undefined,
-				undefined,
 				undefined
 			);
+			// Control, delegation and ticket are not handed over when unset.
+			expect(callback.mock.calls[0]).toHaveLength(10);
 		});
 
 		it('acks { success: false } on the response channel before rethrowing a callback error', () => {

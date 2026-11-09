@@ -22,8 +22,19 @@ import { resolveMaestroCliScriptPath } from '../cue/cue-cli-executor';
 import { PianolaSupervisor } from './pianola-supervisor';
 import { PianolaRelearnScheduler } from './pianola-relearn-scheduler';
 import { runRelearnJob } from './pianola-relearn';
+import { initializePianolaMemory } from './memory-host';
+import { discoverMemoryCliProviders, readMemoryCliEnvironments } from './memory-provider-discovery';
+import type { AgentDetector } from '../agents/detector';
+import type { PianolaMemoryHost } from './memory-host';
 import { isEncoreFeatureEnabled } from '../../shared/encoreFeatureDefaults';
-import { readRules, writeSuggestions, getProfile } from './pianola-store-main';
+import {
+	readRules,
+	writeSuggestions,
+	readSuggestions,
+	getProfile,
+	readDecisions,
+	onHumanDecisionSettled,
+} from './pianola-store-main';
 import {
 	stopProcess,
 	BACKGROUND_STOP_GRACE_MS,
@@ -36,9 +47,9 @@ import {
 } from '../../shared/maestro-lib/managed/host-adapter';
 import type { DispatchSpecLike } from '../../shared/maestro-lib/managed/authority';
 import type { ProcessSpawnAuthorityPort } from '../process-manager/types';
-import type { DecisionPair } from '../../shared/pianola/transcript-mining';
+import { settledDecisionPairs, type DecisionPair } from '../../shared/pianola/transcript-mining';
 import type { PianolaRule } from '../../shared/pianola/types';
-import type { getSettingsStore, getSessionsStore } from '../stores';
+import type { getAgentConfigsStore, getSettingsStore, getSessionsStore } from '../stores';
 
 /** Cap on decision pairs the scheduled re-learn pulls from the CLI per run. */
 const RELEARN_MAX_PAIRS = 100_000;
@@ -216,12 +227,16 @@ export function readExistingForRelearn(): { rules: PianolaRule[]; profile: strin
 export interface PianolaLifecycleDependencies {
 	settingsStore: ReturnType<typeof getSettingsStore>;
 	sessionsStore: ReturnType<typeof getSessionsStore>;
+	agentConfigsStore: ReturnType<typeof getAgentConfigsStore>;
+	agentDetector: AgentDetector;
 	logger: { info: (msg: string, tag: string) => void };
 	/**
 	 * The host's spawn authority (the enterprise service's), read on every
 	 * spawn so an enrollment that appears after construction governs the next
-	 * child and the next mine. Absent or null, or a standalone standing: both
-	 * spawn as they always did, admitted by nobody.
+	 * supervised child. Absent or null, or a standalone standing: the children
+	 * spawn as they always did, admitted by nobody. The scheduled re-learn no
+	 * longer spawns a mine (it reads settled owner decisions in-process), so
+	 * only an explicit caller of mineDecisionPairsViaCli is admitted here.
 	 */
 	spawnAuthority?: () => ProcessSpawnAuthorityPort | null;
 }
@@ -229,6 +244,7 @@ export interface PianolaLifecycleDependencies {
 export interface PianolaLifecycle {
 	supervisor: PianolaSupervisor;
 	relearnScheduler: PianolaRelearnScheduler;
+	memoryHost: PianolaMemoryHost;
 }
 
 export function createPianolaLifecycle(deps: PianolaLifecycleDependencies): PianolaLifecycle {
@@ -253,17 +269,23 @@ export function createPianolaLifecycle(deps: PianolaLifecycleDependencies): Pian
 
 	// Pianola scheduled re-learn: keeps the learned profile fresh as a PROPOSAL
 	// (stages suggestions; never overwrites the live profile/rules) and
-	// relaunches stale supervised targets, on a fixed cadence. Armed only while
-	// encoreFeatures.pianola is on, and still self-gates per tick on it. Mining
-	// reuses the existing `pianola learn` crawler via the bundled CLI; the
-	// composition is pure with injected deps.
+	// relaunches stale supervised targets, on a fixed cadence. Self-gates per
+	// tick on encoreFeatures.pianola and immediately on a new native human decision.
+	// The audit corpus has transport identity; raw CLI role=user text does not.
 	const relearnScheduler = new PianolaRelearnScheduler({
+		onHumanDecisionSettled,
 		isEnabled: () => isEncoreFeatureEnabled(deps.settingsStore, 'pianola'),
 		runJob: async () => {
 			await runRelearnJob({
 				isEnabled: () => isEncoreFeatureEnabled(deps.settingsStore, 'pianola'),
-				mine: () => mineDecisionPairsViaCli(deps.spawnAuthority),
-				readExisting: readExistingForRelearn,
+				// Raw CLI transcripts do not authenticate their user-role author.
+				// Only settled, transport-attributed owner answers enter native learning.
+				mine: async () => settledDecisionPairs(readDecisions(), { snapshots: true }),
+				readExisting: () => ({
+					...readExistingForRelearn(),
+					minSamples: deps.settingsStore.get('pianolaLearningMinSamples'),
+					suggestions: readSuggestions(),
+				}),
 				writeSuggestions,
 				relaunchStale: () => supervisor?.relaunchStale() ?? 0,
 				now: Date.now,
@@ -272,5 +294,16 @@ export function createPianolaLifecycle(deps: PianolaLifecycleDependencies): Pian
 		},
 	});
 
-	return { supervisor, relearnScheduler };
+	return {
+		supervisor,
+		relearnScheduler,
+		memoryHost: initializePianolaMemory(
+			() => isEncoreFeatureEnabled(deps.settingsStore, 'pianola'),
+			() => discoverMemoryCliProviders(deps.agentDetector, deps.agentConfigsStore),
+			() => readMemoryCliEnvironments(deps.agentConfigsStore),
+			// The same authority the supervisor holds, so the memory CLI backfill
+			// child is admitted on a managed host (MCOMP-33-00H1).
+			deps.spawnAuthority
+		),
+	};
 }

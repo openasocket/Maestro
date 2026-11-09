@@ -29,6 +29,8 @@ import { getLiveModeController } from '../../../../main/web-server/live-mode';
 import { setSettingsWriteAuthority } from '../../../../main/enterprise/settings-policy';
 import { installManagedSettingsPolicy } from '../../../helpers/managedSettingsPolicy';
 
+const INSTALL = '/Applications/Maestro.app';
+
 vi.mock('electron', () => ({
 	ipcMain: { handle: vi.fn(), on: vi.fn(), removeHandler: vi.fn() },
 	dialog: { showOpenDialog: vi.fn(), showSaveDialog: vi.fn() },
@@ -330,7 +332,10 @@ describe('system handlers under the local-effects ceiling (MRC2-04-09)', () => {
 		const registerLocks = () =>
 			registerSystemHandlers({
 				getMainWindow: () => null,
-				app: { getPath: () => '/data' } as never,
+				app: {
+					getPath: (name: string) =>
+						name === 'exe' ? `${INSTALL}/Contents/MacOS/Maestro` : '/data',
+				} as never,
 				settingsStore: { get: vi.fn(), set: vi.fn() } as never,
 				bootstrapStore: bootstrap as never,
 			});
@@ -390,22 +395,46 @@ describe('system handlers under the local-effects ceiling (MRC2-04-09)', () => {
 			const pinned = installManagedSettingsPolicy([
 				{ key: 'storage.syncPath', pin: { value: '/Managed/Sync' } },
 			]).pins();
-			expect(restoreManagedSyncPath(bootstrap as never, '/data', pinned)).toBe(
+			expect(restoreManagedSyncPath(bootstrap as never, '/data', pinned, INSTALL)).toBe(
 				'Storage location restored to the managed pin /Managed/Sync (0 files migrated); it takes effect at the next launch'
 			);
 			expect(bootstrap.data.customSyncPath).toBe('/Managed/Sync');
-			expect(restoreManagedSyncPath(bootstrap as never, '/data', pinned)).toBeNull();
+			expect(restoreManagedSyncPath(bootstrap as never, '/data', pinned, INSTALL)).toBeNull();
 			// Too short for isValidSyncPath on every platform: named, never written.
 			const unusable = installManagedSettingsPolicy([
 				{ key: 'storage.syncPath', pin: { value: '/a' } },
 			]).pins();
-			expect(restoreManagedSyncPath(bootstrap as never, '/data', unusable)).toMatch(
+			expect(restoreManagedSyncPath(bootstrap as never, '/data', unusable, INSTALL)).toMatch(
 				/^Storage location pinned by managed policy to \/a is not a usable sync folder/
 			);
 			expect(bootstrap.data.customSyncPath).toBe('/Managed/Sync');
-			expect(restoreManagedSyncPath(bootstrap as never, '/data', null)).toBeNull();
+			expect(restoreManagedSyncPath(bootstrap as never, '/data', null, INSTALL)).toBeNull();
 			const unpinned = installManagedSettingsPolicy([{ key: 'storage.syncPath' }]).pins();
-			expect(restoreManagedSyncPath(bootstrap as never, '/data', unpinned)).toBeNull();
+			expect(restoreManagedSyncPath(bootstrap as never, '/data', unpinned, INSTALL)).toBeNull();
+		});
+
+		it('keeps the folder under a pin inside the install directory, which an update removes', () => {
+			const inside = installManagedSettingsPolicy([
+				{ key: 'storage.syncPath', pin: { value: `${INSTALL}/Contents/Sync` } },
+			]).pins();
+			expect(restoreManagedSyncPath(bootstrap as never, '/data', inside, INSTALL)).toBe(
+				`Storage location pinned by managed policy to ${INSTALL}/Contents/Sync is inside the Maestro install directory, which an update removes; the current folder is kept`
+			);
+			const theDir = installManagedSettingsPolicy([
+				{ key: 'storage.syncPath', pin: { value: INSTALL } },
+			]).pins();
+			expect(restoreManagedSyncPath(bootstrap as never, '/data', theDir, INSTALL)).toMatch(
+				/is inside the Maestro install directory/
+			);
+			expect(bootstrap.set).not.toHaveBeenCalled();
+			expect(fsSync.mkdirSync).not.toHaveBeenCalled();
+			// A sibling of the install directory is an ordinary folder.
+			const sibling = installManagedSettingsPolicy([
+				{ key: 'storage.syncPath', pin: { value: `${INSTALL}-Sync` } },
+			]).pins();
+			expect(restoreManagedSyncPath(bootstrap as never, '/data', sibling, INSTALL)).toMatch(
+				/^Storage location restored to the managed pin /
+			);
 		});
 	});
 });

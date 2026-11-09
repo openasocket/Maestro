@@ -1,8 +1,15 @@
+import type { PianolaQueueControl } from '../shared/pianola/pianola-dispatch';
 import type {
 	TranslationRequest,
 	TranslationReport,
 } from '../shared/maestro-lib/translation/types';
 import type { UpdateHoldView, UpdateStatus } from '../shared/types';
+import type {
+	HarnessInteractionRequest,
+	HarnessInteractionResolveResult,
+	HarnessInteractionResponse,
+	HarnessInteractionSettledEvent,
+} from '../shared/harness-control/types';
 /* eslint-disable @typescript-eslint/no-unused-vars */
 /**
  * Global type declarations for the renderer process.
@@ -56,7 +63,12 @@ type LocalFileScanNode = {
 };
 
 interface ProcessConfig {
+	/** Native submitted transcript boundary, checked against owner commits by the host. */
+	transcriptBoundaryId?: string;
 	sessionId: string;
+	pianolaDispatchId?: string;
+	pianolaQueueStepId?: string;
+	pianolaQueueItemId?: string;
 	toolType: string;
 	cwd: string;
 	command: string;
@@ -70,6 +82,8 @@ interface ProcessConfig {
 	modelId?: string;
 	yoloMode?: boolean;
 	permissionMode?: 'full' | 'standard' | 'readonly';
+	/** Optional provider-native protocol mode for this turn. */
+	harnessControlMode?: import('../shared/maestro-lib/providers/native-control').HarnessControlMode;
 	// Per-session overrides (take precedence over agent-level config)
 	sessionCustomPath?: string;
 	sessionCustomArgs?: string;
@@ -235,7 +249,6 @@ import type {
 	PianolaSuggestionsFile,
 } from '../shared/pianola/storage';
 import type { PianolaSupervisorSnapshot } from '../main/ipc/handlers/pianola';
-import type { ManagedRunView } from '../main/enterprise/dispatch';
 import type {
 	PluginListSnapshot,
 	PluginGrantsSnapshot,
@@ -254,6 +267,10 @@ import type { BrowserOp } from '../shared/coworkingBrowser';
 import type { HistoryEntry } from '../shared/types';
 import type { SnoozeCommandRequest, SnoozeCommandResult } from '../shared/snoozeCommands';
 import type { ClosedTabCommandRequest, ClosedTabCommandResult } from '../shared/closedTabCommands';
+import type {
+	MessagePinCommandRequest,
+	MessagePinCommandResult,
+} from '../shared/messagePinCommands';
 import type { TabContextOpRequest, TabContextOpResult } from '../shared/tabContextOps';
 import type {
 	ThroughputGaugeCommandRequest,
@@ -267,7 +284,9 @@ import type { WindowCommandRequest, WindowCommandResult } from '../shared/window
 import type { WebUserPublic } from '../shared/webLogin';
 import type { ComputerHistoryApi } from '../main/preload/computerHistory';
 import type { EnterpriseApi } from '../main/preload/enterprise';
+import type { FederationApi } from '../main/preload/federation';
 import type { MaestroRunApi } from '../main/preload/maestroRun';
+import type { JourneyApi } from '../main/preload/journey';
 import type { DataviewApi } from '../main/preload/dataview';
 
 interface MaestroAPI {
@@ -333,7 +352,11 @@ interface MaestroAPI {
 	};
 	sessions: {
 		getAll: () => Promise<any[]>;
-		getBootstrap: () => Promise<any[]>;
+		getBootstrap: () => Promise<
+			(import('./types').Session & {
+				transcriptSnapshots?: import('../shared/sessionTranscript').SessionRuntimeSnapshot[];
+			})[]
+		>;
 		getDeferredContent: (
 			sessionId: string,
 			tabId: string | null,
@@ -404,7 +427,10 @@ interface MaestroAPI {
 	};
 	groups: {
 		getAll: () => Promise<any[]>;
-		setAll: (groups: any[]) => Promise<boolean>;
+		setAll: (
+			groups: import('../shared/types').Group[],
+			baseline: import('../shared/types').Group[]
+		) => Promise<boolean>;
 	};
 	process: {
 		onRemoteStartAutoRun: (
@@ -426,17 +452,9 @@ interface MaestroAPI {
 			responseChannel: string,
 			result: import('../shared/autoRunRemote').AutoRunRemoteResult
 		) => void;
-		spawn: (config: ProcessConfig) => Promise<{
-			pid: number;
-			success: boolean;
-			sshRemote?: { id: string; name: string; host: string };
-			/** The managed run this spawn started (identifiers only); absent on a standalone host. */
-			managedRun?: ManagedRunView;
-			/** Why the spawn did not start, when it did not. */
-			error?: string;
-			/** Set when a managed host refused the spawn at the sink. */
-			managed?: { state: 'denied' | 'unavailable' | 'unknown'; code: string };
-		}>;
+		spawn: (
+			config: ProcessConfig
+		) => Promise<import('../main/preload/process/core').ProcessSpawnResponse>;
 		spawnTerminalTab: (config: {
 			sessionId: string;
 			cwd: string;
@@ -497,6 +515,7 @@ interface MaestroAPI {
 		}) => Promise<void>;
 		interrupt: (sessionId: string) => Promise<boolean>;
 		kill: (sessionId: string) => Promise<boolean>;
+		closeAgent: (agentId: string) => Promise<boolean>;
 		resize: (sessionId: string, cols: number, rows: number) => Promise<boolean>;
 		runCommand: (config: {
 			sessionId: string;
@@ -522,6 +541,7 @@ interface MaestroAPI {
 			Array<{
 				sessionId: string;
 				toolType: string;
+				/** OS PID, or 0 for a Host-owned Relay turn cancelled by session ID. */
 				pid: number;
 				cwd: string;
 				isTerminal: boolean;
@@ -558,6 +578,12 @@ interface MaestroAPI {
 		) => () => void;
 		/** `signal` is set only when the process was killed by a signal, never on a clean exit. */
 		onExit: (callback: (sessionId: string, code: number, signal?: number) => void) => () => void;
+		getPendingPermissions: () => Promise<
+			import('../shared/pendingPermissions').PendingPermissionSnapshot
+		>;
+		onPendingPermissionsChanged: (
+			callback: (snapshot: import('../shared/pendingPermissions').PendingPermissionSnapshot) => void
+		) => () => void;
 		onPermissionRequest: (
 			callback: (request: {
 				requestId: string;
@@ -581,6 +607,16 @@ interface MaestroAPI {
 				| { behavior: 'allow'; updatedInput?: Record<string, unknown> }
 				| { behavior: 'deny'; message: string }
 		) => Promise<boolean>;
+		onHarnessInteractionRequest: (
+			callback: (request: HarnessInteractionRequest) => void
+		) => () => void;
+		onHarnessInteractionSettled: (
+			callback: (event: HarnessInteractionSettledEvent) => void
+		) => () => void;
+		listHarnessInteractions: () => Promise<HarnessInteractionRequest[]>;
+		respondHarnessInteraction: (
+			response: HarnessInteractionResponse
+		) => Promise<HarnessInteractionResolveResult>;
 		onSessionId: (callback: (sessionId: string, agentSessionId: string) => void) => () => void;
 		onSlashCommands: (callback: (sessionId: string, slashCommands: string[]) => void) => () => void;
 		/** The later, transcript-observed outcome of a steer that `steer()` reported `delivered`. */
@@ -620,9 +656,10 @@ interface MaestroAPI {
 				images?: string[],
 				background?: boolean,
 				mentionRouting?: import('../shared/crossAgentContext').MentionRouting,
+				receiptChannel?: string,
+				pianolaDispatchId?: string,
 				delegation?: import('../shared/maestro-lib/managed/delegation').ManagedDelegationContext,
-				dispatchTicket?: string,
-				receiptChannel?: string
+				dispatchTicket?: string
 			) => void
 		) => () => void;
 		/** Answer a `remote:executeCommand` receipt channel. `accepted: true`
@@ -685,6 +722,14 @@ interface MaestroAPI {
 		sendRemoteClosedTabCommandResponse: (
 			responseChannel: string,
 			result: ClosedTabCommandResult
+		) => void;
+		// `maestro-cli tab pins ...` requests; returns unsubscribe.
+		onRemoteMessagePinCommand: (
+			callback: (request: MessagePinCommandRequest, responseChannel: string) => void
+		) => () => void;
+		sendRemoteMessagePinCommandResponse: (
+			responseChannel: string,
+			result: MessagePinCommandResult
 		) => void;
 		// `maestro-cli tab compact|merge|transfer` (the overlay menu's Context items);
 		// each returns unsubscribe and is answered with a TabContextOpResult.
@@ -975,6 +1020,7 @@ interface MaestroAPI {
 				background?: boolean,
 				hidden?: boolean,
 				mentionRouting?: import('../shared/crossAgentContext').MentionRouting,
+				control?: import('../shared/pianola/pianola-dispatch').PianolaNewTabControl,
 				delegation?: import('../shared/maestro-lib/managed/delegation').ManagedDelegationContext,
 				dispatchTicket?: string
 			) => void
@@ -1024,6 +1070,8 @@ interface MaestroAPI {
 				background?: boolean,
 				held?: boolean,
 				mentionRouting?: import('../shared/crossAgentContext').MentionRouting,
+				dispatchCallback?: boolean,
+				control?: PianolaQueueControl,
 				delegation?: import('../shared/maestro-lib/managed/delegation').ManagedDelegationContext,
 				dispatchTicket?: string
 			) => void
@@ -1552,6 +1600,9 @@ interface MaestroAPI {
 		) => Promise<{ success: boolean }>;
 	};
 	web: {
+		getAutoRunStates: () => Promise<
+			Record<string, import('../shared/autoRunBroadcast').AutoRunBroadcastState>
+		>;
 		onLiteReady: (getReady: () => boolean) => () => void;
 		startAutoRun: (
 			sessionId: string,
@@ -2093,6 +2144,12 @@ interface MaestroAPI {
 	 */
 	computerHistory: ComputerHistoryApi;
 	/**
+	 * Federation peer mirror (FED-SSH-05): the peers this desktop mirrors, their agents, a tab's
+	 * transcript, and the change pushes. Read-only. Desktop-only: no `federation:*` channel is on
+	 * the web-desktop allowlist, so in the browser build every call is refused.
+	 */
+	federation: FederationApi;
+	/**
 	 * MaestroRun (macOS launcher install, the Full Disk Access walkthrough, and
 	 * the readiness that gates its system-prompt section).
 	 */
@@ -2147,6 +2204,9 @@ interface MaestroAPI {
 			global: string[];
 		}>;
 		getModels: (agentId: string, forceRefresh?: boolean, sshRemoteId?: string) => Promise<string[]>;
+		onModelsRefreshed: (
+			callback: (payload: import('../shared/agentModelsRefresh').ModelsRefreshedPayload) => void
+		) => () => void;
 		getConfigOptions: (
 			agentId: string,
 			optionKey: string,
@@ -2187,7 +2247,7 @@ interface MaestroAPI {
 					accountEmail?: string;
 					accountUuid?: string;
 					organizationName?: string;
-					session: { percent: number; resetsAt?: string };
+					session?: { percent: number; resetsAt?: string };
 					weekAllModels: { percent: number; resetsAt?: string };
 					weekSonnetOnly: { percent: number; resetsAt?: string; label?: string };
 				}
@@ -2411,8 +2471,22 @@ interface MaestroAPI {
 			agentId: string,
 			projectPath: string
 		) => Promise<
-			Record<string, { origin?: 'user' | 'auto'; sessionName?: string; starred?: boolean }>
+			Record<
+				string,
+				{
+					origin?: 'user' | 'auto';
+					sessionName?: string;
+					starred?: boolean;
+					pinnedMessages?: unknown;
+				}
+			>
 		>;
+		setSessionPins: (
+			agentId: string,
+			projectPath: string,
+			sessionId: string,
+			pins: import('../shared/messagePins').MessagePin[]
+		) => Promise<void>;
 		setSessionName: (
 			agentId: string,
 			projectPath: string,
@@ -2440,6 +2514,10 @@ interface MaestroAPI {
 	};
 	dialog: {
 		selectFolder: () => Promise<string | null>;
+		selectFile: (options: {
+			filters?: Array<{ name: string; extensions: string[] }>;
+			title?: string;
+		}) => Promise<string | null>;
 		saveFile: (options: {
 			defaultPath?: string;
 			filters?: Array<{ name: string; extensions: string[] }>;
@@ -2791,6 +2869,7 @@ interface MaestroAPI {
 						sessionName?: string;
 						starred?: boolean;
 						contextUsage?: number;
+						pinnedMessages?: unknown;
 				  }
 			>
 		>;
@@ -3477,18 +3556,7 @@ interface MaestroAPI {
 		onActivityChange: (handler: () => void) => () => void;
 	};
 	// Cross-Agent Dispatch API (@mentions)
-	crossAgent: {
-		/** Dispatch a cross-agent request; response streams back via onChunk. */
-		send: (
-			request: import('../shared/crossAgentTypes').CrossAgentSendRequest
-		) => Promise<{ requestId: string }>;
-		/** Stop every consult this source agent (or one of its tabs) still has in flight (Stop button). */
-		cancel: (sourceSessionId: string, sourceTabId?: string) => Promise<{ canceled: number }>;
-		/** Subscribe to streamed cross-agent response chunks. Returns a cleanup fn. */
-		onChunk: (
-			handler: (chunk: import('../shared/crossAgentTypes').CrossAgentResponseChunk) => void
-		) => () => void;
-	};
+	crossAgent: import('../main/preload/crossAgent').CrossAgentApi;
 	// Group Chat API (multi-agent coordination)
 	groupChat: {
 		// Shared return shape for group chat methods (mirrors GroupChat from shared/group-chat-types.ts)
@@ -4666,7 +4734,12 @@ interface MaestroAPI {
 		// running as an orphan). Main retires anything scoped to that tab, e.g. an
 		// armed dispatch callback that would otherwise time out an hour later.
 		notifyAiTabClosed: (agentId: string, tabId: string) => void;
+		notifyAiTabRetryState: (agentId: string, tabId: string, pending: boolean) => void;
 	};
+
+	// User Journey API (per-agent log of user actions inside Maestro). Record
+	// through recordJourney() in src/renderer/services/userJourney.ts.
+	journey: JourneyApi;
 
 	// AI Command API (plain-English request -> one shell command line)
 	aiCommand: {
@@ -4872,8 +4945,6 @@ interface MaestroAPI {
 		getRunLiveOutput: (runId: string) => Promise<{ stdout: string; stderr: string } | null>;
 		getActivityLog: (limit?: number) => Promise<CueRunResult[]>;
 		getEventCount: () => Promise<number>;
-		/** Can this data directory run Cue unattended? Same report as `maestro-cli cue engine check`. */
-		checkReadiness: () => Promise<import('../shared/cue/readiness').CueReadinessReport>;
 		enable: () => Promise<void>;
 		disable: () => Promise<void>;
 		/**
@@ -4911,13 +4982,14 @@ interface MaestroAPI {
 			projectRoot: string,
 			name: string
 		) => Promise<{ removed: boolean; reason?: string }>;
-		readYaml: (projectRoot: string) => Promise<string | null>;
+		readYaml: (projectRoot: string, sessionId?: string) => Promise<string | null>;
 		writeYaml: (
 			projectRoot: string,
 			content: string,
-			promptFiles?: Record<string, string>
+			promptFiles?: Record<string, string>,
+			sessionId?: string
 		) => Promise<{ changed: boolean }>;
-		deleteYaml: (projectRoot: string) => Promise<boolean>;
+		deleteYaml: (projectRoot: string, sessionId?: string) => Promise<boolean>;
 		renamePipeline: (
 			oldName: string,
 			newName: string
@@ -4961,10 +5033,43 @@ interface MaestroAPI {
 	// Pianola API (autonomous manager: rules + decision log)
 	// All channels reject with 'PianolaDisabled' when the Encore flag is off.
 	pianola: {
+		memory: (request: import('../shared/pianola/memory').MemoryRequest) => Promise<unknown>;
 		getRules: () => Promise<RulesLoadResult>;
 		saveRules: (rules: PianolaRule[]) => Promise<PianolaRule[]>;
 		getDecisions: (limit?: number) => Promise<PianolaDecisionRecord[]>;
+		resolveDecision: (
+			resolution: import('../shared/pianola/pianola-decision-lifecycle').PianolaDecisionResolution
+		) => Promise<import('../shared/pianola/pianola-scope-cycle').PianolaScopeDeliveryResult>;
+		getPrograms: () => Promise<import('../shared/pianola/pianola-programs').PianolaProgram[]>;
+		superviseProgram: (programId: string) => Promise<void>;
+		setProgramStatus: (
+			programId: string,
+			status: import('../shared/pianola/pianola-programs').PianolaProgramStatus
+		) => Promise<void>;
+		getAsks: (
+			status?: import('../shared/pianola/pianola-programs').PianolaAskStatus
+		) => Promise<import('../shared/pianola/pianola-programs').PianolaAsk[]>;
+		resolveAsk: (
+			id: string,
+			option: string,
+			note?: string
+		) => Promise<import('../shared/pianola/pianola-programs').PianolaAsk>;
+		dismissAsk: (id: string) => Promise<import('../shared/pianola/pianola-programs').PianolaAsk>;
+		getBrief: () => Promise<import('../shared/pianola/pianola-programs').PianolaBrief>;
+		revisePlanTask: (
+			planId: string,
+			taskId: string,
+			prompt?: string
+		) => Promise<import('../shared/pianola/pianola-tasks').PianolaPlan>;
+		skipPlanTask: (
+			planId: string,
+			taskId: string
+		) => Promise<import('../shared/pianola/pianola-tasks').PianolaPlan>;
 		getSuggestions: () => Promise<PianolaSuggestionsFile>;
+		confirmDesktopOwner: () => Promise<void>;
+		reviewSuggestion: (
+			review: import('../shared/pianola/storage').PianolaSuggestionReview
+		) => Promise<{ rules: PianolaRule[]; suggestions: PianolaSuggestionsFile }>;
 		applySuggestion: (payload: {
 			rule?: PianolaRule;
 			profile?: { text: string; projectPath?: string };
@@ -4988,8 +5093,8 @@ interface MaestroAPI {
 			flag: FirstPartyEncoreFlag,
 			enabled: boolean
 		) => Promise<FirstPartyBridgeState>;
-		install: (sourceDir: string) => Promise<PluginInstallResult>;
-		update: (sourceDir: string) => Promise<PluginListSnapshot>;
+		install: (sourcePath: string) => Promise<PluginInstallResult>;
+		update: (sourcePath: string, expectedId?: string) => Promise<PluginListSnapshot>;
 		uninstall: (id: string) => Promise<{ success: boolean; error?: string }>;
 		contributions: () => Promise<PluginContributions>;
 		getGrants: (id: string) => Promise<PluginGrantsSnapshot>;

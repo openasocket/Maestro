@@ -1,3 +1,4 @@
+import { pianolaPersistenceConsumer } from './pianola-persistence';
 /**
  * Single-entry orchestrator for all IPC handler registrations plus a handful
  * of inline wiring blocks (group-chat mention/session callbacks, the
@@ -41,6 +42,7 @@ import {
 	registerWebLoginHandlers,
 	registerEnterpriseHandlers,
 	registerComputerHistoryHandlers,
+	registerFederationHandlers,
 	registerMaestroRunHandlers,
 	registerDataviewHandlers,
 	registerLeaderboardHandlers,
@@ -61,6 +63,7 @@ import {
 	registerPromptsHandlers,
 	registerMemoryHandlers,
 	registerTabsHandlers,
+	registerJourneyHandlers,
 	registerContextTimelineHandlers,
 	registerPianolaHandlers,
 	registerPluginsHandlers,
@@ -84,8 +87,6 @@ import { createCotStateKeyringAnchor } from '../../cot-export/config-store';
 import { getSshRemoteById, flushPendingSessionWrites } from '../../stores';
 import { createSshRemoteStoreAdapter } from '../../utils/ssh-remote-resolver';
 import { tunnelManager } from '../../tunnel-manager';
-import { captureException } from '../../utils/sentry';
-import { logger } from '../../utils/logger';
 import { MAX_ENTRIES_PER_SESSION, resolveHistoryEntryLimit } from '../../../shared/history';
 import {
 	setGetSessionsCallback,
@@ -96,6 +97,7 @@ import {
 	setGetCustomShellPathCallback,
 } from '../../group-chat/group-chat-router';
 import { mapSessionsForMentions } from './session-mention-mapper';
+import { resolveSessionWindow } from './session-window';
 import { filterLiveAgents } from '../../../shared/agentVisibility';
 import type { IpcBootstrapDependencies } from './types';
 
@@ -140,6 +142,17 @@ export function setupIpcHandlers(deps: IpcBootstrapDependencies): void {
 	// Computer History - desktop-only, the bridge refuses every
 	// `computerHistory:*` channel (D15). See src/main/ipc/handlers/computerHistory.ts.
 	registerComputerHistoryHandlers();
+
+	// Federation peer mirror - reads and pushes of the desktop's mirror of its
+	// Federation peers, input to them, and Move to Host (lift). Desktop-only.
+	// See src/main/ipc/handlers/federation.ts.
+	registerFederationHandlers({
+		readSessions: () => deps.sessionsStore.get('sessions', []),
+		readSshRemotes: () => deps.settingsStore.get('sshRemotes', []),
+		readAgentConfigs: () => deps.agentConfigsStore.get('configs', {}),
+		getMainWindow: deps.getMainWindow,
+		getProcessManager: deps.getProcessManager,
+	});
 
 	// MaestroRun - install, grant walkthrough, and the readiness that gates its
 	// system-prompt section. See src/main/ipc/handlers/maestroRun.ts.
@@ -203,6 +216,8 @@ export function setupIpcHandlers(deps: IpcBootstrapDependencies): void {
 	// Cross-agent @mention dispatch - streams a target agent's response back
 	// into the source agent's transcript (Phase 03).
 	registerCrossAgentHandlers({
+		getWebServer: deps.getWebServer,
+		getWindowForSession: (sessionId) => resolveSessionWindow(sessionId, deps),
 		getProcessManager: deps.getProcessManager,
 		getAgentDetector: deps.getAgentDetector,
 		sessionsStore: deps.sessionsStore,
@@ -225,7 +240,7 @@ export function setupIpcHandlers(deps: IpcBootstrapDependencies): void {
 		localEffects: deps.getLocalEffectAuthority,
 		install: deps.getInstallAuthority,
 	});
-	// Cue bundles - export / import pipelines and agents (Cue modal Bundles tab)
+	// Cue bundles - export / import pipelines and agents (Export Agent and Import Agent modals)
 	registerCueBundleHandlers({
 		sessionsStore: deps.sessionsStore,
 		getMainWindow: deps.getMainWindow,
@@ -242,11 +257,14 @@ export function setupIpcHandlers(deps: IpcBootstrapDependencies): void {
 
 	// Process management operations - extracted to src/main/ipc/handlers/process.ts
 	registerProcessHandlers({
+		groupsStore: deps.groupsStore,
+		getWebServer: deps.getWebServer,
 		getProcessManager: deps.getProcessManager,
 		getAgentDetector: deps.getAgentDetector,
 		agentConfigsStore: deps.agentConfigsStore,
 		settingsStore: deps.settingsStore,
 		getMainWindow: deps.getMainWindow,
+		getWindowForSession: (sessionId) => resolveSessionWindow(sessionId, deps),
 		safeSend: deps.safeSend,
 		sessionsStore: deps.sessionsStore,
 		interactiveReplayController: deps.getInteractiveReplayController() ?? undefined,
@@ -274,6 +292,7 @@ export function setupIpcHandlers(deps: IpcBootstrapDependencies): void {
 
 	// Persistence operations - extracted to src/main/ipc/handlers/persistence.ts
 	const persistenceHandlers = registerPersistenceHandlers({
+		getWindowForSession: (sessionId) => resolveSessionWindow(sessionId, deps),
 		settingsStore: deps.settingsStore,
 		sessionsStore: deps.sessionsStore,
 		groupsStore: deps.groupsStore,
@@ -286,25 +305,13 @@ export function setupIpcHandlers(deps: IpcBootstrapDependencies): void {
 		// block the UI thread. Await it here so the handlers' boolean
 		// acknowledgement keeps meaning "this revision reached disk".
 		flushSessionWrites: flushPendingSessionWrites,
-		onSessionsPersisted: (added, current, removedIds) => {
-			try {
-				deps
-					.getPianolaSupervisor()
-					?.autoWatchNewSessions(
-						added,
-						current,
-						deps.settingsStore.get('pianolaAutoWatchNewAgents', false) === true,
-						removedIds
-					);
-			} catch (error) {
-				logger.error('Could not register new Pianola watches', '[Pianola]', error);
-				void captureException(error, { operation: 'pianola:autoWatchNewSessions' });
-			}
-		},
+		onSessionsPersisted: pianolaPersistenceConsumer(deps.getPianolaSupervisor),
 	});
 	// Wire the plugin focus verbs into the persistence layer's session.activated
 	// dedupe so the two emit paths share one last-emitted id.
 	deps.setNoteSessionActivated(persistenceHandlers.noteSessionActivated);
+	deps.setReleaseQueueItem?.(persistenceHandlers.releaseQueueItem);
+	deps.setConfirmQueueItem?.(persistenceHandlers.confirmQueueItem);
 
 	// System operations - extracted to src/main/ipc/handlers/system.ts
 	registerSystemHandlers({
@@ -332,6 +339,7 @@ export function setupIpcHandlers(deps: IpcBootstrapDependencies): void {
 	registerAgentSessionsHandlers({
 		getMainWindow: deps.getMainWindow,
 		agentSessionOriginsStore: deps.agentSessionOriginsStore,
+		claudeSessionOriginsStore: deps.claudeSessionOriginsStore,
 	});
 
 	// Register Group Chat handlers
@@ -367,6 +375,10 @@ export function setupIpcHandlers(deps: IpcBootstrapDependencies): void {
 	// Register tab lifecycle handlers (renderer -> main tab-close notification)
 	registerTabsHandlers();
 
+	// User Journey: per-agent log of what the user did inside Maestro (files
+	// opened, saved, browsed). See src/main/user-journey-manager.ts.
+	registerJourneyHandlers();
+
 	// Register Context Timeline capture handlers (per-agent turn history backfill).
 	// The renderer calls these on every panel open and timeline clear, so leaving
 	// them out makes `contextTimeline:*` reject with "No handler registered"
@@ -381,6 +393,8 @@ export function setupIpcHandlers(deps: IpcBootstrapDependencies): void {
 		registerPianolaHandlers({
 			settingsStore: deps.settingsStore,
 			supervisor: pianolaSupervisor,
+			getAppWindows: () => deps.windowRegistry.getAppWindows().map((entry) => entry.browserWindow),
+			getWebServer: deps.getWebServer,
 		});
 	}
 

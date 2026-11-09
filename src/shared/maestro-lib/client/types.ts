@@ -1,3 +1,4 @@
+import type { PianolaDispatchReceipt } from '../../pianola/pianola-dispatch';
 /**
  * The `MaestroClient` interface: the one surface the TUI programs against.
  *
@@ -18,6 +19,7 @@ import type { LogEntryRecord } from '../store/transcript';
 import type { TurnOutcome } from '../streaming/turn-outcome';
 import type { AgentError, SshRemoteConfig, ThinkingMode, UsageStats } from '../../types';
 import type { CodexTransport } from '../../codexTransport';
+import type { HarnessControlMode } from '../providers/native-control';
 import type { AutoRunLaunchInput, GoalRunLaunchInput } from '../autorun/launch';
 import type { AutoRunRunEvent } from '../autorun/run-tracker';
 import type { GroupChatCreateInput, GroupChatEvent, GroupChatRecord } from '../groupchat/chat';
@@ -38,6 +40,7 @@ import type {
 	ManagedSubmitReceipt,
 } from '../managed/types';
 import type { ManagedPolicyStatus } from '../managed/host-adapter';
+import type { ExplicitHostEndpointSource } from './discovery';
 
 // ---------------------------------------------------------------------------
 // Results and errors
@@ -67,6 +70,9 @@ export type ClientErrorCode =
 	| 'failed';
 
 export interface ClientError {
+	dispatchId?: string;
+	admission?: PianolaDispatchReceipt;
+	unknown?: boolean;
 	code: ClientErrorCode;
 	/** Safe to show a person. Never holds a token or a secret. */
 	message: string;
@@ -83,6 +89,7 @@ export type ClientMethod =
 	| 'agents.list'
 	| 'agents.get'
 	| 'agents.create'
+	| 'agents.import'
 	| 'agents.update'
 	| 'agents.rename'
 	| 'agents.remove'
@@ -215,6 +222,61 @@ export interface AgentCreateInput {
 }
 
 /**
+ * One tab an imported agent brings with it (Federation lift): its chips, its transcript, and the
+ * provider session its next turn resumes. Absent fields take the host's defaults for a new tab.
+ */
+export interface AgentImportTab {
+	/** Kept on the host, so a queued message, a pin, or a link that names the tab still finds it. */
+	id: string;
+	name?: string | null;
+	starred?: boolean;
+	/**
+	 * The provider session id. The SAME id on the host, so the next turn resumes the conversation
+	 * from the provider's own session files, which already sit on the host.
+	 */
+	agentSessionId?: string | null;
+	createdAt?: number;
+	saveToHistory?: boolean;
+	showThinking?: ThinkingMode;
+	readOnlyMode?: boolean;
+	model?: string;
+	effort?: string;
+	usageStats?: UsageStats;
+	/** The transcript, oldest first, as the source persisted it. */
+	logs: LogEntryRecord[];
+}
+
+/** A message that was waiting on the source agent. It runs on the host in the order given. */
+export interface AgentImportQueuedMessage {
+	/** The tab it waits for: an `id` from `AgentImportInput.tabs`. */
+	tabId: string;
+	text: string;
+	/** Images as data URLs. */
+	images?: string[];
+}
+
+/**
+ * An agent moved onto this host from another Maestro (Federation lift). The agent runs locally on
+ * the host, so `agent.ssh` is refused, and `agent.cwd` must exist here.
+ */
+export interface AgentImportInput {
+	agent: Omit<AgentCreateInput, 'ssh'>;
+	/** At least one tab, in strip order. */
+	tabs: AgentImportTab[];
+	/** The tab the person was looking at. Absent, or not one of `tabs`: the first tab. */
+	activeTabId?: string;
+	queue?: AgentImportQueuedMessage[];
+}
+
+export interface AgentImportReceipt {
+	agentId: string;
+	/** How many of the queued messages the host accepted. */
+	queued: number;
+	/** A queued message the host could not accept, one line each. The agent itself was imported. */
+	notices?: string[];
+}
+
+/**
  * AG-4. Absent means unchanged; `null` clears the field so it inherits again.
  * `env` replaces the whole map, because it is one field on the host.
  */
@@ -247,6 +309,8 @@ export interface AgentPatch {
 	maestroPPath?: string | null;
 	/** Codex only. `exec` is the default and is stored as an unset field, as is `null`. */
 	codexTransport?: CodexTransport | null;
+	/** Optional native protocol mode. `current` and `null` are stored as unset. */
+	harnessControlMode?: HarnessControlMode | null;
 }
 
 export type AgentPatchField = keyof AgentPatch;
@@ -264,6 +328,11 @@ export interface AgentsApi {
 	/** One agent, read fresh from the host. An edit form opens on this. */
 	get(agentId: string): Promise<ClientResult<AgentRecord>>;
 	create(input: AgentCreateInput): Promise<ClientResult<{ agentId: string }>>;
+	/**
+	 * Create an agent from one another Maestro hands over, with its tabs, transcripts, provider
+	 * session ids, and queued messages (Federation lift). Same checks as `create`.
+	 */
+	import(input: AgentImportInput): Promise<ClientResult<AgentImportReceipt>>;
 	update(agentId: string, patch: AgentPatch): Promise<ClientResult<AgentUpdateReceipt>>;
 	/** Same as `update(agentId, { name })`. */
 	rename(agentId: string, name: string): Promise<ClientResult<void>>;
@@ -340,6 +409,8 @@ export interface TabsApi {
 // ---------------------------------------------------------------------------
 
 export interface TurnInput {
+	/** Reconcile a prior send with the same ID; changed intent is refused. */
+	dispatchId?: string;
 	/**
 	 * What the person typed. The host adds the system prompt, conductor
 	 * profile, nudge, and template variables (CH-2).
@@ -353,7 +424,15 @@ export type TurnSendReceipt =
 	/** The agent was idle; the turn is running now. */
 	| { status: 'started' }
 	/** The agent was busy; the message waits in the host's execution queue (CH-4). */
-	| { status: 'queued'; itemId: string; position: number; queueLength: number };
+	| {
+			status: 'queued';
+			itemId: string;
+			position: number;
+			queueLength: number;
+			dispatchId?: string;
+			admission?: PianolaDispatchReceipt;
+			durable?: boolean;
+	  };
 
 export interface QueuedTurn {
 	itemId: string;
@@ -801,10 +880,30 @@ export interface MaestroClient {
 // The WebSocket factory's options
 // ---------------------------------------------------------------------------
 
-/** Transport options, kept off the interface (R1). */
-export interface WsMaestroClientOptions {
-	/** The data dir the caller resolved. Discovery reads `cli-server.json` here. */
-	userDataDir: string;
+/**
+ * Transport options, kept off the interface (R1). The host is found one of two ways: the local
+ * `cli-server.json` in `userDataDir` (the default), or an explicit `endpoint` (a Federation
+ * remote's SSH forward). Exactly one is given.
+ */
+export type WsMaestroClientOptions = WsMaestroClientTransportOptions &
+	(
+		| {
+				/** The data dir the caller resolved. Discovery reads `cli-server.json` here. */
+				userDataDir: string;
+				endpoint?: undefined;
+		  }
+		| {
+				/**
+				 * Dial this bridge on 127.0.0.1 instead of reading `cli-server.json`. A function is
+				 * called before every connection attempt, reconnects included, so a host that came
+				 * back on a new port is found again.
+				 */
+				endpoint: ExplicitHostEndpointSource;
+				userDataDir?: undefined;
+		  }
+	);
+
+export interface WsMaestroClientTransportOptions {
 	/** Per call. Default 10000. */
 	requestTimeoutMs?: number;
 	/** Default 500, doubling to 15000, with 20% jitter. */

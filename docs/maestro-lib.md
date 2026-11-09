@@ -27,18 +27,18 @@ It is not:
 
 `planSessionTurn` checks every request before anything starts, and refuses what could not run correctly:
 
-| Reason          | When                                                                                                                                                                                                                                                                  |
-| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `unknown-agent` | The agent id is not one Maestro knows.                                                                                                                                                                                                                                |
-| `no-batch-mode` | The provider cannot run a single turn without a terminal.                                                                                                                                                                                                             |
-| `no-parser`     | Maestro has no parser for the provider's output, so the answer could not be read. The turn is refused rather than run blind.                                                                                                                                          |
-| `no-resume`     | You asked to resume, and the provider cannot resume a session.                                                                                                                                                                                                        |
-| `no-read-only`  | You asked for a read-only turn, and the provider's command line cannot enforce one. A program with nobody watching gets read-only or a refusal, never a turn that only looks read-only.                                                                               |
-| `not-installed` | The provider's binary was not found on `PATH`, in its known install locations, or at the `command` you gave.                                                                                                                                                          |
-| `windows-shell` | On Windows, the provider is installed as a `.cmd` shim that only starts through cmd.exe, and an argument cannot pass through cmd.exe intact (a prompt with a line break, `%` or `^`, for a provider that cannot read its prompt from stdin). See [Windows](#windows). |
-| `launch`        | The launch could not be planned. The message says why.                                                                                                                                                                                                                |
+| Reason          | When                                                                                                                                                                                                                                                                           |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `unknown-agent` | The agent id is not one Maestro knows.                                                                                                                                                                                                                                         |
+| `no-batch-mode` | The provider cannot run a single turn without a terminal.                                                                                                                                                                                                                      |
+| `no-parser`     | Maestro has no parser for the provider's output, so the answer could not be read. The turn is refused rather than run blind.                                                                                                                                                   |
+| `no-resume`     | You asked to resume, and the provider cannot resume a session.                                                                                                                                                                                                                 |
+| `no-read-only`  | You asked for a read-only turn, and the provider's command line cannot enforce one. A program with nobody watching gets read-only or a refusal, never a turn that only looks read-only.                                                                                        |
+| `not-installed` | The provider's binary was not found on `PATH`, in its known install locations, or at the `command` you gave.                                                                                                                                                                   |
+| `windows-shell` | On Windows, the provider is installed as a `.cmd` shim that only starts through cmd.exe, and an argument cannot pass through cmd.exe intact (a line break, a `%NAME%` pair or `^`; for the prompt, only when the provider cannot read it from stdin). See [Windows](#windows). |
+| `launch`        | The launch could not be planned. The message says why.                                                                                                                                                                                                                         |
 
-What each provider supports in maestro-lib `0.36.0`:
+What each provider supports in maestro-lib `0.37.0`:
 
 | Agent id        | Name            | Runs a turn | Resume | Read-only |
 | --------------- | --------------- | ----------- | ------ | --------- |
@@ -384,11 +384,11 @@ npm installs most agent CLIs on Windows as `.cmd` shims (`claude.cmd`, `codex.cm
 
 - If the binary is a `.cmd` or `.bat` shim, a bare `.exe` name, or a shebang script, the spec has `shell: true`. Every argument is escaped for cmd.exe, and a command path with spaces is quoted. A plain `.exe` with a path starts directly, with no shell.
 - The prompt goes over stdin for every provider that can read it there, so quotes, `%`, `&`, `|`, `^` and line breaks reach the agent as typed. This also avoids cmd.exe's limit of about 8 KB per command line.
-- A provider that only takes its prompt on the command line keeps it there. If an argument contains a line break, `%` or `^`, cmd.exe cannot pass it intact, so the turn is refused with `windows-shell` instead of running with a changed prompt.
+- A provider that only takes its prompt on the command line keeps it there. Every argument on a cmd.exe command line is checked, the provider's own flags and values as well as such a prompt. If one contains a line break, a `%NAME%` pair or `^`, cmd.exe cannot pass it intact, so the turn is refused with `windows-shell` instead of running with a changed argument. A lone `%` (`100%`, `%20`) passes. The refusal names the argument (the prompt, a flag's value, or its position) and never quotes its value.
 
 On other hosts the spec is unchanged.
 
-If you build a spec yourself, pass it through `applyWindowsShellRules(spec)` to apply the same rules. It returns the spec unchanged on other hosts, for a command that can start directly, and for a spec that already sets `shell`, so applying it twice is safe. `turnProcessSpecFromPlan` already applies it. Put the prompt in `spec.stdin` when the provider reads its prompt from stdin, and check other arguments with `cmdShellArgProblem(arg)`, which returns the reason cmd.exe cannot carry an argument, or `null` if it can.
+If you build a spec yourself, pass it through `applyWindowsShellRules(spec)` to apply the same rules. It returns the spec unchanged on other hosts, for a command that can start directly, and for a spec that already sets `shell`, so applying it twice is safe. `turnProcessSpecFromPlan` already applies it. Put the prompt in `spec.stdin` when the provider reads its prompt from stdin, and check other arguments with `cmdShellArgProblem(arg)`, which returns the reason cmd.exe cannot carry an argument, or `null` if it can. `cmdShellArgsRefusal(args, promptArgs)` checks a whole argument list and returns a refusal that names the first bad argument by its flag or position without quoting its value.
 
 ## Lower-level pieces
 
@@ -490,7 +490,7 @@ if (problems.length > 0) throw new Error(problems.join('; '));
 
 The client interface carries the extension as `MaestroClient.managed`, optional: a host without it is `unsupported`, never "unmanaged, so allowed".
 
-What that adds up to in `0.36.0`, before the release-by-release detail below:
+What that adds up to in `0.37.0`, before the release-by-release detail below:
 
 - **Standalone is untouched.** A program that never passes `managed` to `createMaestroRuntime`, and a `startTurn` with no `admission`, plan and run exactly as the earlier sections describe. Nothing here reads a keyring, opens a socket or asks a peer.
 - **A managed host admits launches, not providers.** `providerRouteSupport(agentId)` is the table: `managed` is `implemented` on the `child-process` route alone (the launch is admitted at the real spawn), and `unsupported` on `pty`, `codex-app-server`, `opencode-server` and `ssh`. What a provider's own tools do once running is not governed. The one route whose effects are enforced is the synthetic harness route, which qualifies no real provider.
@@ -569,6 +569,8 @@ Since `0.35.0` the runtime takes that source (`runtime/index.ts`, MCOMP-09-04A).
 
 Since `0.36.0` the surface carries what the upstream/rc merge added (MCOMP-01-03S, landing `e97ebd3ca`). `withAgentInGroup(agents, agentId, groupId)` moves an agent to another group (`agents/rules.ts`). `isAgentOwnWorkingDirectory(cwd, agent)`, `MAESTRO_P_ACCEPT_WORKSPACE_TRUST_ENV` and `MAESTRO_P_WORKSPACE_UNTRUSTED_EXIT_CODE` let a host accept the workspace trust prompt of the maestro-p TUI for the agent's own folder only, carried as `acceptWorkspaceTrust` on the spawn decision, the group chat spawn and `runAgentTurn` (`launch/interactive-mode.ts`). `TurnNotStartedError` names a spawn that threw before any process existed (`run/start-turn.ts`), so a caller can tell a turn that never started from one that failed. `ProviderSwitchAgent.providerTranslationTabInventory` lets a provider swap see every tab container, and `MAX_CLOSED_TAB_ARCHIVE` follows the shared closed-tab history cap. All additions; no export is removed and no managed rule changes.
 
+Since `0.37.0` the surface carries what the second upstream/rc merge added (MCOMP-33-00, upstream `919d28a66`, which numbered its own releases `0.4.0` to `0.6.0` from the shared `0.3.0`). `cmdShellArgsRefusal(args, promptArgs)` (`launch/windows-command.ts`) checks a whole cmd.exe argument list and names the first argument cmd.exe cannot carry by its flag or position, never quoting its value; see [Windows](#windows). The types `CurrentTurnCursor`, `CurrentTurnMessage` and `CurrentTurnRead` describe the desktop current-turn observation wire protocol; see [Desktop current-turn observations](#desktop-current-turn-observations). All additions; no export is removed and no managed rule changes.
+
 ## See also
 
 - [Maestro CLI](./cli) for running agents and playbooks from a shell.
@@ -576,3 +578,25 @@ Since `0.36.0` the surface carries what the upstream/rc merge added (MCOMP-01-03
 - [Running Cue on a Server](./maestro-cue-server) for unattended pipelines.
 - [`examples/maestro-lib-tui`](https://github.com/RunMaestro/Maestro/tree/main/examples/maestro-lib-tui), an interactive terminal chat built on the built entry alone: provider choice, streaming, resume, Ctrl+C to stop. Its README says how to run it.
 - `maestro-lib-run`, a small program in the Maestro build that runs one turn with these same calls and prints JSON lines. Its source, `src/shared/maestro-lib/bin/run-turn.ts`, is a complete example.
+
+### Desktop current-turn observations
+
+The exported `CurrentTurnRead` type describes the additive desktop observation
+wire protocol (version 1). The scope worker requests `get_session_history` with
+`currentTurn: true` and the census's exact `expectedCursor`. The response is a
+complete native current turn, independent of the persisted history window.
+
+When Pianola is off, an explicit current-turn history request starts bounded
+observation for that tab. The first response may be unavailable: no disk history
+or pre-enable boundary is reconstructed. A fresh native submitted user boundary
+and captured spawn are required before a complete response. Feature transitions
+discard retained continuity; ordinary census reads do not opt tabs into observation.
+Ordinary history requests retain their existing behavior.
+
+A worker with a complete base can supply `deltaBase`. A `mode: 'delta'` response
+contains changed rows, the exact base cursor, and the complete ordered ID list;
+the worker reconstructs the entire turn before classification. A different run,
+host generation, or lost base requires a full refresh. Incomplete, gap, reset,
+and unknown observations never authorize an answer. Observation revisions are
+separate from scope ownership, enrollment epochs, and answer rules. The final
+native spawn fence rechecks those guards after asynchronous preparation.

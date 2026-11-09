@@ -306,7 +306,7 @@ describe('send command', () => {
 				requirePluginTools: true,
 			}),
 			'plugins_send_agent_result',
-			61 * 60_000
+			361 * 60_000
 		);
 		expect(spawnAgent).not.toHaveBeenCalled();
 		expect(JSON.parse(consoleSpy.mock.calls[0][0])).toMatchObject({
@@ -609,6 +609,21 @@ describe('send command', () => {
 		const output = JSON.parse(consoleSpy.mock.calls[0][0]);
 		expect(output.success).toBe(false);
 		expect(output.code).toBe('AGENT_NOT_FOUND');
+		expect(processExitSpy).toHaveBeenCalledWith(1);
+	});
+
+	it('refuses a lifted agent with AGENT_LIFTED and a pointer at peer:agentId', async () => {
+		vi.mocked(resolveAgentId).mockReturnValue('agent-abc-123');
+		vi.mocked(getSessionById).mockReturnValueOnce(
+			mockAgent({ liftedTo: { peer: 'build-box', agentId: 'host-1', at: 1 } })
+		);
+
+		await send('agent-abc', 'Hello', {});
+
+		const output = JSON.parse(consoleSpy.mock.calls[0][0]);
+		expect(output.success).toBe(false);
+		expect(output.code).toBe('AGENT_LIFTED');
+		expect(output.error).toContain('build-box:host-1');
 		expect(processExitSpy).toHaveBeenCalledWith(1);
 	});
 

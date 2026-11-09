@@ -7,8 +7,11 @@
  * filtered inside the service (ISC-1.7).
  */
 
+import { getSessionsStore } from '../stores/getters';
+import { pianolaNewTabSpawns } from '../pianola/pianola-new-tab-dispatch';
 import type { ProcessManager } from '../process-manager';
-import type { ProcessConfig } from '../process-manager/types';
+import type { ProcessConfig, TurnSettlement } from '../process-manager/types';
+import type { AgentError } from '../../shared/types';
 import {
 	findActiveRunBySession,
 	getAgentRun,
@@ -27,6 +30,8 @@ import { redactPrompt } from '../../shared/agent-run';
 import { buildEnrichHook } from './producers';
 import { resolveOwningMaestroSessionId } from '../coworking/coworking-session-id';
 
+import { nativeCurrentTurns } from '../pianola/current-turn';
+
 const LOG_CONTEXT = '[AgentRunCapture]';
 
 export interface CaptureListenerOptions {
@@ -38,14 +43,46 @@ export interface CaptureListenerOptions {
 	lifecycle?: CaptureServiceDeps['lifecycle'];
 }
 
+/**
+ * Wire native process events into durable run capture and current-turn tracking. Return the
+ * capture service; spawn capture binds admission to the native run rather than a renderer
+ * acknowledgement.
+ */
 export function setupAgentRunCapture(
 	processManager: ProcessManager,
 	options: CaptureListenerOptions = {}
 ): AgentRunCaptureService {
 	const service = new AgentRunCaptureService({
+		/**
+		 * Resolve exactly one stored tab matching the native process and provider session. Return
+		 * undefined for ambiguous or changed bindings so capture cannot certify another tab's
+		 * creation identity.
+		 */
+		resolveNativeTabSession: (input) => {
+			const matches = getSessionsStore()
+				.get('sessions', [])
+				.flatMap((agent) =>
+					(agent.aiTabs ?? [])
+						.filter((tab: { id: string }) => input.sessionId === `${agent.id}-ai-${tab.id}`)
+						.map((tab: { id: string; createdAt: number; agentSessionId?: string | null }) => ({
+							agent,
+							tab,
+						}))
+				);
+			const target = matches.length === 1 ? matches[0] : undefined;
+			return target && (target.tab.agentSessionId ?? undefined) === input.agentSessionId
+				? {
+						agentId: target.agent.id,
+						tabId: target.tab.id,
+						createdAt: target.tab.createdAt,
+						initialSessionId: target.tab.agentSessionId,
+					}
+				: undefined;
+		},
 		getAgentRun,
-		upsertAgentRun: (run) => {
+		upsertAgentRun: (run, terminalOutput) => {
 			const saved = upsertAgentRun(run);
+			pianolaNewTabSpawns.observeRun(saved, terminalOutput);
 			broadcastRunUpdated(saved);
 			return saved;
 		},
@@ -67,22 +104,45 @@ export function setupAgentRunCapture(
 		// The lifecycle projection's identities: the owning agent, the lineage
 		// the sink bound the spawn as, and the admission it granted.
 		const lineage = spawnLifecycleLineage(config);
-		service.captureSpawn({
+		nativeCurrentTurns.spawning(config.sessionId);
+		const run = service.captureSpawn({
 			sessionId: config.sessionId,
+			transcriptBoundaryId: config.transcriptBoundaryId,
 			toolType: config.toolType,
 			cwd: config.cwd,
 			tabId: config.tabId,
+			agentSessionId: config.agentSessionId,
 			prompt: config.prompt,
 			worktreePath: config.projectPath,
 			agentId: resolveOwningMaestroSessionId(config.sessionId),
 			...(lineage ? { lineage } : {}),
 			admission: spawnLifecycleAdmission(config.admission),
 		});
+		if (run) nativeCurrentTurns.begin(run, config.transcriptBoundaryId);
+		if (run)
+			pianolaNewTabSpawns.captured(
+				config.sessionId,
+				run.id,
+				config.pianolaDispatchId,
+				config.pianolaQueueItemId
+			);
 	});
 
-	processManager.on('exit', (sessionId: string, code: number) => {
-		void service.captureExit({ sessionId, exitCode: code });
+	processManager.on('session-id', (sessionId: string, agentSessionId: string) => {
+		service.captureSessionAnnouncement(sessionId, agentSessionId);
+		nativeCurrentTurns.announce(sessionId, agentSessionId);
 	});
+
+	processManager.on('agent-error', (sessionId: string, error: AgentError) => {
+		service.captureError(sessionId, error);
+	});
+
+	processManager.on(
+		'exit',
+		(sessionId: string, code: number, signal?: number, settlement?: TurnSettlement) => {
+			void service.captureExit({ sessionId, exitCode: code, signal, settlement });
+		}
+	);
 
 	logger.info('AgentRun capture wired to ProcessManager', LOG_CONTEXT);
 	return service;

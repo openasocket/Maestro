@@ -1,3 +1,7 @@
+import {
+	isRemoteMethodAllowed,
+	isRemoteEventAllowed,
+} from '../../../main/web-server/handlers/bridgeDenyList';
 import { describe, it, expect, vi, afterEach, beforeAll, afterAll } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -9,9 +13,15 @@ import {
 	createPending,
 	resolvePending,
 	relayRegistryStats,
+	getPendingPermissionSnapshot,
+	subscribePendingPermissions,
 } from '../../../main/permission-relay/registry';
 import { buildRelayArgs } from '../../../main/permission-relay/spawn-args';
-import { parseQuestionRequest } from '../../../main/permission-relay/question-request';
+import { isNativeQuestionContent, isNativeQuestionRequest } from '../../../shared/currentTurn';
+import {
+	parseQuestionRequest,
+	parseAutomatableQuestionRequest,
+} from '../../../main/permission-relay/question-request';
 import { PermissionRelayServer } from '../../../main/permission-relay/PermissionRelayServer';
 import {
 	RELAY_PERMISSION_PROMPT_TOOL,
@@ -23,6 +33,43 @@ import { claudeToolEffect, createRelayManagedGate } from '../../../main/enterpri
 import { fakeAdmission, fakeSpawnPort, tableEffects } from '../../helpers/managedSpawnPort';
 
 describe('permission-relay registry', () => {
+	it('keeps the registry snapshot and status push native-only', () => {
+		expect(isRemoteMethodAllowed('process:getPendingPermissions')).toBe(false);
+		expect(isRemoteEventAllowed('process:pending-permissions')).toBe(false);
+	});
+
+	it('publishes only versioned process IDs and clears them on timeout and exit', async () => {
+		vi.useFakeTimers();
+		const spawn = registerSpawn({ sessionId: 'agent-ai-tab', tabId: 'tab' });
+		const changes = vi.fn();
+		const off = subscribePendingPermissions(changes);
+		try {
+			const timed = createPending('timed-status', spawn.token, 10);
+			expect(getPendingPermissionSnapshot()).toEqual({
+				version: expect.any(Number),
+				processIds: ['agent-ai-tab'],
+				requestIds: ['timed-status'],
+			});
+			const version = getPendingPermissionSnapshot().version;
+			await vi.advanceTimersByTimeAsync(10);
+			await timed;
+			expect(getPendingPermissionSnapshot().processIds).toEqual([]);
+			expect(getPendingPermissionSnapshot().version).toBeGreaterThan(version);
+			const exited = createPending('exited-status', spawn.token);
+			spawn.cleanup();
+			await exited;
+			expect(changes).toHaveBeenLastCalledWith({
+				version: expect.any(Number),
+				processIds: [],
+				requestIds: [],
+			});
+		} finally {
+			off();
+			spawn.cleanup();
+			vi.useRealTimers();
+		}
+	});
+
 	it('registers a spawn and looks up its binding', () => {
 		const { token, cleanup } = registerSpawn({ sessionId: 's1', tabId: 't1' });
 		expect(lookupBinding(token)).toEqual({ sessionId: 's1', tabId: 't1' });
@@ -253,6 +300,7 @@ describe('permission-relay server AskUserQuestion round-trip', () => {
 		// Stand in for the renderer: answer via deny+message (the proven shape).
 		server.setOnRequest((req) => {
 			captured = req;
+			expect(getPendingPermissionSnapshot().processIds).toContain('sQ');
 			resolvePending(req.requestId, { behavior: 'deny', message: 'Color: Blue' });
 		});
 
@@ -620,5 +668,125 @@ describe('permission-relay server AskUserQuestion round-trip', () => {
 		expect(await gate.decide({ sessionId: 'sG' }, request('Bash', { command: 'ls' }))).toEqual({
 			managed: false,
 		});
+	});
+});
+
+describe('strict automation question schema', () => {
+	const nativeMetadata = {
+		requestId: 'request',
+		processId: 'agent-ai-tab',
+		createdAt: 1,
+		observedRisk: 'low',
+		cursor: {
+			generation: 'host',
+			sourceGeneration: 'renderer',
+			agentId: 'agent',
+			tabId: 'tab',
+			createdAt: 7,
+			provider: 'claude-code',
+			agentSessionId: null,
+			runId: 'run',
+			turnId: 'user',
+			revision: 1,
+		},
+	};
+	const valid = {
+		question: 'Use count or total?',
+		header: 'Naming',
+		multiSelect: false,
+		options: [{ label: 'count', description: 'Item count' }, { label: 'total' }],
+	};
+	it('accepts the intact supported request and shares content bounds with the wire guard', () => {
+		const parsed = parseAutomatableQuestionRequest('AskUserQuestion', { questions: [valid] });
+		expect(parsed).toEqual(valid);
+		expect(
+			isNativeQuestionRequest({
+				...nativeMetadata,
+				question: valid.question,
+				options: ['count', 'total'],
+			})
+		).toBe(true);
+		expect(
+			isNativeQuestionContent({
+				question: parsed!.question,
+				options: parsed!.options.map((o) =>
+					o.description ? `${o.label}: ${o.description}` : o.label
+				),
+			})
+		).toBe(true);
+	});
+	it.each([
+		{ multiSelect: 'true' },
+		{ multiSelect: 'false' },
+		{ multiSelect: undefined },
+		{ multiSelect: null },
+		{ multiSelect: 0 },
+		{ multiSelect: true },
+		{ options: undefined },
+		{ options: [] },
+		{ options: ['count'] },
+		{ options: [{ label: 'count' }, {}] },
+		{ options: [{ label: [] }] },
+		{ options: [{ label: ' ' }] },
+		{ options: [['count']] },
+		{ options: [{ label: 'count', description: null }] },
+		{ options: [{ label: 'count', description: ' ' }] },
+		{ options: [{ label: 'count', extra: true }] },
+		{ options: [{ label: 'count' }, { label: ' count ' }] },
+		{ options: [{ label: 'x'.repeat(1001) }] },
+		{ options: Array.from({ length: 33 }, (_, i) => ({ label: `${i}` })) },
+		{ question: [] },
+		{ question: ' ' },
+		{ question: 'x'.repeat(8001) },
+		{ header: [] },
+		{ header: ' ' },
+		{ header: 'x'.repeat(16001) },
+		{ extra: true },
+	])('keeps raw malformed or unsupported fields human-only: %#', (patch) => {
+		expect(
+			parseAutomatableQuestionRequest('AskUserQuestion', { questions: [{ ...valid, ...patch }] })
+		).toBeNull();
+	});
+	it.each(
+		[[], [valid, valid], 'question', [Object.assign([], valid)], [null]].map((questions) => ({
+			questions,
+		}))
+	)('rejects an ambiguous raw questions container: %#', ({ questions }) => {
+		expect(parseAutomatableQuestionRequest('AskUserQuestion', { questions })).toBeNull();
+	});
+	it.each(
+		[
+			[],
+			[' '],
+			['count', 'count'],
+			['count', ' count '],
+			['x'.repeat(1001)],
+			Array.from({ length: 33 }, (_, i) => `${i}`),
+			Array.from({ length: 32 }, (_, i) => `${i}${'x'.repeat(900)}`),
+		].map((options) => ({ options }))
+	)('rejects equivalent malformed native wire options: %#', ({ options }) => {
+		expect(isNativeQuestionContent({ question: 'Use count?', options })).toBe(false);
+		expect(isNativeQuestionRequest({ ...nativeMetadata, question: 'Use count?', options })).toBe(
+			false
+		);
+	});
+});
+
+describe('permission relay instance transport isolation', () => {
+	it('starts two hosts in one process without sharing a Windows pipe', async () => {
+		const first = new PermissionRelayServer();
+		const second = new PermissionRelayServer();
+		const dirs = [0, 1].map(() => fs.mkdtempSync(path.join(os.tmpdir(), 'relay-instance-')));
+		try {
+			const a = await first.ensureStarted(dirs[0]);
+			const b = await second.ensureStarted(dirs[1]);
+			expect(a).not.toBe(b);
+			expect(first.isRunning()).toBe(true);
+			expect(second.isRunning()).toBe(true);
+		} finally {
+			first.stop();
+			second.stop();
+			for (const dir of dirs) fs.rmSync(dir, { recursive: true, force: true });
+		}
 	});
 });

@@ -21,11 +21,17 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { EventEmitter } from 'events';
 import type { ChildProcess } from 'child_process';
 
+// The store surface the supervisor reads since upstream rc 919d28a66 (async
+// target writes, programs and plans gate which targets are runnable).
 vi.mock('../../../main/pianola/pianola-store-main', () => ({
+	compactDispatchArtifacts: vi.fn(async () => {}),
 	readSupervisorTargets: vi.fn(() => []),
-	writeSupervisorTargets: vi.fn(),
-	removeSupervisorTarget: vi.fn(() => []),
+	readSupervisorTarget: vi.fn(),
+	removeSupervisorTargetAsync: vi.fn(async () => []),
+	updateSupervisorTargetsAsync: vi.fn(),
 	supervisorFilePath: vi.fn(() => '/fake/maestro-pianola-supervisor.json'),
+	readPrograms: vi.fn(() => []),
+	readPlans: vi.fn(() => []),
 }));
 vi.mock('../../../main/cue/cue-cli-executor', () => ({
 	resolveMaestroCliScriptPath: () => '/fake/maestro-cli.js',

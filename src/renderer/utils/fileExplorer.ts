@@ -1,3 +1,4 @@
+import { isExpectedBridgeError } from '../../shared/bridgeError';
 import {
 	getAllFolderPaths as getAllFolderPathsShared,
 	walkTreePartitioned,
@@ -329,7 +330,8 @@ export async function loadFileTree(
 					sshContext.sshRemoteId
 				);
 				ignorePatterns = [...ignorePatterns, ...gitignorePatterns];
-			} catch {
+			} catch (error) {
+				if (isExpectedBridgeError(error)) throw error;
 				// Silently ignore - .gitignore may not exist or be readable
 			}
 		}
@@ -344,7 +346,8 @@ export async function loadFileTree(
 				if (content) {
 					ignorePatterns = [...ignorePatterns, ...parseGitignoreContent(content)];
 				}
-			} catch {
+			} catch (error) {
+				if (isExpectedBridgeError(error)) throw error;
 				// .gitignore may not exist or be readable - not an error
 			}
 		}
@@ -380,7 +383,8 @@ async function fetchRemoteGitignorePatterns(
 	try {
 		const content = await window.maestro.fs.readFile(`${dirPath}/.gitignore`, sshRemoteId);
 		return content ? parseGitignoreContent(content) : [];
-	} catch {
+	} catch (error) {
+		if (isExpectedBridgeError(error)) throw error;
 		return [];
 	}
 }
@@ -474,7 +478,8 @@ async function loadFileTreeRecursive(
 					} catch (childErr) {
 						// Re-throw aborts so the whole walk stops; skip unreadable child
 						// directories so a single failing subdir doesn't kill the walk.
-						if (childErr instanceof FileTreeAbortError) throw childErr;
+						if (childErr instanceof FileTreeAbortError || isExpectedBridgeError(childErr))
+							throw childErr;
 					}
 				} else {
 					// Cap hit before we could recurse: fold this in as an empty placeholder
@@ -518,7 +523,7 @@ async function loadFileTreeRecursive(
 			return a.name.localeCompare(b.name);
 		});
 	} catch (error) {
-		if (error instanceof FileTreeAbortError) throw error;
+		if (error instanceof FileTreeAbortError || isExpectedBridgeError(error)) throw error;
 		logger.error('Error loading file tree:', undefined, error);
 		throw error; // Propagate error to be caught by caller
 	}
@@ -723,7 +728,8 @@ export async function loadFileTreeRemoteBatched(
 		try {
 			const gitignorePatterns = await fetchRemoteGitignorePatterns(rootPath, sshRemoteId);
 			effectiveIgnorePatterns = [...effectiveIgnorePatterns, ...gitignorePatterns];
-		} catch {
+		} catch (error) {
+			if (isExpectedBridgeError(error)) throw error;
 			// .gitignore may not exist or be readable - not an error
 		}
 	}
@@ -763,7 +769,7 @@ export async function loadFileTreeRemoteBatched(
 		partial.maestro = maestroChildren;
 		onPhase?.('maestro', partial);
 	} catch (err) {
-		if (err instanceof FileTreeAbortError) throw err;
+		if (err instanceof FileTreeAbortError || isExpectedBridgeError(err)) throw err;
 		// .maestro missing/unreadable - log and continue with empty subtree
 		logger.debug('[loadFileTreeRemoteBatched] .maestro phase failed:', undefined, err);
 	}
@@ -826,7 +832,7 @@ export async function loadFileTreeRemoteBatched(
 			deepDirsScanned += listing.directories.length;
 			deepFilesFound += listing.files.length;
 		} catch (err) {
-			if (err instanceof FileTreeAbortError) throw err;
+			if (err instanceof FileTreeAbortError || isExpectedBridgeError(err)) throw err;
 			// Unreadable or since-deleted folder: leave it empty, keep the tree.
 			logger.debug('[loadFileTreeRemoteBatched] expanded folder listing failed:', undefined, err);
 		}
@@ -915,6 +921,26 @@ function collectPaths(
 	return paths;
 }
 
+// Matching ordered shapes guarantee equal path sets, even with duplicate names.
+// Any difference falls back to the set comparison, which handles reordering and duplicates.
+function sameTreeStructure(oldNodes: FileTreeNode[], newNodes: FileTreeNode[]): boolean {
+	if (oldNodes === newNodes) return true;
+	if (oldNodes.length !== newNodes.length) return false;
+	for (let i = 0; i < oldNodes.length; i++) {
+		const oldNode = oldNodes[i];
+		const newNode = newNodes[i];
+		if (oldNode.name !== newNode.name || oldNode.type !== newNode.type) return false;
+		if (oldNode.type === 'folder') {
+			const oldChildren = oldNode.children;
+			const newChildren = newNode.children;
+			if (oldChildren && newChildren) {
+				if (!sameTreeStructure(oldChildren, newChildren)) return false;
+			} else if ((oldChildren?.length ?? 0) !== (newChildren?.length ?? 0)) return false;
+		}
+	}
+	return true;
+}
+
 /**
  * Compare two file trees and count the differences
  */
@@ -922,6 +948,11 @@ export function compareFileTrees(
 	oldTree: FileTreeNode[],
 	newTree: FileTreeNode[]
 ): FileTreeChanges {
+	if (sameTreeStructure(oldTree, newTree)) {
+		const cached = rootPathSetsCache.get(oldTree);
+		if (cached) rootPathSetsCache.set(newTree, cached);
+		return { totalChanges: 0, newFiles: 0, newFolders: 0, removedFiles: 0, removedFolders: 0 };
+	}
 	const oldPaths = collectPaths(oldTree);
 	const newPaths = collectPaths(newTree);
 

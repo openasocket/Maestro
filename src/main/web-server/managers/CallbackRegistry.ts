@@ -1,3 +1,4 @@
+import type { PianolaQueueControl } from '../../../shared/pianola/pianola-dispatch';
 import type { TranslationReport } from '../../../shared/maestro-lib/translation/types';
 import type { ManagedDelegationContext } from '../../../shared/maestro-lib/managed/delegation';
 /**
@@ -33,6 +34,7 @@ import type {
 	StarTabCallback,
 	SnoozeCommandCallback,
 	ClosedTabCommandCallback,
+	MessagePinCommandCallback,
 	AutoRunSteeringCommandCallback,
 	WindowCommandCallback,
 	ThroughputGaugeCommandCallback,
@@ -173,7 +175,6 @@ import type {
 	ListDesktopSessionsCallback,
 	GetSessionHistoryCallback,
 	GetSessionHistoryOptions,
-	DesktopSessionEntry,
 	SessionHistoryResult,
 } from '../types';
 import type { SnoozeCommandRequest, SnoozeCommandResult } from '../../../shared/snoozeCommands';
@@ -181,6 +182,10 @@ import type {
 	ClosedTabCommandRequest,
 	ClosedTabCommandResult,
 } from '../../../shared/closedTabCommands';
+import type {
+	MessagePinCommandRequest,
+	MessagePinCommandResult,
+} from '../../../shared/messagePinCommands';
 import type { TabContextOpRequest, TabContextOpResult } from '../../../shared/tabContextOps';
 import type {
 	SteeringCommandRequest,
@@ -226,6 +231,7 @@ export interface WebServerCallbacks {
 	starTab: StarTabCallback | null;
 	snoozeCommand: SnoozeCommandCallback | null;
 	closedTabCommand: ClosedTabCommandCallback | null;
+	messagePinCommand: MessagePinCommandCallback | null;
 	autoRunSteeringCommand: AutoRunSteeringCommandCallback | null;
 	windowCommand: WindowCommandCallback | null;
 	throughputGaugeCommand: ThroughputGaugeCommandCallback | null;
@@ -345,6 +351,7 @@ export class CallbackRegistry {
 		starTab: null,
 		snoozeCommand: null,
 		closedTabCommand: null,
+		messagePinCommand: null,
 		autoRunSteeringCommand: null,
 		windowCommand: null,
 		throughputGaugeCommand: null,
@@ -477,6 +484,8 @@ export class CallbackRegistry {
 		images?: string[],
 		background?: boolean,
 		mentionRouting?: MentionRouting,
+		requireDeliveryReceipt?: boolean,
+		pianolaDispatchId?: string,
 		delegation?: ManagedDelegationContext,
 		dispatchTicket?: string
 	): Promise<boolean> {
@@ -490,8 +499,13 @@ export class CallbackRegistry {
 			images,
 			background,
 			mentionRouting,
-			delegation,
-			dispatchTicket
+			...((delegation || dispatchTicket
+				? [requireDeliveryReceipt, pianolaDispatchId, delegation, dispatchTicket]
+				: pianolaDispatchId
+					? [requireDeliveryReceipt, pianolaDispatchId]
+					: requireDeliveryReceipt
+						? [true]
+						: []) as [boolean?, string?, ManagedDelegationContext?, string?])
 		);
 	}
 
@@ -567,6 +581,13 @@ export class CallbackRegistry {
 			return { success: false, error: 'Reopening closed tabs is not configured' };
 		}
 		return this.callbacks.closedTabCommand(request);
+	}
+
+	async messagePinCommand(request: MessagePinCommandRequest): Promise<MessagePinCommandResult> {
+		if (!this.callbacks.messagePinCommand) {
+			return { success: false, error: 'Message pins are not configured' };
+		}
+		return this.callbacks.messagePinCommand(request);
 	}
 
 	async autoRunSteeringCommand(request: SteeringCommandRequest): Promise<SteeringCommandResult> {
@@ -696,9 +717,10 @@ export class CallbackRegistry {
 		background?: boolean,
 		hidden?: boolean,
 		mentionRouting?: MentionRouting,
+		control?: import('../../../shared/pianola/pianola-dispatch').PianolaNewTabControl,
 		delegation?: ManagedDelegationContext,
 		dispatchTicket?: string
-	): Promise<{ success: boolean; tabId?: string }> {
+	): Promise<import('../types').NewAITabWithPromptResult> {
 		if (!this.callbacks.newAITabWithPrompt) return { success: false };
 		return this.callbacks.newAITabWithPrompt(
 			sessionId,
@@ -706,8 +728,11 @@ export class CallbackRegistry {
 			background,
 			hidden,
 			mentionRouting,
-			delegation,
-			dispatchTicket
+			control,
+			...((delegation || dispatchTicket ? [delegation, dispatchTicket] : []) as [
+				ManagedDelegationContext?,
+				string?,
+			])
 		);
 	}
 
@@ -732,6 +757,8 @@ export class CallbackRegistry {
 		background?: boolean,
 		held?: boolean,
 		mentionRouting?: MentionRouting,
+		dispatchCallback?: boolean,
+		control?: PianolaQueueControl,
 		delegation?: ManagedDelegationContext,
 		dispatchTicket?: string
 	): Promise<EnqueueCommandResult> {
@@ -745,8 +772,12 @@ export class CallbackRegistry {
 			background,
 			held,
 			mentionRouting,
-			delegation,
-			dispatchTicket
+			dispatchCallback,
+			control,
+			...((delegation || dispatchTicket ? [delegation, dispatchTicket] : []) as [
+				ManagedDelegationContext?,
+				string?,
+			])
 		);
 	}
 
@@ -942,6 +973,7 @@ export class CallbackRegistry {
 			theme: 'dracula',
 			fontSize: 14,
 			enterToSendAI: false,
+			relayArchiveHours: 24,
 			defaultSaveToHistory: true,
 			defaultShowThinking: 'off',
 			autoScroll: true,
@@ -1285,8 +1317,8 @@ export class CallbackRegistry {
 		return this.callbacks.importMarketplacePlaybook(sessionId, playbookId, targetFolderName);
 	}
 
-	listDesktopSessions(): DesktopSessionEntry[] {
-		return this.callbacks.listDesktopSessions?.() ?? [];
+	listDesktopSessions(): ReturnType<ListDesktopSessionsCallback> | null {
+		return this.callbacks.listDesktopSessions?.() ?? null;
 	}
 
 	getSessionHistory(
@@ -1375,6 +1407,10 @@ export class CallbackRegistry {
 
 	setClosedTabCommandCallback(callback: ClosedTabCommandCallback): void {
 		this.callbacks.closedTabCommand = callback;
+	}
+
+	setMessagePinCommandCallback(callback: MessagePinCommandCallback): void {
+		this.callbacks.messagePinCommand = callback;
 	}
 
 	setAutoRunSteeringCommandCallback(callback: AutoRunSteeringCommandCallback): void {

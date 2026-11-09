@@ -5,8 +5,9 @@
  * already-sanitized quota windows through IPC.
  */
 
-import { create } from 'zustand';
+import { createQuotaSnapshotStore } from './quotaSnapshotStore';
 
+import type { CodexCreditBalance } from '../../shared/codexCredits';
 import type { CodexResetCreditCounts } from '../../shared/codexResetCredits';
 
 export interface CodexUsageWindow {
@@ -41,43 +42,17 @@ export interface CodexUsageSnapshot {
 	session?: CodexUsageWindow;
 	weekly?: CodexUsageWindow;
 	additionalLimits?: CodexAdditionalLimit[];
+	/** Additional usage credits; absent when the endpoint does not report a usable balance. */
+	credits?: CodexCreditBalance;
 	/** Reset-credit inventory, carried free on the usage payload. */
 	resetCredits?: CodexResetCreditCounts;
 	error?: string;
 }
 
-interface CodexUsageState {
-	snapshots: Record<string, CodexUsageSnapshot>;
-	loaded: boolean;
-	refreshing: boolean;
-	setSnapshots: (next: Record<string, CodexUsageSnapshot>) => void;
-	refresh: () => Promise<void>;
-	__resetForTests: () => void;
-}
-
-const initial = {
-	snapshots: {} as Record<string, CodexUsageSnapshot>,
-	loaded: false,
-	refreshing: false,
-};
-
-export const useCodexUsageStore = create<CodexUsageState>((set, get) => ({
-	...initial,
-	setSnapshots: (next) => set({ snapshots: next, loaded: true }),
-	refresh: async () => {
-		if (get().refreshing) return;
-		set({ refreshing: true });
-		try {
-			const next = await window.maestro.agents.getCodexUsageSnapshots();
-			set({ snapshots: next ?? {}, loaded: true });
-		} catch {
-			set({ loaded: true });
-		} finally {
-			set({ refreshing: false });
-		}
-	},
-	__resetForTests: () => set({ ...initial }),
-}));
+export const useCodexUsageStore = createQuotaSnapshotStore<CodexUsageSnapshot>({
+	fetchSnapshots: () => window.maestro.agents.getCodexUsageSnapshots(),
+	sampleOnMain: () => window.maestro.agents.refreshCodexUsageSnapshots(),
+});
 
 export function getAllCodexUsageSnapshots(): Record<string, CodexUsageSnapshot> {
 	return useCodexUsageStore.getState().snapshots;

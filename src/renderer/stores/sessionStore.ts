@@ -22,6 +22,7 @@ import { hasRunnableQueueItem } from '../utils/executionQueue';
 import { logger } from '../utils/logger';
 import { persistActiveSessionId } from '../utils/activeSessionPersistence';
 import { useUIStore } from './uiStore';
+import { usePeerMirrorStore } from './peerMirrorStore';
 import {
 	normalizeGroupHierarchy,
 	removeGroupAndPromoteChildren,
@@ -40,6 +41,7 @@ export interface SessionStoreState {
 	// Core entities
 	sessions: Session[];
 	groups: Group[];
+	groupPersistenceBaseline: Group[];
 
 	// Active session
 	activeSessionId: string;
@@ -47,6 +49,9 @@ export interface SessionStoreState {
 	// Initialization
 	sessionsLoaded: boolean;
 	initialLoadComplete: boolean;
+
+	// Authoritative recovery retires state-event work from the previous inventory.
+	sessionReconciliationGeneration: number;
 	initialFileTreeReady: boolean;
 
 	// True only once the group registry has been READ back successfully. Group
@@ -195,9 +200,11 @@ export const useSessionStore = create<SessionStore>()((set, get) => ({
 	// --- State ---
 	sessions: [],
 	groups: [],
+	groupPersistenceBaseline: [],
 	activeSessionId: '',
 	sessionsLoaded: false,
 	initialLoadComplete: false,
+	sessionReconciliationGeneration: 0,
 	initialFileTreeReady: false,
 	groupsLoaded: false,
 	sessionsReadOk: false,
@@ -265,6 +272,9 @@ export const useSessionStore = create<SessionStore>()((set, get) => ({
 		// highlight never lingers. The cycle re-sets it afterward when it lands on
 		// a starred row (see useCycleSession.activateVisualItem).
 		useUIStore.getState().setSidebarExtraSelection(null);
+		// Choosing a local agent leaves a Federation mirror the Main Window may be showing, even
+		// when the id is the one already active (the mirror hid it, it did not replace it).
+		usePeerMirrorStore.getState().clearMirrorSelection();
 		// Fire-and-forget: persist for restore on next launch. Not awaited - UI
 		// state must update synchronously; if the write fails the only consequence
 		// is the session won't be pre-selected on next launch (falls back to first
@@ -275,8 +285,11 @@ export const useSessionStore = create<SessionStore>()((set, get) => ({
 
 	hydrateActiveSessionId: (id) => set({ activeSessionId: id, cyclePosition: -1 }),
 
-	setActiveSessionIdInternal: (v) =>
-		set((s) => ({ activeSessionId: resolve(v, s.activeSessionId) })),
+	setActiveSessionIdInternal: (v) => {
+		set((s) => ({ activeSessionId: resolve(v, s.activeSessionId) }));
+		// Session cycling lands on a local agent: leave any mirror shown (see setActiveSessionId).
+		usePeerMirrorStore.getState().clearMirrorSelection();
+	},
 
 	// Groups
 	setGroups: (v) =>
@@ -441,6 +454,12 @@ export const selectSessionById =
 	(id: string) =>
 	(state: SessionStore): Session | undefined =>
 		state.sessions.find((s) => s.id === id);
+
+/** Logical agents that need a decision, matching the Pianola dashboard badge. */
+export const selectNeedsInputCount = (state: SessionStore): number =>
+	state.sessions.filter(
+		(session) => !session.isPianola && !session.parentSessionId && session.state === 'waiting_input'
+	).length;
 
 export const selectIsAnySessionBusy = (state: SessionStore): boolean =>
 	state.sessions.some((s) => s.state === 'busy');

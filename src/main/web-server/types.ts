@@ -2,6 +2,7 @@ import type {
 	AgentConfigWriteOutcome,
 	AgentConfigWriteRequest,
 } from '../agents/agent-config-writes';
+import type { PianolaQueueControl } from '../../shared/pianola/pianola-dispatch';
 import type { TranslationReport } from '../../shared/maestro-lib/translation/types';
 /**
  * Shared type definitions for the web server module.
@@ -12,12 +13,16 @@ import type { AutoRunBroadcastState } from '../../shared/autoRunBroadcast';
 import type { QueueSteerResult } from '../../shared/chatSteering';
 import type { InterruptTurnResult } from '../../shared/turnInterrupt';
 import type { GroupChatSteerResult } from '../../shared/groupChatSteering';
-import type { DesktopTabEntry } from '../../shared/desktopTabs';
+import type { DesktopTabEntry, DesktopSessionsSnapshot } from '../../shared/desktopTabs';
 import type { SnoozeCommandRequest, SnoozeCommandResult } from '../../shared/snoozeCommands';
 import type {
 	ClosedTabCommandRequest,
 	ClosedTabCommandResult,
 } from '../../shared/closedTabCommands';
+import type {
+	MessagePinCommandRequest,
+	MessagePinCommandResult,
+} from '../../shared/messagePinCommands';
 import type { TabContextOpRequest, TabContextOpResult } from '../../shared/tabContextOps';
 import type {
 	SteeringCommandRequest,
@@ -30,6 +35,7 @@ import type {
 } from '../../shared/throughputGaugeCommands';
 import type { AdditionalDirectory, UsageStats } from '../../shared/types';
 import type { CodexTransport } from '../../shared/codexTransport';
+import type { HarnessControlMode } from '../../shared/maestro-lib/providers/native-control';
 import type { RemoteGroupChatMessage, RemoteGroupChatState } from '../../shared/groupChatRemote';
 import type { ToastClickAction } from '../../shared/toastClickAction';
 import type { CueTurnSettings } from '../../shared/cue/turn-settings';
@@ -250,7 +256,7 @@ export interface WebClient {
 	/** Set only from the verified per-boot CLI secret on WebSocket upgrade. */
 	cliAuthenticated?: boolean;
 	/** Revalidate the upgrade session/current login policy before commands and delivery. */
-	isAuthorized?: () => boolean;
+	isAuthorized?: (context?: import('./auth/web-login-policy').WebLoginPolicyContext) => boolean;
 	/**
 	 * The Web Login account behind this socket, resolved once at the upgrade
 	 * from the session cookie. Undefined when the gate is off and for
@@ -368,6 +374,9 @@ export type ExecuteCommandCallback = (
 	background?: boolean,
 	/** `dispatch --routing`: the `@mention` routing the composer strip would set. */
 	mentionRouting?: MentionRouting,
+	/** Throw on a missing/malformed receipt instead of reporting a rejection. */
+	requireDeliveryReceipt?: boolean,
+	pianolaDispatchId?: string,
 	/**
 	 * The context of the operation that dispatched the prompt (a Cue `mode: cli`
 	 * action, an agent's `maestro-cli dispatch`), already narrowed by the WS
@@ -472,6 +481,14 @@ export type SnoozeCommandCallback = (request: SnoozeCommandRequest) => Promise<S
 export type ClosedTabCommandCallback = (
 	request: ClosedTabCommandRequest
 ) => Promise<ClosedTabCommandResult>;
+/**
+ * One message-pin verb (`maestro-cli tab pins ...`), forwarded to the renderer
+ * that owns the agent - pins live on its tab - and answered with the tab's
+ * pins after the verb ran. Resolves rather than rejects on a miss.
+ */
+export type MessagePinCommandCallback = (
+	request: MessagePinCommandRequest
+) => Promise<MessagePinCommandResult>;
 /**
  * One Auto Run steering verb, forwarded to the renderer - which holds the notes
  * its run loop reads - and answered with whatever it did. Resolves rather than
@@ -598,25 +615,10 @@ export type NoteAgentDelegationCallback = (notice: AgentDelegationNotice) => voi
  * a refusal, so the CLI can report what actually happened instead of inferring
  * one from a missing tab id.
  */
-export type NewAITabWithPromptResult = {
-	success: boolean;
-	tabId?: string;
-	queued?: boolean;
-	error?: string;
-};
-export type NewAITabWithPromptCallback = (
-	sessionId: string,
-	prompt: string,
-	background?: boolean,
-	/** Create the tab with no chip in the strip (see `AITab.hidden`). */
-	hidden?: boolean,
-	/** `dispatch --routing`: the `@mention` routing the composer strip would set. */
-	mentionRouting?: MentionRouting,
-	/** The dispatching operation's context (see `ExecuteCommandCallback`). */
-	delegation?: ManagedDelegationContext,
-	/** The host-minted dispatch ticket (see `ExecuteCommandCallback`). */
-	dispatchTicket?: string
-) => Promise<NewAITabWithPromptResult>;
+export type {
+	NewAITabWithPromptResult,
+	NewAITabWithPromptCallback,
+} from '../../shared/pianola/pianola-dispatch';
 /**
  * Result of enqueuing (or immediately dispatching) a CLI prompt into the
  * renderer's authoritative execution queue. When the target session is busy the
@@ -656,6 +658,12 @@ export type EnqueueCommandCallback = (
 	held?: boolean,
 	/** `dispatch --routing`: the `@mention` routing the composer strip would set. */
 	mentionRouting?: MentionRouting,
+	/**
+	 * The prompt is a `dispatch --notify-on-complete` wake, sent by main. The
+	 * queued item is marked so it can never be steered into a running turn.
+	 */
+	dispatchCallback?: boolean,
+	control?: PianolaQueueControl,
 	/** The dispatching operation's context; stored on the queued item so it travels to the spawn. */
 	delegation?: ManagedDelegationContext,
 	/** The host-minted dispatch ticket; kept on the queued item so the drain's spawn still binds the transport. */
@@ -1105,6 +1113,7 @@ export interface SessionHistoryMessage {
 }
 
 export interface SessionHistoryResult {
+	currentTurn?: import('../../shared/currentTurn').CurrentTurnRead;
 	tabId: string;
 	sessionId: string;
 	agentId: string;
@@ -1115,6 +1124,14 @@ export interface SessionHistoryResult {
 }
 
 export interface GetSessionHistoryOptions {
+	/** Explicit full native current-turn observation; legacy filters do not apply. */
+	currentTurn?: boolean;
+	/** Internal reads do not establish generic capture interest. Grants no send authority. */
+	currentTurnInterest?: 'pianola';
+	/** Host-only socket identity; never populated from a payload. */
+	observationClient?: { once(event: 'close', listener: () => void): unknown };
+	expectedCursor?: import('../../shared/currentTurn').CurrentTurnCursor;
+	deltaBase?: import('../../shared/currentTurn').CurrentTurnCursor;
 	/** Drop messages with timestamp ≤ this epoch ms. Use for poll-friendly cursoring. */
 	sinceMs?: number;
 	/** After other filters, keep only the last N messages. */
@@ -1122,7 +1139,7 @@ export interface GetSessionHistoryOptions {
 }
 
 /** Callback to enumerate all open AI tabs across all desktop agents. */
-export type ListDesktopSessionsCallback = () => DesktopSessionEntry[];
+export type ListDesktopSessionsCallback = () => DesktopSessionEntry[] | DesktopSessionsSnapshot;
 
 /** Callback to fetch a tab's full conversation history by tabId. */
 export type GetSessionHistoryCallback = (
@@ -1159,6 +1176,7 @@ export type SettingValue = string | number | boolean | null;
  * Curated subset of settings exposed to the web interface.
  */
 export interface WebSettings {
+	relayArchiveHours: number;
 	theme: string;
 	fontSize: number;
 	enterToSendAI: boolean;
@@ -1373,6 +1391,8 @@ export interface CreateSessionConfig {
 	codexTransport?: CodexTransport;
 	/** The host authoring operation: `clone` for `duplicate-agent`, else a create. */
 	operation?: 'create' | 'clone';
+	/** Optional native protocol mode. Absent means current. */
+	harnessControlMode?: HarnessControlMode;
 }
 
 /** A created agent's id, or the host's reason for refusing it (by field). */

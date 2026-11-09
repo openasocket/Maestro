@@ -14,37 +14,96 @@
  * IPC failure.
  */
 
-import { ipcMain } from 'electron';
+import {
+	configurePianolaScope,
+	type PianolaLegacyMigrationResult,
+} from '../../pianola/pianola-legacy-migration';
+import * as migrationStore from '../../pianola/pianola-store-main';
+import { ipcMain, dialog, type BrowserWindow } from 'electron';
+import type { MemoryRequest } from '../../../shared/pianola/memory';
+import { getPianolaMemory } from '../../pianola/memory-host';
 import { withIpcErrorLogging, type CreateHandlerOptions } from '../../utils/ipcHandler';
 import {
 	readRulesResult,
 	writeRules,
 	readDecisions,
 	readSupervisorTargets,
-	upsertSupervisorTarget,
-	removeSupervisorTarget,
+	readScopeCheckpoint,
+	upsertSupervisorTargetAsync,
+	updateSupervisorTargetsAsync,
+	removeSupervisorTargetAsync,
 	readSuggestions,
 	writeSuggestions,
 	setProfile,
 	type RulesLoadResult,
 } from '../../pianola/pianola-store-main';
 import {
+	readPrograms,
+	updateProgramsAsync,
+	readAsks,
+	updateAsksAsync,
+	readPlans,
+	updatePlansAsync,
+	withPlanLock,
+	readProgramLoopMemo,
+} from '../../pianola/pianola-store-main';
+import { readAgentRuns } from '../../../cli/services/agent-run-store';
+import { pianolaTaskAgentRunId } from '../../../shared/agent-run';
+import {
+	briefRunsForPlans,
+	derivePianolaBrief,
+	type PianolaProgram,
+	type PianolaAsk,
+	type PianolaAskStatus,
+	type PianolaBrief,
+	assertOneActivePlanPerProgram,
+} from '../../../shared/pianola/pianola-programs';
+import {
+	markTaskStatus,
+	propagateBlocked,
+	revisePlanTask,
+	type PianolaPlan,
+} from '../../../shared/pianola/pianola-tasks';
+import {
 	validatePianolaSupervisedTarget,
 	type PianolaDecisionRecord,
 	type PianolaSupervisedTarget,
 	validatePianolaRule,
 	type PianolaSuggestionsFile,
+	type PianolaSuggestionCandidate,
 } from '../../../shared/pianola/storage';
 import type { PianolaRule } from '../../../shared/pianola/types';
+import {
+	pianolaScopeConfigurationFingerprint,
+	pianolaCoverageRegistryFingerprint,
+} from '../../../shared/pianola/pianola-scope-cycle';
+import type {
+	PianolaScopeCoverage,
+	PianolaScopeCheckpoint,
+} from '../../../shared/pianola/pianola-scope-checkpoint';
 import type { PianolaSupervisor, PianolaSupervisorHealth } from '../../pianola/pianola-supervisor';
 import { generateUUID } from '../../../shared/uuid';
+import { getActingUser } from '../../web-server/auth/acting-user';
+import type { WebServer } from '../../web-server/WebServer';
+import { synthesizeSuggestions } from '../../../shared/pianola/pianola-synthesis';
+import { settledDecisionPairs } from '../../../shared/pianola/transcript-mining';
+import { canonicalJson } from '../../../shared/canonicalJson';
+import { captureException } from '../../utils/sentry';
+import { readPianolaOwnerIdentity } from '../../../shared/pianola/owner-identity';
 
 const LOG_CONTEXT = '[Pianola]';
 
 /** Snapshot returned by every supervisor channel: persisted targets + live health. */
 export interface PianolaSupervisorSnapshot {
+	migration?: PianolaLegacyMigrationResult;
 	targets: PianolaSupervisedTarget[];
 	health: PianolaSupervisorHealth[];
+	checkpoints: Array<{
+		scopeId: string;
+		checkpoint: PianolaScopeCheckpoint | null;
+		error?: string;
+		coverage?: PianolaScopeCoverage;
+	}>;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -63,9 +122,18 @@ const handlerOpts = (operation: string): Pick<CreateHandlerOptions, 'context' | 
 export interface PianolaHandlerDependencies {
 	settingsStore: {
 		get: (key: string) => unknown;
+		set?: (key: string, value: unknown) => void;
 	};
+	getAppWindows?: () => BrowserWindow[];
+	/** Trusted native dialog adapter; never supplied by IPC payloads. */
+	confirmScopeConfiguration?: (
+		window: BrowserWindow,
+		detail: string,
+		signal: AbortSignal
+	) => Promise<boolean>;
 	/** The desktop supervised daemon; supervisor channels drive its reconcile. */
 	supervisor: PianolaSupervisor;
+	getWebServer?: () => WebServer | null;
 }
 
 /**
@@ -82,12 +150,156 @@ function isPianolaEnabled(settingsStore: { get: (key: string) => unknown }): boo
  */
 export function registerPianolaHandlers(deps: PianolaHandlerDependencies): void {
 	const { settingsStore, supervisor } = deps;
+	const isNativeOwnerTransport = (event: unknown): boolean => {
+		if (!isRecord(event) || event.type === 'bridge' || getActingUser()) return false;
+		return (deps.getAppWindows?.() ?? []).some((win) => {
+			if (win.isDestroyed() || win.webContents.isDestroyed()) return false;
+			return (
+				win.webContents.getType() === 'window' &&
+				event.sender === win.webContents &&
+				event.senderFrame === win.webContents.mainFrame
+			);
+		});
+	};
+	ipcMain.handle('pianola:memory', async (_event, request: MemoryRequest) => {
+		if (!isPianolaEnabled(settingsStore)) throw new Error('PianolaDisabled');
+		return getPianolaMemory().request(request);
+	});
 
 	/** Current persisted targets + live health, returned by every supervisor channel. */
-	const snapshot = (): PianolaSupervisorSnapshot => ({
-		targets: readSupervisorTargets(),
-		health: supervisor.getHealth(),
-	});
+	const snapshot = (): PianolaSupervisorSnapshot => {
+		const targets = readSupervisorTargets();
+		const health = supervisor.getHealth();
+		const now = Date.now();
+		const registryFingerprint = pianolaCoverageRegistryFingerprint(targets);
+		return {
+			targets,
+			health,
+			checkpoints: targets
+				.filter((target) => target.kind === 'watch-scope')
+				.map((target) => {
+					let checkpoint: PianolaScopeCheckpoint | null = null;
+					let error: string | undefined;
+					try {
+						checkpoint = readScopeCheckpoint(target.id);
+					} catch (cause) {
+						error = cause instanceof Error ? cause.message : 'Checkpoint unavailable';
+					}
+					const worker = health.find((item) => item.id === target.id);
+					const configurationFingerprint =
+						target.selection && target.managerAgentId
+							? pianolaScopeConfigurationFingerprint({
+									...target,
+									selection: target.selection,
+									managerAgentId: target.managerAgentId,
+								})
+							: null;
+					const censusAt = checkpoint?.lastSnapshotAt ?? null;
+					const ageMs = censusAt === null ? null : now - censusAt;
+					// Three missed polls with a 30s floor; this measures metadata
+					// freshness, never answer delivery or recipient acknowledgment.
+					const staleAfterMs = Math.max(30_000, (target.intervalSeconds ?? 5) * 3000);
+					const fresh =
+						ageMs !== null &&
+						ageMs >= 0 &&
+						ageMs <= staleAfterMs &&
+						checkpoint?.configurationFingerprint === configurationFingerprint &&
+						checkpoint?.coverageRegistryFingerprint === registryFingerprint &&
+						(worker?.startedAt === undefined || censusAt! >= worker.startedAt);
+					let status: PianolaScopeCoverage['status'];
+					let reason: string;
+					let nextActor: PianolaScopeCoverage['nextActor'] = 'operator';
+					let nextAction: string;
+					if (!target.enabled) {
+						status = 'paused';
+						reason = 'Scope disabled';
+						nextActor = 'none';
+						nextAction = 'Explicitly resume the scope to continue monitoring';
+					} else if (
+						error ||
+						checkpoint?.lastCycleError ||
+						target.selection?.mode !== 'agents-and-groups' ||
+						worker?.state !== 'running'
+					) {
+						status = 'blocked';
+						reason =
+							error ??
+							checkpoint?.lastCycleError?.reason ??
+							(target.selection?.mode !== 'agents-and-groups'
+								? 'Legacy scope requires explicit agent/group selection'
+								: (worker?.lastError ?? `Worker ${worker?.state ?? 'not registered'}`));
+						nextAction = error
+							? 'Repair the checkpoint before resuming; preserve uncertain delivery intents'
+							: checkpoint?.lastCycleError
+								? 'Restore complete native census access; worker retries on its next cycle'
+								: 'Restore valid native selection and a running scope worker';
+					} else if (!fresh) {
+						status = 'stale';
+						reason = 'No fresh census for the current configuration and worker';
+						nextAction =
+							'Obtain a complete native census with the current registry; inspect worker errors if it remains stale';
+					} else if (checkpoint?.status !== 'armed') {
+						status = 'blocked';
+						reason = `Checkpoint ${checkpoint?.status ?? 'missing'}`;
+						nextAction = 'Restore the native census and arm the scope through its worker';
+					} else {
+						status = 'covered';
+						reason = 'Fresh native census for current selection';
+						nextActor = 'worker';
+						nextAction = 'Continue bounded transcript monitoring';
+					}
+					const tabs: PianolaScopeCoverage['tabs'] = (checkpoint?.tabs ?? []).map((tab) => {
+						const observation = tab.coverage;
+						const historicalStatus =
+							tab.status === 'closed' ? 'closed' : (observation?.status ?? 'stale');
+						const overridden = historicalStatus !== 'closed' && status !== 'covered';
+						return {
+							agentId: tab.agentId,
+							tabId: tab.tabId,
+							status: overridden ? (status === 'blocked' ? 'suspended' : status) : historicalStatus,
+							ownerScopeId: overridden || !fresh ? null : (observation?.ownerScopeId ?? null),
+							observedAt: observation?.observedAt ?? null,
+							reason: overridden
+								? reason
+								: (observation?.reason ?? 'Historical tab without current coverage observation'),
+							nextActor: overridden ? nextActor : (observation?.nextActor ?? 'operator'),
+							nextAction: overridden
+								? nextAction
+								: (observation?.nextAction ?? 'Obtain a fresh native census'),
+							...(observation?.status === 'blocked' ? { error: observation.reason } : {}),
+						};
+					});
+					if (
+						status === 'covered' &&
+						tabs.some((tab) => tab.status === 'blocked' || tab.status === 'stale')
+					) {
+						status = 'blocked';
+						reason = 'One or more tabs have incomplete or failed coverage';
+						nextActor = 'operator';
+						nextAction =
+							'Resolve the per-agent/tab errors below; healthy tabs continue independently';
+					}
+					return {
+						scopeId: target.id,
+						checkpoint,
+						...(error ? { error } : {}),
+						coverage: {
+							configurationFingerprint,
+							checkpointFingerprint: checkpoint?.configurationFingerprint ?? null,
+							censusAt,
+							ageMs,
+							staleAfterMs,
+							fresh,
+							status,
+							reason,
+							nextActor,
+							nextAction,
+							tabs,
+						},
+					};
+				}),
+		};
+	};
 
 	const wrappedGetRules = withIpcErrorLogging(
 		handlerOpts('getRules'),
@@ -106,7 +318,140 @@ export function registerPianolaHandlers(deps: PianolaHandlerDependencies): void 
 	);
 	const wrappedGetSuggestions = withIpcErrorLogging(
 		handlerOpts('getSuggestions'),
-		async (): Promise<PianolaSuggestionsFile> => readSuggestions()
+		// Catch up after restart or before the incremental job finishes. The
+		// shared store only persists changed review metadata, never live policy.
+		async (): Promise<PianolaSuggestionsFile> => writeSuggestions(readSuggestions())
+	);
+	/** Shared by legacy approval and source-linked accept/edit/reject. No await
+	 * occurs between fresh evidence validation and the durable writes. */
+	const reviewSuggestion = (
+		event: unknown,
+		raw: unknown
+	): {
+		rules: PianolaRule[];
+		suggestions: PianolaSuggestionsFile;
+	} => {
+		if (
+			!isRecord(raw) ||
+			typeof raw.candidateId !== 'string' ||
+			typeof raw.evidenceFingerprint !== 'string' ||
+			typeof raw.operation !== 'string' ||
+			!['accept', 'edit', 'reject'].includes(raw.operation)
+		)
+			throw new Error('InvalidSuggestionReview');
+		const loaded = readRulesResult();
+		if (loaded.malformed) throw new Error('MalformedRulesFile');
+		const staged = readSuggestions();
+		const candidate = staged.candidates?.find((item) => item.id === raw.candidateId);
+		const current = synthesizeSuggestions({
+			pairs: settledDecisionPairs(readDecisions()),
+			existingRules: loaded.rules,
+			learningScope: candidate?.rule.scope === 'group' ? 'group' : 'agent',
+			minSamples: settingsStore.get('pianolaLearningMinSamples') as number | undefined,
+		}).candidates.find((item) => item.id === raw.candidateId);
+		if (
+			!candidate ||
+			!current ||
+			candidate.evidenceFingerprint !== raw.evidenceFingerprint ||
+			current.evidenceFingerprint !== raw.evidenceFingerprint ||
+			staged.rejections?.some(
+				(item) =>
+					item.candidateId === candidate.id && item.evidenceFingerprint === raw.evidenceFingerprint
+			)
+		)
+			throw new Error('StaleOrChangedSuggestion');
+
+		// Only a transport-attributed owner review grants learned-rule consent.
+		// The caller cannot supply its own human role or reviewer identity.
+		const user = getActingUser();
+		const bridge = isRecord(event) && event.type === 'bridge';
+		const identity = readPianolaOwnerIdentity(settingsStore.get('pianolaLearningIdentity'));
+		const confirmed =
+			(bridge &&
+				user &&
+				identity.ownerWebUserId !== undefined &&
+				user.id === identity.ownerWebUserId) ||
+			(isNativeOwnerTransport(event) && identity.desktopIsOwner);
+		if (!confirmed) throw new Error('HumanSuggestionReviewRequired');
+		const actorId = user?.id ?? 'desktop';
+		const now = Date.now();
+		if (raw.operation === 'reject') {
+			if (raw.reason !== undefined && typeof raw.reason !== 'string')
+				throw new Error('InvalidSuggestionRejection');
+			const suggestions = writeSuggestions({
+				...staged,
+				candidates: staged.candidates!.filter((item) => item.id !== candidate.id),
+				rejections: [
+					...(staged.rejections ?? []),
+					{
+						sourceKind: 'native-human-review',
+						principal: 'owner',
+						candidateId: candidate.id,
+						evidenceFingerprint: candidate.evidenceFingerprint,
+						candidate,
+						rejectedAt: now,
+						actorId,
+						...(typeof raw.reason === 'string' ? { reason: raw.reason } : {}),
+					},
+				],
+			});
+			return { rules: loaded.rules, suggestions };
+		}
+
+		let rule = candidate.rule;
+		if (raw.operation === 'edit') {
+			const edited = validatePianolaRule(raw.rule);
+			if (!edited || edited.id !== candidate.id) throw new Error('InvalidSuggestionRule');
+			// Answer, description and priority can be edited by Chris. Scope, the
+			// exact condition and risk guard retain the evidenced authorization.
+			const boundary = (value: PianolaRule): string =>
+				canonicalJson([value.scope, value.scopeId ?? null, value.match, value.action]);
+			if (boundary(edited) !== boundary(candidate.rule)) throw new Error('BroadenedSuggestionEdit');
+			rule = {
+				...candidate.rule,
+				answer: edited.answer,
+				description: edited.description,
+				priority: edited.priority,
+			};
+		}
+		const approvedRule = { ...rule, enabled: true, updatedAt: now };
+		// Persist the human authorization before activating policy. A failure to
+		// write rules leaves an approval receipt and the candidate available to retry;
+		// a receipt alone never activates a rule, including after restart.
+		const authorized = writeSuggestions({
+			...staged,
+			approvals: [
+				...(staged.approvals ?? []),
+				{
+					sourceKind: 'native-human-review',
+					principal: 'owner',
+					candidate,
+					rule: approvedRule,
+					approvedAt: now,
+					actorId,
+					edited: raw.operation === 'edit',
+				},
+			],
+		});
+		const rules = writeRules([...loaded.rules, approvedRule]);
+		let suggestions = authorized;
+		try {
+			suggestions = writeSuggestions({
+				...authorized,
+				candidates: authorized.candidates!.filter((item) => item.id !== candidate.id),
+			});
+		} catch (error) {
+			// Authorization and activation succeeded; report cleanup separately.
+			void captureException(error, {
+				operation: 'prune approved Pianola suggestion',
+				ruleId: rule.id,
+			});
+		}
+		return { rules, suggestions };
+	};
+	const wrappedReviewSuggestion = withIpcErrorLogging(
+		handlerOpts('reviewSuggestion'),
+		async (event: unknown, payload: unknown) => reviewSuggestion(event, payload)
 	);
 	const wrappedApplySuggestion = withIpcErrorLogging(
 		handlerOpts('applySuggestion'),
@@ -114,28 +459,38 @@ export function registerPianolaHandlers(deps: PianolaHandlerDependencies): void 
 		// the rules file (still subject to decide() at runtime, so high-risk always
 		// escalates), and an approved profile draft is persisted. Nothing here ever
 		// auto-answers or bypasses the policy.
-		async (raw: unknown): Promise<{ rules: PianolaRule[] }> => {
+		async (raw: unknown, event: unknown): Promise<{ rules: PianolaRule[] }> => {
 			if (!isRecord(raw)) throw new Error('InvalidSuggestionPayload');
-			let rules = readRulesResult().rules;
+			const loaded = readRulesResult();
+			if (loaded.malformed) throw new Error('MalformedRulesFile');
+			let rules = loaded.rules;
 			if (raw.rule !== undefined) {
 				const rule = validatePianolaRule(raw.rule);
 				if (!rule) throw new Error('InvalidSuggestionRule');
-				const idx = rules.findIndex((r) => r.id === rule.id);
-				const next = idx >= 0 ? rules.map((r, i) => (i === idx ? rule : r)) : [...rules, rule];
-				rules = writeRules(next);
-				// Best-effort: drop the now-applied proposal from staging so a
-				// refresh does not re-surface an already-approved suggestion. A
-				// staging-prune failure must never fail the apply (the rule is
-				// already persisted above).
-				try {
-					const staged = readSuggestions();
-					writeSuggestions({
-						...staged,
-						proposals: staged.proposals.filter((p) => p.id !== rule.id),
-					});
-				} catch {
-					// Ignore: staging is advisory; the persisted rule is authoritative.
-				}
+				const staged = readSuggestions();
+				const candidate: PianolaSuggestionCandidate | undefined = staged.candidates?.find(
+					(item) => item.id === rule.id
+				);
+				const policy = (value: PianolaRule): string =>
+					canonicalJson([
+						value.scope,
+						value.scopeId ?? null,
+						value.match,
+						value.action,
+						value.answer ?? null,
+					]);
+				if (
+					!candidate ||
+					policy(rule) !== policy(candidate.rule) ||
+					rule.createdAt !== candidate.rule.createdAt ||
+					rule.updatedAt !== candidate.rule.updatedAt
+				)
+					throw new Error('StaleOrChangedSuggestion');
+				rules = reviewSuggestion(event, {
+					operation: 'accept',
+					candidateId: candidate.id,
+					evidenceFingerprint: candidate.evidenceFingerprint,
+				}).rules;
 			}
 			if (isRecord(raw.profile) && typeof raw.profile.text === 'string') {
 				const projectPath =
@@ -155,16 +510,45 @@ export function registerPianolaHandlers(deps: PianolaHandlerDependencies): void 
 		// Validate the untrusted target at this boundary; fill id/createdAt/enabled
 		// when the caller omits them, then upsert and reconcile so the new child
 		// spawns without waiting for the file-watch debounce.
-		async (raw: unknown): Promise<PianolaSupervisorSnapshot> => {
+		async (
+			raw: unknown,
+			ownerAuthorized: () => boolean = () => false,
+			approvalValid?: (current: PianolaSupervisedTarget[]) => boolean
+		): Promise<PianolaSupervisorSnapshot> => {
 			const candidate: Record<string, unknown> = isRecord(raw) ? { ...raw } : {};
+			// Handover receipts/fences are host results, never caller assertions.
+			delete candidate.legacyMigration;
+			delete candidate.migratedToScopeId;
 			if (typeof candidate.id !== 'string' || candidate.id.length === 0) {
 				candidate.id = generateUUID();
 			}
 			if (typeof candidate.createdAt !== 'number') candidate.createdAt = Date.now();
-			if (candidate.enabled === undefined) candidate.enabled = true;
+			if (candidate.enabled === undefined)
+				candidate.enabled =
+					readSupervisorTargets().find((entry) => entry.id === candidate.id)?.enabled ??
+					candidate.kind !== 'watch-scope';
 			const target = validatePianolaSupervisedTarget(candidate);
 			if (!target) throw new Error('InvalidSupervisedTarget');
-			upsertSupervisorTarget(target);
+			if (target.kind === 'watch-scope') {
+				const migration = await configurePianolaScope(target, {
+					ownerAuthorized,
+					approvalValid,
+					readRules: readRulesResult,
+					store: migrationStore,
+					featureEnabled: () => isPianolaEnabled(settingsStore),
+					canFence: (id) => supervisor.canFenceLegacyWatch(id),
+					snapshot: () =>
+						deps.getWebServer?.()?.getPianolaScopeSnapshot() ?? {
+							complete: false,
+							capturedAt: Date.now(),
+							owners: [],
+							tabs: [],
+						},
+				});
+				if (migration.status !== 'NeedsConfiguration') supervisor.reconcile();
+				return { ...snapshot(), migration };
+			}
+			await upsertSupervisorTargetAsync(target);
 			supervisor.reconcile();
 			return snapshot();
 		}
@@ -174,9 +558,11 @@ export function registerPianolaHandlers(deps: PianolaHandlerDependencies): void 
 		async (id: unknown, enabled: unknown): Promise<PianolaSupervisorSnapshot> => {
 			if (typeof id !== 'string' || id.length === 0) throw new Error('InvalidTargetId');
 			if (typeof enabled !== 'boolean') throw new Error('InvalidEnabledFlag');
-			const current = readSupervisorTargets().find((t) => t.id === id);
-			if (!current) throw new Error('SupervisedTargetNotFound');
-			upsertSupervisorTarget({ ...current, enabled });
+			await updateSupervisorTargetsAsync((targets) => {
+				if (!targets.some((target) => target.id === id))
+					throw new Error('SupervisedTargetNotFound');
+				return targets.map((target) => (target.id === id ? { ...target, enabled } : target));
+			});
 			supervisor.reconcile();
 			return snapshot();
 		}
@@ -185,7 +571,7 @@ export function registerPianolaHandlers(deps: PianolaHandlerDependencies): void 
 		handlerOpts('supervisorRemove'),
 		async (id: unknown): Promise<PianolaSupervisorSnapshot> => {
 			if (typeof id !== 'string' || id.length === 0) throw new Error('InvalidTargetId');
-			removeSupervisorTarget(id);
+			await removeSupervisorTargetAsync(id);
 			supervisor.reconcile();
 			return snapshot();
 		}
@@ -213,12 +599,45 @@ export function registerPianolaHandlers(deps: PianolaHandlerDependencies): void 
 		if (!isPianolaEnabled(settingsStore)) throw new Error('PianolaDisabled');
 		return wrappedGetSuggestions(event);
 	});
+	ipcMain.handle('pianola:confirm-desktop-owner', async (event) => {
+		if (!isPianolaEnabled(settingsStore)) throw new Error('PianolaDisabled');
+		if (!isNativeOwnerTransport(event)) throw new Error('HumanSuggestionReviewRequired');
+		const identity = readPianolaOwnerIdentity(settingsStore.get('pianolaLearningIdentity'));
+		if (identity.desktopIsOwner) return;
+		if (identity.state !== 'available') throw new Error('DesktopOwnerRestricted');
+		if (!settingsStore.set) throw new Error('DesktopOwnerSetupUnavailable');
+		settingsStore.set('pianolaLearningIdentity', { desktopIsOwner: true });
+	});
+	ipcMain.handle('pianola:review-suggestion', async (event, payload: unknown) => {
+		if (!isPianolaEnabled(settingsStore)) throw new Error('PianolaDisabled');
+		return wrappedReviewSuggestion(event, event, payload);
+	});
+
+	// Only this explicit human UI action may create human provenance. The CLI
+	// manager endpoint cannot choose its actor kind or impersonate a human.
+	ipcMain.handle('pianola:resolve-decision', async (_event, payload: unknown) => {
+		if (!isPianolaEnabled(settingsStore)) throw new Error('PianolaDisabled');
+		const server = deps.getWebServer?.();
+		if (!server) throw new Error('Native decision transport unavailable');
+		const user = getActingUser();
+		const bridge = (_event as unknown as { type?: string }).type === 'bridge';
+		const identity = readPianolaOwnerIdentity(settingsStore.get('pianolaLearningIdentity'));
+		const actorId = user?.id ?? (bridge ? 'web-owner' : 'desktop');
+		// Web binding is explicit; desktop attribution requires a verified native sender.
+		const confirmed =
+			(bridge &&
+				user &&
+				identity.ownerWebUserId !== undefined &&
+				user.id === identity.ownerWebUserId) ||
+			(isNativeOwnerTransport(_event) && identity.desktopIsOwner);
+		return server.resolvePianolaHumanDecision(payload, actorId, confirmed ? 'owner' : undefined);
+	});
 
 	ipcMain.handle(
 		'pianola:apply-suggestion',
 		async (event, payload: unknown): Promise<{ rules: PianolaRule[] }> => {
 			if (!isPianolaEnabled(settingsStore)) throw new Error('PianolaDisabled');
-			return wrappedApplySuggestion(event, payload);
+			return wrappedApplySuggestion(event, payload, event);
 		}
 	);
 
@@ -229,9 +648,165 @@ export function registerPianolaHandlers(deps: PianolaHandlerDependencies): void 
 
 	ipcMain.handle(
 		'pianola:supervisor-add',
-		async (event, target: unknown): Promise<PianolaSupervisorSnapshot> => {
+		async (event, target: unknown, options?: unknown): Promise<PianolaSupervisorSnapshot> => {
 			if (!isPianolaEnabled(settingsStore)) throw new Error('PianolaDisabled');
-			return wrappedSupervisorAdd(event, target);
+			const transport: unknown = event;
+			/** Recheck the current desktop or authenticated web owner at each authorization boundary. */
+			const ownerAuthorized = (): boolean => {
+				const identity = readPianolaOwnerIdentity(settingsStore.get('pianolaLearningIdentity'));
+				const user = getActingUser();
+				return (
+					(isNativeOwnerTransport(event) && identity.desktopIsOwner) ||
+					(isRecord(transport) &&
+						transport.type === 'bridge' &&
+						transport.cli !== true &&
+						!!user &&
+						!!identity.ownerWebUserId &&
+						user.id === identity.ownerWebUserId)
+				);
+			};
+			// Ordinary delegation and exact standing reconciliation never open a dialog.
+			const requested = isRecord(options) && options.requestOwnerApproval === true;
+			if (!requested) return wrappedSupervisorAdd(event, target, ownerAuthorized);
+			const denied = (status: 'Denied' | 'Unknown', reason: string): PianolaSupervisorSnapshot => ({
+				...snapshot(),
+				migration: {
+					status,
+					scopeId: isRecord(target) && typeof target.id === 'string' ? target.id : '',
+					watchIds: [],
+					reason,
+				},
+			});
+			if (
+				!isRecord(transport) ||
+				transport.type !== 'bridge' ||
+				transport.cli !== true ||
+				typeof transport.isCallerActive !== 'function' ||
+				!transport.isCallerActive()
+			)
+				return denied('Denied', 'Active authenticated CLI connection required');
+			const isCallerActive = transport.isCallerActive;
+			const candidate = validatePianolaSupervisedTarget({
+				...(isRecord(target) ? target : {}),
+				id: isRecord(target) && target.id ? target.id : generateUUID(),
+				createdAt:
+					isRecord(target) && target.createdAt !== undefined ? target.createdAt : Date.now(),
+				enabled:
+					isRecord(target) && target.enabled !== undefined
+						? target.enabled
+						: (readSupervisorTargets().find((entry) => isRecord(target) && entry.id === target.id)
+								?.enabled ?? false),
+			});
+			if (
+				!candidate ||
+				candidate.kind !== 'watch-scope' ||
+				!candidate.selection ||
+				!candidate.managerAgentId
+			)
+				return denied('Denied', 'Invalid scope configuration');
+			// Caller policy and migration claims are not part of the proposed operation.
+			delete candidate.delegationPolicy;
+			delete candidate.legacyMigration;
+			delete candidate.migratedToScopeId;
+			const previous = canonicalJson(readSupervisorTargets());
+			const enrollmentRevision = readScopeCheckpoint(candidate.id)?.enrollmentRevision ?? null;
+			const reviewedRules = readRulesResult();
+			const rules = canonicalJson(reviewedRules);
+			const identity = canonicalJson(settingsStore.get('pianolaLearningIdentity') ?? null);
+			const reconciled = await wrappedSupervisorAdd(event, candidate);
+			if (reconciled.migration?.status !== 'NeedsConfiguration') return reconciled;
+			if (!readPianolaOwnerIdentity(settingsStore.get('pianolaLearningIdentity')).desktopIsOwner)
+				return denied('Denied', 'Desktop owner identity is restricted; use the configured owner');
+			const window = deps
+				.getAppWindows?.()
+				.find(
+					(win) =>
+						!win.isDestroyed() &&
+						!win.webContents.isDestroyed() &&
+						win.webContents.getType() === 'window'
+				);
+			if (!window) return denied('Unknown', 'Native owner window unavailable');
+			const controller = new AbortController();
+			const deadline = Date.now() + 60_000;
+			let timer: ReturnType<typeof setTimeout> | undefined;
+			try {
+				const existing = readSupervisorTargets().find((entry) => entry.id === candidate.id);
+				const describe = (scope: PianolaSupervisedTarget): string => {
+					const selection = scope.selection;
+					return [
+						`Scope: ${scope.selection?.label ?? scope.id}`,
+						`Manager: ${scope.managerAgentId ?? 'None'}`,
+						...(selection?.mode === 'agents-and-groups'
+							? [
+									`Agents: ${selection.agentIds.join(', ') || 'None'}`,
+									`Groups (including future members): ${selection.groupIds.join(', ') || 'None'}`,
+									`Future local agents: ${selection.futureLocalAgents ? 'Included' : 'Not included'}`,
+								]
+							: selection
+								? [
+										`Legacy scope: ${selection.mode}`,
+										`Project roots: ${selection.projectRoots.join(', ') || 'None'}`,
+									]
+								: []),
+						`Excluded agents: ${selection?.excludedAgentIds.join(', ') || 'None'}`,
+						`Supervision: ${scope.enabled ? 'Enabled' : 'Paused'}`,
+					].join('\n');
+				};
+				const detail = [
+					existing ? `Current configuration:\n${describe(existing)}` : 'New supervision scope',
+					`Standing delegation will use the current Pianola rules (${reviewedRules.rules.length}):\n${JSON.stringify(reviewedRules.rules, null, 2)}`,
+					`Proposed configuration:\n${describe(existing ? { ...candidate, enabled: existing.enabled } : candidate)}`,
+				].join('\n\n');
+				const confirm =
+					deps.confirmScopeConfiguration ??
+					(async (parent, text, signal) => {
+						const response = await dialog.showMessageBox(parent, {
+							type: 'question',
+							title: 'Approve Pianola scope configuration',
+							message: 'Allow this exact supervision configuration?',
+							detail: text,
+							buttons: ['Cancel', 'Approve configuration'],
+							defaultId: 0,
+							cancelId: 0,
+							noLink: true,
+							signal,
+						});
+						return response.response === 1;
+					});
+				const approved = await Promise.race([
+					confirm(window, detail, controller.signal),
+					new Promise<boolean>((resolve) => {
+						timer = setTimeout(() => {
+							controller.abort();
+							resolve(false);
+						}, 60_000);
+					}),
+				]);
+				if (!approved) return denied('Denied', 'Native owner approval cancelled or timed out');
+				const valid = (current: PianolaSupervisedTarget[]): boolean =>
+					Date.now() < deadline &&
+					!controller.signal.aborted &&
+					!window.isDestroyed() &&
+					!window.webContents.isDestroyed() &&
+					(deps.getAppWindows?.() ?? []).includes(window) &&
+					isCallerActive() === true &&
+					isPianolaEnabled(settingsStore) &&
+					readPianolaOwnerIdentity(settingsStore.get('pianolaLearningIdentity')).desktopIsOwner &&
+					canonicalJson(settingsStore.get('pianolaLearningIdentity') ?? null) === identity &&
+					canonicalJson(current) === previous &&
+					(readScopeCheckpoint(candidate.id)?.enrollmentRevision ?? null) === enrollmentRevision &&
+					canonicalJson(readRulesResult()) === rules;
+				return await wrappedSupervisorAdd(event, candidate, () => true, valid);
+			} catch (error) {
+				void captureException(error, { operation: 'approve Pianola scope configuration' });
+				return denied(
+					'Unknown',
+					'Native approval or configuration could not be confirmed; read back before retrying'
+				);
+			} finally {
+				if (timer) clearTimeout(timer);
+				controller.abort();
+			}
 		}
 	);
 
@@ -250,4 +825,185 @@ export function registerPianolaHandlers(deps: PianolaHandlerDependencies): void 
 			return wrappedSupervisorRemove(event, id);
 		}
 	);
+	ipcMain.handle('pianola:supervise-program', async (_event, programId: unknown): Promise<void> => {
+		if (!isPianolaEnabled(settingsStore)) throw new Error('PianolaDisabled');
+		if (
+			typeof programId !== 'string' ||
+			!readPrograms().some((program) => program.id === programId)
+		)
+			throw new Error('InvalidProgramId');
+		await updateSupervisorTargetsAsync((current) => {
+			const existing = current.find(
+				(target) => target.kind === 'program' && target.programId === programId
+			);
+			const target: PianolaSupervisedTarget = {
+				id: existing?.id ?? generateUUID(),
+				createdAt: existing?.createdAt ?? Date.now(),
+				kind: 'program',
+				programId,
+				enabled: true,
+				intervalSeconds: existing?.intervalSeconds ?? 120,
+			};
+			return existing
+				? current.map((entry) => (entry.id === existing.id ? target : entry))
+				: [...current, target];
+		});
+		supervisor.reconcile();
+	});
+	ipcMain.handle(
+		'pianola:set-program-status',
+		async (_event, programId: unknown, status: unknown): Promise<void> => {
+			if (!isPianolaEnabled(settingsStore)) throw new Error('PianolaDisabled');
+			if (typeof programId !== 'string' || (status !== 'active' && status !== 'paused'))
+				throw new Error('InvalidProgramStatus');
+			await updateProgramsAsync((programs) => {
+				if (!programs.some((program) => program.id === programId))
+					throw new Error('InvalidProgramId');
+				return programs.map((program) =>
+					program.id === programId && program.status !== status
+						? { ...program, status, updatedAt: Date.now() }
+						: program
+				);
+			});
+			supervisor.reconcile();
+		}
+	);
+	ipcMain.handle('pianola:get-programs', async (): Promise<PianolaProgram[]> => {
+		if (!isPianolaEnabled(settingsStore)) throw new Error('PianolaDisabled');
+		return readPrograms();
+	});
+	ipcMain.handle(
+		'pianola:get-asks',
+		async (_event, status?: PianolaAskStatus): Promise<PianolaAsk[]> => {
+			if (!isPianolaEnabled(settingsStore)) throw new Error('PianolaDisabled');
+			if (status !== undefined && !['open', 'resolved', 'dismissed'].includes(status))
+				throw new Error('InvalidAskStatus');
+			return readAsks().filter((ask) => ask.status === (status ?? 'open'));
+		}
+	);
+	ipcMain.handle(
+		'pianola:resolve-ask',
+		async (_event, id: unknown, option: unknown, note?: unknown): Promise<PianolaAsk> => {
+			if (!isPianolaEnabled(settingsStore)) throw new Error('PianolaDisabled');
+			if (
+				typeof id !== 'string' ||
+				typeof option !== 'string' ||
+				!option.trim() ||
+				(note !== undefined && typeof note !== 'string')
+			)
+				throw new Error('InvalidAskResolution');
+			let updated: PianolaAsk | undefined;
+			await updateAsksAsync((asks) => {
+				const ask = asks.find((a) => a.id === id && a.status === 'open');
+				if (!ask) throw new Error('OpenAskNotFound');
+				const now = new Date().toISOString();
+				const resolved: PianolaAsk = {
+					...ask,
+					status: 'resolved',
+					updatedAt: now,
+					resolution: { option, ...(note === undefined ? {} : { note }), resolvedAt: now },
+				};
+				updated = resolved;
+				return asks.map((a) => (a.id === id ? resolved : a));
+			});
+			if (!updated) throw new Error('OpenAskNotFound');
+			return updated;
+		}
+	);
+	ipcMain.handle('pianola:dismiss-ask', async (_event, id: unknown): Promise<PianolaAsk> => {
+		if (!isPianolaEnabled(settingsStore)) throw new Error('PianolaDisabled');
+		if (typeof id !== 'string') throw new Error('InvalidAskId');
+		let updated: PianolaAsk | undefined;
+		await updateAsksAsync((asks) => {
+			const ask = asks.find((a) => a.id === id && a.status === 'open');
+			if (!ask) throw new Error('OpenAskNotFound');
+			const dismissed: PianolaAsk = {
+				...ask,
+				status: 'dismissed',
+				updatedAt: new Date().toISOString(),
+			};
+			updated = dismissed;
+			return asks.map((a) => (a.id === id ? dismissed : a));
+		});
+		if (!updated) throw new Error('OpenAskNotFound');
+		return updated;
+	});
+	ipcMain.handle(
+		'pianola:revise-plan-task',
+		async (_event, planId: unknown, taskId: unknown, prompt?: unknown): Promise<PianolaPlan> => {
+			if (!isPianolaEnabled(settingsStore)) throw new Error('PianolaDisabled');
+			if (
+				typeof planId !== 'string' ||
+				!planId ||
+				typeof taskId !== 'string' ||
+				!taskId ||
+				(prompt !== undefined && (typeof prompt !== 'string' || !prompt.trim()))
+			)
+				throw new Error('InvalidPlanTaskRevision');
+			let revised: PianolaPlan | undefined;
+			await withPlanLock(
+				planId,
+				async () => {
+					await updatePlansAsync((plans) => {
+						const plan = plans.find((entry) => entry.id === planId);
+						if (!plan) throw new Error(`No Pianola plan with id "${planId}".`);
+						const task = plan.tasks.find((entry) => entry.id === taskId);
+						if (!task) throw new Error(`No task with id "${taskId}" in plan "${planId}".`);
+						revised = revisePlanTask(
+							plan,
+							taskId,
+							(prompt as string | undefined) ?? task.prompt,
+							generateUUID()
+						);
+						assertOneActivePlanPerProgram(revised, plans);
+						return plans.map((entry) => (entry.id === planId ? revised! : entry));
+					});
+				},
+				{ waitForTurn: true }
+			);
+			supervisor.reconcile();
+			return revised!;
+		}
+	);
+	ipcMain.handle(
+		'pianola:skip-plan-task',
+		async (_event, planId: unknown, taskId: unknown): Promise<PianolaPlan> => {
+			if (!isPianolaEnabled(settingsStore)) throw new Error('PianolaDisabled');
+			if (typeof planId !== 'string' || !planId || typeof taskId !== 'string' || !taskId)
+				throw new Error('InvalidPlanTaskSkip');
+			let skipped: PianolaPlan | undefined;
+			await withPlanLock(
+				planId,
+				async () => {
+					await updatePlansAsync((plans) => {
+						const plan = plans.find((entry) => entry.id === planId);
+						if (!plan) throw new Error(`No Pianola plan with id "${planId}".`);
+						const task = plan.tasks.find((entry) => entry.id === taskId);
+						if (!task) throw new Error(`No task with id "${taskId}" in plan "${planId}".`);
+						if (task.status !== 'failed') throw new Error('Only failed tasks can be skipped.');
+						skipped = propagateBlocked(markTaskStatus(plan, taskId, 'skipped'));
+						return plans.map((entry) => (entry.id === planId ? skipped! : entry));
+					});
+				},
+				{ waitForTurn: true }
+			);
+			supervisor.reconcile();
+			return skipped!;
+		}
+	);
+	ipcMain.handle('pianola:get-brief', async (): Promise<PianolaBrief> => {
+		if (!isPianolaEnabled(settingsStore)) throw new Error('PianolaDisabled');
+		const plans = readPlans();
+		const runs = briefRunsForPlans(plans, readAgentRuns(), pianolaTaskAgentRunId);
+		return derivePianolaBrief(
+			readPrograms(),
+			plans,
+			readAsks(),
+			readDecisions(),
+			runs,
+			new Date().toISOString(),
+			readSupervisorTargets(),
+			readProgramLoopMemo()
+		);
+	});
 }

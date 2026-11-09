@@ -1,15 +1,28 @@
+import type { PendingPermissionSnapshot } from '../../../shared/pendingPermissions';
 import type { HeadlessAgentActivity } from '../../../shared/headlessAgentActivity';
 import { ipcRenderer } from 'electron';
 import type { CallUsage, UsageStats } from '../../../shared/types';
 import type { ParsedQuestion } from '../../permission-relay/types';
 import type { SteeringResultFrame } from '../../../shared/chatSteering';
 import type { ManagedRunView } from '../../enterprise/dispatch';
+import type {
+	HarnessInteractionRequest,
+	HarnessInteractionResolveResult,
+	HarnessInteractionResponse,
+	HarnessInteractionSettledEvent,
+} from '../../../shared/harness-control/types';
 
 /**
  * Configuration for spawning a process
  */
 export interface ProcessConfig {
+	/** Submitted native transcript row; a missing boundary disables full-turn observation. */
+	transcriptBoundaryId?: string;
 	sessionId: string;
+	pianolaDispatchId?: string;
+	/** Owning desktop queue consumer only; host releases and claims within this spawn request. */
+	pianolaQueueItemId?: string;
+	pianolaQueueStepId?: string;
 	toolType: string;
 	cwd: string;
 	command: string;
@@ -37,11 +50,16 @@ export interface ProcessConfig {
  * Response from spawning a process
  */
 export interface ProcessSpawnResponse {
+	error?: string;
+	pianolaRunId?: string;
+	pianolaQueueReconciled?: boolean;
 	pid: number;
 	success: boolean;
 	sshRemote?: { id: string; name: string; host: string };
 	/** The managed run this spawn started (identifiers only); absent on a standalone host. */
 	managedRun?: ManagedRunView;
+	/** Set when a managed host refused the spawn at the sink. */
+	managed?: { state: 'denied' | 'unavailable' | 'unknown'; code: string };
 }
 
 /**
@@ -65,6 +83,7 @@ export interface RunCommandConfig {
 export interface ActiveProcess {
 	sessionId: string;
 	toolType: string;
+	/** OS PID, or 0 for a Host-owned Relay turn cancelled by session ID. */
 	pid: number;
 	cwd: string;
 	isTerminal: boolean;
@@ -221,6 +240,9 @@ export function createProcessCoreApi() {
 		 */
 		kill: (sessionId: string): Promise<boolean> => ipcRenderer.invoke('process:kill', sessionId),
 
+		closeAgent: (agentId: string): Promise<boolean> =>
+			ipcRenderer.invoke('process:closeAgent', agentId),
+
 		/**
 		 * Resize process terminal
 		 */
@@ -302,6 +324,13 @@ export function createProcessCoreApi() {
 		 * Subscribe to Claude Code permission-relay requests (standard mode).
 		 * The renderer shows a prompt and replies via respondPermission().
 		 */
+		getPendingPermissions: (): Promise<PendingPermissionSnapshot> =>
+			ipcRenderer.invoke('process:getPendingPermissions'),
+		onPendingPermissionsChanged: (callback: (snapshot: PendingPermissionSnapshot) => void) => {
+			const handler = (_: unknown, snapshot: PendingPermissionSnapshot) => callback(snapshot);
+			ipcRenderer.on('process:pending-permissions', handler);
+			return () => ipcRenderer.removeListener('process:pending-permissions', handler);
+		},
 		onPermissionRequest: (
 			callback: (request: {
 				requestId: string;
@@ -330,6 +359,30 @@ export function createProcessCoreApi() {
 				| { behavior: 'allow'; updatedInput?: Record<string, unknown> }
 				| { behavior: 'deny'; message: string }
 		): Promise<boolean> => ipcRenderer.invoke('permission:respond', requestId, decision),
+
+		onHarnessInteractionRequest: (
+			callback: (request: HarnessInteractionRequest) => void
+		): (() => void) => {
+			const handler = (_: unknown, request: HarnessInteractionRequest) => callback(request);
+			ipcRenderer.on('process:harness-interaction-request', handler);
+			return () => ipcRenderer.removeListener('process:harness-interaction-request', handler);
+		},
+
+		onHarnessInteractionSettled: (
+			callback: (event: HarnessInteractionSettledEvent) => void
+		): (() => void) => {
+			const handler = (_: unknown, event: HarnessInteractionSettledEvent) => callback(event);
+			ipcRenderer.on('process:harness-interaction-settled', handler);
+			return () => ipcRenderer.removeListener('process:harness-interaction-settled', handler);
+		},
+
+		listHarnessInteractions: (): Promise<HarnessInteractionRequest[]> =>
+			ipcRenderer.invoke('harnessControl:listPending'),
+
+		respondHarnessInteraction: (
+			response: HarnessInteractionResponse
+		): Promise<HarnessInteractionResolveResult> =>
+			ipcRenderer.invoke('harnessControl:respond', response),
 
 		/**
 		 * Subscribe to agent session ID events

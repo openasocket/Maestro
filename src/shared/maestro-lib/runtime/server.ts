@@ -71,13 +71,16 @@ export interface RuntimeServerOptions {
 	onStopRequested(): void;
 	/**
 	 * What only the host process knows: where Cue stands, how many Cue runs are in flight, the
-	 * build version, and why no managed standing was composed when none was.
+	 * build version, whether a macOS host holds the machine awake, and why no managed standing
+	 * was composed when none was.
 	 */
 	describe?(): {
 		cue: HostCueState;
 		cueRuns?: number;
 		version?: string;
 		managedUnavailable?: string;
+		/** A macOS host holding the machine awake for its work in flight. */
+		preventingSleep?: boolean;
 	};
 	/**
 	 * The custody this host's own group chat rounds run under (MCOMP-17-03CB): handed to the
@@ -93,6 +96,13 @@ export interface RuntimeServerOptions {
 	 * desktop. Absent: each of those verbs is refused by name.
 	 */
 	communications?: ManagedCommunicationsPort;
+	/**
+	 * Desktop bridge messages the runtime does not serve but the host process can, asked after the
+	 * runtime declined: Cue's, answered by the engine the host runs. The message and reply types are
+	 * the desktop's own, so no client learns anything new. `undefined` echoes the message, as for any
+	 * message nobody serves.
+	 */
+	answer?(message: Record<string, unknown>): Frame | undefined | Promise<Frame | undefined>;
 }
 
 export interface RuntimeServer {
@@ -257,6 +267,9 @@ export async function startRuntimeServer(options: RuntimeServerOptions): Promise
 			cue: described.cue,
 			...(managed ? { managed } : {}),
 			...(managedUnavailable ? { managedUnavailable } : {}),
+			...(described.preventingSleep !== undefined
+				? { preventingSleep: described.preventingSleep }
+				: {}),
 		};
 	};
 
@@ -300,7 +313,7 @@ export async function startRuntimeServer(options: RuntimeServerOptions): Promise
 				reply(control.frame, control.afterSend);
 				return;
 			}
-			const answer = await handle(message);
+			const answer = (await handle(message)) ?? (await options.answer?.(message));
 			if (answer) {
 				reply(answer);
 				return;

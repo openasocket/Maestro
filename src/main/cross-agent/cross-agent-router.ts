@@ -50,7 +50,7 @@ import {
 } from '../../shared/maestro-lib/managed/delegation';
 import type { ManagedDenialCode } from '../../shared/maestro-lib/managed/types';
 import { providerRouteSupport } from '../../shared/maestro-lib/providers/capabilities';
-import { createDesktopConsultRunner } from './consult-runner';
+import { createDesktopConsultRunner, type NativeConsultAdmission } from './consult-runner';
 import type { GroupChatSpawnLineage } from '../group-chat/spawnGroupChatAgent';
 import { dispatchedChildContext } from '../process-manager/ProcessManager';
 import type { ProcessSpawnActor, ProcessSpawnAuthorityPort } from '../process-manager/types';
@@ -238,6 +238,9 @@ export interface ConsultRefusal {
 }
 
 export interface StartCrossAgentRequestOptions {
+	assertNativeOwner?: () => void;
+	/** Host-only, never accepted in a cross-agent wire payload. */
+	nativeAdmission?: NativeConsultAdmission;
 	/** Concrete process manager (needed for both spawn and the data/exit events). */
 	processManager: ProcessManager;
 	/** Resolves an agent id to its executable config. */
@@ -438,6 +441,8 @@ export async function startCrossAgentRequest(
 	if (dispatchTicket !== undefined && isConsultTicketWithdrawn(dispatchTicket)) {
 		// The ask was withdrawn while the consult was on its way here: nothing runs.
 		withdrawnTickets.delete(dispatchTicket);
+		// Nothing was spawned: a native admission is told so before the chunk settles the ask.
+		opts.nativeAdmission?.notStarted?.();
 		logger.info('A withdrawn ask arrived; the consult was not started', LOG_CONTEXT, {
 			requestId: request.requestId,
 			targetSessionId: request.targetSessionId,
@@ -458,6 +463,8 @@ export async function startCrossAgentRequest(
 	}
 	const refusal = consultRefusal(managedPortOf(opts.processManager), initiator.delegation, target);
 	if (refusal) {
+		// Nothing was spawned: a native admission is told so before the chunk settles the ask.
+		opts.nativeAdmission?.notStarted?.();
 		logger.warn(
 			`${target?.name ?? request.targetSessionId} was not consulted (${refusal.state}, ${refusal.code}): ${refusal.message}`,
 			LOG_CONTEXT,
@@ -503,7 +510,7 @@ export async function startCrossAgentRequest(
 	};
 	try {
 		await consultService.start(request, {
-			runner: createDesktopConsultRunner(opts.processManager, opts.sshStore, {
+			runner: createDesktopConsultRunner(opts.processManager, opts.sshStore, opts.nativeAdmission, {
 				actor: opts.actor,
 				dispatchedBy,
 			}),
@@ -517,6 +524,7 @@ export async function startCrossAgentRequest(
 			// the runner's `dispatchedBy`, the same record both ways.
 			delegation: child,
 			getSystemPrompt: (consulted) => buildMaestroSystemPromptForSession(consulted.id),
+			onNotStarted: opts.nativeAdmission?.notStarted,
 			onChunk,
 		});
 	} catch (err) {

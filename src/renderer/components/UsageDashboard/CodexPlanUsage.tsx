@@ -12,6 +12,7 @@
 import { memo, useCallback, useMemo, useState } from 'react';
 import type { Theme } from '../../types';
 import { DURATION_LADDER_DAYS, DURATION_MS, humanizeDuration } from '../../../shared/duration';
+import { formatCount } from '../../../shared/formatters';
 import { useCodexUsageStore, type CodexUsageSnapshot } from '../../stores/codexUsageStore';
 import { useUIStore } from '../../stores/uiStore';
 import { makeAccountKeyHelpers, resolveLatestSampledAt } from './quota/quotaFormatting';
@@ -121,6 +122,17 @@ const AccountRow = memo(function AccountRow({
 	const shortName = deriveShortName(codexHomeKey);
 	const hasBars =
 		snapshot.session || snapshot.weekly || (snapshot.additionalLimits?.length ?? 0) > 0;
+	const creditBalance = snapshot.credits?.kind === 'balance' ? snapshot.credits.balance : undefined;
+	const creditBalanceLabel =
+		snapshot.credits?.kind === 'unlimited'
+			? 'Unlimited'
+			: creditBalance === undefined
+				? 'Not available'
+				: // formatCount groups digits with up to three decimal places. Never
+					// round a positive remainder into an apparent zero balance.
+					creditBalance > 0 && creditBalance < 0.001
+					? `<${formatCount(0.001)}`
+					: formatCount(creditBalance);
 
 	return (
 		<div className="space-y-2" data-testid={`${TEST_ID_PREFIX}-row-${shortName}`}>
@@ -213,6 +225,27 @@ const AccountRow = memo(function AccountRow({
 				</div>
 			)}
 
+			{snapshot.authState === 'authenticated' && (
+				<div
+					className="flex items-center justify-between gap-3 px-3 py-2 rounded text-xs"
+					style={{ backgroundColor: theme.colors.bgActivity }}
+					data-testid={`${TEST_ID_PREFIX}-credits-${shortName}`}
+				>
+					<span style={{ color: theme.colors.textDim }}>Available credits</span>
+					<span
+						className="font-medium tabular-nums"
+						style={{ color: snapshot.credits ? theme.colors.textMain : theme.colors.textDim }}
+						title={
+							creditBalance === undefined
+								? undefined
+								: `${creditBalance} credits reported by this account`
+						}
+					>
+						{creditBalanceLabel}
+					</span>
+				</div>
+			)}
+
 			{/* Reset credits sit under the bars they act on, and only for an
 			    authenticated account: an account we cannot read quota for cannot
 			    redeem either, and offering the button there is a dead control. */}
@@ -239,7 +272,9 @@ export const CodexPlanUsage = memo(function CodexPlanUsage({
 	onShowAccountAgents,
 }: CodexPlanUsageProps) {
 	const snapshots = useCodexUsageStore((s) => s.snapshots);
-	const refreshing = useCodexUsageStore((s) => s.refreshing);
+	// A sample in flight counts as busy even when this panel did not start it
+	// (it outlives a tab switch), so a remount shows the spinner, not an idle button.
+	const refreshing = useCodexUsageStore((s) => s.refreshing || s.sampling);
 
 	const { configuredAccountKeys, agentCountsByAccount, setSelectedKey, effectiveSelectedKey } =
 		useQuotaAccounts({
@@ -307,16 +342,9 @@ export const CodexPlanUsage = memo(function CodexPlanUsage({
 			? configuredAccountKeys
 			: configuredAccountKeys.filter((k) => !hiddenSet.has(k));
 
-	// Trigger the main re-sample, then re-pull the store. The store re-pull runs
-	// even when the sampler IPC throws so the dashboard reflects the latest cache.
-	const doRefresh = useCallback(async () => {
-		try {
-			await window.maestro.agents.refreshCodexUsageSnapshots();
-		} catch {
-			// Main logs carry the detailed failure.
-		}
-		await useCodexUsageStore.getState().refresh();
-	}, []);
+	// The store owns the sample, not this panel: leaving the tab mid-sample
+	// does not abandon it, and the result lands in the store when it finishes.
+	const doRefresh = useCallback(() => useCodexUsageStore.getState().sample(), []);
 
 	const { isBusy, refreshIntervalMs, setRefreshIntervalMs, handleRefresh } = useQuotaRefresh({
 		providerId: PROVIDER_ID,

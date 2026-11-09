@@ -58,6 +58,8 @@ export interface GroupChatSpawnLineage {
 }
 
 export interface SpawnGroupChatAgentConfig {
+	/** Host capability: final synchronous fence after all asynchronous preparation. */
+	beforeSpawn?: () => void;
 	/** Stable session id for the process manager */
 	sessionId: string;
 	/** Agent id (e.g. 'claude-code', 'codex') - used as `toolType` */
@@ -277,6 +279,10 @@ export async function spawnGroupChatAgent(
 		sshRemoteCommand: prepared.sshRemoteCommand,
 		...(lineage ?? {}),
 	};
+
+	// The host's final synchronous fence (upstream), after every asynchronous step and before
+	// either sink, so a fence that throws spawns nothing and nothing is admitted.
+	config.beforeSpawn?.();
 
 	// Admitted at the sink for the actor named: a managed desktop spawns nothing without an
 	// admission (and binds the room's child, never a fresh chat turn of the room); a standalone

@@ -33,6 +33,7 @@ import {
 } from '../../services/agentCommit';
 import { buildNewAgentRecord, newAgentClaudeInteractive } from '../../../shared/newAgentRecord';
 import type { CodexTransport } from '../../../shared/codexTransport';
+import type { HarnessControlMode } from '../../../shared/maestro-lib/providers/native-control';
 import { logger } from '../../utils/logger';
 import { killAgentAiProcesses } from '../../services/process';
 import { removeGroupAndPromoteChildren } from '../../../shared/groupHierarchy';
@@ -100,6 +101,7 @@ export interface UseSessionCrudReturn {
 		codexAutoResetOnExhaustion?: boolean,
 		/** Codex only: which transport chat turns use. `undefined` means `exec`. */
 		codexTransport?: CodexTransport,
+		harnessControlMode?: HarnessControlMode,
 		/** `clone` when the form duplicates an agent; the host checks it as a clone. */
 		operation?: NewAgentOperation,
 		/**
@@ -205,6 +207,7 @@ export function useSessionCrud(deps: UseSessionCrudDeps): UseSessionCrudReturn {
 			codexAutoResetOnExhaustion?: boolean,
 			/** Codex only: which transport chat turns use. `undefined` means `exec`. */
 			codexTransport?: CodexTransport,
+			harnessControlMode?: HarnessControlMode,
 			/** `clone` when the form duplicates an agent; the host checks it as a clone. */
 			operation: NewAgentOperation = 'create',
 			/** The New Agent form's policy revision (see the return type above). */
@@ -301,6 +304,7 @@ export function useSessionCrud(deps: UseSessionCrudDeps): UseSessionCrudReturn {
 					codexAutoResetOnExhaustion: codexAutoResetOnExhaustion === true ? true : undefined,
 					// Same rule: `exec` is the default, so only the opt-in is stored.
 					codexTransport: codexTransport === 'app-server' ? 'app-server' : undefined,
+					harnessControlMode: harnessControlMode === 'native' ? 'native' : undefined,
 					claudeInteractive: newAgentClaudeInteractive(agentId),
 				};
 
