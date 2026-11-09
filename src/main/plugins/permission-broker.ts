@@ -246,6 +246,109 @@ interface CeilingVerdict {
 	receipt: PluginCeilingReceipt;
 }
 
+type ManagedStandingHeld = Exclude<ManagedPluginStanding, { standing: 'standalone' }>;
+
+/**
+ * The ceiling entry a plugin identity is held to, or why it is held to none:
+ * no usable ceiling, no entry, no identity, a central revoke of the plugin or
+ * its publisher, or an entry issued for other bytes, publisher or status.
+ * The one entry rule a call (`ceilingVerdict`) and an authorization act
+ * (`ceilingAuthorizationVerdict`) both read.
+ */
+function heldCeilingEntry(
+	pluginId: string,
+	standing: ManagedStandingHeld,
+	identity: AuthIdentity | null
+):
+	| { entry: PluginCeilingEntry; policyRevision: number }
+	| { outcome: Exclude<PluginCeilingOutcome, 'within-ceiling'>; why: string } {
+	if (!standing.ceiling) {
+		return {
+			outcome: 'unavailable',
+			why: `the managed plugin ceiling is unavailable (${standing.reason})`,
+		};
+	}
+	const { ceiling, policyRevision } = standing;
+	const entry = ceiling.plugins.find((p) => p.pluginId === pluginId);
+	if (!entry) {
+		return {
+			outcome: 'outside-ceiling',
+			why: `"${pluginId}" is not within the managed plugin ceiling of policy revision ${policyRevision}`,
+		};
+	}
+	if (!identity) {
+		return {
+			outcome: 'identity-mismatch',
+			why: 'no consented plugin identity is readable to bind the ceiling to',
+		};
+	}
+	const revokedPublishers = ceiling.revokedPublishers ?? [];
+	const publisherRevoked = (key: string | null) => key !== null && revokedPublishers.includes(key);
+	if (entry.revoked || publisherRevoked(entry.signerKey) || publisherRevoked(identity.signerKey)) {
+		return {
+			outcome: 'revoked',
+			why: `"${pluginId}" is revoked by the managed plugin ceiling of policy revision ${policyRevision}`,
+		};
+	}
+	if (!consentMatches(entry, identity)) {
+		return {
+			outcome: 'identity-mismatch',
+			why: `the managed plugin ceiling names a different content digest, publisher or signature status for "${pluginId}" than the one consented to`,
+		};
+	}
+	return { entry, policyRevision };
+}
+
+/** One capability an authorization act would hold: an allowlist grant names its members. */
+export interface CeilingGrantRequest {
+	capability: PluginCapability;
+	/** The exact allowlist members the act would grant; absent for other scope forms. */
+	members?: readonly string[];
+}
+
+export type CeilingAuthorizationVerdict =
+	| { allowed: true }
+	| {
+			allowed: false;
+			outcome: Exclude<PluginCeilingOutcome, 'within-ceiling'>;
+			reason: string;
+	  };
+
+/**
+ * Hold an authorization act (a consent mint, an allowlist widening, a plugin
+ * load) against the ceiling, before the ledger records or the host honors it.
+ * Pure. The plugin identity must be the one the ceiling names, and every
+ * capability must be admitted for it; an allowlist member must be inside the
+ * ceiling's own members. Path and host scopes are patterns, not targets: they
+ * stay held per call by `ceilingVerdict`. An earlier consent or a trusted
+ * signature never stands in for this verdict.
+ */
+export function ceilingAuthorizationVerdict(input: {
+	pluginId: string;
+	identity: AuthIdentity;
+	grants: readonly CeilingGrantRequest[];
+	standing: ManagedStandingHeld;
+}): CeilingAuthorizationVerdict {
+	const { pluginId, standing } = input;
+	const held = heldCeilingEntry(pluginId, standing, input.identity);
+	if ('outcome' in held) return { allowed: false, outcome: held.outcome, reason: held.why };
+	const { entry, policyRevision } = held;
+	for (const grant of input.grants) {
+		const admitted = ceilingGrants(entry, grant.capability);
+		const within = grant.members
+			? grant.members.every((member) => isPermitted(admitted, grant.capability, member))
+			: admitted.length > 0;
+		if (!within) {
+			return {
+				allowed: false,
+				outcome: 'outside-ceiling',
+				reason: `${grant.capability} is outside the managed plugin ceiling for "${pluginId}" (policy revision ${policyRevision})`,
+			};
+		}
+	}
+	return { allowed: true };
+}
+
 /**
  * Hold one locally allowed call against the ceiling. Pure: the standing and
  * the consent view are what the caller read for this call. `method` is
@@ -257,7 +360,7 @@ export function ceilingVerdict(input: {
 	method: HostMethod | undefined;
 	capability: PluginCapability;
 	target: string | undefined;
-	standing: Exclude<ManagedPluginStanding, { standing: 'standalone' }>;
+	standing: ManagedStandingHeld;
 	consent: PluginConsentView | null;
 }): CeilingVerdict {
 	const { pluginId, method, capability, target, standing, consent } = input;
@@ -273,41 +376,9 @@ export function ceilingVerdict(input: {
 		reason: `permission denied: ${capability}${target ? ` (${target})` : ''}: ${why}`,
 		receipt: receipt(outcome),
 	});
-	if (!standing.ceiling) {
-		return deny('unavailable', `the managed plugin ceiling is unavailable (${standing.reason})`);
-	}
-	const { ceiling, policyRevision } = standing;
-	const entry = ceiling.plugins.find((p) => p.pluginId === pluginId);
-	if (!entry) {
-		return deny(
-			'outside-ceiling',
-			`"${pluginId}" is not within the managed plugin ceiling of policy revision ${policyRevision}`
-		);
-	}
-	if (!consent) {
-		return deny(
-			'identity-mismatch',
-			'no consented plugin identity is readable to bind the ceiling to'
-		);
-	}
-	const revokedPublishers = ceiling.revokedPublishers ?? [];
-	const publisherRevoked = (key: string | null) => key !== null && revokedPublishers.includes(key);
-	if (
-		entry.revoked ||
-		publisherRevoked(entry.signerKey) ||
-		publisherRevoked(consent.identity.signerKey)
-	) {
-		return deny(
-			'revoked',
-			`"${pluginId}" is revoked by the managed plugin ceiling of policy revision ${policyRevision}`
-		);
-	}
-	if (!consentMatches(entry, consent.identity)) {
-		return deny(
-			'identity-mismatch',
-			`the managed plugin ceiling names a different content digest, publisher or signature status for "${pluginId}" than the one consented to`
-		);
-	}
+	const held = heldCeilingEntry(pluginId, standing, consent?.identity ?? null);
+	if ('outcome' in held) return deny(held.outcome, held.why);
+	const { entry, policyRevision } = held;
 	const admitted = ceilingGrants(entry, capability);
 	const within =
 		method !== undefined && HANDLER_REAUTHORIZED_METHODS.has(method)

@@ -308,7 +308,12 @@ describe('the admin set namespace (MRC2-06-04)', () => {
 	const PLUGINS = 'plugins.installed';
 
 	it('names the two sets beside the settings keys and pins each to its closed shape', () => {
-		expect(MANAGED_SET_LOCK_KEYS).toEqual([PROMPTS, PLUGINS, 'storage.syncPath']);
+		expect(MANAGED_SET_LOCK_KEYS).toEqual([
+			PROMPTS,
+			PLUGINS,
+			'storage.syncPath',
+			'pluginTrustedKeys',
+		]);
 		expect(LOCKABLE_SETTING_KEYS).not.toContain(PROMPTS);
 		expect(isSettingLockable(PLUGINS)).toBe(true);
 		const prompts = { 'wizard-system': 'pinned' };

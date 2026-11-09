@@ -45,7 +45,11 @@ import { canonicalJson } from '../../shared/canonicalJson';
 import { yieldToEventLoop } from '../utils/concurrency';
 import type { PluginEventReceiptRow } from './plugin-cue-events';
 import { assertSerializedJsonIsSafe } from '../../shared/jsonUtils';
-import { isAllowlistScoped, isValidAllowlistMember } from '../../shared/plugins/permissions';
+import {
+	isAllowlistScoped,
+	isValidAllowlistMember,
+	parseAllowlistScope,
+} from '../../shared/plugins/permissions';
 import type { PermissionGrant, PluginCapability } from '../../shared/plugins/permissions';
 import type { SignatureStatus } from '../../shared/plugins/signing';
 import { PLUGIN_ID_PATTERN } from '../../shared/plugins/plugin-manifest';
@@ -58,6 +62,12 @@ import {
 import type { Anchor, AnchorStore, KeyringEntry, KeyringModule } from '../utils/keyring-anchor';
 import { safeStorageSeal } from '../utils/safe-storage-seal';
 import type { SafeStorageLike, SealProvider } from '../utils/safe-storage-seal';
+import {
+	ceilingAuthorizationVerdict,
+	type CeilingAuthorizationVerdict,
+	type CeilingGrantRequest,
+	type ManagedPluginStanding,
+} from './permission-broker';
 
 const AUTHORIZATION_LEDGER_LIMITS = {
 	plaintextBytes: 20 * 1024 * 1024,
@@ -198,7 +208,7 @@ function isLedger(value: unknown): value is LoadedLedger {
 }
 
 /** Why a plugin's verification resolved the way it did (for the UI / audit). */
-export type VerifyReason = 'ok' | 'not-authorized' | 'identity-changed' | 'removed';
+export type VerifyReason = 'ok' | 'not-authorized' | 'identity-changed' | 'removed' | 'managed';
 
 /** Result of verifying a discovered plugin against its consented authorization. */
 export interface VerifyResult {
@@ -206,6 +216,30 @@ export interface VerifyResult {
 	reason: VerifyReason;
 	/** Caps to hand the broker - empty unless `authorized`. */
 	caps: PermissionGrant[];
+}
+
+/**
+ * A consent mint the managed plugin ceiling refuses (MCOMP-21-07): thrown
+ * before the ledger is touched, so no grant, epoch or tombstone moves.
+ */
+export class ManagedPluginAuthorizationError extends Error {
+	constructor(
+		readonly pluginId: string,
+		readonly outcome: Exclude<CeilingAuthorizationVerdict, { allowed: true }>['outcome'],
+		message: string
+	) {
+		super(message);
+		this.name = 'ManagedPluginAuthorizationError';
+	}
+}
+
+/** The grants an authorization act would hold, as the ceiling reads them: allowlist members by name. */
+function ceilingGrantRequests(caps: readonly PermissionGrant[]): CeilingGrantRequest[] {
+	return caps.map((grant) =>
+		isAllowlistScoped(grant.capability)
+			? { capability: grant.capability, members: parseAllowlistScope(grant.scope) ?? [] }
+			: { capability: grant.capability }
+	);
 }
 
 export function shouldDisablePluginForVerifyResult(result: VerifyResult): boolean {
@@ -241,6 +275,31 @@ export class AuthorizationStore {
 	}
 	private notifyAuthorizationChange(pluginId: string): void {
 		for (const listener of this.authorizationListeners) listener(pluginId);
+	}
+
+	/** The host's managed plugin standing, read live on every authorization act.
+	 * Null (never composed) or standalone: local consent alone decides. */
+	private managedStanding: (() => ManagedPluginStanding) | null = null;
+
+	/**
+	 * Compose the managed plugin standing (the same source the broker reads)
+	 * into every act that creates or widens authority: a consent mint, an
+	 * allowlist widening and a load-time verify. Revocation, uninstall and a
+	 * narrowing are never held: a ceiling only narrows.
+	 */
+	setManagedStanding(read: (() => ManagedPluginStanding) | null): void {
+		this.managedStanding = read;
+	}
+
+	/** The ceiling's verdict on an act, or allowed when the host is standalone. */
+	private managedHold(
+		pluginId: string,
+		identity: AuthIdentity,
+		grants: readonly CeilingGrantRequest[]
+	): CeilingAuthorizationVerdict {
+		const standing = this.managedStanding?.();
+		if (!standing || standing.standing === 'standalone') return { allowed: true };
+		return ceilingAuthorizationVerdict({ pluginId, identity, grants, standing });
 	}
 
 	private readonly seal: SealProvider;
@@ -946,6 +1005,11 @@ export class AuthorizationStore {
 	 * MUST already have verified sender-frame + nonce + user-activation.
 	 */
 	mint(pluginId: string, caps: PermissionGrant[], identity: AuthIdentity): void {
+		// The managed ceiling holds the mint before anything moves: a user's
+		// consent and a trusted signature never override an enterprise ceiling.
+		const held = this.managedHold(pluginId, identity, ceilingGrantRequests(caps));
+		if (!held.allowed)
+			throw new ManagedPluginAuthorizationError(pluginId, held.outcome, held.reason);
 		this.notifyAuthorizationChange(pluginId);
 		this.ensureLoaded();
 		this.bump();
@@ -1030,6 +1094,15 @@ export class AuthorizationStore {
 		// member is invalid (empty, or a character that could split or smuggle
 		// through the comma-joined scope) - fail loud, never silently narrow.
 		if (!members.every(isValidAllowlistMember)) return false;
+		// A widening (any member the consented scope does not already hold) is
+		// held by the managed ceiling for the added members; a narrowing never is.
+		const current = parseAllowlistScope(entry.caps[idx].scope) ?? [];
+		const added = members.filter((member) => !current.includes(member));
+		if (
+			added.length > 0 &&
+			!this.managedHold(pluginId, entry.identity, [{ capability, members: added }]).allowed
+		)
+			return false;
 		const scope = members.length > 0 ? [...members].join(',') : undefined;
 		this.bump();
 		entry.caps = entry.caps.map((c, i) => (i === idx ? { ...c, scope } : { ...c }));
@@ -1127,6 +1200,11 @@ export class AuthorizationStore {
 		if (kept.length !== entry.caps.length) {
 			return { authorized: false, reason: 'identity-changed', caps: [] };
 		}
+		// A consented, unchanged plugin still loads only within the managed
+		// ceiling of the revision the host is under right now. Not a revoke: the
+		// consent stays, and a later verify under an admitting ceiling loads it.
+		if (!this.managedHold(pluginId, current, ceilingGrantRequests(kept)).allowed)
+			return { authorized: false, reason: 'managed', caps: [] };
 		return { authorized: true, reason: 'ok', caps: kept.map((c) => ({ ...c })) };
 	}
 }

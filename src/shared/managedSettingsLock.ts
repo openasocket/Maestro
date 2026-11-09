@@ -38,6 +38,12 @@
  * What a Settings pane reads of the lock (MRC2-06-05) is `ManagedSettingLocksView`:
  * every held key by name with the line its refusal is named with.
  *
+ * MCOMP-21-07 adds a third admin set, the trusted plugin publisher keys
+ * (`pluginTrustedKeys`, held by its own settings name so `settings:set` and a
+ * guarded store write meet the same lock), pinned as the whole key list. A
+ * pin replaces the user's keys outright (`effectiveTrustedKeys()`), so a key
+ * the policy drops stops trusting the plugins it signed on the next refresh.
+ *
  * MRC2-07-06 adds one lock key per Encore Feature flag (`encore.<flag>`, from
  * `ENCORE_FEATURE_DEFAULTS`), always pinned on or off and never locked bare:
  * managed mode is not a flag a person switches, so a policy holds a flag to a
@@ -84,7 +90,10 @@ export interface ManagedSettingsPolicyPort {
 /** No policy: standalone. */
 export type ManagedSettingsPolicyRef = ManagedSettingsPolicy | null | undefined;
 
-export const MANAGED_SETTINGS_LIMITS = { pinLength: 65536 } as const;
+export const MANAGED_SETTINGS_LIMITS = { pinLength: 65536, trustedKeys: 256 } as const;
+
+/** A base64 SPKI public key as `signature.json` carries it: base64 characters only, padded. */
+const TRUSTED_KEY_PATTERN = /^[A-Za-z0-9+/]+={0,2}$/;
 
 const POLICY_KEYS = ['policyRevision', 'locks'] as const;
 const LOCK_KEYS = ['key', 'pin'] as const;
@@ -134,12 +143,15 @@ export function agentConfigLockKey(field: string): string | null {
 export const PROMPT_SET_LOCK_KEY = 'prompts.customizations';
 /** The installed community plugin set, pinned as plugin ids. */
 export const PLUGIN_SET_LOCK_KEY = 'plugins.installed';
+/** The trusted plugin publisher keys (base64 SPKI), pinned as the whole list; the settings key itself. */
+export const PLUGIN_TRUSTED_KEYS_LOCK_KEY = 'pluginTrustedKeys';
 /** The Storage Location sync folder (`maestro-bootstrap.json`), pinned as an absolute folder or null for the user-data default. */
 export const SYNC_PATH_LOCK_KEY = 'storage.syncPath';
 export const MANAGED_SET_LOCK_KEYS: readonly string[] = Object.freeze([
 	PROMPT_SET_LOCK_KEY,
 	PLUGIN_SET_LOCK_KEY,
 	SYNC_PATH_LOCK_KEY,
+	PLUGIN_TRUSTED_KEYS_LOCK_KEY,
 ]);
 
 /** Remote-access actions a policy may hold, locked and never pinned: Live Mode sessions, the cloudflared tunnel, the Lite client's controls. */
@@ -239,6 +251,15 @@ const MANAGED_SET_PIN_PROBLEM: Record<string, (value: unknown) => string | null>
 		const bad = value.find((id) => typeof id !== 'string' || !PLUGIN_ID_PATTERN.test(id));
 		if (bad !== undefined) return `names ${JSON.stringify(bad)}, which is not a plugin id`;
 		return new Set(value).size === value.length ? null : 'names a plugin id twice';
+	},
+	[PLUGIN_TRUSTED_KEYS_LOCK_KEY]: (value) => {
+		if (!Array.isArray(value)) return 'is not an array of base64 publisher keys';
+		if (value.length > MANAGED_SETTINGS_LIMITS.trustedKeys)
+			return `names more than ${MANAGED_SETTINGS_LIMITS.trustedKeys} publisher keys`;
+		const bad = value.find((key) => typeof key !== 'string' || !TRUSTED_KEY_PATTERN.test(key));
+		if (bad !== undefined)
+			return `names ${JSON.stringify(bad)}, which is not a base64 publisher key`;
+		return new Set(value).size === value.length ? null : 'names a publisher key twice';
 	},
 	[SYNC_PATH_LOCK_KEY]: (value) => {
 		if (value === null) return null;
@@ -367,6 +388,20 @@ export function lockedSettingKeys(policy: ManagedSettingsPolicyRef): string[] {
 	for (const lock of policy?.locks ?? [])
 		if (isSettingLockable(lock.key) && !keys.includes(lock.key)) keys.push(lock.key);
 	return keys;
+}
+
+/**
+ * The user-configured trusted publisher keys a signature check reads under
+ * this policy: the pinned list when `pluginTrustedKeys` is pinned (the user's
+ * own keys are not consulted at all), otherwise the user's keys unchanged.
+ * The built-in publisher anchor is merged afterwards by `resolveTrustedKeys()`.
+ */
+export function effectiveTrustedKeys(
+	userKeys: readonly string[],
+	policy: ManagedSettingsPolicyRef
+): string[] {
+	const pin = managedSettingPin(PLUGIN_TRUSTED_KEYS_LOCK_KEY, policy);
+	return pin ? [...(pin.value as string[])] : [...userKeys];
 }
 
 /** The value the policy pins this key to, or null when it is unlocked or locked without a pin. */
