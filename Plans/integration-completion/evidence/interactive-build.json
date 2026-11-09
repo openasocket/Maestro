@@ -1,0 +1,429 @@
+{
+	"schemaVersion": 1,
+	"schema": "maestro-integration-build/1",
+	"artifactId": "MAESTRO-DESKTOP-APP-BUILD",
+	"owner": "maestro",
+	"proofClass": "implementation-input",
+	"status": "complete-local-consumer-build",
+	"producerDocument": "MCOMP-25",
+	"task": "MCOMP-25-05",
+	"stage": "S12",
+	"backlog": ["M-06"],
+	"recordedAt": "2026-11-09T09:33:38.980Z",
+	"standing": "Compiled and locally tested inputs published at the content-addressed paths below. Grants no execution authority and proves no paired, native, GUI or real-provider support.",
+	"grants": {
+		"authority": "none",
+		"lease": "none",
+		"policy": "none"
+	},
+	"qualification": {
+		"paired": false,
+		"provider": false,
+		"native": false,
+		"desktopGui": false
+	},
+	"implementationRevision": "3541f561cd4e7b27dda6222a769164fb3324be3e",
+	"observedRevision": "eabe64a44708279cacaef162927715fbc5088b1b",
+	"inputDigest": "e4bd4e66c99b9119ef5b04f6bab5c2821dbbf3fcdac6ff84dcd18665d91f4318",
+	"snapshot": {
+		"implementationClean": true,
+		"checkoutClean": false,
+		"implementationDigest": "46e4fbb94f6733980b92e79111318dbdc1d7742a595a639de2cf543ee17b04e8",
+		"implementationFiles": 6947,
+		"inputMap": {
+			"path": ".maestro/playbooks/Working/MCOMP-25-05/input-map.json",
+			"sha256": "dba7a5230fbb5505d08369ff26bc9fc30eeec43d3f256389c0f9b5b877ca93d2"
+		},
+		"inputDigestEncoding": "sha256(canonicalJson(inputMap.inputs))",
+		"implementationMap": "/Users/dr3/dev-shit/Maestro/dist/mega-maestro-runtime/0.36.0/f68ed62ec453992a176ec4133e40b2a78446135ef1dee9af2fbf022084273778/runtime.tgz#package/source/implementation.json",
+		"libraryInputMap": "/Users/dr3/dev-shit/Maestro/dist/mega-maestro-runtime/0.36.0/f68ed62ec453992a176ec4133e40b2a78446135ef1dee9af2fbf022084273778/runtime.tgz#package/source/library-inputs.json",
+		"changeRange": {
+			"from": "a4889e77c (MCOMP-25-01, parent excluded)",
+			"to": "3541f561c (MCOMP-25-05A, the stale managed Codex spawn case repaired before this check)",
+			"implementationRevision": "3541f561cd4e7b27dda6222a769164fb3324be3e",
+			"e2e": "c7bcddbc4 (MCOMP-25-04: e2e/fixtures/managed-host.ts, e2e/managed-agent-run.spec.ts, e2e/managed-recovery.spec.ts; outside the implementation snapshot, linted, format-checked and type-checked here, not run)",
+			"manifestReconcile": ["262484bc1 (25-01A, 25-01B, 25-02A, 25-04A)", "eabe64a44 (25-05A)"],
+			"changedFiles": {
+				"path": ".maestro/playbooks/Working/MCOMP-25-05/checked-files.json",
+				"sha256": "de01192ae101d074b9dc27a9401f7505e256bdd3591c6c8428e3d6722553e814"
+			}
+		},
+		"inputs": "All tracked implementation source, prompts, templates and schemas; package and lockfiles; main/renderer/library/test/lint/format configuration; packaged README and SDK metadata; coverage and archive plans; imported contracts and exact dependencies; all installed dependency bytes including compiler/native tools; verification harnesses and Node executable. Build override variables and renderer .env inputs were absent.",
+		"installedDependencyFiles": 77914,
+		"importedContractFiles": 891,
+		"testCoordinationInput": {
+			"path": "Plans/integration-completion/program.json",
+			"sha256": "a08568257bdb3e6b6c0b15af009fdeced3c9f8987fab7fa74fca00835b377196",
+			"committedSha256": "0ca35260ac2001e3554bfb368d1b90ca3e565b86bce3e3c7a4a09fa179396aab",
+			"role": "Uncommitted coordination manifest read only to validate task IDs; excluded from production source cleanliness claim"
+		},
+		"preservedDiff": {
+			"path": ".maestro/playbooks/Working/MCOMP-25-05/initial-planning.patch",
+			"sha256": "8ae30a25692a6802fc95281c02cd18a6077190bee6edb2f71a7b797875d224b3"
+		},
+		"exclusions": "Existing planning amendments, checklist/coordination receipts, SlopTimize state and graph output are not application/build inputs. program.json is explicitly hashed as an uncommitted test coordination input. The full checkout and full test input set are not claimed committed. No private sibling implementation is loaded."
+	},
+	"dependencies": [
+		{
+			"artifactId": "MAESTRO-CONTRACT-INPUTS-BUILD",
+			"path": "Plans/integration-completion/evidence/contract-inputs-build.json",
+			"sha256": "206664f3ab7605927bbf9964597da12f4607da34bac5f601ce18e19fffca34c2",
+			"implementationRevision": "dc5938509be17742adcca713cca07c0176af6fe6",
+			"inputDigest": "115a3223b356e0975ca73b9a53c4b6e25031437915888b5534bcfd955f6116b5"
+		},
+		{
+			"artifactId": "MAESTRO-EFFECT-CONSUMERS-BUILD",
+			"path": "Plans/integration-completion/evidence/effect-build.json",
+			"sha256": "f5f81b81e3255ec225eb51d9e80c12f9c1a8ee921cc24aa7a13482cb29ae031e",
+			"implementationRevision": "4094931879e55287eec1a1306d857111293b7460",
+			"inputDigest": "901b2125ede561263fbe03428207fabb92c8ebc006d5b0410f038f48f0626b73"
+		},
+		{
+			"artifactId": "MAESTRO-POLICY-CONSUMERS-BUILD",
+			"path": "Plans/integration-completion/evidence/policy-build.json",
+			"sha256": "e253139055c3b804bbf2ff6e6f155d360e426c48132869d284c42c2a29232b09",
+			"implementationRevision": "d86ddb94c43360d46631a9f88e61f4a931435103",
+			"inputDigest": "9f5807ac2d21e92e9dd8952e3703e32ba4d90054bd8fa2ab432804cbe3ea6771"
+		},
+		{
+			"artifactId": "MAESTRO-WORKFLOW-CONSUMERS-BUILD",
+			"path": "Plans/integration-completion/evidence/workflow-build.json",
+			"sha256": "9f1105a55d036d31724b7e7960e4f77c56812ebce2bf3c3f23600bf332c08bec",
+			"implementationRevision": "59ea7a5309eecc8d7befafd56e6dd599b2fe3b11",
+			"inputDigest": "5b64f9ca421d985cb18538ffe720cccba91bbf18d46960bfe03876402b64ed2c"
+		}
+	],
+	"archives": {
+		"runtime": {
+			"path": "/Users/dr3/dev-shit/Maestro/dist/mega-maestro-runtime/0.36.0/f68ed62ec453992a176ec4133e40b2a78446135ef1dee9af2fbf022084273778/runtime.tgz",
+			"sha256": "f68ed62ec453992a176ec4133e40b2a78446135ef1dee9af2fbf022084273778",
+			"sha512": "812de729d058904dd9e7be1e38d943c703839ef968a7b5ad0e52be081bd05b72a14a0231293cf4a4d74ac1bb9872caae09ea76c12d70d3c36ff5ff412ec3cc9e",
+			"bytes": 2655323,
+			"manifest": {
+				"path": "/Users/dr3/dev-shit/Maestro/dist/mega-maestro-runtime/0.36.0/f68ed62ec453992a176ec4133e40b2a78446135ef1dee9af2fbf022084273778/artifact.json",
+				"sha256": "10c46110bba3a82ff07e582fa7fef0324b828f015c6c9d3b03bbd65c79e74d07"
+			},
+			"sidecar": {
+				"path": "/Users/dr3/dev-shit/Maestro/dist/mega-maestro-runtime/0.36.0/f68ed62ec453992a176ec4133e40b2a78446135ef1dee9af2fbf022084273778/runtime.tgz.sha256",
+				"sha256": "f5147c7a83898165f2b483185b153858fdc053f5848985adb643edf2ab354019"
+			},
+			"payloadFiles": 309,
+			"payloadDigest": "80f6df314345edf99e7825b62bf000c241fa6107bb6cec06e756c320fa9ec695",
+			"payloadMap": "/Users/dr3/dev-shit/Maestro/dist/mega-maestro-runtime/0.36.0/f68ed62ec453992a176ec4133e40b2a78446135ef1dee9af2fbf022084273778/artifact.json#/payloadSha256"
+		},
+		"desktopCompiled": {
+			"path": "/Users/dr3/dev-shit/Maestro/dist/mega-maestro-interactive-desktop/1/c848cb0b7c155b4125b983a6508a0dc224b4c791423e51f520f898ba2f74f0e4/desktop-compiled.tgz",
+			"sha256": "c848cb0b7c155b4125b983a6508a0dc224b4c791423e51f520f898ba2f74f0e4",
+			"sha512": "cfab9ce5d6503b746a1a1bcb1da834d64a14c454293a19e50c9d54827cc7987086052f147417c296822c30b9a692839da38adf0341dee89f66ba5b4df72fd2f6",
+			"bytes": 19882758,
+			"manifest": {
+				"path": "/Users/dr3/dev-shit/Maestro/dist/mega-maestro-interactive-desktop/1/c848cb0b7c155b4125b983a6508a0dc224b4c791423e51f520f898ba2f74f0e4/artifact.json",
+				"sha256": "a5a1b159fa81967c5ee1b9db32da76eaf462cb2f7b34311ea6bfd3a10c8f5f29"
+			},
+			"sidecar": {
+				"path": "/Users/dr3/dev-shit/Maestro/dist/mega-maestro-interactive-desktop/1/c848cb0b7c155b4125b983a6508a0dc224b4c791423e51f520f898ba2f74f0e4/desktop-compiled.tgz.sha256",
+				"sha256": "1d3928136d9c0e9d966903ae766dca2f2a18192f70522f6acd434d9d2bfc95bd"
+			},
+			"payloadFiles": 2142,
+			"payloadDigest": "5ac17abece55f3a97fb7ec7f7ec31dbd6b2ed4155a5efdcb6cc9300fc056110a",
+			"payloadMap": "/Users/dr3/dev-shit/Maestro/dist/mega-maestro-interactive-desktop/1/c848cb0b7c155b4125b983a6508a0dc224b4c791423e51f520f898ba2f74f0e4/artifact.json#/payloadSha256"
+		},
+		"publicContracts": {
+			"name": "@mega-maestro/contracts",
+			"version": "0.1.0",
+			"path": "/Users/dr3/dev-shit/mega-maestro/artifacts/enterprise/0.1.0/c34e6cd0590fdce90cd2ace60f8f43ee278f6d24d62d4b6caab2bb4f720ab177/contracts.tgz",
+			"sha256": "c34e6cd0590fdce90cd2ace60f8f43ee278f6d24d62d4b6caab2bb4f720ab177",
+			"integrity": "sha512-MNZe6OgdHh5LwxRVY85zDkudqUFJjyQHdW/IgfuzH3S0cGnN1lKLaAV4dT1Z4hpyXzMbhIYiKQjpECt9RWNhTA==",
+			"manifest": {
+				"path": "/Users/dr3/dev-shit/mega-maestro/artifacts/enterprise/0.1.0/c34e6cd0590fdce90cd2ace60f8f43ee278f6d24d62d4b6caab2bb4f720ab177/artifact.json",
+				"sha256": "6c346c4fa4a7b7d4ec41b1624c7b155715128ec04c877bf0830910fd49aa127d"
+			},
+			"sidecar": {
+				"path": "/Users/dr3/dev-shit/mega-maestro/artifacts/enterprise/0.1.0/c34e6cd0590fdce90cd2ace60f8f43ee278f6d24d62d4b6caab2bb4f720ab177/contracts.tgz.sha256",
+				"sha256": "36b351059a4fc51fda3c278dc87d892fa098ac8ad8517972cec0f82f01a88fd6"
+			},
+			"payloadFiles": 46,
+			"payloadDigest": "12976943661224f30e6461430332d1fefb36f4133bd38e93cb02f006d52296fd"
+		}
+	},
+	"builds": {
+		"libraryProvenance": {
+			"path": ".maestro/playbooks/Working/MCOMP-25-05/library/provenance.json",
+			"sha256": "f3dfce2be2b0f2b41ae3ec645daffccb4675e67b46a3c7ffffeabdb24355c486"
+		},
+		"desktopPayloadMap": {
+			"path": ".maestro/playbooks/Working/MCOMP-25-05/main-build-payload.json",
+			"sha256": "24c55ea2e229b1a4e5909229b9cdf62f6eb657ba695b1ec1f131394c087338d8"
+		},
+		"scope": "Runtime library, Electron main/shared/preload and renderer compiled locally. Desktop archive contains compiled inputs with external Electron/Node/native dependencies, not an installable native app. No GUI session was qualified."
+	},
+	"archiveValidation": {
+		"integrity": {
+			"path": ".maestro/playbooks/Working/MCOMP-25-05/archive-validation.json",
+			"sha256": "622c1721d273be654bac53bf64113f951f22f800d53ff7b677c61a5f58fe1538"
+		},
+		"importTrace": {
+			"path": ".maestro/playbooks/Working/MCOMP-25-05/archive-redirects.log",
+			"sha256": "7f84534959a6c1d073d217782a44ba58088496b76c22e8e8d7e5139582b4a8c9"
+		},
+		"runtimeInput": {
+			"path": ".maestro/playbooks/Working/MCOMP-25-05/runtime-input-validation.json",
+			"sha256": "5df31cc5aabd790e34b297509ac6535056b7f6df5dfe4f01e46b704c6d568b76"
+		},
+		"desktopRedirects": 21,
+		"runtimeRedirects": 8,
+		"scope": "SHA-256/SHA-512, sidecars, manifests, member sets, safe paths and every payload hash verified before extraction. Every relative import of the dispatch bridge (main/enterprise/dispatch: managedRunViewOf, managedRunViewOfReceipt), the enterprise service (main/enterprise/service: run readback, live-run constraint), the managed spawn refusal encoding (shared/processErrors) and the admission authority (shared/maestro-lib/managed/authority, so a context the suites bind and the lease the compiled service checks share one verifier registry) was redirected to the compiled desktop archive, and every import of the launch argument builder and provider definitions (bounded standard mode, bypass-flag check) to the public runtime bundle; five suites (dispatch ledger and run view, enterprise service incl. mid-run revocation and restart readback, processErrors, process:spawn under management, enterprise IPC) ran on those bytes. A first archive run without the authority redirect failed six service cases only because the compiled service and the source test bound contexts on separate verifier instances; recorded, not hidden. Renderer component, hook, store, CLI, preload and bridge suites stay source-only. Public declaration checks and a plain Node load of both archives (standard Codex launch bounded, a caller bypass flag named, a foreign receipt never joined, ledger readback, refusal survives the IPC wrap, a forged state refused) passed. Temporary identity-only pin leaves the historical runtime pin unchanged."
+	},
+	"tests": {
+		"source": {
+			"files": 14,
+			"passed": 397,
+			"failed": 0,
+			"skipped": 0,
+			"results": {
+				"path": ".maestro/playbooks/Working/MCOMP-25-05/source-tests.json",
+				"sha256": "0e9058cc040b9a5f5b6fa58edd6cde344d3e2884bfd41c9ef07c9f0a7397cf65"
+			}
+		},
+		"archived": {
+			"files": 5,
+			"passed": 73,
+			"failed": 0,
+			"skipped": 0,
+			"results": {
+				"path": ".maestro/playbooks/Working/MCOMP-25-05/archive-tests.json",
+				"sha256": "6b3086a09b3f7ea3333a33412fbc3f6c6cfcce3a5a7b56dec5351861291b2fe6"
+			}
+		},
+		"boundary": "Local typed-port and public-schema fixtures, a contract-fixture endpoint double, temporary data directories and recording sinks only. No signed production delivery, real tenant, provider, native peer or live endpoint supplied authority. The e2e journeys (e2e/managed-agent-run.spec.ts, e2e/managed-recovery.spec.ts) are type-checked here but not run; their fixture-mode cases passed 6/6 when authored (MCOMP-25-04) and MCOMP-26 executes and records the endpoint-mode cases."
+	},
+	"behavior": [
+		"A composer send or a queued send returns the managed run its spawn was admitted under (lease, authority, request, attempt, digest, provider, actor, policy revision) and the AI tab keeps it for that turn; a retry or resume is a new admission under the policy current at that moment.",
+		"A managed sink refusal survives the process:spawn rejection as a parseable state/code/message (a forged state is refused) and is recorded on the tab from both send paths.",
+		"The dispatch ledger answers a run by lease id (IPC enterprise:managedRun, bridge managed_run, maestro-cli managed run): a stopped, released, revoked or restart-unknown run reads back from the durable record; a receipt for another lease is never joined.",
+		"The AI tab shows the run state (admitted, running, completed, denied, offline, revoked, unknown) with the host reason and revision and only the recovery the state allows (Stop, Send again, Refresh policy).",
+		"Live managed runs are held to the host standing on a timer and after a policy refresh: denied, suspended, revoked, retired or custody-refused revokes the running lease, stopping its process with the reason in the ledger."
+	],
+	"contractMappings": {
+		"pin": {
+			"path": "vendor/mega-maestro/contracts.pin.json",
+			"sha256": "8343292d926cf3ed7b67a3c6f34a88eecedf85045dddb187d0357deae3daf3f4"
+		},
+		"coverage": {
+			"path": "Plans/integration-completion/contract-coverage.json",
+			"sha256": "6b1d8a57c3864678df317d013b8a2d4663bf86d4fab885b7d8fdb0573e3bf0b2"
+		},
+		"endpointProtocolsAccepted": [1],
+		"liveNegotiationPerformed": false,
+		"extensions": [
+			{
+				"id": "DESKTOP-LOCAL/1",
+				"status": "proposed-not-negotiated",
+				"productionProducer": false
+			}
+		],
+		"remaining": "The run view is a Maestro-local projection of the admission and the dispatch receipt; no wire operation or advertised capability was invented in this phase and contract-coverage.json gained no entry. Production admission still requires authenticated negotiated authority."
+	},
+	"checks": [
+		{
+			"name": "archive-tests",
+			"command": "st node node_modules/vitest/vitest.mjs run --config .maestro/playbooks/Working/MCOMP-25-05/vitest.archive.config.mts src/__tests__/main/enterprise/dispatch.test.ts src/__tests__/main/enterprise/service.test.ts src/__tests__/shared/processErrors.test.ts src/__tests__/main/ipc/handlers/process/handle-spawn.managed.test.ts src/__tests__/main/ipc/handlers/enterprise.test.ts --reporter=default --reporter=json --outputFile=.maestro/playbooks/Working/MCOMP-25-05/archive-tests.json",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-25-05/archive-tests.log",
+				"sha256": "8c90fcd97c6dccb41e3583bd35eab80fd0ddb42a67e53d95079ef0b212396211"
+			}
+		},
+		{
+			"name": "build-library",
+			"command": "st node scripts/build-maestro-lib.mjs --out-dir .maestro/playbooks/Working/MCOMP-25-05/library",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-25-05/build-library.log",
+				"sha256": "a961c1f07c13640a1a86cb3db147f74ec047c8a27e46183a14e6d7a67d431024"
+			}
+		},
+		{
+			"name": "build-main",
+			"command": "st npm run build:main",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-25-05/build-main.log",
+				"sha256": "b663ffb0e5d36c2df8242740090612076817c7023ecfb292b28e3ecb0c6ade3e"
+			}
+		},
+		{
+			"name": "build-renderer",
+			"command": "st npm run build:renderer",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-25-05/build-renderer.log",
+				"sha256": "5184736f19c78ac1133f5b263bd1938036eeedc074eca01b0f0df04a370372ae"
+			}
+		},
+		{
+			"name": "contract-vectors",
+			"command": "st node .maestro/playbooks/Working/MCOMP-00-03/exact-dependency-vectors.mjs",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-25-05/contract-vectors.log",
+				"sha256": "e15ef2fcaa677666d1461af0a5a760e956fee6ca69c90a14e15ea37d2443d295"
+			}
+		},
+		{
+			"name": "contracts",
+			"command": "st node .maestro/playbooks/Working/MCOMP-00-01/verify-inputs.mjs",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-25-05/contracts.log",
+				"sha256": "36eef50e024c7307bd9a3e4832a63c265dcb6df7b15878eb105b99f0b2f989a9"
+			}
+		},
+		{
+			"name": "dash-lint",
+			"command": "st node node_modules/eslint/bin/eslint.js -c eslint.dashes.config.mjs docs/agent-guides/CLI-UI-PARITY.md e2e/fixtures/managed-host.ts e2e/managed-agent-run.spec.ts e2e/managed-recovery.spec.ts src/__tests__/cli/commands/managed.test.ts src/__tests__/main/enterprise/dispatch.test.ts src/__tests__/main/enterprise/service.test.ts src/__tests__/main/ipc/handlers/enterprise.test.ts src/__tests__/main/ipc/handlers/process/handle-spawn.managed.test.ts src/__tests__/main/preload/enterprise.test.ts src/__tests__/main/web-server/handlers/messageHandlers.managed.test.ts src/__tests__/renderer/components/Enterprise/AiTabManagedRun.test.tsx src/__tests__/renderer/components/Enterprise/ManagedRunState.test.tsx src/__tests__/renderer/hooks/useInputProcessing.test.ts src/__tests__/renderer/stores/agentStore.test.ts src/__tests__/renderer/turns/assemble-parity.test.ts src/__tests__/shared/processErrors.test.ts src/cli/commands/managed-inbox.ts src/cli/index.ts src/main/enterprise/dispatch.ts src/main/enterprise/service.ts src/main/ipc/handlers/enterprise.ts src/main/ipc/handlers/process/handle-spawn.ts src/main/preload/enterprise.ts src/main/preload/process/core.ts src/main/web-server/handlers/messageHandlers/WebSocketMessageHandler.ts src/main/web-server/handlers/messageHandlers/managed.ts src/renderer/components/Enterprise/AiTabManagedRun.tsx src/renderer/components/Enterprise/ManagedRunState.tsx src/renderer/components/MainPanel/MainPanelContent.tsx src/renderer/global.d.ts src/renderer/hooks/enterprise/useManagedStatus.ts src/renderer/hooks/input/useInputProcessing.ts src/renderer/services/process.ts src/renderer/stores/agentStore.ts src/renderer/types/index.ts src/shared/processErrors.ts",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-25-05/dash-lint.log",
+				"sha256": "bbd06799c22cf8919aad7d04b42d62f94dc4d5453c80308a5c943cd1472f2886"
+			}
+		},
+		{
+			"name": "dependencies",
+			"command": "st node .maestro/playbooks/Working/MCOMP-25-05/verify-dependencies.mjs",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-25-05/dependencies.log",
+				"sha256": "71804a7ba3e62283ea6e260fb1706f3e7250709da37b6bde0233981aa9683d49"
+			}
+		},
+		{
+			"name": "docs",
+			"command": "st npm run docs:verify",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-25-05/docs.log",
+				"sha256": "56683629ce6ed30d817e0a34bc4cde8c75211aade58d0b3584a9c459b85764b2"
+			}
+		},
+		{
+			"name": "e2e-typecheck",
+			"command": "st node node_modules/typescript/bin/tsc -p .maestro/playbooks/Working/MCOMP-25-05/tsconfig.e2e.json",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-25-05/e2e-typecheck.log",
+				"sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+			}
+		},
+		{
+			"name": "eslint",
+			"command": "st node node_modules/eslint/bin/eslint.js e2e/fixtures/managed-host.ts e2e/managed-agent-run.spec.ts e2e/managed-recovery.spec.ts src/cli/commands/managed-inbox.ts src/cli/index.ts src/main/enterprise/dispatch.ts src/main/enterprise/service.ts src/main/ipc/handlers/enterprise.ts src/main/ipc/handlers/process/handle-spawn.ts src/main/preload/enterprise.ts src/main/preload/process/core.ts src/main/web-server/handlers/messageHandlers/WebSocketMessageHandler.ts src/main/web-server/handlers/messageHandlers/managed.ts src/renderer/components/Enterprise/AiTabManagedRun.tsx src/renderer/components/Enterprise/ManagedRunState.tsx src/renderer/components/MainPanel/MainPanelContent.tsx src/renderer/global.d.ts src/renderer/hooks/enterprise/useManagedStatus.ts src/renderer/hooks/input/useInputProcessing.ts src/renderer/services/process.ts src/renderer/stores/agentStore.ts src/renderer/types/index.ts src/shared/processErrors.ts",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-25-05/eslint.log",
+				"sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+			}
+		},
+		{
+			"name": "extract-all",
+			"command": "st python3 .maestro/playbooks/Working/MCOMP-25-05/extract.py",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-25-05/extract-all.log",
+				"sha256": "622c1721d273be654bac53bf64113f951f22f800d53ff7b677c61a5f58fe1538"
+			}
+		},
+		{
+			"name": "format",
+			"command": "st node node_modules/prettier/bin/prettier.cjs --check docs/agent-guides/CLI-UI-PARITY.md e2e/fixtures/managed-host.ts e2e/managed-agent-run.spec.ts e2e/managed-recovery.spec.ts src/__tests__/cli/commands/managed.test.ts src/__tests__/main/enterprise/dispatch.test.ts src/__tests__/main/enterprise/service.test.ts src/__tests__/main/ipc/handlers/enterprise.test.ts src/__tests__/main/ipc/handlers/process/handle-spawn.managed.test.ts src/__tests__/main/preload/enterprise.test.ts src/__tests__/main/web-server/handlers/messageHandlers.managed.test.ts src/__tests__/renderer/components/Enterprise/AiTabManagedRun.test.tsx src/__tests__/renderer/components/Enterprise/ManagedRunState.test.tsx src/__tests__/renderer/hooks/useInputProcessing.test.ts src/__tests__/renderer/stores/agentStore.test.ts src/__tests__/renderer/turns/assemble-parity.test.ts src/__tests__/shared/processErrors.test.ts src/cli/commands/managed-inbox.ts src/cli/index.ts src/main/enterprise/dispatch.ts src/main/enterprise/service.ts src/main/ipc/handlers/enterprise.ts src/main/ipc/handlers/process/handle-spawn.ts src/main/preload/enterprise.ts src/main/preload/process/core.ts src/main/web-server/handlers/messageHandlers/WebSocketMessageHandler.ts src/main/web-server/handlers/messageHandlers/managed.ts src/renderer/components/Enterprise/AiTabManagedRun.tsx src/renderer/components/Enterprise/ManagedRunState.tsx src/renderer/components/MainPanel/MainPanelContent.tsx src/renderer/global.d.ts src/renderer/hooks/enterprise/useManagedStatus.ts src/renderer/hooks/input/useInputProcessing.ts src/renderer/services/process.ts src/renderer/stores/agentStore.ts src/renderer/types/index.ts src/shared/processErrors.ts",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-25-05/format.log",
+				"sha256": "17aa973d3f004560237d9a95171210b0671deff23d61628eecf7322ff5938f20"
+			}
+		},
+		{
+			"name": "package",
+			"command": "st node .maestro/playbooks/Working/MCOMP-25-05/package.mjs",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-25-05/package.log",
+				"sha256": "826e47bade7ab9ec246b567e8167004d14cb7663e0a7f4df306715c3f708e85d"
+			}
+		},
+		{
+			"name": "package-desktop",
+			"command": "st node .maestro/playbooks/Working/MCOMP-25-05/package-desktop.mjs",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-25-05/package-desktop.log",
+				"sha256": "8de6f1d15b58d4bec8796e5e20129ac16d60e31ff6d9fa604434638bbb61f947"
+			}
+		},
+		{
+			"name": "plain-node-load",
+			"command": "st node .maestro/playbooks/Working/MCOMP-25-05/load.mjs",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-25-05/plain-node-load.log",
+				"sha256": "8838b33ca5db03b536c6c8d166bc4ed9dd42bad20dcc5fa0cbc6c3b2f3d05b65"
+			}
+		},
+		{
+			"name": "public-types",
+			"command": "st node node_modules/typescript/bin/tsc --ignoreConfig --noEmit --strict --target es2022 --module esnext --moduleResolution bundler --skipLibCheck --esModuleInterop .maestro/playbooks/Working/MCOMP-25-05/consumer.ts",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-25-05/public-types.log",
+				"sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+			}
+		},
+		{
+			"name": "runtime-input",
+			"command": "st node .maestro/playbooks/Working/MCOMP-25-05/verify-runtime.mjs",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-25-05/runtime-input.log",
+				"sha256": "e484de55cc2c81fdea3925934f76536e7ed4250da69c78fc6d678f223e5bf767"
+			}
+		},
+		{
+			"name": "schemas",
+			"command": "st node .maestro/playbooks/Working/MCOMP-00-01/load-schemas.mjs",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-25-05/schemas.log",
+				"sha256": "b5948d1f375bddd6ecbf9e871653e313413adbb7b5a4d25b063d3f2e153a443d"
+			}
+		},
+		{
+			"name": "source-tests",
+			"command": "st node node_modules/vitest/vitest.mjs run src/__tests__/cli/commands/managed.test.ts src/__tests__/integration/mega-maestro/conformance.test.ts src/__tests__/main/enterprise/dispatch.test.ts src/__tests__/main/enterprise/service.test.ts src/__tests__/main/ipc/handlers/enterprise.test.ts src/__tests__/main/ipc/handlers/process/handle-spawn.managed.test.ts src/__tests__/main/preload/enterprise.test.ts src/__tests__/main/web-server/handlers/messageHandlers.managed.test.ts src/__tests__/renderer/components/Enterprise/AiTabManagedRun.test.tsx src/__tests__/renderer/components/Enterprise/ManagedRunState.test.tsx src/__tests__/renderer/hooks/useInputProcessing.test.ts src/__tests__/renderer/stores/agentStore.test.ts src/__tests__/renderer/turns/assemble-parity.test.ts src/__tests__/shared/processErrors.test.ts --reporter=default --reporter=json --outputFile=.maestro/playbooks/Working/MCOMP-25-05/source-tests.json",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-25-05/source-tests.log",
+				"sha256": "e2ed27904bf67f96a399feafedcdf23b29c0e706fcb98e1a43864e54c4a529ea"
+			}
+		},
+		{
+			"name": "typecheck",
+			"command": "st npm run lint",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/MCOMP-25-05/typecheck.log",
+				"sha256": "ed9e886b2a647f29f520344068302948b8558e4b83a448690f8259049c5af0b3"
+			}
+		}
+	],
+	"limitations": [
+		"This BUILD supplies local compiled inputs only; GUI run, provider and native outcomes remain in MCOMP-26 and later qualification tasks.",
+		"Renderer build exited zero; its warnings are retained in the log. Compilation is not GUI/runtime qualification.",
+		"A registration is bound to the desktop process: after a restart the standing reads denied until the desktop registers again (found in MCOMP-25-04, asserted by its journeys).",
+		"The app agent-error dialog also opens on a refused send and covers the run state (found in MCOMP-25-04, not changed here).",
+		"MCOMP-25-04 landed 855 lines across 3 authored files, over the 500-line task bound; recorded in the document, not split after the fact.",
+		"The runtime library version string is unchanged although its bytes differ from earlier archives. A counterpart must pin this archive by digest and requalify before claiming compatibility.",
+		"Continuations MCOMP-25-01A, 01B, 02A, 04A and 05A were reconciled into program.json (262484bc1, eabe64a44) before this check; the conformance suite that maps every coverage consumer to a manifest task passes on that manifest.",
+		"Archives and detailed evidence are workspace-local handoff artifacts. No remote artifact registry, native application archive, CI matrix qualification or production release is claimed."
+	],
+	"imagesAnalyzed": 0
+}
