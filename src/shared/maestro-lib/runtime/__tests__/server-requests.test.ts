@@ -21,7 +21,11 @@ import type {
 	TurnInput,
 	TurnSendReceipt,
 } from '../../client/types';
-import { createLocalHostAuthority, type PolicyDecision } from '../../managed/authority';
+import {
+	createLocalHostAuthority,
+	isVerifiedContext,
+	type PolicyDecision,
+} from '../../managed/authority';
 import { createManagedBinding } from '../../managed/binding';
 import { inProcessContext } from '../../managed/operations';
 import {
@@ -30,7 +34,14 @@ import {
 	type ManagedOperationContext,
 } from '../../managed/types';
 import { createMaestroRuntime, type MaestroRuntime, type RuntimeDeps } from '../index';
-import { createRequestHandler, runtimeManagedScope, type RequestHandler } from '../server-requests';
+import {
+	MAX_ROUND_PARENT_PROCESSES,
+	createRequestHandler,
+	createRoundParentCustody,
+	runtimeManagedScope,
+	type ManagedRequestScope,
+	type RequestHandler,
+} from '../server-requests';
 import type { WatchDirectory } from '../settings-watch';
 
 const ok = <T>(value: T): ClientResult<T> => ({ ok: true, value });
@@ -919,5 +930,113 @@ describe('managed_operation (MRC-08-05)', () => {
 			error: expect.stringContaining('no scope'),
 		});
 		expect(await listed()).toEqual([]);
+	});
+});
+
+describe('the parent a room round runs under on the host standing (MCOMP-17-03BZ)', () => {
+	const installation = { installationId: 'inst-1', runtimeId: 'rt-1', processEpoch: 'epoch-1' };
+	function scopeOf(state: { binding: ReturnType<ManagedRequestScope['binding']>; actor: string }) {
+		const scope: ManagedRequestScope = {
+			installation,
+			actor: () => ({ kind: 'human', id: state.actor }),
+			policyRevision: () => 7,
+			binding: () => state.binding,
+		};
+		return scope;
+	}
+	const enrolled = (): { binding: ReturnType<ManagedRequestScope['binding']>; actor: string } => ({
+		binding: 'enrolled',
+		actor: 'person-1',
+	});
+	const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+	it('binds every process of a round to one verified host-standing parent, past the round', async () => {
+		const custody = createRoundParentCustody(scopeOf(enrolled()), { now: () => 1_000 });
+		const seen = await custody.run(async () => {
+			const moderator = custody.lookup('group-chat-c1-moderator-1');
+			await tick();
+			const participant = custody.lookup('group-chat-c1-participant-Alpha-2');
+			return { moderator, participant };
+		});
+		expect(seen.moderator.ok && seen.participant.ok).toBe(true);
+		if (!seen.moderator.ok || !seen.participant.ok) return;
+		const parent = seen.moderator.context;
+		expect(isVerifiedContext(parent)).toBe(true);
+		expect(parent).toMatchObject({
+			installation,
+			origin: 'cli',
+			actor: { kind: 'human', id: 'person-1' },
+			delegation: { chain: [], grantRef: null },
+			workflow: null,
+			policyRevision: 7,
+			verification: { peer: 'host-secret', verifierId: 'host-secret:rt-1' },
+		});
+		expect(parent.traceId).toBe(`room:${parent.identity.requestId}`);
+		expect(seen.participant.context.identity).toEqual(parent.identity);
+		// Outside the round's async context, a bound process still reads the same parent.
+		const later = custody.lookup('group-chat-c1-moderator-1');
+		expect(later.ok && later.context.identity).toEqual(parent.identity);
+	});
+
+	it('gives each round its own parent and refuses a process another round bound', async () => {
+		const custody = createRoundParentCustody(scopeOf(enrolled()));
+		const first = await custody.run(async () => custody.lookup('p-1'));
+		const second = await custody.run(async () => ({
+			own: custody.lookup('p-2'),
+			borrowed: custody.lookup('p-1'),
+		}));
+		expect(first.ok && second.own.ok).toBe(true);
+		if (!first.ok || !second.own.ok) return;
+		expect(second.own.context.identity.requestId).not.toBe(first.context.identity.requestId);
+		expect(second.borrowed).toEqual({
+			ok: false,
+			code: 'unauthenticated',
+			problems: ['p-1 belongs to another round on this host.'],
+		});
+		const still = custody.lookup('p-1');
+		expect(still.ok && still.context.identity).toEqual(first.context.identity);
+	});
+
+	it('refuses a process no round of this host started', () => {
+		const custody = createRoundParentCustody(scopeOf(enrolled()));
+		expect(custody.lookup('stray')).toEqual({
+			ok: false,
+			code: 'unauthenticated',
+			problems: ['stray was started by no round this host holds a parent for.'],
+		});
+	});
+
+	it('refuses every process of a round once the standing is released or the custody names another principal', async () => {
+		const state = enrolled();
+		const custody = createRoundParentCustody(scopeOf(state));
+		await custody.run(async () => custody.lookup('p-1'));
+		expect(custody.lookup('p-1').ok).toBe(true);
+		state.actor = 'person-2';
+		const swapped = custody.lookup('p-1');
+		expect(swapped.ok).toBe(false);
+		expect(!swapped.ok && swapped.problems[0]).toMatch(/another principal/);
+		state.actor = 'person-1';
+		expect(custody.lookup('p-1').ok).toBe(true);
+		state.binding = 'standalone';
+		const released = custody.lookup('p-1');
+		expect(released.ok).toBe(false);
+		expect(!released.ok && released.problems[0]).toMatch(/no longer holds managed standing/);
+	});
+
+	it('runs a round started on a standalone binding with no parent', async () => {
+		const custody = createRoundParentCustody(scopeOf({ binding: 'standalone', actor: 'person-1' }));
+		const seen = await custody.run(async () => custody.lookup('p-1'));
+		expect(seen.ok).toBe(false);
+		expect(!seen.ok && seen.problems[0]).toMatch(/no round this host holds a parent for/);
+	});
+
+	it('forgets, and so refuses, the oldest process past the cap', async () => {
+		const custody = createRoundParentCustody(scopeOf(enrolled()));
+		await custody.run(async () => {
+			for (let i = 0; i <= MAX_ROUND_PARENT_PROCESSES; i++) custody.lookup(`p-${i}`);
+		});
+		expect(custody.lookup('p-0').ok).toBe(false);
+		expect(custody.lookup('p-1').ok).toBe(true);
+		expect(custody.lookup(`p-${MAX_ROUND_PARENT_PROCESSES}`).ok).toBe(true);
 	});
 });

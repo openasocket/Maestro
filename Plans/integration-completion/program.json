@@ -4786,6 +4786,20 @@
 					"produces": []
 				},
 				{
+					"id": "MCOMP-17-03BZ",
+					"label": "Hold a headless room round to a parent on the host standing",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/shared/maestro-lib/runtime/server-requests.ts",
+						"src/shared/maestro-lib/runtime/__tests__/server-requests.test.ts",
+						"Plans/integration-completion/program.json"
+					],
+					"outcome": "Consume MAESTRO-EFFECT-CONSUMERS-BUILD and its pinned MAESTRO-CONTRACT-INPUTS-BUILD dependency. Bounded prerequisite continuation of MCOMP-17-03 after MCOMP-17-03BY, the first slice of gap 2 of the umbrella re-assessment (no production headless host composes backgroundParentContext). server-requests.ts gains createRoundParentCustody(scope): run() mints one host-standing context per group chat round (the sendOnStanding shape, trace room) and lookup(processId) binds each background process to the round it started in, re-verifying the context against the host standing on every read; a process no round started, a process another round bound, a released standing and a changed custody principal are refused. Exercise each refusal, the binding past the round's async context and the cap, with a mutation check. Composition into the runtime options and the group chat verbs is a later slice. Reuse WORKFLOW-CONTEXT/1; no new wire capability, producer mapping or paired/provider/native qualification. Keep to three authored files and fewer than 500 changed lines.",
+					"backlog": ["M-04"],
+					"requires": ["MAESTRO-EFFECT-CONSUMERS-BUILD"],
+					"produces": []
+				},
+				{
 					"label": "Bind Auto Run Cue and nested work at dispatch",
 					"kind": "IMPLEMENT",
 					"targets": [
@@ -4828,7 +4842,7 @@
 			"produces": ["MAESTRO-WORKFLOW-CONSUMERS-BUILD"],
 			"id": "MCOMP-17",
 			"path": ".maestro/playbooks/2026-10-29-Maestro-Integration-Completion/MCOMP-17.md",
-			"taskCount": 82,
+			"taskCount": 83,
 			"stage": "S10"
 		},
 		{
@@ -6618,7 +6632,7 @@
 				"PAIR-DIRECT-EVIDENCE"
 			],
 			"nativeInputs": false,
-			"taskCount": 89
+			"taskCount": 90
 		},
 		{
 			"id": "S11",
@@ -6822,8 +6836,8 @@
 			"taskCount": 1
 		}
 	],
-	"taskCount": 402,
-	"taskCounts": { "IMPLEMENT": 293, "TEST": 49, "VERIFY": 60 },
+	"taskCount": 403,
+	"taskCounts": { "IMPLEMENT": 294, "TEST": 49, "VERIFY": 60 },
 	"artifacts": {
 		"MEGA-CONTRACTS-FOUNDATION-BUILD": {
 			"producerDocument": "GCOMP-01",
@@ -7641,6 +7655,7 @@
 			"MCOMP-17-03BW",
 			"MCOMP-17-03BX",
 			"MCOMP-17-03BY",
+			"MCOMP-17-03BZ",
 			"MCOMP-17-03",
 			"MCOMP-17-04",
 			"MCOMP-17-05",

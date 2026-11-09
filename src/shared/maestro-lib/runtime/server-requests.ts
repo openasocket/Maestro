@@ -14,6 +14,8 @@
  * itself, so a forwarded caller credential is resolved by the host that minted it.
  */
 
+import { AsyncLocalStorage } from 'node:async_hooks';
+
 import type { AgentRecord } from '../store/records';
 import { parseProcessId } from '../client/bridge-frames';
 import {
@@ -35,7 +37,7 @@ import type {
 	TurnSendReceipt,
 } from '../client/types';
 import { generateUUID } from '../../uuid';
-import { sha256Hex } from '../managed/authority';
+import { createContextVerifier, sha256Hex, type ContextVerification } from '../managed/authority';
 import { managedActorPrincipal } from '../managed/host-adapter';
 import {
 	MANAGED_CAPABILITIES,
@@ -612,6 +614,35 @@ async function answerManaged(
 type StandingSend = { ok: true; fields: Frame } | { ok: false; error: string; notFound: boolean };
 
 /**
+ * A context bound to this host's standing: this installation, the principal the host's custody
+ * names, no delegation, a fresh request and the policy generation of this moment. `trace` names
+ * what raised it in the trace id. Attribution the host itself vouches for, never caller input.
+ */
+function standingContext(scope: ManagedRequestScope, trace: string): ManagedOperationContext {
+	const requestId = generateUUID();
+	return {
+		contractVersion: MANAGED_CONTRACT_VERSION,
+		installation: scope.installation,
+		origin: 'cli',
+		actor: scope.actor(),
+		delegation: { chain: [], grantRef: null },
+		identity: {
+			requestId,
+			// A bridge send is never a replay of an earlier one: each is its own submission.
+			idempotencyKey: generateUUID(),
+			attemptId: generateUUID(),
+			runId: null,
+			rootRunId: null,
+			parentRunId: null,
+		},
+		policyRevision: scope.policyRevision(),
+		workflow: null,
+		traceId: `${trace}:${requestId}`,
+		requestedCapabilities: ['runs.submit'],
+	};
+}
+
+/**
  * Place one of the dispatch verbs' sends on this host's standing. A scope that reads `standalone`,
  * or no scope at all (an embedding without `startRuntimeServer`, which holds no standing to read),
  * sends through `turns.send` as it always has, and the turn service behind the client keeps its own
@@ -656,27 +687,7 @@ async function sendOnStanding(
 	if (!agent.ok) {
 		return { ok: false, error: errorText(agent), notFound: agent.error.code === 'not-found' };
 	}
-	const requestId = generateUUID();
-	const context: ManagedOperationContext = {
-		contractVersion: MANAGED_CONTRACT_VERSION,
-		installation: scope.installation,
-		origin: 'cli',
-		actor: scope.actor(),
-		delegation: { chain: [], grantRef: null },
-		identity: {
-			requestId,
-			// A bridge send is never a replay of an earlier one: each is its own submission.
-			idempotencyKey: generateUUID(),
-			attemptId: generateUUID(),
-			runId: null,
-			rootRunId: null,
-			parentRunId: null,
-		},
-		policyRevision: scope.policyRevision(),
-		workflow: null,
-		traceId: `bridge:${requestId}`,
-		requestedCapabilities: ['runs.submit'],
-	};
+	const context = standingContext(scope, 'bridge');
 	const text = input.text ?? '';
 	const result = await client.managed.submit({
 		context,
@@ -703,6 +714,94 @@ async function sendOnStanding(
 	return {
 		ok: true,
 		fields: { queued: run.state === 'queued', runId: run.runId },
+	};
+}
+
+// ---------------------------------------------------------------------------
+// The parent a room round runs under on this host's standing (MCOMP-17-03BZ)
+// ---------------------------------------------------------------------------
+
+/** How many background processes a round parent custody holds before it forgets the oldest. */
+export const MAX_ROUND_PARENT_PROCESSES = 1024;
+
+/**
+ * The authenticated parent of the group chat rounds a host starts on its own standing: what a host
+ * installs as `createMaestroRuntime({ managed: { backgroundParentContext } })`.
+ *
+ * `run` mints one host-standing context per round (the shape `sendOnStanding` submits under, with
+ * `trace` `room`) and runs the round inside it. Every background process the round starts is bound
+ * to that round the first time the runtime looks its parent up, so a later read (a retry, a nested
+ * `!autorun` queued past the round's async context) still finds the same parent and no other round
+ * can borrow it. Each read re-verifies the context against the host's standing as it is NOW: once
+ * the binding reads `standalone` or the custody names another principal, every process of the
+ * round is refused. A process no round of this host started is refused, never parented by default.
+ * A round started while the binding reads `standalone` runs with no parent, on the runtime's
+ * own rule. The oldest bindings past `MAX_ROUND_PARENT_PROCESSES` are forgotten, and refused.
+ */
+export interface RoundParentCustody {
+	/** The parent of one background process, re-verified on every read. */
+	lookup(processId: string): ContextVerification;
+	/** Run one round (a create or a send) under a fresh host-standing parent. */
+	run<T>(round: () => Promise<T>): Promise<T>;
+}
+
+export function createRoundParentCustody(
+	scope: ManagedRequestScope,
+	deps: { now?(): number } = {}
+): RoundParentCustody {
+	const verifier = createContextVerifier({
+		verifierId: `host-secret:${scope.installation.runtimeId}`,
+		peer: BRIDGE_PEER,
+		now: deps.now ?? Date.now,
+		accept: (context) =>
+			context.installation.installationId === scope.installation.installationId
+				? []
+				: [`installation ${context.installation.installationId} is not this one`],
+	});
+	type Round = { read(): ContextVerification };
+	const rounds = new AsyncLocalStorage<Round>();
+	const processes = new Map<string, Round>();
+	const refuse = (problem: string): ContextVerification => ({
+		ok: false,
+		code: 'unauthenticated',
+		problems: [problem],
+	});
+	return {
+		lookup(processId) {
+			const current = rounds.getStore();
+			const bound = processes.get(processId);
+			if (current && bound && bound !== current) {
+				return refuse(`${processId} belongs to another round on this host.`);
+			}
+			if (current && !bound) {
+				processes.set(processId, current);
+				if (processes.size > MAX_ROUND_PARENT_PROCESSES) {
+					const oldest = processes.keys().next().value;
+					if (oldest !== undefined) processes.delete(oldest);
+				}
+			}
+			const round = current ?? bound;
+			return round
+				? round.read()
+				: refuse(`${processId} was started by no round this host holds a parent for.`);
+		},
+		run(round) {
+			if (scope.binding() === 'standalone') return round();
+			const context = standingContext(scope, 'room');
+			const read = (): ContextVerification => {
+				if (scope.binding() === 'standalone') {
+					return refuse('This host no longer holds managed standing, so the round has no parent.');
+				}
+				const actor = scope.actor();
+				if (actor.kind !== context.actor.kind || actor.id !== context.actor.id) {
+					return refuse(
+						'The host custody names another principal than the one the round started under.'
+					);
+				}
+				return verifier.verify(context);
+			};
+			return rounds.run({ read }, round);
+		},
 	};
 }
 
