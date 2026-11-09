@@ -39,7 +39,7 @@ import { PluginServiceHost, ServiceError } from './plugin-service-host';
 import { RELAY_PLUGIN_ID, isRelayConversationIdentity } from '../../shared/plugins/relay-identity';
 import type { PluginSignatureInfo } from '../../shared/plugins/plugin-registry';
 import type { PluginManifest } from '../../shared/plugins/plugin-manifest';
-import { PluginMediaTools, resolveMediaRuntime } from './plugin-media-tools';
+import { PLUGIN_EGRESS_CLASS, PluginMediaTools, resolveMediaRuntime } from './plugin-media-tools';
 import type { HostCallHandler, HostCallHandlers } from './plugin-sandbox-host';
 import type { BrokerDecision, PermissionBroker, PluginCeilingReceipt } from './permission-broker';
 import type { ProcessSpawnAuthorityPort } from '../process-manager/types';
@@ -1210,7 +1210,15 @@ export function buildHostCallHandlers(deps: HostHandlerDeps): HostCallHandlers {
 				redirect: 'error',
 				...pinned,
 			} as RequestInit;
-			const response = await fetchWithTimeout(p.url, init, PLUGIN_FETCH_TIMEOUT_MS);
+			// Held at the egress chokepoint as `plugin` (MCOMP-21-12): a plugin's own
+			// fetch is never the `content` a first-party feature reads, so a managed
+			// ceiling that admits content does not admit it.
+			const response = await fetchWithTimeout(
+				p.url,
+				init,
+				PLUGIN_FETCH_TIMEOUT_MS,
+				PLUGIN_EGRESS_CLASS
+			);
 			const reader = response.body?.getReader();
 			let received = 0;
 			let body = '';

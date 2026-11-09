@@ -7,6 +7,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { findAllBinaryPaths } from '../agents/path-prober';
 import { fetchWithTimeout } from '../utils/fetchWithTimeout';
+import type { EgressClass } from '../enterprise/egress-policy';
 import { createIdleWatchdog, type IdleWatchdog } from '../utils/idle-watchdog';
 import { logger } from '../utils/logger';
 import {
@@ -18,6 +19,9 @@ import {
 	type MediaToolStatus,
 } from '../../shared/plugins/media-tools';
 import type { EgressGuard } from './net-egress-guard';
+
+/** The egress class every plugin-originated request (net.fetch, a media download) is held as (MCOMP-21-12). */
+export const PLUGIN_EGRESS_CLASS: EgressClass = 'plugin';
 
 type Tool = 'ffprobe' | 'ffmpeg' | 'whisper-cli';
 type Runtime = {
@@ -614,7 +618,9 @@ export class PluginMediaTools {
 				// Node fetch extension; the renderer type graph also includes DOM RequestInit.
 				dispatcher: this.deps.egressGuard.dispatcher,
 			} as RequestInit,
-			MEDIA_LIMITS.jobTimeoutMs
+			MEDIA_LIMITS.jobTimeoutMs,
+			// A plugin's media download is the plugin's egress, not first-party content (MCOMP-21-12).
+			PLUGIN_EGRESS_CLASS
 		);
 		const reader = response.body?.getReader();
 		if (!response.ok || !reader) {
