@@ -35,6 +35,7 @@ import {
 	readDelegationContextEnv,
 } from '../../managed/delegation';
 import { createHeadlessSpawnAuthority } from '../../managed/host-adapter';
+import type { WorkflowFenceLifetime } from '../../managed/workflows';
 import {
 	createMaestroRuntime,
 	type MaestroRuntime,
@@ -307,7 +308,11 @@ describe('runtime group chats', () => {
 	});
 
 	describe('hosted authenticated parent custody', () => {
-		async function enrolled(script: FakeScript = ROUND) {
+		async function enrolled(
+			script: FakeScript = ROUND,
+			extra: MaestroRuntimeOptions['managed'] = {},
+			owned = true
+		) {
 			const asked: AdmissionRequest[] = [];
 			const custody: { current: ContextVerification; onAdmit?: () => void; revision: number } = {
 				current: { ok: false, code: 'unauthenticated', problems: ['Parent custody withdrawn.'] },
@@ -327,6 +332,7 @@ describe('runtime group chats', () => {
 			});
 			const parentContext = vi.fn((_processId: string) => custody.current);
 			const runtime = await startEnrolled(authority, script, {
+				...extra,
 				policy: () => ({ sources: [], policyRevision: custody.revision }),
 				backgroundParentContext: parentContext,
 			});
@@ -353,13 +359,15 @@ describe('runtime group chats', () => {
 						rootRunId: 'root-run',
 						parentRunId: 'root-run',
 					},
-					workflow: {
-						workflowId: 'nightly',
-						version: 'v1',
-						triggerEventId: 'cue:1',
-						ownerEpoch: 'epoch-1',
-						fencingToken,
-					},
+					workflow: owned
+						? {
+								workflowId: 'nightly',
+								version: 'v1',
+								triggerEventId: 'cue:1',
+								ownerEpoch: 'epoch-1',
+								fencingToken,
+							}
+						: null,
 					delegation: { chain: [{ kind: 'agent', id: 'source-agent' }], grantRef: grant },
 				});
 			custody.current = parent();
@@ -717,10 +725,20 @@ describe('runtime group chats', () => {
 				return { plan, runs };
 			}
 
-			it('is refused, with no run, when the host verifies an authenticated parent', async () => {
-				const { runtime, asked } = await enrolled(AUTORUN);
-				const { plan, runs } = await withPlan(runtime);
-				const chat = watch(runtime);
+			// MCOMP-17-03BW: the run is nested under the parent the host verifies for the room turn.
+			it('nests the run under the room parent, with its own workflow and fence', async () => {
+				const lifetime = {
+					signal: new AbortController().signal,
+					current: vi.fn(() => true),
+					finish: vi.fn<WorkflowFenceLifetime['finish']>().mockResolvedValue(undefined),
+				};
+				const claim = vi.fn(() => ({ ownerEpoch: 'epoch-9', fencingToken: 'fence-9', lifetime }));
+				const { runtime, asked, parentContext } = await enrolled(
+					AUTORUN,
+					{ workflowFence: claim },
+					false
+				);
+				const { runs } = await withPlan(runtime);
 				value(
 					await runtime.groupChats.create({
 						name: 'Plan room',
@@ -728,22 +746,65 @@ describe('runtime group chats', () => {
 						message: 'Run the plan',
 					})
 				);
-				await chat.idle();
-				expect(chat.lines()).toEqual(
-					expect.arrayContaining([
-						expect.stringMatching(
-							/^Alpha: Auto Run could not start for Alpha: .*authenticated parent custody/
+				const nestedOf = () =>
+					asked.find((request) => request.context.workflow?.workflowId.includes('runtime-a1-'));
+				await vi.waitFor(() => expect(nestedOf()).toBeDefined(), { timeout: 10_000, interval: 20 });
+				expect(runs).toContain('a1');
+				const moderator = provider.calls[0];
+				expect(moderator.role).toBe('moderator');
+				// The room's own turns own no workflow: the run's workflow is its own, under its own fence.
+				expect(asked[0].context.workflow).toBeNull();
+				expect(nestedOf()!.context).toMatchObject({
+					identity: { parentRunId: 'cue-run', rootRunId: 'root-run' },
+					workflow: { ownerEpoch: 'epoch-9', fencingToken: 'fence-9' },
+					delegation: {
+						chain: [
+							{ kind: 'agent', id: 'source-agent' },
+							{ kind: 'human', id: 'source-operator' },
+						],
+						grantRef: 'grant-1',
+					},
+				});
+				expect(claim).toHaveBeenCalled();
+				// Keyed by the moderator turn the directive came from, never a caller's coordinates.
+				expect(parentContext).toHaveBeenCalledWith(moderator.processId);
+			});
+
+			it('starts no run when the room parent is withdrawn by launch', async () => {
+				const { runtime, asked, custody, parentContext } = await enrolled(AUTORUN, {}, false);
+				const { plan, runs } = await withPlan(runtime);
+				const verified = custody.current;
+				const chat = watch(runtime);
+				// Verified for the moderator's turn, withdrawn once the room hands Alpha its `!autorun`.
+				parentContext.mockImplementation(
+					(): ContextVerification =>
+						chat.states().includes('agent-working')
+							? { ok: false, code: 'unauthenticated', problems: ['Room custody withdrawn.'] }
+							: verified
+				);
+				value(
+					await runtime.groupChats.create({
+						name: 'Plan room',
+						participantIds: ['a1'],
+						message: 'Run the plan',
+					})
+				);
+				await vi.waitFor(
+					() =>
+						expect(chat.lines()).toEqual(
+							expect.arrayContaining([
+								expect.stringMatching(
+									/^Alpha: Auto Run could not start for Alpha: .*Room custody withdrawn\./
+								),
+							])
 						),
-						'moderator: Wrapped up.',
-					])
+					{ timeout: 5_000, interval: 20 }
 				);
 				expect(runs).toEqual([]);
 				expect(runtime.runs.activeRuns()).toEqual([]);
 				expect(fs.readFileSync(plan, 'utf8')).toBe('- [ ] one\n');
-				// Only the moderator's two turns ran, each still under the verified parent.
-				expect(provider.calls.map((call) => call.role)).toEqual(['moderator', 'synthesis']);
-				for (const request of asked)
-					expect(request.context).toMatchObject({ delegation: { grantRef: 'grant-1' } });
+				expect(asked.every((request) => request.context.workflow === null)).toBe(true);
+				expect(provider.calls.map((call) => call.role)).toEqual(['moderator']);
 			});
 
 			it('still launches on a managed host that verifies no parent', async () => {

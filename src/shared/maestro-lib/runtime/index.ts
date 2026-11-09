@@ -29,7 +29,7 @@ import { logger } from '../host';
 import { createGroupChatTurnMetrics } from '../groupchat/turn-metrics';
 import { findSessionForParticipantName } from '../groupchat/router';
 import { toGroupChatSessionInfo } from '../groupchat/session-info';
-import { parseParticipantSessionId } from '../groupchat/session-ids';
+import { parseModeratorSessionId, parseParticipantSessionId } from '../groupchat/session-ids';
 import { filterLiveAgents } from '../../agentVisibility';
 import type { BinaryDetectionResult } from '../launch/path-prober';
 import { assertUserDataDirExists, type UserDataDirOptions } from '../paths/userDataDir';
@@ -833,10 +833,14 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 	// it is forgotten when the turn ends or is refused, and as soon as its room is stopped or
 	// removed, before the room's processes are. A moderator or synthesis turn stands for no agent.
 	const roomCallers = new Map<string, { chatId: string; agentId: string }>();
+	// The latest moderator turn each room started (MCOMP-17-03BW): the room turn whose reply a
+	// `!autorun` came from, so the run is nested under the parent the host verifies for it.
+	const roomModerators = new Map<string, string>();
 	const forgetRoomCallers = (chatId: string): void => {
 		for (const [processId, caller] of roomCallers) {
 			if (caller.chatId === chatId) roomCallers.delete(processId);
 		}
+		roomModerators.delete(chatId);
 	};
 	const participantAgentId = (participantName: string): string | null => {
 		const settings = readSettingsStore(paths.settingsFile);
@@ -864,6 +868,8 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 				start: async (spawn) => {
 					const owner = parseParticipantSessionId(spawn.processId);
 					const agentId = owner ? participantAgentId(owner.participantName) : null;
+					const moderatorOf = parseModeratorSessionId(spawn.processId);
+					if (moderatorOf) roomModerators.set(moderatorOf, spawn.processId);
 					if (owner && agentId)
 						roomCallers.set(spawn.processId, { chatId: owner.groupChatId, agentId });
 					try {
@@ -886,27 +892,34 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 		fence,
 		background: roomBackground,
 		metrics: groupChatMetrics,
-		// A room's `!autorun` would mint a new workflow under the host's own authority. Where the
-		// host verifies an authenticated parent for every room child, that run cannot yet carry the
-		// parent's chain, grant and fence into a new workflow (the Auto Run runner requires its
-		// parent to own the run's workflow), so it is refused rather than launched without them.
-		// Checked at launch, not per round: a run queued behind a busy agent starts outside it.
+		// A room's `!autorun` mints a new workflow. Where the host verifies an authenticated parent
+		// for every room child, the run is nested under that parent (MCOMP-17-03BW): the host's
+		// lookup, keyed by the room's latest moderator turn (the turn the directive came from),
+		// pinned at launch. The runner reads it on every attempt and again before dispatch, so the
+		// run carries the parent's chain, grant and root run, still claims its own owner fence, and
+		// stops dispatching once the host withdraws or changes that custody. A room with no known
+		// moderator turn, or a parent not verified at launch, starts nothing. Decided at launch, not
+		// per round: a run queued behind a busy agent starts outside the round's async context.
 		autoRun: {
 			holds: (agentId) => autoRun.holds(agentId),
 			api: {
 				stop: (agentId) => autoRun.api.stop(agentId),
-				launch: (agentId, input) =>
-					options.managed?.backgroundParentContext
-						? Promise.resolve({
-								ok: false,
-								error: {
-									code: 'unsupported',
-									method: 'autoRun.launch',
-									message:
-										'This group chat runs under authenticated parent custody, which a new Auto Run cannot carry yet; start the Auto Run directly.',
-								},
-							} as const)
-						: autoRun.api.launch(agentId, input),
+				launch: (agentId, input, room) => {
+					const lookup = options.managed?.backgroundParentContext;
+					if (!lookup) return autoRun.api.launch(agentId, input);
+					const processId = roomModerators.get(room.chatId);
+					if (!processId)
+						return Promise.resolve({
+							ok: false,
+							error: {
+								code: 'rejected',
+								method: 'autoRun.launch',
+								message:
+									'This group chat runs under authenticated parent custody, and no room turn it can be nested under is known.',
+							},
+						} as const);
+					return autoRun.launchNested(agentId, input, () => lookup(processId));
+				},
 			},
 		},
 		options: options.turns,
