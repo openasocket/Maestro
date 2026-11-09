@@ -2529,6 +2529,43 @@
 						"00R34 eight HEAD-wire preload cases need the merged order"
 					]
 				}
+			},
+			"MCOMP-33-00D": {
+				"completedAt": "2026-11-09",
+				"completedBy": "Maestro-Claude",
+				"worktreeHead": "f5367a7f7",
+				"install": {
+					"symlinkRemoved": "node_modules -> /Users/dr3/dev-shit/Maestro/node_modules (link only; target untouched)",
+					"command": "npm ci --ignore-scripts",
+					"npm": "11.20.0",
+					"node": "v26.13.0",
+					"exit": 0,
+					"result": "added 1556 packages, audited 1557, in 30s",
+					"upstreamDependencies": {
+						"@agentclientprotocol/sdk": "2.0.2",
+						"@anthropic-ai/claude-agent-sdk": "0.3.310",
+						"@github/copilot-sdk": "1.0.26",
+						"sqlite-vec": "0.1.6",
+						"@huggingface/transformers": "3.8.1"
+					},
+					"nativeRebuild": "not run (--ignore-scripts); 00S rebuilds only if a suite needs a native module"
+				},
+				"typeCheck": {
+					"tsconfig.lint.json": {
+						"exit": 0,
+						"errors": 0
+					},
+					"tsconfig.main.json": {
+						"exit": 0,
+						"errors": 0
+					},
+					"tsconfig.cli.json": {
+						"exit": 0,
+						"errors": 0
+					}
+				},
+				"typeCheckNote": "Each config run by hand with node node_modules/typescript/bin/tsc -p <config> --noEmit in the worktree. All 35 / 45 / 42 errors the 00C second pass left were the missing dependencies, as 00C classified them: no merge defect surfaced, so no source change and no continuation.",
+				"sourceChanges": []
 			}
 		}
 	}
