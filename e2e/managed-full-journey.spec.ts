@@ -16,8 +16,9 @@
  *
  * This file holds enrollment, runs, standalone and create (MCOMP-33-02B), run
  * controls, edit/clone/import and live policy (MCOMP-33-02C), offline and
- * restart, isolation and keyboard, and the credential route (MCOMP-33-02D);
- * the remaining Electron cases are authored by MCOMP-33-02E..02F.
+ * restart, isolation and keyboard, and the credential route (MCOMP-33-02D),
+ * Auto Run lineage, Cue prompt/shell/CLI and the delegated consult
+ * (MCOMP-33-02E); the remaining Electron cases are authored by MCOMP-33-02F.
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -25,7 +26,20 @@ import path from 'node:path';
 import type { ElectronApplication, Locator, Page } from '@playwright/test';
 import { ENTERPRISE_IDENTITY_FILE_NAME } from '../src/main/enterprise/identity-store';
 import { MANAGED_BINDING_FILE_NAME } from '../src/shared/maestro-lib/runtime/data-dir-lock';
-import { parseManagedSpawnRefusal } from '../src/shared/processErrors';
+import { parseManagedSpawnRefusal, type ManagedSpawnRefusal } from '../src/shared/processErrors';
+import { generateUUID } from '../src/shared/uuid';
+import {
+	autoRunTriggerEventId,
+	autoRunWorkflowVersion,
+	newAutoRunTurnRequest,
+	nextAutoRunAttempt,
+	type AutoRunTurnAttribution,
+} from '../src/shared/maestro-lib/autorun/attribution';
+import {
+	MANAGED_WORKFLOWS_FILE_NAME,
+	type HeldWorkflowOwnership,
+} from '../src/shared/maestro-lib/managed/workflows';
+import { GROUP_CHATS_DIR_NAME } from '../src/shared/maestro-lib/paths/resolve';
 import {
 	startFakeEndpoint,
 	type FakeEndpoint,
@@ -297,30 +311,109 @@ async function spawnWithOverride(
 	prompt: string,
 	env: Record<string, string>
 ) {
+	return spawnThroughSink(page, agent.toolType, {
+		sessionId: `${agent.id}-ai-e2e-override`,
+		cwd,
+		prompt,
+		sessionCustomEnvVars: env,
+	});
+}
+
+/** The workflow fences the host holds, read off disk; an absent file holds none. */
+function heldWorkflows(dataDir: string): HeldWorkflowOwnership[] {
+	const file = path.join(dataDir, MANAGED_WORKFLOWS_FILE_NAME);
+	if (!fs.existsSync(file)) return [];
+	return JSON.parse(fs.readFileSync(file, 'utf8')).workflows ?? [];
+}
+
+type LedgerRecord = {
+	leaseId: string;
+	requestId: string;
+	attemptId: string;
+	effect?: { state?: string };
+};
+
+/** The ledger's records with their lineage ids, read off disk; an absent ledger holds none. */
+function ledgerRecords(dataDir: string): LedgerRecord[] {
+	const file = ledgerFile(dataDir);
+	if (!fs.existsSync(file)) return [];
+	return JSON.parse(fs.readFileSync(file, 'utf8')).receipts ?? [];
+}
+
+/** Wait until the ledger holds at least `min` leases not in `before`, all ended; their records. */
+async function endedLeasesSince(dataDir: string, before: string[], min = 1) {
+	const fresh = () => ledgerRecords(dataDir).filter((r) => !before.includes(r.leaseId));
+	const ended = (r: LedgerRecord) =>
+		['released', 'revoked', 'expired'].includes(r.effect?.state ?? '');
+	await expect
+		.poll(() => fresh().length >= min && fresh().every(ended), { timeout: 180_000 })
+		.toBe(true);
+	return fresh();
+}
+
+/** One spawn through the real `process:spawn` sink: the managed refusal, or null when it was not refused. */
+async function spawnThroughSink(page: Page, toolType: string, config: Record<string, unknown>) {
 	const message = await page.evaluate(
-		async ({ id, toolType, cwd, prompt, env }) => {
-			const config = (await window.maestro.agents.get(toolType)) as {
+		async ({ toolType, config }) => {
+			const agent = (await window.maestro.agents.get(toolType)) as {
 				path?: string;
 				command?: string;
 			} | null;
 			return window.maestro.process
 				.spawn({
-					sessionId: `${id}-ai-e2e-override`,
 					toolType,
-					cwd,
-					command: config?.path || config?.command || toolType,
+					command: agent?.path || agent?.command || toolType,
 					args: [],
-					prompt,
-					sessionCustomEnvVars: env,
-				} as Parameters<typeof window.maestro.process.spawn>[0])
+					...config,
+				} as unknown as Parameters<typeof window.maestro.process.spawn>[0])
 				.then(
 					() => null,
 					(error: Error) => error.message
 				);
 		},
-		{ id: agent.id, toolType: agent.toolType, cwd, prompt, env }
+		{ toolType, config }
 	);
 	return parseManagedSpawnRefusal(message ?? '');
+}
+
+/** One attempt of an Auto Run task through the sink, shaped as the Auto Run engine sends it. */
+function autoRunAttempt(
+	page: Page,
+	agent: { id: string; toolType: string },
+	cwd: string,
+	prompt: string,
+	attribution: AutoRunTurnAttribution
+) {
+	return spawnThroughSink(page, agent.toolType, {
+		sessionId: `${agent.id}-batch-${attribution.attemptId}`,
+		cwd,
+		prompt,
+		readOnlyMode: false,
+		permissionMode: 'full',
+		querySource: 'auto',
+		autoRun: { attribution, fence: null },
+	});
+}
+
+/** The Cue activity of the named subscriptions once none is still running (a wait, not an observation). */
+async function settledCueRuns(page: Page, names: string[]) {
+	const read = () =>
+		page.evaluate(async (wanted) => {
+			const log = await window.maestro.cue.getActivityLog(200);
+			return log
+				.filter((r) => wanted.includes(r.subscriptionName))
+				.map((r) => ({ name: r.subscriptionName, status: r.status, stderr: r.stderr }));
+		}, names);
+	await expect
+		.poll(
+			async () => {
+				const runs = await read();
+				return names.every((n) => runs.some((r) => r.name === n && r.status !== 'running'));
+			},
+			{ timeout: 180_000 }
+		)
+		.toBe(true);
+	return read();
 }
 
 test.describe(`Electron acceptance cases (${MANAGED_MODE} mode)`, () => {
@@ -860,5 +953,247 @@ test.describe(`Electron acceptance cases (${MANAGED_MODE} mode)`, () => {
 		} finally {
 			fs.rmSync(foreignAccount, { recursive: true, force: true });
 		}
+	});
+
+	acceptance('electron.autorun-lineage', async (ctx) => {
+		const { page } = ctx;
+		const inputs = MANAGED_MODE === 'endpoint' ? readRunEndpointInputs() : null;
+		if (!inputs) await expectStubProvider(page, ctx.stub);
+		const provider = inputs?.approvedProvider ?? FIXTURE_PROVIDER;
+		const agent = await createAgent(page, provider, 'E2E Accept Auto Run', ctx.projectDir);
+		await enroll(
+			page,
+			inputs?.socketPath ?? (await ctx.fixtureEndpoint()).socketPath,
+			inputs ?? undefined
+		);
+		// One Auto Run (one workflow, one root run) of two tasks, attributed as the engine does.
+		const workflow = {
+			workflowId: `e2e-accept-autorun-${Date.now()}`,
+			version: autoRunWorkflowVersion(['Phase 1.md']),
+			triggerEventId: autoRunTriggerEventId('operator', Date.now()),
+			runId: generateUUID(),
+		};
+		const task = () =>
+			newAutoRunTurnRequest(workflow, { purpose: 'task', document: 'Phase 1.md', loopNumber: 1 });
+		const tasks = [task(), task()];
+		const prompt = inputs?.approvedPrompt ?? 'auto run acceptance task';
+		const launches = ctx.stub.launches().length;
+		const refusals: (ManagedSpawnRefusal | null)[] = [];
+		for (const attempt of tasks) {
+			const before = ledgerLeases(ctx.dataDir);
+			refusals.push(await autoRunAttempt(page, agent, ctx.projectDir, prompt, attempt));
+			if (inputs && !refusals.at(-1)) await endedLeasesSince(ctx.dataDir, before);
+		}
+		// The second task tried again after the policy moved: the later attempt is refused.
+		const retry = nextAutoRunAttempt(tasks[1]);
+		let retryRefusal: ManagedSpawnRefusal | null = null;
+		if (inputs) {
+			runOperator(inputs.tightenPolicy);
+			try {
+				await page.evaluate(() => window.maestro.enterprise.refreshPolicy());
+				retryRefusal = await autoRunAttempt(page, agent, ctx.projectDir, prompt, retry);
+			} finally {
+				runOperator(inputs.restorePolicy);
+			}
+		}
+		const records = ledgerRecords(ctx.dataDir);
+		const fences = heldWorkflows(ctx.dataDir);
+		const held = fences.some((w) => w.workflowId === workflow.workflowId && w.state === 'held');
+		const checks: Record<string, boolean> = inputs
+			? {
+					'each task ran once under its own request': tasks.every(
+						(t) => records.filter((r) => r.requestId === t.requestId).length === 1
+					),
+					'the workflow owner fence is held': held,
+					'the later attempt under the changed policy was refused': retryRefusal !== null,
+					'the refused attempt took no lease': !records.some(
+						(r) => r.attemptId === retry.attemptId
+					),
+				}
+			: {
+					'every task was refused at the sink': refusals.every((r) => r !== null),
+					'no attempt reached the provider':
+						ctx.stub.launches().length === launches && !ctx.stub.sawPrompt(prompt),
+					'no lease in the ledger': records.length === 0,
+					'no workflow owner fence is held': !fences.some((w) => w.state === 'held'),
+				};
+		const effect = observeOnDisk(
+			{
+				workflowId: workflow.workflowId,
+				refusals,
+				retryRefusal,
+				fences: fences.map((w) => w.state),
+			},
+			checks
+		);
+		ctx.observe('effect', effect);
+		if (inputs) {
+			const first = records.find((r) => r.requestId === tasks[0].requestId)!;
+			const receipt = observeLedgerReceipt(ledgerFile(ctx.dataDir), first.leaseId);
+			ctx.observe('receipt', receipt);
+			expect(receipt.problems).toEqual([]);
+		}
+		expect(effect.problems).toEqual([]);
+	});
+
+	acceptance('electron.cue-prompt-shell-cli', async (ctx) => {
+		const { page } = ctx;
+		const inputs = MANAGED_MODE === 'endpoint' ? readRunEndpointInputs() : null;
+		if (!inputs) await expectStubProvider(page, ctx.stub);
+		const provider = inputs?.approvedProvider ?? FIXTURE_PROVIDER;
+		const agent = await createAgent(page, provider, 'E2E Accept Cue', ctx.projectDir);
+		await enroll(
+			page,
+			inputs?.socketPath ?? (await ctx.fixtureEndpoint()).socketPath,
+			inputs ?? undefined
+		);
+		// One pipeline: an agent prompt, a constrained shell command and a nested maestro-cli send.
+		const prompt = inputs?.approvedPrompt ?? 'cue acceptance prompt';
+		const relayed = inputs?.approvedPrompt ?? 'cue acceptance relay';
+		const marker = path.join(ctx.projectDir, 'e2e-cue-shell.marker');
+		const names = ['e2e-accept-cue-prompt', 'e2e-accept-cue-shell', 'e2e-accept-cue-cli'];
+		const head = (name: string) => [
+			`  - name: ${name}`,
+			'    pipeline_name: E2E Accept Cue',
+			'    event: cli.trigger',
+		];
+		const yaml = [
+			'subscriptions:',
+			...head(names[0]),
+			`    prompt: ${JSON.stringify(prompt)}`,
+			...head(names[1]),
+			'    action: command',
+			'    command:',
+			'      mode: shell',
+			`      shell: ${JSON.stringify('touch e2e-cue-shell.marker')}`,
+			...head(names[2]),
+			'    action: command',
+			'    command:',
+			'      mode: cli',
+			'      cli:',
+			'        command: send',
+			`        target: ${JSON.stringify(agent.id)}`,
+			`        message: ${JSON.stringify(relayed)}`,
+			'',
+		].join('\n');
+		await page.evaluate(
+			async ({ root, yaml, id }) => {
+				await window.maestro.cue.writeYaml(root, yaml, undefined, id);
+				await window.maestro.cue.enable();
+				await window.maestro.cue.refreshSession(id, root);
+			},
+			{ root: ctx.projectDir, yaml, id: agent.id }
+		);
+		const before = ledgerLeases(ctx.dataDir);
+		const launches = ctx.stub.launches().length;
+		for (const name of names) {
+			const fired = await page.evaluate((n) => window.maestro.cue.triggerSubscription(n), name);
+			expect(fired, `${name} fired`).toBe(true);
+		}
+		const runs = await settledCueRuns(page, names);
+		const fresh = inputs ? await endedLeasesSince(ctx.dataDir, before) : [];
+		const fences = heldWorkflows(ctx.dataDir);
+		const checks: Record<string, boolean> = inputs
+			? {
+					'the runs took leases that ended in the ledger': fresh.length > 0,
+					'the approved shell command ran in the project': fs.existsSync(marker),
+					'the pipeline owner fence is held': fences.some((w) => w.state === 'held'),
+				}
+			: {
+					'no Cue run reached the provider':
+						ctx.stub.launches().length === launches &&
+						!ctx.stub.sawPrompt(prompt) &&
+						!ctx.stub.sawPrompt(relayed),
+					'the shell command never ran': !fs.existsSync(marker),
+					'no lease in the ledger': ledgerLeases(ctx.dataDir).length === 0,
+					'no workflow owner fence is held': !fences.some((w) => w.state === 'held'),
+				};
+		const effect = observeOnDisk(
+			{ runs: runs.map((r) => ({ ...r, stderr: r.stderr.slice(0, 400) })), fences },
+			checks
+		);
+		ctx.observe('effect', effect);
+		if (inputs) {
+			const receipt = observeLedgerReceipt(ledgerFile(ctx.dataDir), fresh[0].leaseId);
+			ctx.observe('receipt', receipt);
+			expect(receipt.problems).toEqual([]);
+		}
+		expect(effect.problems).toEqual([]);
+		expect(runs.map((r) => r.status)).toEqual(names.map(() => (inputs ? 'completed' : 'failed')));
+	});
+
+	acceptance('electron.delegated-consult', async (ctx) => {
+		const inputs = MANAGED_MODE === 'endpoint' ? readRunEndpointInputs() : null;
+		if (!inputs) await expectStubProvider(ctx.page, ctx.stub);
+		const provider = inputs?.approvedProvider ?? FIXTURE_PROVIDER;
+		const asker = await createAgent(ctx.page, provider, 'E2E-Accept-Asker', ctx.projectDir);
+		const peer = await createAgent(ctx.page, provider, 'E2E-Accept-Peer', ctx.projectDir);
+		await enroll(
+			ctx.page,
+			inputs?.socketPath ?? (await ctx.fixtureEndpoint()).socketPath,
+			inputs ?? undefined
+		);
+		const question = inputs?.approvedPrompt ?? 'consult acceptance question';
+		const roomMessage = inputs?.approvedPrompt ?? 'room acceptance message';
+		const launches = ctx.stub.launches().length;
+
+		// A consult: a leading mention goes to the peer only, the asker's own turn is suppressed.
+		let before = ledgerLeases(ctx.dataDir);
+		await openAgent(ctx.page, asker.name);
+		await sendTurn(ctx.page, asker.name, `@${peer.name} ${question}`);
+		await dismissErrorDialog(ctx.page);
+		const consulted = inputs ? await endedLeasesSince(ctx.dataDir, before) : [];
+
+		// A group chat moderated on the same provider: the room's turn is the room's child.
+		before = ledgerLeases(ctx.dataDir);
+		const room = await ctx.page.evaluate(
+			async ({ toolType, message }) => {
+				const chat = await window.maestro.groupChat.create('E2E Accept Room', toolType);
+				const sent = await window.maestro.groupChat.sendToModerator(chat.id, message).then(
+					() => null,
+					(error: Error) => error.message
+				);
+				return { id: chat.id as string, sent };
+			},
+			{ toolType: asker.toolType, message: roomMessage }
+		);
+		const moderated = inputs ? await endedLeasesSince(ctx.dataDir, before) : [];
+		// A refused turn leaves no lease to wait on: give it time to touch what it would.
+		if (!inputs) await ctx.page.waitForTimeout(5_000);
+		const leases = ledgerLeases(ctx.dataDir);
+		const ranBefore = ctx.stub.launches().length;
+
+		// Restart: the room and the receipts read back, nothing is resent on its own.
+		await ctx.restart();
+		await ctx.page.waitForTimeout(5_000);
+		const roomFile = path.join(ctx.dataDir, GROUP_CHATS_DIR_NAME, room.id, 'metadata.json');
+		const checks: Record<string, boolean> = {
+			'the room is on disk after the restart': fs.existsSync(roomFile),
+			'nothing was resent after the restart':
+				ledgerLeases(ctx.dataDir).length === leases.length &&
+				ctx.stub.launches().length === ranBefore,
+			...(inputs
+				? {
+						'the consult ran under its own lease': consulted.length > 0,
+						'the room turn ran under its own lease': moderated.length > 0,
+					}
+				: {
+						'the consult never reached the provider': !ctx.stub.sawPrompt(question),
+						'the room turn never reached the provider': !ctx.stub.sawPrompt(roomMessage),
+						'nothing reached the provider': ctx.stub.launches().length === launches,
+						'no lease in the ledger': leases.length === 0,
+					}),
+		};
+		const effect = observeOnDisk({ room: room.id, roomRefusal: room.sent, leases }, checks);
+		ctx.observe('effect', effect);
+		if (inputs) {
+			// Read back after the restart: the consult's receipt, and the room turn's.
+			const receipt = observeLedgerReceipt(ledgerFile(ctx.dataDir), consulted[0].leaseId);
+			ctx.observe('receipt', receipt);
+			expect(receipt.problems).toEqual([]);
+			const roomReceipt = observeLedgerReceipt(ledgerFile(ctx.dataDir), moderated[0].leaseId);
+			expect(roomReceipt.problems).toEqual([]);
+		}
+		expect(effect.problems).toEqual([]);
 	});
 });
