@@ -1,5 +1,7 @@
-import { Worker } from 'node:worker_threads';
+import { MessageChannel, Worker } from 'node:worker_threads';
 import path from 'node:path';
+import type { SupervisorChildPort } from '../../shared/maestro-lib/managed/host-adapter';
+import { serveMemoryCliAdmission } from './memory-transport';
 import { app } from 'electron';
 import type {
 	MemoryCliProviderInfo,
@@ -23,20 +25,32 @@ export class PianolaMemoryHost {
 	constructor(
 		private readonly enabled: () => boolean,
 		private readonly discoverCliProviders: () => Promise<MemoryCliProviderInfo[]> = async () => [],
-		private readonly cliEnvironments: () => MemoryCliEnvironments = () => ({})
+		private readonly cliEnvironments: () => MemoryCliEnvironments = () => ({}),
+		/**
+		 * The host's spawn authority, read on every memory CLI launch. The worker
+		 * cannot hold it, so it asks over the admission channel and this thread
+		 * admits the exact spawn (MCOMP-33-00H). Absent, or standalone: the
+		 * backfill launches as it always did.
+		 */
+		private readonly managedPort: () => SupervisorChildPort | null = () => null
 	) {}
 	reconcile() {
 		this.worker?.postMessage({ featureEnabled: this.enabled() });
 	}
 	private connect() {
 		if (this.worker) return this.worker;
+		const admission = new MessageChannel();
+		serveMemoryCliAdmission(admission.port1, this.managedPort);
 		const worker = new Worker(path.join(__dirname, 'memory-worker.js'), {
 			workerData: {
 				directory: app.getPath('userData'),
 				featureEnabled: this.enabled(),
 				cliEnvironments: this.cliEnvironments(),
+				memoryCliAdmission: admission.port2,
 			},
+			transferList: [admission.port2],
 		});
+		worker.once('exit', () => admission.port1.close());
 		worker.on('message', (message: { id: number; result?: unknown; error?: string }) => {
 			const pending = this.pending.get(message.id);
 			if (!pending) return;
@@ -158,9 +172,10 @@ let host: PianolaMemoryHost | null = null;
 export function initializePianolaMemory(
 	enabled: () => boolean,
 	discoverCliProviders?: () => Promise<MemoryCliProviderInfo[]>,
-	cliEnvironments?: () => MemoryCliEnvironments
+	cliEnvironments?: () => MemoryCliEnvironments,
+	managedPort?: () => SupervisorChildPort | null
 ) {
-	host = new PianolaMemoryHost(enabled, discoverCliProviders, cliEnvironments);
+	host = new PianolaMemoryHost(enabled, discoverCliProviders, cliEnvironments, managedPort);
 	return host;
 }
 export function getPianolaMemory() {

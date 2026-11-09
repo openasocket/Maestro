@@ -3,9 +3,17 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { afterEach, expect, it, vi } from 'vitest';
+import { MessageChannel } from 'node:worker_threads';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MemoryDatabase } from '../../../main/pianola/memory-database';
-import { MemoryTransportScope } from '../../../main/pianola/memory-transport';
+import {
+	MemoryTransportScope,
+	PIANOLA_MEMORY_SERVICE,
+	memoryCliAdmissionClient,
+	serveMemoryCliAdmission,
+	setMemoryCliAdmitter,
+} from '../../../main/pianola/memory-transport';
+import { fakeSpawnPort, type FakeSpawnPort } from '../../helpers/managedSpawnPort';
 import { execFileNoThrow } from '../../../shared/maestro-lib/launch/exec-file';
 import type { MemoryTransportActivation } from '../../../shared/pianola/memory';
 
@@ -744,4 +752,101 @@ it('keeps a timed-out CLI submission uncertain instead of releasing it for repla
 			.prepare('SELECT state,terminal FROM memory_transport_requests WHERE operation=?')
 			.get('cli-extract')
 	).toEqual({ state: 'unknown', terminal: 'unproven-close' });
+});
+
+// The memory CLI child under management (MCOMP-33-00H). The worker asks the
+// main thread over a real MessageChannel; the main end admits through the REAL
+// lease authority behind `fakeSpawnPort` (only the policy answer is a table).
+describe('memory CLI admission on a managed host', () => {
+	const channels: MessageChannel[] = [];
+	afterEach(() => {
+		setMemoryCliAdmitter(null);
+		for (const channel of channels.splice(0)) {
+			channel.port1.close();
+			channel.port2.close();
+		}
+	});
+	function admitThrough(port: FakeSpawnPort | null) {
+		const channel = new MessageChannel();
+		channels.push(channel);
+		serveMemoryCliAdmission(channel.port1, () => port);
+		setMemoryCliAdmitter(memoryCliAdmissionClient(channel.port2));
+	}
+	const invocation = {
+		command: '/usr/bin/omp',
+		args: ['--json'],
+		input: '{}',
+		contentType: 'application/jsonl',
+	};
+
+	it('refuses a launch the managed host does not admit, before the permit opens, and starts nothing', async () => {
+		const f = await fixture(1);
+		const item = stage(f.db, f.runtime, 'cli-managed-denied')!;
+		const port = fakeSpawnPort({
+			decide: () => ({ decision: 'deny', reason: 'no backfill here', policyRevision: 3 }),
+		});
+		admitThrough(port);
+		await expect(item.scope.cli(invocation, 1000, 'cli-extract')).rejects.toThrow('managed-denied');
+		expect(execFileNoThrow).not.toHaveBeenCalled();
+		expect(port.asked).toHaveLength(1);
+		expect(port.asked[0].snapshot).toMatchObject({
+			provider: `maestro-supervisor:${PIANOLA_MEMORY_SERVICE}`,
+			purpose: 'supervisor',
+			operation: 'start',
+		});
+		expect(port.authority.live()).toHaveLength(0);
+		// Nothing was sent, so nothing is uncertain and the permit is released normally.
+		expect(f.db.db.prepare('SELECT COUNT(*) n FROM memory_transport_requests').get()).toEqual({
+			n: 0,
+		});
+		release(f.db, item);
+	});
+
+	it('admits the exact launch, binds the lease before the spawn and releases it with the exit', async () => {
+		const f = await fixture(1);
+		const item = stage(f.db, f.runtime, 'cli-managed-admitted')!;
+		const port = fakeSpawnPort();
+		admitThrough(port);
+		let leaseAtSpawn: string | undefined;
+		vi.mocked(execFileNoThrow).mockImplementation(async () => {
+			leaseAtSpawn = port.authority.live()[0]?.state();
+			return { stdout: '{}', stderr: '', exitCode: 0 };
+		});
+		await expect(item.scope.cli(invocation, 1000, 'cli-extract')).resolves.toBe('{}');
+		expect(leaseAtSpawn).toBe('bound');
+		const [command, args, workspace, options] = vi.mocked(execFileNoThrow).mock.calls[0];
+		expect(port.asked).toHaveLength(1);
+		expect(port.asked[0].snapshot.executable).toBe(command);
+		expect(port.asked[0].snapshot.cwd).toBe(workspace);
+		expect(args).toEqual(['--json']);
+		expect(options).toMatchObject({ input: '{}' });
+		await vi.waitFor(() => expect(port.authority.live()).toHaveLength(0));
+		release(f.db, item);
+	});
+
+	it('withdraws an admitted lease when the permit cannot open, and launches nothing', async () => {
+		const f = await fixture(1);
+		let permitted = true;
+		const item = stage(f.db, f.runtime, 'cli-managed-withdrawn', 'extract', () => permitted)!;
+		permitted = false;
+		const port = fakeSpawnPort();
+		admitThrough(port);
+		await expect(item.scope.cli(invocation, 1000, 'cli-extract')).rejects.toThrow('unproven-close');
+		expect(execFileNoThrow).not.toHaveBeenCalled();
+		expect(port.asked).toHaveLength(1);
+		await vi.waitFor(() => expect(port.authority.live()).toHaveLength(0));
+		release(f.db, item);
+	});
+
+	it('asks nobody on a standalone host and launches as before', async () => {
+		const f = await fixture(1);
+		const item = stage(f.db, f.runtime, 'cli-standalone')!;
+		const port = fakeSpawnPort({ standing: 'standalone' });
+		admitThrough(port);
+		vi.mocked(execFileNoThrow).mockResolvedValue({ stdout: '{}', stderr: '', exitCode: 0 });
+		await expect(item.scope.cli(invocation, 1000, 'cli-extract')).resolves.toBe('{}');
+		expect(port.asked).toHaveLength(0);
+		expect(execFileNoThrow).toHaveBeenCalledTimes(1);
+		release(f.db, item);
+	});
 });

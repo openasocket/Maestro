@@ -3,8 +3,15 @@ import crypto from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
-import { threadId } from 'node:worker_threads';
+import { isMainThread, threadId, workerData } from 'node:worker_threads';
 import { execFileNoThrow, needsWindowsShell } from '../utils/execFile';
+import {
+	admitSupervisorChild,
+	type SupervisedChildLifetime,
+	type SupervisorChildAdmission,
+	type SupervisorChildPort,
+} from '../../shared/maestro-lib/managed/host-adapter';
+import type { DispatchSpecLike } from '../../shared/maestro-lib/managed/authority';
 import { isWindows } from '../../shared/platformDetection';
 import { isBlankEnvValue } from '../../shared/agentEnvironment';
 import { buildSpawnPath } from '../../shared/maestro-lib/launch/spawn-path';
@@ -691,6 +698,193 @@ export function prepareMemoryCliLaunch(invocation: MemoryCliInvocation): {
 	};
 }
 
+// The memory CLI child under management (MCOMP-33-00H). The backfill runs in
+// the memory worker thread, which cannot hold the host's spawn authority, so
+// the worker asks the main thread over a MessageChannel (handed to it as
+// `workerData.memoryCliAdmission`) before every launch. The main thread admits
+// the exact spawn through `admitSupervisorChild` as the `pianola-memory`
+// service, re-checks the lease, binds it, and answers; the worker launches only
+// on `standalone` or `admitted`, and reports the exit (or a withdrawal) so the
+// lease is released with the child. A refusal is a MemoryTransportError raised
+// before the permit opens: nothing started, nothing is uncertain. With no
+// channel (a test, or a host that hands none) the launch is standalone as before.
+
+/** The service the memory CLI child is admitted as: a policy may allow watchers and deny the backfill. */
+export const PIANOLA_MEMORY_SERVICE = 'pianola-memory';
+
+/** How long the worker waits for the main thread's admission answer before treating it as lost. */
+const MEMORY_CLI_ADMISSION_TIMEOUT_MS = 60_000;
+
+/** The memory CLI spawn exactly as `execFileNoThrow` will make it. */
+export interface MemoryCliLaunchSpec extends DispatchSpecLike {
+	command: string;
+	args: string[];
+	cwd: string;
+	env: Record<string, string | undefined>;
+	stdin?: string;
+	shell: false;
+}
+
+/** The main thread's answer to one launch, as the worker acts on it. */
+export type MemoryCliAdmission =
+	| { state: 'standalone' }
+	| {
+			state: 'admitted';
+			/** The child ran and exited (code null when the close was unproven). */
+			exited(exitCode: number | null): void;
+			/** Nothing was started on the lease. */
+			withdraw(message: string): void;
+	  }
+	| { state: 'denied' | 'unavailable' | 'unknown'; code: string; message: string };
+
+export type MemoryCliAdmitter = (spec: MemoryCliLaunchSpec) => Promise<MemoryCliAdmission>;
+
+/** The wire between the worker and the main thread. */
+type MemoryCliAdmissionAnswer =
+	| { id: number; state: 'standalone' }
+	| { id: number; state: 'admitted' }
+	| { id: number; state: 'denied' | 'unavailable' | 'unknown'; code: string; message: string };
+type MemoryCliAdmissionMessage =
+	| { kind: 'admit'; id: number; spec: MemoryCliLaunchSpec }
+	| { kind: 'exited'; id: number; exitCode: number | null }
+	| { kind: 'withdrawn'; id: number; message: string };
+
+/** The slice of a worker_threads MessagePort both ends use. */
+export interface MemoryCliAdmissionChannel {
+	on(event: 'message', listener: (message: unknown) => void): unknown;
+	postMessage(message: unknown): void;
+	unref?(): void;
+}
+
+let memoryCliAdmitter: MemoryCliAdmitter | null | undefined;
+
+/** Install (or clear, with null) the admitter the CLI launch asks. `undefined` re-reads workerData. */
+export function setMemoryCliAdmitter(admitter: MemoryCliAdmitter | null | undefined): void {
+	memoryCliAdmitter = admitter;
+}
+
+function currentMemoryCliAdmitter(): MemoryCliAdmitter | null {
+	if (memoryCliAdmitter === undefined) {
+		const channel = isMainThread
+			? undefined
+			: (workerData as { memoryCliAdmission?: MemoryCliAdmissionChannel } | null)
+					?.memoryCliAdmission;
+		memoryCliAdmitter = channel ? memoryCliAdmissionClient(channel) : null;
+	}
+	return memoryCliAdmitter;
+}
+
+/** The worker's end: ask the main thread for each launch and report the child's end. */
+export function memoryCliAdmissionClient(channel: MemoryCliAdmissionChannel): MemoryCliAdmitter {
+	let sequence = 0;
+	const pending = new Map<number, (answer: MemoryCliAdmissionAnswer) => void>();
+	channel.on('message', (message) => {
+		const answer = message as MemoryCliAdmissionAnswer;
+		const settle = pending.get(answer?.id);
+		if (!settle) return;
+		pending.delete(answer.id);
+		settle(answer);
+	});
+	channel.unref?.();
+	return (spec) =>
+		new Promise<MemoryCliAdmission>((resolve) => {
+			const id = ++sequence;
+			const timer = setTimeout(() => {
+				if (!pending.delete(id)) return;
+				resolve({
+					state: 'unknown',
+					code: 'outcome-unknown',
+					message: "The managed host's admission answer was lost. Nothing was started.",
+				});
+			}, MEMORY_CLI_ADMISSION_TIMEOUT_MS);
+			timer.unref?.();
+			pending.set(id, (answer) => {
+				clearTimeout(timer);
+				if (answer.state === 'standalone') resolve({ state: 'standalone' });
+				else if (answer.state === 'admitted')
+					resolve({
+						state: 'admitted',
+						exited: (exitCode) => channel.postMessage({ kind: 'exited', id, exitCode }),
+						withdraw: (message) => channel.postMessage({ kind: 'withdrawn', id, message }),
+					});
+				else resolve({ state: answer.state, code: answer.code, message: answer.message });
+			});
+			channel.postMessage({ kind: 'admit', id, spec } satisfies MemoryCliAdmissionMessage);
+		});
+}
+
+/**
+ * The main thread's end: admit each launch the worker asks for through the
+ * host's spawn authority, read on every launch so an enrollment that appears
+ * later governs the next child. No port, or a standalone standing, answers
+ * `standalone` and asks nobody.
+ */
+export function serveMemoryCliAdmission(
+	channel: MemoryCliAdmissionChannel,
+	managedPort: () => SupervisorChildPort | null
+): void {
+	const live = new Map<number, SupervisedChildLifetime>();
+	channel.on('message', (raw) => {
+		const message = raw as MemoryCliAdmissionMessage;
+		if (message?.kind === 'exited' || message?.kind === 'withdrawn') {
+			const lifetime = live.get(message.id);
+			live.delete(message.id);
+			if (message.kind === 'exited') lifetime?.exited({ exitCode: message.exitCode, signal: null });
+			else lifetime?.withdraw(message.message);
+			return;
+		}
+		if (message?.kind !== 'admit') return;
+		void admitMemoryCli(managedPort, message.spec, message.id).then(({ answer, lifetime }) => {
+			if (lifetime) live.set(message.id, lifetime);
+			channel.postMessage(answer);
+		});
+	});
+}
+
+/** Admit one memory CLI launch and re-check its lease the instant before the worker spawns. */
+async function admitMemoryCli(
+	managedPort: () => SupervisorChildPort | null,
+	spec: MemoryCliLaunchSpec,
+	id: number
+): Promise<{ answer: MemoryCliAdmissionAnswer; lifetime: SupervisedChildLifetime | null }> {
+	const port = managedPort() ?? null;
+	if (!port || port.standing() !== 'managed')
+		return { answer: { id, state: 'standalone' }, lifetime: null };
+	let admission: SupervisorChildAdmission;
+	try {
+		admission = await admitSupervisorChild({
+			port,
+			service: PIANOLA_MEMORY_SERVICE,
+			traceId: `pianola-memory:${id}`,
+			spec,
+			attribution: { target: { kind: 'local' }, resourceIds: ['pianola-memory'] },
+		});
+	} catch (error) {
+		// The authority never throws by contract; a port that does is an answer lost.
+		admission = {
+			state: 'unknown',
+			code: 'outcome-unknown',
+			message: `The managed host's answer was lost: ${error instanceof Error ? error.message : String(error)}. Nothing was started.`,
+		};
+	}
+	if (admission.state === 'standalone')
+		return { answer: { id, state: 'standalone' }, lifetime: null };
+	if (admission.state !== 'admitted')
+		return {
+			answer: { id, state: admission.state, code: admission.code, message: admission.message },
+			lifetime: null,
+		};
+	const verdict = admission.lifetime.admit();
+	if (!verdict.ok)
+		return {
+			answer: { id, state: verdict.state, code: verdict.code, message: verdict.message },
+			lifetime: null,
+		};
+	// The worker spawns on this answer and nothing else: the protected lifetime begins.
+	admission.lifetime.spawned({ pid: undefined });
+	return { answer: { id, state: 'admitted' }, lifetime: admission.lifetime };
+}
+
 /** Build the expanded spawn PATH and apply account overrides and blank unsets in order. */
 function memoryCliEnvironment(invocation: MemoryCliInvocation): NodeJS.ProcessEnv {
 	const env = { ...process.env };
@@ -723,14 +917,41 @@ export class MemoryTransportScope {
 		const launch = prepareMemoryCliLaunch(invocation);
 		const workspace = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'maestro-memory-cli-'));
 		let request: string | undefined;
+		let admitted: Extract<MemoryCliAdmission, { state: 'admitted' }> | null = null;
+		let exitCode: number | null = null;
+		let launched = false;
 		try {
+			// The spawn exactly as it will be made: a managed host admits this
+			// snapshot before the permit opens, and a refusal starts nothing.
+			const spec: MemoryCliLaunchSpec = {
+				command: launch.command,
+				args: launch.args,
+				cwd: workspace,
+				env: memoryCliEnvironment(invocation),
+				stdin: invocation.input,
+				shell: false,
+			};
+			const admitter = currentMemoryCliAdmitter();
+			const admission: MemoryCliAdmission = admitter
+				? await admitter(spec)
+				: { state: 'standalone' };
+			if (admission.state === 'admitted') admitted = admission;
+			else if (admission.state !== 'standalone')
+				throw new MemoryTransportError(
+					'managed-' + admission.state,
+					null,
+					invocation.contentType,
+					'not-started'
+				);
 			request = this.controller.startRequest(this.id, operation, this.authority);
 			this.open = true;
-			const result = await execFileNoThrow(launch.command, launch.args, workspace, {
+			launched = true;
+			const result = await execFileNoThrow(spec.command, spec.args, spec.cwd, {
 				input: invocation.input,
 				timeout: timeoutMs,
-				env: memoryCliEnvironment(invocation),
+				env: spec.env,
 			});
+			if (typeof result.exitCode === 'number') exitCode = result.exitCode;
 			if (typeof result.exitCode !== 'number')
 				throw new MemoryTransportError(
 					'cli-unproven-close',
@@ -758,6 +979,11 @@ export class MemoryTransportScope {
 			if (error instanceof MemoryTransportError) throw error;
 			throw new MemoryTransportError('cli-failed', null, invocation.contentType, 'unproven-close');
 		} finally {
+			// The lease follows the child: released with its exit, or withdrawn unused.
+			if (admitted) {
+				if (launched) admitted.exited(exitCode);
+				else admitted.withdraw('the memory CLI was not started on its lease');
+			}
 			if (workspace)
 				await fs.promises.rm(workspace, { recursive: true, force: true }).catch(() => undefined);
 		}
