@@ -336,7 +336,11 @@ describe('enterprise service', () => {
 			versions: { app: '1.1.0-RC', contracts: { status: 'absent' } },
 			endpoint: { authority: 'none', status: null },
 			identity: { custody: 'none' },
-			collection: { journal: { attached: true }, telemetry: { running: true }, usage: null },
+			collection: {
+				journal: { attached: true },
+				telemetry: { running: true },
+				usage: { tracked: 0 },
+			},
 			completeness: 'partial',
 		});
 		expect(service.events.recent().map((event) => event.kind)).toEqual(['inventory']);

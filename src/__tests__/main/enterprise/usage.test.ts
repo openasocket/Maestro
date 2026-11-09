@@ -17,6 +17,8 @@ import {
 	buildUsageFact,
 	createUsageCapture,
 	usageAttributionOf,
+	usageReportFromStats,
+	usageSettlingSink,
 	type UsageSettleInput,
 } from '../../../main/enterprise/usage';
 import type { ManagedIdentityView } from '../../../shared/maestro-lib/managed/endpoint-port';
@@ -24,7 +26,9 @@ import { createEventJournal } from '../../../shared/maestro-lib/managed/event-jo
 import {
 	createLifecycleProjector,
 	usageFactProblems,
+	type LifecycleFact,
 	type LifecycleProjector,
+	type ManagedUsageEvent,
 } from '../../../shared/maestro-lib/managed/events';
 import {
 	UsageProvenanceTracker,
@@ -590,5 +594,147 @@ describe('usage capture: unknown usage, replays, surfaces and canaries (MRC-10-0
 		expect(journal.page({ cursor: null, limit: 10 })).toMatchObject({ completeness: 'gap' });
 		await journal.flush();
 		expect(fs.readFileSync(journal.file, 'utf8')).not.toContain('CANARY ANSWER');
+	});
+});
+
+describe('actual process usage stream and run settlement (MCOMP-27-01)', () => {
+	const lifecycleFact = (overrides: Partial<LifecycleFact> = {}): LifecycleFact => ({
+		surface: 'agent',
+		state: 'completed',
+		at: T0,
+		sessionId: 'agent-1-ai-tab-1',
+		agentId: 'agent-1',
+		tabId: 'tab-1',
+		provider: 'claude-code',
+		model: 'claude-sonnet-4-5',
+		providerSessionId: null,
+		runId: 'run-1',
+		record: 'ledger',
+		ledgerStatus: 'completed',
+		exitCode: 0,
+		durationMs: 1_000,
+		detail: null,
+		admission: null,
+		...overrides,
+	});
+
+	it('reads emitted stats back conservatively: an unfilled zero is not reported, a correction is not a report', () => {
+		expect(usageReportFromStats(total({ cacheReadInputTokens: 0, totalCostUsd: 0 }))).toEqual({
+			inputTokens: 1_600,
+			outputTokens: 80,
+		});
+		expect(
+			usageReportFromStats(
+				total({ cacheCreationInputTokens: 40, totalCostUsd: 0.02, reasoningTokens: 7 })
+			)
+		).toEqual({
+			inputTokens: 1_600,
+			outputTokens: 80,
+			cacheReadTokens: 1_300,
+			cacheCreationTokens: 40,
+			reasoningTokens: 7,
+			costUsd: 0.02,
+		});
+		expect(usageReportFromStats(total({ contextWindowCorrectionOnly: true }))).toEqual({
+			inputTokens: 0,
+			outputTokens: 0,
+			correctionOnly: true,
+		});
+	});
+
+	it('sums the stream, settles on the run terminal fact with the reported cost, and passes every lifecycle fact through', () => {
+		const p = projector();
+		const capture = createUsageCapture({
+			events: p,
+			identity: () => enrolled(),
+			accountRef: ({ provider }) => (provider === 'claude-code' ? 'c'.repeat(64) : null),
+			now: () => T0,
+		});
+		const sink = usageSettlingSink(p, capture);
+		sink.record(lifecycleFact({ state: 'running', ledgerStatus: 'running', exitCode: null }));
+		capture.observeStats(
+			'agent-1-ai-tab-1',
+			'claude-code',
+			total({ inputTokens: 10, outputTokens: 5, cacheReadInputTokens: 0, totalCostUsd: 0.01 })
+		);
+		capture.observeStats(
+			'agent-1-ai-tab-1',
+			'claude-code',
+			total({ inputTokens: 20, outputTokens: 7, cacheReadInputTokens: 30, totalCostUsd: 0.02 })
+		);
+		// A window correction replays counts already reported: observed, never summed.
+		capture.observeStats(
+			'agent-1-ai-tab-1',
+			'claude-code',
+			total({ inputTokens: 20, outputTokens: 7, contextWindowCorrectionOnly: true })
+		);
+		expect(capture.size()).toBe(1);
+		sink.record(lifecycleFact());
+		expect(capture.size()).toBe(0);
+		const kinds = p.recent().map((event) => event.kind);
+		expect(kinds.filter((kind) => kind === 'usage')).toHaveLength(1);
+		const usageEvent = p.recent().find((event) => event.kind === 'usage') as ManagedUsageEvent;
+		expect(usageEvent.usage).toMatchObject({
+			provenance: 'estimated',
+			cost: 'reported',
+			events: 2,
+			corrections: 1,
+			counts: { inputTokens: 30, outputTokens: 12, cacheReadInputTokens: 30 },
+		});
+		expect(usageEvent.usage.costUsd).toBeCloseTo(0.03, 10);
+		expect(usageEvent.usage.accountRef).toBe('c'.repeat(64));
+	});
+
+	it('settles a silent run as unavailable, never a zero, and settles nothing for a shell terminal or a running fact', () => {
+		const p = projector();
+		const capture = createUsageCapture({ events: p, identity: () => null, accountRef: () => null });
+		const sink = usageSettlingSink(p, capture);
+		sink.record(
+			lifecycleFact({ surface: 'terminal', sessionId: 'agent-1-terminal', record: 'omitted' })
+		);
+		sink.record(lifecycleFact({ state: 'running', ledgerStatus: 'running', exitCode: null }));
+		expect(p.recent().some((event) => event.kind === 'usage')).toBe(false);
+		sink.record(lifecycleFact({ state: 'failed', ledgerStatus: 'failed', exitCode: 1 }));
+		const usageEvents = p.recent().filter((event) => event.kind === 'usage') as ManagedUsageEvent[];
+		expect(usageEvents).toHaveLength(1);
+		expect(usageEvents[0].usage).toMatchObject({
+			provenance: 'unavailable',
+			counts: null,
+			costUsd: null,
+		});
+	});
+
+	it('keeps a retry or a provider swap on the same session a separate fact under its own run and provider', () => {
+		const p = projector();
+		const capture = createUsageCapture({ events: p, identity: () => null, accountRef: () => null });
+		const sink = usageSettlingSink(p, capture);
+		capture.observeStats('agent-1-ai-tab-1', 'claude-code', total({ totalCostUsd: 0.05 }));
+		sink.record(
+			lifecycleFact({
+				state: 'cancelled',
+				ledgerStatus: 'cancelled',
+				detail: 'superseded by run-2',
+			})
+		);
+		capture.observeStats('agent-1-ai-tab-1', 'codex', total({ inputTokens: 5, outputTokens: 1 }));
+		sink.record(lifecycleFact({ runId: 'run-2', provider: 'codex', model: 'gpt-5-codex' }));
+		const usageEvents = p.recent().filter((event) => event.kind === 'usage') as ManagedUsageEvent[];
+		expect(usageEvents.map((event) => event.eventId)).toHaveLength(2);
+		expect(new Set(usageEvents.map((event) => event.eventId)).size).toBe(2);
+		expect(usageEvents[0].usage).toMatchObject({
+			cost: 'reported',
+			counts: { inputTokens: 1_600 },
+		});
+		expect(usageEvents[1].usage).toMatchObject({ cost: 'priced', counts: { inputTokens: 5 } });
+	});
+
+	it('never lets a failing settle disturb the lifecycle path', () => {
+		const p = projector();
+		const sink = usageSettlingSink(p, {
+			settle: () => {
+				throw new Error('boom');
+			},
+		});
+		expect(sink.record(lifecycleFact())).not.toHaveLength(0);
 	});
 });

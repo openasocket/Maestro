@@ -42,6 +42,7 @@ import type {
 import type { ManagedEffectProducer } from '../../shared/maestro-lib/managed/effects';
 import {
 	createLifecycleProjector,
+	type LifecycleEventSink,
 	type LifecycleProjector,
 } from '../../shared/maestro-lib/managed/events';
 import {
@@ -112,6 +113,7 @@ import {
 	type InventoryDeps,
 } from './inventory';
 import { createPolicyStatusService, type PolicyStatusService } from './policy-status';
+import { createUsageCapture, usageSettlingSink, type UsageCapture } from './usage';
 import {
 	createCueSpawnAuthority,
 	createProcessSpawnAuthority,
@@ -426,6 +428,12 @@ export interface EnterpriseServiceDeps {
 	holds?: ManagedHolds;
 	/** How often live runs are held to the standing in force (`constrainLiveRuns`). Default 15 s; 0 runs no timer. */
 	liveRunCheckMs?: number;
+	/**
+	 * The opaque account reference (`managedAccountRef`) an agent's run settles its usage under,
+	 * resolved from the agent's real layers when the run settles. Null when the provider has no
+	 * account concept or the agent's current provider is not the run's. Default: none (null).
+	 */
+	accountRefOf?(agent: { agentId: string; provider: string }): string | null;
 }
 
 /**
@@ -476,6 +484,15 @@ export interface EnterpriseService {
 	 * policy generation the host applies. A projection, not delivery.
 	 */
 	readonly events: LifecycleProjector;
+	/**
+	 * The actual usage producer (MCOMP-27-01): `usage.observeStats()` hears the process
+	 * manager's `usage` stream, and `runLifecycle` is the sink the agent-run capture is
+	 * handed in place of `events`: every lifecycle fact reaches `events` unchanged and
+	 * each terminal fact settles that run's `usage` event (estimated or unavailable,
+	 * never an invented zero). The inventory reports the sessions it tracks.
+	 */
+	readonly usage: UsageCapture;
+	readonly runLifecycle: LifecycleEventSink;
 	/**
 	 * The durable event journal (MRC-10-02A) attached to `events` at start: what a
 	 * telemetry client takes batches from and settles with the endpoint's answer.
@@ -716,6 +733,13 @@ export function createEnterpriseService(deps: EnterpriseServiceDeps): Enterprise
 	// refuses every capture by name and a standalone one never follows a process.
 	const content = createContentCollectionSource({ status: () => lifecycle.status() });
 	const contentCapture = createContentCapture({ source: content, now });
+	const usage = createUsageCapture({
+		events,
+		identity: () => lifecycle.status().identity,
+		accountRef: (agent) => deps.accountRefOf?.(agent) ?? null,
+		now,
+	});
+	const runLifecycle = usageSettlingSink(events, usage);
 	const contractsPin: () => ContractsPinStatus =
 		typeof deps.contractsPin === 'function'
 			? deps.contractsPin
@@ -740,8 +764,8 @@ export function createEnterpriseService(deps: EnterpriseServiceDeps): Enterprise
 		journal: () => (eventJournalAttached ? eventJournal.status() : null),
 		telemetry: () => telemetry.status(),
 		content: () => ({ standing: content.standing(), capture: contentCapture.status() }),
-		// No producer calls the usage capture yet (MRC-10-04A open): a gap by name, not a zero.
-		usage: () => null,
+		// The usage producer the process listener and the run capture feed (MCOMP-27-01).
+		usage: () => usage.size(),
 		installed: deps.installed ?? (() => ({ state: 'unknown', version: null })),
 		contractsPin,
 		now,
@@ -819,6 +843,8 @@ export function createEnterpriseService(deps: EnterpriseServiceDeps): Enterprise
 		cueSpawnAuthority,
 		remote,
 		events,
+		usage,
+		runLifecycle,
 		eventJournal,
 		eventJournalAttached: () => eventJournalAttached,
 		telemetry,

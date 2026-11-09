@@ -203,7 +203,7 @@ import { executeCueNotify } from './cue/cue-notify-executor';
 import { executeCueAutoRun } from './cue/cue-autorun-executor';
 import { launchCueAutoRun } from './cue-autorun-launcher';
 import { reportCueAuthFailure } from './cue/cue-auth-detector';
-import type { ToolType } from '../shared/types';
+import type { ToolType, UsageStats } from '../shared/types';
 import {
 	executeCueRunAction,
 	type CueRunActionDeps,
@@ -2012,6 +2012,16 @@ app
 				os: { platform: process.platform, release: os.release(), arch: process.arch },
 				installed: (agentId) => installationOfSnapshot(capabilitySnapshots.get(agentId)),
 				contractsPin: path.join(app.getAppPath(), 'vendor', 'mega-maestro', 'contracts.pin.json'),
+				// The account a run's usage settles under (MCOMP-27-01): the stored agent's
+				// real layers, and only while the agent still runs the run's provider.
+				accountRefOf: ({ agentId, provider }) => {
+					const stored = (sessionsStore.get('sessions', []) as Array<Record<string, unknown>>).find(
+						(s) => s?.id === agentId
+					);
+					if (!stored || stored.toolType !== provider) return null;
+					const dir = resolveAgentAccountDir(agentId);
+					return dir === undefined ? null : managedAccountRef(provider, dir);
+				},
 			});
 		} catch (error) {
 			enterpriseService = null;
@@ -4028,9 +4038,21 @@ app
 			try {
 				// The enterprise service's lifecycle projection (MRC-10-01) hears every
 				// spawn and exit the capture does, terminal and group-chat included.
+				// Its terminal facts also settle each run's usage (MCOMP-27-01), from the
+				// process manager's usage stream the enterprise usage capture hears.
 				setupAgentRunCapture(processManager, {
-					...(enterpriseService ? { lifecycle: enterpriseService.events } : {}),
+					...(enterpriseService ? { lifecycle: enterpriseService.runLifecycle } : {}),
 				});
+				if (enterpriseService) {
+					const usage = enterpriseService.usage;
+					processManager.on('usage', (sessionId: string, stats: UsageStats) => {
+						usage.observeStats(
+							sessionId,
+							processManager?.get(sessionId)?.toolType ?? 'unknown',
+							stats
+						);
+					});
+				}
 				// Managed content capture (MRC-10-05A): follows a spawn only when the
 				// collection standing admits it; a standalone desktop never subscribes.
 				if (enterpriseService) {
