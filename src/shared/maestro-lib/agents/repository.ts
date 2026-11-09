@@ -143,7 +143,25 @@ export interface AgentRepositoryOptions {
 	readTabDefaults?: () => Promise<TabDefaults>;
 	/** Why a local working directory cannot be used, or null. Default: `unusableCwdReason`. */
 	checkCwd?: (cwd: string) => string | null;
+	/**
+	 * The host's agent mutation authority, asked inside the command queue with the
+	 * record exactly as it would be committed, after every rule and before the write.
+	 * A managed host composes its policy here; absent (standalone), nothing is held.
+	 */
+	authorizeAgentMutation?: (change: AgentMutationChange) => AgentMutationAuthorization;
 }
+
+/** One create or edit as the repository is about to commit it. */
+export interface AgentMutationChange {
+	operation: 'create' | 'edit';
+	/** The stored record; null on create. */
+	before: AgentRecord | null;
+	after: AgentRecord;
+}
+
+export type AgentMutationAuthorization =
+	| { ok: true }
+	| { ok: false; code: Extract<ClientErrorCode, 'rejected' | 'unsupported'>; message: string };
 
 /** Why the repository could not load its documents. The runtime unions these into `RuntimeRefusal`. */
 export type RepositoryLoadFailure =
@@ -509,6 +527,16 @@ export function createAgentRepository(options: AgentRepositoryOptions): AgentRep
 	// Agents
 	// -----------------------------------------------------------------------
 
+	/** Ask the host authority about a computed change; a throw is a refusal, never an admission. */
+	function authorizeChange(change: AgentMutationChange): AgentMutationAuthorization {
+		if (!options.authorizeAgentMutation) return { ok: true };
+		try {
+			return options.authorizeAgentMutation(change);
+		} catch {
+			return { ok: false, code: 'rejected', message: 'The agent change could not be authorized.' };
+		}
+	}
+
 	function createAgent(input: AgentCreateInput): Promise<ClientResult<{ agentId: string }>> {
 		const method: ClientMethod = 'agents.create';
 		return run(method, async () => {
@@ -536,6 +564,8 @@ export function createAgentRepository(options: AgentRepositoryOptions): AgentRep
 
 			const defaults = await readTabDefaults();
 			const { agent } = buildAgentRecord(input, checked.value, ctx, defaults);
+			const authorized = authorizeChange({ operation: 'create', before: null, after: agent });
+			if (!authorized.ok) return failure(method, authorized.code, authorized.message);
 			return {
 				ok: true,
 				plan: {
@@ -692,6 +722,9 @@ export function createAgentRepository(options: AgentRepositoryOptions): AgentRep
 			if (applied.length === 0) {
 				return { ok: true, plan: { value: receipt, events: [] } };
 			}
+
+			const authorized = authorizeChange({ operation: 'edit', before, after: next });
+			if (!authorized.ok) return failure(method, authorized.code, authorized.message);
 
 			changed.set(agentId, next);
 			const events = updateEvents(before, next);
