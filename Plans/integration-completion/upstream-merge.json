@@ -1746,6 +1746,40 @@
 				],
 				"notes": "No guard dropped; no hunk took one whole side.",
 				"unmergedAfter": 69
+			},
+			"MCOMP-33-00R14": {
+				"resolvedAt": "2026-11-09",
+				"resolvedBy": "Maestro-Claude",
+				"files": [
+					"src/main/opencode-server/OpencodeServerManager.ts",
+					"src/main/ipc/handlers/process.ts",
+					"src/main/ipc/handlers/process/handle-spawn.ts"
+				],
+				"method": "Nine hunks (3 + 3 + 3) resolved by a shape-asserting script (Working/mcomp-33-00r14/resolve.mjs, both sides read in full, all replacements computed before any write); staged through merge-tool.mjs stage (prettier unchanged, 66 unmerged left). Working/mcomp-33-00r14/check.mjs: 0 syntax diagnostics in all three, every export of HEAD and MERGE_HEAD present, no markers, every seam count at least the larger of HEAD and MERGE_HEAD except exitListener.current (5 vs HEAD 6: HEAD pluginRunToken-only failure call superseded by upstream unconditional call). git diff HEAD +667 -54, git diff MERGE_HEAD +678 -111. opencode-server suites 16/16 pass; ProcessManager.serveSpawn.test and the process handler suites cannot load until src/shared/maestro-lib/launch/env.ts and agent-args.ts (00R21) merge.",
+				"hunks": {
+					"src/main/opencode-server/OpencodeServerManager.ts": [
+						"Configs: HEAD OpencodeManagedServerScope, OPENCODE_MANAGED_PERMISSION_CONFIG and AUTO_APPROVE_CONFIG kept; upstream permissionConfig(mode) restated over a new STANDARD_ASK_CONFIG (standard asks, others auto-approve). opencodeServerPermissionConfig(managed, permissionMode?) returns the managed config for any managed scope whatever permissionMode says, else permissionConfig(permissionMode).",
+						"OPENCODE_CONFIG_CONTENT: JSON.stringify(opencodeServerPermissionConfig(opts.managed, opts.permissionMode)).",
+						"buildServerKey: both HEAD scope and upstream permissionMode ?? current."
+					],
+					"src/main/ipc/handlers/process.ts": [
+						"Imports: HEAD handle-spawn names (currentSpawnActor, handleProcessSpawn, reportSpawnRefusal, SpawnHandlerDependencies), transport-actor names, WebTerminalInputRefusal, parseTerminalSessionId, plus upstream cancelPendingDesktopSpawns.",
+						"HEAD initPermissionRelay with createRelayManagedGate kept; upstream initHarnessControl({ getMainWindow, getWindowForSession }, getProcessManager()) added after it.",
+						"process:spawn: upstream owner-checked handler shape; handleProcessSpawn deps carry both HEAD remoteQualifier and upstream assertQueueOwner."
+					],
+					"src/main/ipc/handlers/process/handle-spawn.ts": [
+						"Spawn: upstream prelude (abort, assertQueueOwner, admissionGuard, proof fence) then HEAD ticket strip and await processManager.spawnAdmitted({...spawnConfig, purpose, origin, dispatchedAs, permission, sshRemoteEndpoint, ...}, actor) with every upstream-added field (agentSessionId, appendSystemPrompt, harnessControlMode, nativeAcpArgs, nativeRpcProtocol, nativeRpcArgs, effort, native model/effort/permissionMode spread, promptFileArgs), then upstream post-spawn (fence, pianolaRunId, callerProcess, spawnReturned, unconditional failure exit-listener, native persistClaudeInteractiveMode).",
+						"Slash-command probe: upstream deletes CALLER_RUN_PROOF_FILE_ENV_VAR from the probe env; HEAD providerProbeManaged admission kept.",
+						"Result: both HEAD managedRun and upstream pianolaRunId."
+					]
+				},
+				"semanticConflictsForC": [
+					"The admitted spawn is awaited after upstream synchronous assertQueueOwner()/admissionGuard(); confirm a queue-owner change or abort during spawnAdmitted cannot start a stale turn (re-check after admission if needed).",
+					"Upstream initHarnessControl broker is not managed-gated; spawners route managed turns away from it (00R13); confirm no other path reaches it for an admitted session.",
+					"Native spread passes permissionMode: effectivePermissionMode beside HEAD permission: launchPermission; when the 00R12 refusal of managed native launches is lifted the snapshot must bind both."
+				],
+				"notes": "No guard dropped; no hunk took one whole side.",
+				"unmergedAfter": 66
 			}
 		}
 	}
