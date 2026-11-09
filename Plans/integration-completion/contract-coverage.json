@@ -263,7 +263,8 @@
 			"consumerPort": "src/shared/maestro-lib/managed/provider-route.ts",
 			"binding": "pending",
 			"pairedVerification": ["MCOMP-32-01"],
-			"note": "Route receipts bind binary/version/transport/OS/backend; parsing is not verification. Native authenticated peer transport and prepared confinement still need actual platform/provider proofs (PREPARED/1)."
+			"note": "Route receipts bind binary/version/transport/OS/backend; parsing is not verification. Native authenticated peer transport and prepared confinement still need actual platform/provider proofs (PREPARED/1).",
+			"localConsumer": "MCOMP-31-01: providerRouteEvidenceProblems() and approveProviderRoute() in provider-route.ts consume signedProviderRouteQualification v1 against the exact launch candidate (provider, adapter, transport, binary digest/version/identity, OS, backend, input digest), require every published allow case observed allowed and every deny case observed denied once with outside evidence, a non-harness tier with its matching model transport, and bounded freshness, then ask a host-injected ProviderRouteEvidenceVerifier.version=1 to check the Ed25519 signature and payloadDigest. No verifier, a refused/lost verification, cancellation or a candidate change across the await yields unavailable; there is no fallback and no lease is minted. No production verifier or trust-root binding is installed: the route-qualification key distribution and the canonical inputDigest recomputation encoding are not published, so binding stays pending and the approval is never advertised as provider support."
 		},
 		{
 			"family": "headless-host",
