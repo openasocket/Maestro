@@ -3075,6 +3075,27 @@
 				"static": "prettier --check clean after --write on two files; eslint 0 errors (suite file is eslint-ignored)",
 				"tools": "Working/mcomp-33-00s6 (apply.mjs, apply-test.mjs, mutate.mjs, tsc-suite.mjs, commit-wt.mjs, record.mjs)",
 				"note": "The supervised new-tab path (00R33) keeps its own ownsBinding logic: a repeat on an already-finished dispatch id there issues a ticket that is never withdrawn and expires by TTL; not changed here (scope)."
+			},
+			"MCOMP-33-00S7": {
+				"completedAt": "2026-11-09",
+				"completedBy": "Maestro-Claude",
+				"worktreeCommit": "6ce44f5f0",
+				"worktreeParent": "85218010c",
+				"verdict": "None of the three failures is a merge fault; the premise that they pass on upstream rc did not hold on this machine. Each was checked against a scratch export of pristine 919d28a66 (Working/mcomp-33-00s7/upstream-tree, removed after) sharing the worktree node_modules. (1) pianola-scope-host (4) and pianola-legacy-migration (17): one environmental cause. Both suites root their fixture in os.tmpdir() and hand it to HostCallerRuns.issue; PluginToolRunProofFiles.validateDirectory refuses a base whose realpath differs, and macOS os.tmpdir() is under the /var symlink, so provisioning threw PLUGIN_UNAVAILABLE and the migration suite read an empty proof path. Pristine upstream fails the same 4 scope-host cases here; both suites pass 110/110 in the worktree with a canonical TMPDIR. Upstream CI is Linux. Repaired in the suites only (fixture root fs.realpathSync(os.tmpdir())); every assertion and the store rule unchanged. (2) pianola-native-acceptance.integration: UPSTREAM BASELINE, not repaired. It fails to load identically on pristine upstream rc (child_process mock has no default export, reached at upstream pianola-supervisor), and past that has at least two more upstream defects found by probing in the scratch tree only: memory-host -> historical-inventory -> opencode-session-storage reads fs at module load against the closed fs facade (same chain upstream), and the web server double lacks getPianolaScopeSnapshot (TypeError in pianola.ts snapshot during legacy migration). No CI workflow runs vitest.integration.config.ts. The integration line adds one more edge (host-adapter -> start-turn and process-tree, which need default exports on the child_process and fs/promises mocks), which would need the same mock repair once upstream fixes its suite. Repairing upstream drifted fixture is out of this task scope; 00S10 should classify the file as upstream baseline.",
+				"change": {
+					"src/__tests__/main/pianola/pianola-legacy-migration.test.ts": "fixture root fs.realpathSync(os.tmpdir()) with a one-line comment.",
+					"src/__tests__/main/pianola/pianola-scope-host.test.ts": "fixture root fs.realpathSync(os.tmpdir()) with a one-line comment."
+				},
+				"mutation": "Suite-only repair, no source change, so no mutation case. Reverting the two lines brings back exactly the 21 failures (the pre-repair run), and the unrepaired suites pass with TMPDIR set to the canonical path.",
+				"typeCheck": {
+					"testFiles": "suites in no project config; ad hoc config over both gives 33 errors before and after (1 and 9 in the suites, all pre-existing upstream), 0 new (Working/mcomp-33-00s7/tsc-suite.mjs)"
+				},
+				"suites": {
+					"run": "src/__tests__/main/pianola/pianola-legacy-migration.test.ts, pianola-scope-host.test.ts; src/__tests__/integration/pianola-native-acceptance.integration.test.ts with --config vitest.integration.config.ts",
+					"result": "legacy-migration + scope-host 110/110 (was 21 failed); native acceptance fails to load, identical on pristine upstream rc (baseline)"
+				},
+				"static": "prettier --check clean; eslint 0 errors (suite files are eslint-ignored)",
+				"tools": "Working/mcomp-33-00s7 (apply-test.mjs, import-path.mjs, tsc-suite.mjs, commit-wt.mjs, record.mjs)"
 			}
 		}
 	}
