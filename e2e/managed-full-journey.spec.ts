@@ -14,8 +14,9 @@
  * and the packaged app; a missing input fails the case by name, never skips.
  * MCOMP-34 executes endpoint mode against the exact paired artifacts.
  *
- * This file holds the first group (enrollment, runs, standalone, create); the remaining Electron cases are authored by the inserted
- * continuations MCOMP-33-02C..02F.
+ * This file holds enrollment, runs, standalone and create (MCOMP-33-02B), run
+ * controls, edit/clone/import and live policy (MCOMP-33-02C); the remaining
+ * Electron cases are authored by the inserted continuations MCOMP-33-02D..02F.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -167,6 +168,48 @@ async function approvedTurn(ctx: CaseContext, agent: { id: string; name: string 
 	return managedRun!;
 }
 
+/** The Edit Agent dialog, opened from the agent's Left Bar row. */
+async function openEditAgent(page: Page, name: string) {
+	await page.locator('[data-nav-key]').filter({ hasText: name }).first().click({ button: 'right' });
+	await page.getByRole('button', { name: 'Edit Agent...' }).click();
+	const dialog = page.getByRole('dialog', { name: `Edit Agent: ${name}` });
+	await expect(dialog).toBeVisible();
+	return dialog;
+}
+
+/** The New Agent form with a draft filled in, not yet submitted. */
+async function draftNewAgent(page: Page, provider: string, name: string, dir: string) {
+	await page.keyboard.press('Meta+n');
+	const dialog = page.getByRole('dialog', { name: 'Create New Agent' });
+	const row = dialog.getByRole('option', { name: new RegExp(provider) });
+	await expect(row).toContainText('Available');
+	await row.click();
+	await dialog.getByLabel('Agent Name').fill(name);
+	await dialog.getByPlaceholder('Select directory...').fill(dir);
+	return dialog;
+}
+
+/**
+ * Clone and import go through the same host operation (`sessions:commitAgent`)
+ * the Duplicate and import surfaces call: the host's full record, a new id.
+ */
+async function commitCopy(page: Page, agentId: string, operation: 'clone' | 'import') {
+	return page.evaluate(
+		async ({ id, op }) => {
+			const record = (await window.maestro.sessions.getAll()).find(
+				(r: { id: string }) => r.id === id
+			);
+			const revision = (await window.maestro.enterprise.managedState())?.policy?.appliedRevision;
+			return window.maestro.sessions.commitAgent({
+				operation: op,
+				record: { ...record, id: `e2e-accept-${op}`, name: `E2E Accept ${op}` },
+				expectedPolicyRevision: revision ?? null,
+			} as Parameters<typeof window.maestro.sessions.commitAgent>[0]);
+		},
+		{ id: agentId, op: operation }
+	);
+}
+
 test.describe(`Electron acceptance cases (${MANAGED_MODE} mode)`, () => {
 	acceptance('electron.enrollment-revoke', async (ctx) => {
 		const { page } = ctx;
@@ -248,13 +291,7 @@ test.describe(`Electron acceptance cases (${MANAGED_MODE} mode)`, () => {
 		if (!endpointMode) await expectStubProvider(page, ctx.stub);
 		const agent = await createAgent(page, provider, 'E2E Accept Standalone', ctx.projectDir);
 		// Edit through the Left Bar's Edit Agent: no managed notice on a standalone host.
-		await page
-			.locator('[data-nav-key]')
-			.filter({ hasText: agent.name })
-			.first()
-			.click({ button: 'right' });
-		await page.getByRole('button', { name: 'Edit Agent...' }).click();
-		const dialog = page.getByRole('dialog', { name: `Edit Agent: ${agent.name}` });
+		const dialog = await openEditAgent(page, agent.name);
 		await expect(dialog.getByTestId('managed-choices-notice')).toHaveCount(0);
 		await dialog.getByLabel('Agent Name').fill('E2E Accept Standalone Edited');
 		await dialog.getByRole('button', { name: 'Save Changes' }).click();
@@ -341,6 +378,175 @@ test.describe(`Electron acceptance cases (${MANAGED_MODE} mode)`, () => {
 			'the forged create is not on disk': !names().includes('E2E Accept Forged'),
 		};
 		const effect = observeOnDisk({ before: before.map((r) => r.name), after: names() }, checks);
+		ctx.observe('effect', effect);
+		expect(effect.problems).toEqual([]);
+	});
+
+	acceptance('electron.interactive-run-controls', async (ctx) => {
+		const { page } = ctx;
+		if (MANAGED_MODE === 'fixture') {
+			await expectStubProvider(page, ctx.stub);
+			const agent = await createAgent(
+				page,
+				FIXTURE_PROVIDER,
+				'E2E Accept Controls',
+				ctx.projectDir
+			);
+			await enroll(page, (await ctx.fixtureEndpoint()).socketPath);
+			const run = await expectRefusedSend(ctx, agent, 'controls turn');
+			const word = await run.root.getAttribute('data-run-word');
+			// "Send again" asks the host again and is refused again; nothing launches.
+			if (word !== 'unknown') {
+				await run.action(RUN_ACTION.retry).click();
+				await dismissErrorDialog(page);
+				await expect(run.root).toHaveAttribute('data-run-word', word!);
+				expect(ctx.stub.sawPrompt('controls turn')).toBe(false);
+				expect(ledgerLeases(ctx.dataDir)).toEqual([]);
+			}
+			return;
+		}
+		const inputs = readRunEndpointInputs();
+		await enroll(page, inputs.socketPath, inputs);
+		const agent = await createAgent(
+			page,
+			inputs.approvedProvider,
+			'E2E Accept Controls',
+			ctx.projectDir
+		);
+		await approvedTurn(ctx, agent);
+		// Stop: the long turn is stopped under its lease and the ledger names the stop.
+		const run = runState(page);
+		await sendTurn(page, agent.name, inputs.longPrompt);
+		await expect(run.action(RUN_ACTION.stop)).toBeVisible({ timeout: 60_000 });
+		await run.action(RUN_ACTION.stop).click();
+		await expect(run.root).not.toHaveAttribute('data-run-word', /^(admitted|running)$/, {
+			timeout: 60_000,
+		});
+		const stopped = (await activeTabManaged(page, agent.id)).managedRun!.leaseId;
+		const receipt = observeLedgerReceipt(ledgerFile(ctx.dataDir), stopped);
+		const effect = observeOnDisk(
+			{ leaseId: stopped, effect: (receipt.detail as { effect?: unknown }).effect },
+			{ 'the stopped lease ended in the ledger': receipt.observed }
+		);
+		ctx.observe('effect', effect);
+		expect(effect.problems).toEqual([]);
+	});
+
+	acceptance('electron.agent-edit-clone-import', async (ctx) => {
+		const { page } = ctx;
+		const endpointMode = MANAGED_MODE === 'endpoint';
+		const inputs = endpointMode ? readRunEndpointInputs() : null;
+		if (!endpointMode) await expectStubProvider(page, ctx.stub);
+		const agent = await createAgent(
+			page,
+			inputs?.approvedProvider ?? FIXTURE_PROVIDER,
+			'E2E Accept Edit',
+			ctx.projectDir
+		);
+		await enroll(
+			page,
+			inputs?.socketPath ?? (await ctx.fixtureEndpoint()).socketPath,
+			inputs ?? undefined
+		);
+		const onDisk = () => diskAgents(ctx.dataDir).find((r) => r.id === agent.id);
+		const names = () => diskAgents(ctx.dataDir).map((r) => r.name);
+		const dialog = await openEditAgent(page, agent.name);
+		let checks: Record<string, boolean>;
+		if (!endpointMode) {
+			// A governed choice (the working directory): refused by name, the draft stays.
+			const elsewhere = path.join(ctx.projectDir, 'elsewhere');
+			fs.mkdirSync(elsewhere);
+			await dialog.locator('#edit-agent-working-dir-input').fill(elsewhere);
+			await dialog.getByRole('button', { name: 'Save Changes' }).click();
+			await expect(dialog.getByTestId('managed-refusal')).toContainText('Not saved:');
+			await expect(dialog.locator('#edit-agent-working-dir-input')).toHaveValue(elsewhere);
+			await dialog.getByRole('button', { name: 'Cancel' }).click();
+			// Clone and import share the same validation and are refused the same way.
+			expect(await commitCopy(page, agent.id, 'clone')).toMatchObject({ ok: false });
+			expect(await commitCopy(page, agent.id, 'import')).toMatchObject({ ok: false });
+			checks = {
+				'the refused edit left the working directory on disk': onDisk()?.cwd === ctx.projectDir,
+				'the refused clone is not on disk': !names().includes('E2E Accept clone'),
+				'the refused import is not on disk': !names().includes('E2E Accept import'),
+				'nothing was written into the new directory': listDir(elsewhere).length === 0,
+			};
+		} else {
+			await dialog.getByLabel('Agent Name').fill('E2E Accept Edited');
+			await dialog.getByRole('button', { name: 'Save Changes' }).click();
+			await expect(dialog).toBeHidden();
+			await expect.poll(() => onDisk()?.name).toBe('E2E Accept Edited');
+			expect(await commitCopy(page, agent.id, 'clone')).toMatchObject({ ok: true });
+			expect(await commitCopy(page, agent.id, 'import')).toMatchObject({ ok: true });
+			await expect.poll(names).toEqual(expect.arrayContaining(['E2E Accept clone']));
+			checks = {
+				'the approved edit is on disk': onDisk()?.name === 'E2E Accept Edited',
+				'the approved clone is on disk': names().includes('E2E Accept clone'),
+				'the approved import is on disk': names().includes('E2E Accept import'),
+			};
+		}
+		const effect = observeOnDisk({ agentId: agent.id, after: names() }, checks);
+		ctx.observe('effect', effect);
+		expect(effect.problems).toEqual([]);
+	});
+
+	acceptance('electron.live-policy-revoke', async (ctx) => {
+		const { page } = ctx;
+		const endpointMode = MANAGED_MODE === 'endpoint';
+		const inputs = endpointMode ? readRunEndpointInputs() : null;
+		const endpoint = endpointMode ? null : await ctx.fixtureEndpoint();
+		await enroll(page, inputs?.socketPath ?? endpoint!.socketPath, inputs ?? undefined);
+		const name = 'E2E Accept Live';
+		const provider = inputs?.approvedProvider ?? FIXTURE_PROVIDER;
+		const dialog = await draftNewAgent(page, provider, name, ctx.projectDir);
+		const notice = dialog.getByTestId('managed-choices-notice');
+		const refreshPolicy = () => page.evaluate(() => window.maestro.enterprise.refreshPolicy());
+		const draftKept = async () => {
+			await expect(dialog.getByLabel('Agent Name')).toHaveValue(name);
+			await expect(dialog.getByPlaceholder('Select directory...')).toHaveValue(ctx.projectDir);
+		};
+		// Tightened: the endpoint moves its policy under the open form.
+		if (endpoint) {
+			endpoint.options.status = { desiredPolicyRevision: 4, appliedPolicyRevision: 4 };
+		} else runOperator(inputs!.tightenPolicy);
+		expect((await refreshPolicy()).status).toBe('ok');
+		await notice.getByRole('button', { name: 'Refresh policy' }).click();
+		if (endpoint) await expect(notice.getByTestId('managed-policy-revision')).toContainText('4');
+		await dialog.getByRole('button', { name: 'Create Agent' }).click();
+		await expect(dialog.getByTestId('managed-refusal')).toContainText('Not created:');
+		await expect(dialog.getByTestId('managed-refusal')).toHaveAttribute('role', 'alert');
+		await draftKept();
+		const tightened = !diskAgents(ctx.dataDir).some((r) => r.name === name);
+		if (inputs) {
+			// Restored: the same draft commits without being typed again.
+			runOperator(inputs.restorePolicy);
+			await refreshPolicy();
+			await notice.getByRole('button', { name: 'Refresh policy' }).click();
+			await dialog.getByRole('button', { name: 'Create Agent' }).click();
+			await expect(dialog).toBeHidden();
+			await expect.poll(() => diskAgents(ctx.dataDir).some((r) => r.name === name)).toBe(true);
+		}
+		// Revoked: the host withdraws the managed standing and says why.
+		if (endpoint) {
+			endpoint.options.registrationRequired = true;
+			endpoint.revokeRegistration();
+			endpoint.dropConnections();
+		} else runOperator(inputs!.revokeRegistration);
+		await refreshPolicy();
+		await expect
+			.poll(async () => (await managedState(page))?.standing, { timeout: 30_000 })
+			.not.toBe('managed');
+		const standing = await managedState(page);
+		expect(standing?.reason).toBeTruthy();
+		if (endpoint) await draftKept();
+		const restored = diskAgents(ctx.dataDir).some((r) => r.name === name);
+		const effect = observeOnDisk(
+			{ standing: standing?.standing, reason: standing?.reason, agents: diskAgents(ctx.dataDir) },
+			{
+				'the tightened create is not on disk': tightened,
+				...(inputs ? { 'the restored draft committed on disk': restored } : {}),
+				'no lease in the ledger': ledgerLeases(ctx.dataDir).length === 0,
+			}
+		);
 		ctx.observe('effect', effect);
 		expect(effect.problems).toEqual([]);
 	});
