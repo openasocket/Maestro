@@ -50,6 +50,7 @@ import {
 	deleteRemote,
 	deleteManyRemote,
 	existsRemote,
+	remotePathWouldBeReplaced,
 	countItemsRemote,
 	compressFolderRemote,
 	listTreeRemote,
@@ -283,6 +284,29 @@ const holdDelete = (
 	targetPaths: readonly string[],
 	actor: LocalEffectActor
 ) => holdDeleteEffect(authority, targetPaths, actor, 'FS');
+
+/**
+ * Hold a remote write that would replace what is at `remotePath` (a `mv` onto
+ * a taken name, an overwriting import) as the destructive `delete` naming it
+ * (MCOMP-21-11A), on top of the remote access remote-fs holds itself. Only
+ * under a local-effects ceiling: standalone no authority is installed and no
+ * extra SSH call is made. An unresolvable remote holds nothing here; the
+ * effect fails on its own lookup.
+ */
+async function holdRemoteReplacement(
+	authority: LocalEffectAuthority | null,
+	sshRemoteId: string,
+	remotePath: string,
+	actor: LocalEffectActor,
+	options: { source?: string } = {}
+): Promise<void> {
+	if (!authority) return;
+	const sshConfig = getSshRemoteById(sshRemoteId);
+	if (!sshConfig) return;
+	if (await remotePathWouldBeReplaced(remotePath, sshConfig, options)) {
+		await holdDelete(authority, [remotePath], actor);
+	}
+}
 
 export function registerFilesystemHandlers(deps: FilesystemHandlerDependencies = {}): void {
 	const localEffects = deps.localEffects ?? (() => null);
@@ -876,9 +900,14 @@ export function registerFilesystemHandlers(deps: FilesystemHandlerDependencies =
 
 	// Rename a file or folder (supports SSH remote)
 	ipcMain.handle('fs:rename', async (_, oldPath: string, newPath: string, sshRemoteId?: string) => {
-		// A local rename onto a taken name replaces it; held outside the try so a
-		// refusal is not wrapped as a failed rename (a remote write is held by remote-fs).
-		if (!sshRemoteId) {
+		// A rename onto a taken name replaces it; held outside the try so a
+		// refusal is not wrapped as a failed rename. Remote: the replacement is
+		// held as a delete on top of the remote write remote-fs holds.
+		if (sshRemoteId) {
+			await holdRemoteReplacement(localEffects(), sshRemoteId, newPath, callingLocalEffectActor(), {
+				source: oldPath,
+			});
+		} else {
 			await holdReplacementEffect(localEffects(), [newPath], callingLocalEffectActor(), 'FS', {
 				source: oldPath,
 			});
@@ -920,7 +949,14 @@ export function registerFilesystemHandlers(deps: FilesystemHandlerDependencies =
 		) => {
 			// An overwriting local import replaces what is at the destination: held
 			// before the copy, outside the try so a refusal is not wrapped as a failed copy.
-			if (options?.overwrite && !options.sshRemoteId) {
+			if (options?.overwrite && options.sshRemoteId) {
+				await holdRemoteReplacement(
+					localEffects(),
+					options.sshRemoteId,
+					destPath,
+					callingLocalEffectActor()
+				);
+			} else if (options?.overwrite) {
 				await holdReplacementEffect(localEffects(), [destPath], callingLocalEffectActor(), 'FS');
 			}
 			try {

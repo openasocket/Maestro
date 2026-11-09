@@ -1273,6 +1273,41 @@ export async function writeFileRemote(
 }
 
 /**
+ * Whether a write onto `remotePath` on the remote would REPLACE an entry there
+ * (MCOMP-21-11A): something is at the path, a dangling symlink included (`-L`,
+ * which `existsRemote`'s `test -e` misses). `source` is the path a move
+ * starts from: a target that is the same entry (a case-only rename on a
+ * case-insensitive volume) replaces nothing. A check that fails, or answers
+ * anything unexpected, counts as replaced, so an unreadable target is held
+ * rather than overwritten unheld. Reads only, held as a `read` on the remote.
+ */
+export async function remotePathWouldBeReplaced(
+	remotePath: string,
+	sshRemote: SshRemoteConfig,
+	options: { source?: string } = {},
+	deps: RemoteFsDeps = defaultDeps
+): Promise<boolean> {
+	if (options.source !== undefined && options.source === remotePath) return false;
+	const target = shellEscapeRemotePath(remotePath);
+	const sameEntry =
+		options.source !== undefined
+			? `[ ! -L ${target} ] && [ ${target} -ef ${shellEscapeRemotePath(options.source)} ] && echo SAME && exit 0; `
+			: '';
+	const remoteCommand = `if [ -e ${target} ] || [ -L ${target} ]; then ${sameEntry}echo PRESENT; else echo ABSENT; fi`;
+
+	const result = await execRemoteCommand(
+		sshRemote,
+		remoteCommand,
+		read('replaced', remotePath),
+		deps
+	);
+	if (result.exitCode !== 0) return true;
+	const answer = result.stdout.trim();
+	if (answer === 'ABSENT' || answer === 'SAME') return false;
+	return true;
+}
+
+/**
  * Check if a path exists on a remote host via SSH.
  *
  * @param remotePath Path to check
