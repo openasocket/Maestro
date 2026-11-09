@@ -1588,6 +1588,24 @@
 				"semanticConflictsForC": [],
 				"notes": "No new semantic conflict. With the trailing binding declared, the runner binding from 00R06 is typed again; 00C type-checks the other HeadlessAgentRunner callers (Relay continuity passes writerLeaseHeld and turn only).",
 				"unmergedAfter": 82
+			},
+			"MCOMP-33-00R08": {
+				"resolvedAt": "2026-11-09",
+				"resolvedBy": "Maestro-Claude",
+				"files": ["src/main/plugins/plugin-manager.ts", "src/main/ipc/handlers/plugins.ts"],
+				"method": "Three hunks resolved by a shape-asserting script (Working/mcomp-33-00r08/resolve.mjs, both sides read in full); staged through merge-tool.mjs stage (prettier exit 0). Suites run in the worktree: plugin-manager-hot-reload, -invoke-tool, -trust-gate, -update, -verify 171 of 171 pass; ipc/plugins-handlers.test.ts cannot transform yet because it imports src/shared/maestro-lib/launch/agent-args.ts, still unmerged (MCOMP-33-00R21), not a defect of these files; its update cases (expected id forwarding and the MRC2-06-04 managed set) both match the merged handler.",
+				"hunks": {
+					"src/main/plugins/plugin-manager.ts": [
+						"installDirectory body: upstream's queued mutatePlugin closure kept whole (lstat source-root check, queued manifest re-validation, retireCachedAdmission, refreshRegistry reconciliation and failure cleanup); the integration's managed plugin-set admission (admit?.(manifest), MRC2-06-04) re-applied inside the closure right after the already-installed check, before anything is copied.",
+						"install(): upstream removed the isPackedPluginArchivePath directory shortcut (resolvePluginSourcePath plus an lstat isDirectory branch now covers directories and plugin.json); took the empty upstream side and passed `admit` on upstream's directory branch (outside the hunk, where upstream called installDirectory(resolvedSource) without it), so a directory install stays held by the managed set like an archive install."
+					],
+					"src/main/ipc/handlers/plugins.ts": [
+						"plugins:update handler: upstream's (sourcePath, expectedId) signature and its PLUGIN_ID_PATTERN validation of expectedId, then the integration's holdPluginSetWrite through heldPluginChange({ op: 'update' }) before manager.update(sourcePath, expectedId)."
+					]
+				},
+				"semanticConflictsForC": [],
+				"notes": "No new semantic conflict. The guard outside the hunk (admit on the directory branch) is a semantic fix the textual merge would have dropped silently. PluginSetChange's update variant carries no plugin id, so the hold stays { op: 'update' }; install and uninstall holds were auto-merged unchanged.",
+				"unmergedAfter": 80
 			}
 		}
 	}
