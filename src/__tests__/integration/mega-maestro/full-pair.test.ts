@@ -46,10 +46,19 @@ import { vibesEvidenceOf } from '../../../main/enterprise/vibes';
 import { canonicalJson } from '../../../shared/canonicalJson';
 import * as Lib from '../../../shared/maestro-lib/index';
 import {
+	createLocalHostAuthority,
+	dispatchSnapshotDigest,
+	type AdmissionRequest,
+	type PolicyDecision,
+} from '../../../shared/maestro-lib/managed/authority';
+import {
 	ENDPOINT_COMMAND_ACTIONS,
 	type ManagedRuntimeCommand,
 } from '../../../shared/maestro-lib/managed/commands';
-import type { ManagedEnrollmentStatus } from '../../../shared/maestro-lib/managed/endpoint-port';
+import type {
+	ManagedEnrollmentStatus,
+	PreparedExecutionPort,
+} from '../../../shared/maestro-lib/managed/endpoint-port';
 import {
 	lifecycleAdmissionOfLease,
 	lifecycleLineageOf,
@@ -58,7 +67,7 @@ import {
 	type ManagedInventoryEvent,
 	type ManagedLifecycleEvent,
 } from '../../../shared/maestro-lib/managed/events';
-import type { ManagedOrigin } from '../../../shared/maestro-lib/managed/types';
+import { managedAuthorityId } from '../../../shared/maestro-lib/managed/host-adapter';
 import { readRuntimePin } from '../../../../scripts/package-mega-maestro-runtime.mjs';
 import { fakeAnchor, fakeSeal } from '../../main/enterprise/fakeCustody';
 import { startFakeEndpoint, type FakeEndpoint } from '../../main/enterprise/fakeEndpoint';
@@ -96,18 +105,9 @@ const KNOWN_DEPENDENCIES = [
 	'maestro-runtime',
 	'linux-host',
 	'linux-image',
+	'linux-runtime',
 	...PRODUCERS,
 ];
-/** The sibling bridge's source vocabulary for each managed origin, as the adapter puts it on the wire. */
-const WIRE_SOURCE: Record<ManagedOrigin, string> = {
-	desktop: 'ux',
-	cli: 'cli',
-	cue: 'cue',
-	headless: 'headless',
-	enterprise: 'headless',
-	embedded: 'headless',
-};
-
 const standing = (fresh: readonly PairProducerId[]) =>
 	Object.fromEntries(
 		PRODUCERS.map((id) => [id, { fresh: fresh.includes(id), detail: `test: ${id}` }])
@@ -118,14 +118,71 @@ const stepsOf = (run: JourneyRun, id: string) =>
 const outcomeOf = (run: JourneyRun, id: string, step: string) =>
 	run.journeys.find((j) => j.id === id)!.steps.find((s) => s.name === step)?.outcome;
 
+/** The actor a declared producer is bound to: v1 registration carries none (CP-01/CP-04), so the test supplies it. */
+const PAIR_ACTOR = 'actor-pair';
+
+/**
+ * A declared local PREPARED/1 producer: a test double, never what the real pair
+ * runner installs (the endpoint publishes no prepared protocol yet). It decides
+ * from `state.decision`, keeps every request it is handed whole, and labels its
+ * receipt `prepared-pair`: a broker dispatch is never a local launch permit.
+ */
+function preparedProducer(now: () => number) {
+	const state = {
+		decision: 'allow' as 'allow' | 'deny' | 'unavailable',
+		requests: [] as AdmissionRequest[],
+	};
+	const create = (authorityId: string): PreparedExecutionPort => {
+		const authority = createLocalHostAuthority({
+			authorityId,
+			now,
+			newId: () => `prepared-lease-${state.requests.length}`,
+			decide: (request): PolicyDecision => {
+				const { policyRevision } = request.policy;
+				if (state.decision === 'deny')
+					return { decision: 'deny', reason: 'fixture policy refused the launch', policyRevision };
+				if (state.decision === 'unavailable')
+					return { decision: 'unavailable', reason: 'fixture producer could not decide' };
+				return {
+					decision: 'allow',
+					policyRevision,
+					receipt: {
+						decisionId: `decision-${state.requests.length}`,
+						requestDigest: dispatchSnapshotDigest(request.snapshot),
+						brokerId: 'prepared-pair',
+						policyRevision: policyRevision ?? 0,
+					},
+				};
+			},
+		});
+		return {
+			...authority,
+			version: 1,
+			admit: async (request) => {
+				state.requests.push(request);
+				return authority.admit(request);
+			},
+		};
+	};
+	return { state, create };
+}
+
 describe('full pair: the journeys catalog against the labeled endpoint double', () => {
 	let root: string;
 	let pair: PairComposition;
+	let producer: ReturnType<typeof preparedProducer>;
 	let runs = 0;
 
 	beforeEach(async () => {
 		root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'full-pair-')));
-		pair = await composePair({ dir: root });
+		producer = preparedProducer(() => Date.now());
+		pair = await composePair({
+			dir: root,
+			prepared: {
+				actorId: PAIR_ACTOR,
+				create: (identity) => producer.create(managedAuthorityId(identity)),
+			},
+		});
 	});
 	afterEach(async () => {
 		await pair.close();
@@ -139,8 +196,9 @@ describe('full pair: the journeys catalog against the labeled endpoint double', 
 
 	/**
 	 * The catalog over the fixture's port. The identity record is the fixture's on
-	 * the real clock (the runner's default, so its registration is live); the
-	 * approval is the test's own and labeled: the double has no approval producer.
+	 * the real clock (the runner's default, so its registration is live) with the
+	 * declared producer's actor; the approval is the test's own and labeled: the
+	 * double has no approval producer.
 	 */
 	async function journeys(overrides: Partial<JourneyDeps> = {}) {
 		const workDir = path.join(root, `journeys-${++runs}`);
@@ -151,6 +209,10 @@ describe('full pair: the journeys catalog against the labeled endpoint double', 
 			installation: PAIR_INSTALLATION,
 			identity: (status) => ({
 				...pairIdentityRecord(pair.fake.socketPath, Date.now()),
+				registration: {
+					...pairIdentityRecord(pair.fake.socketPath, Date.now()).registration!,
+					actorId: PAIR_ACTOR,
+				},
 				policy: {
 					desiredRevision: status?.desiredPolicyRevision ?? null,
 					appliedRevision: status?.appliedPolicyRevision ?? null,
@@ -161,6 +223,7 @@ describe('full pair: the journeys catalog against the labeled endpoint double', 
 			workDir,
 			desktop: { createProcessSpawnAuthority },
 			approval: async () => true,
+			actor: { kind: 'human', id: PAIR_ACTOR },
 			timeoutMs: 10_000,
 			...overrides,
 		});
@@ -201,11 +264,11 @@ describe('full pair: the journeys catalog against the labeled endpoint double', 
 				payload: { outcome: 'attached', management: 'managed' },
 			});
 
-			// The adapter authority admits on the broker's decision; the raw operation answers the same vocabulary.
+			// The adapter authority admits on the declared producer's decision; the raw operation still answers the broker's vocabulary.
 			expect(outcomeOf(run, 'library.admit', 'execution.admit')).toMatchObject({
 				state: 'admitted',
 				policyRevision: PAIR_POLICY_REVISION,
-				receipt: { decisionId: 'decision-1', brokerId: 'broker-pair' },
+				receipt: { decisionId: 'decision-1', brokerId: 'prepared-pair' },
 			});
 			expect(outcomeOf(run, 'library.admit', 'execution.raw')).toMatchObject({
 				status: 'ok',
@@ -228,11 +291,11 @@ describe('full pair: the journeys catalog against the labeled endpoint double', 
 				release: { outcome: 'exited', exitCode: 0 },
 			});
 
-			// The desktop port: managed standing, an in-process chat turn admitted on a broker decision.
+			// The desktop port: managed standing, an in-process chat turn admitted on the producer's decision.
 			expect(outcomeOf(run, 'desktop.admit', 'desktop.standing')).toBe('managed');
 			expect(outcomeOf(run, 'desktop.admit', 'desktop.admit')).toMatchObject({
 				state: 'admitted',
-				receipt: { decisionId: 'decision-4' },
+				receipt: { decisionId: 'decision-3', brokerId: 'prepared-pair' },
 			});
 
 			// The workflow claim: the endpoint serves no owner operation, so no fence, no admission, no directory.
@@ -244,9 +307,14 @@ describe('full pair: the journeys catalog against the labeled endpoint double', 
 			});
 			expect(fs.existsSync(path.join(workDir, 'desktop-workflow'))).toBe(false);
 
-			// The wire: four execution requests in the broker's vocabulary, each origin under its source, no command line.
+			// The producer was handed every launch whole, each under its origin; the wire carries only the raw request, no command line.
+			expect(producer.state.requests.map((r) => r.context.origin)).toEqual([
+				'headless',
+				'headless',
+				'desktop',
+			]);
 			const sent = executionCalls();
-			expect(sent.map((p) => p.source)).toEqual(['headless', 'headless', 'headless', 'ux']);
+			expect(sent.map((p) => p.requestId)).toEqual(['pair-raw-1']);
 			expect(sent.every((p) => Array.isArray(p.arguments) && p.arguments.length === 0)).toBe(true);
 			const wire = JSON.stringify(pair.fake.calls);
 			expect(wire).not.toContain(process.execPath);
@@ -303,16 +371,14 @@ describe('full pair: the journeys catalog against the labeled endpoint double', 
 	);
 
 	it(
-		'deny before effect: a policy refusal at the broker and an undecided answer each leave the work directory empty and the journey failed, never passed',
+		'deny before effect: a policy refusal at the producer and an undecided answer each leave the work directory empty and the journey failed, never passed',
 		async () => {
-			const cases: Array<[string, string, string]> = [
-				['policy_denied', 'denied', 'policy-denied'],
-				['unsupported_capability', 'unavailable', 'runtime-unavailable'],
+			const cases: Array<['deny' | 'unavailable', string, string]> = [
+				['deny', 'denied', 'policy-denied'],
+				['unavailable', 'unavailable', 'runtime-unavailable'],
 			];
-			for (const [reason, state, code] of cases) {
-				pair.fake.options.operations = {
-					execution: () => ({ outcome: 'denied', reason }),
-				};
+			for (const [decision, state, code] of cases) {
+				producer.state.decision = decision;
 				const { run, workDir } = await journeys({ surfaces: ['library', 'headless'] });
 				expect(statusOf(run)).toMatchObject({
 					'library.handshake': 'passed',
@@ -339,7 +405,7 @@ describe('full pair: the journeys catalog against the labeled endpoint double', 
 		RUN_TIMEOUT_MS
 	);
 
-	it('origins and delegation: every managed origin is admitted under its wire source; a chain or grant reference is never stripped (CP-03) and no request leaves', async () => {
+	it('origins and delegation: every managed origin reaches the producer under its own name; a chain or grant reference is never stripped and no request leaves', async () => {
 		expect(await pair.attach()).toBe('ok');
 		const snapshot = Lib.buildDispatchSnapshot(
 			{ command: process.execPath, args: ['-e', 'process.exit(0)'], cwd: root, env: {} },
@@ -347,7 +413,10 @@ describe('full pair: the journeys catalog against the labeled endpoint double', 
 		);
 		const admit = (overrides: Parameters<typeof verifiedContext>[1]) =>
 			pair.host.authority.admit({
-				context: verifiedContext(pair.verifier, overrides),
+				context: verifiedContext(pair.verifier, {
+					actor: { kind: 'human', id: PAIR_ACTOR },
+					...overrides,
+				}),
 				snapshot,
 				policy: pair.host.policy(),
 			});
@@ -355,37 +424,39 @@ describe('full pair: the journeys catalog against the labeled endpoint double', 
 		for (const origin of Lib.MANAGED_ORIGINS) {
 			const admitted = await admit({ origin });
 			expect(admitted.state, origin).toBe('admitted');
-			expect(executionCalls().at(-1)).toMatchObject({
-				source: WIRE_SOURCE[origin],
-				provider: SYNTHETIC_PROVIDER_ID,
+			expect(producer.state.requests.at(-1)?.context, origin).toMatchObject({
+				origin,
 				policyRevision: PAIR_POLICY_REVISION,
 			});
+			expect(producer.state.requests.at(-1)?.snapshot.provider).toBe(SYNTHETIC_PROVIDER_ID);
 		}
-		expect(executionCalls()).toHaveLength(Lib.MANAGED_ORIGINS.length);
-		// A parented run carries its parent on the wire: the lineage is bound, not dropped.
+		expect(producer.state.requests).toHaveLength(Lib.MANAGED_ORIGINS.length);
+		// A parented run carries its parent to the producer: the lineage is bound, not dropped.
 		const child = await admit({
 			origin: 'cue',
 			identity: { parentRunId: 'run-parent', rootRunId: 'run-parent' },
 		});
 		expect(child.state).toBe('admitted');
-		expect(executionCalls().at(-1)).toMatchObject({ source: 'cue', parentRunId: 'run-parent' });
+		expect(producer.state.requests.at(-1)?.context).toMatchObject({
+			origin: 'cue',
+			identity: { parentRunId: 'run-parent', rootRunId: 'run-parent' },
+		});
 
-		// A delegation chain or a grant reference: the endpoint binds neither, so no decision and no request.
-		const before = executionCalls().length;
+		// A delegation chain or a grant reference: no authenticated v2 negotiation binds either, so no decision and no request.
+		const before = producer.state.requests.length;
 		const chained = await admit({
 			delegation: { chain: [{ kind: 'agent', id: 'agent-initiator' }], grantRef: null },
 		});
-		expect(chained).toMatchObject({
+		const unnegotiated = {
 			state: 'unavailable',
 			code: 'runtime-unavailable',
-			message: expect.stringContaining('a delegation chain of 1'),
-		});
+			message: expect.stringContaining('No authenticated v2 workflow/delegation negotiation'),
+		};
+		expect(chained).toMatchObject(unnegotiated);
 		const granted = await admit({ delegation: { chain: [], grantRef: 'grant-1' } });
-		expect(granted).toMatchObject({
-			state: 'unavailable',
-			message: expect.stringMatching(/a grant reference.*CP-03/),
-		});
-		expect(executionCalls()).toHaveLength(before);
+		expect(granted).toMatchObject(unnegotiated);
+		expect(producer.state.requests).toHaveLength(before);
+		expect(executionCalls()).toEqual([]);
 		pair.host.authority.revokeAll('test over');
 		expect(pair.host.authority.live()).toEqual([]);
 	});
@@ -396,6 +467,7 @@ describe('full pair: the journeys catalog against the labeled endpoint double', 
 			const first = await journeys({ surfaces: ['library'] });
 			expect(statusOf(first.run)['library.admit']).toBe('passed');
 			const requests = executionCalls().length;
+			const prepared = producer.state.requests.length;
 
 			// The daemon revokes this process's registration: the handshake is refused and no producer answers the challenge.
 			pair.fake.revokeRegistration();
@@ -422,6 +494,7 @@ describe('full pair: the journeys catalog against the labeled endpoint double', 
 			});
 			expect(readSyntheticEffects(path.join(revoked.workDir, 'headless'))).toBeNull();
 			expect(executionCalls()).toHaveLength(requests);
+			expect(producer.state.requests).toHaveLength(prepared);
 			expect(revoked.run.leases).toBe(0);
 			for (const result of revoked.run.journeys) {
 				const assessed = assessJourney(result, standing(['CP-01', 'CP-02', 'CP-03']));
@@ -439,10 +512,49 @@ describe('full pair: the journeys catalog against the labeled endpoint double', 
 				'library.handshake': 'passed',
 				'library.admit': 'passed',
 			});
-			expect(executionCalls()).toHaveLength(requests + 2);
+			// The admission went to the producer; only the raw request went on the wire.
+			expect(producer.state.requests).toHaveLength(prepared + 1);
+			expect(executionCalls()).toHaveLength(requests + 1);
 		},
 		RUN_TIMEOUT_MS
 	);
+
+	it('without a prepared producer: the same registered, attached host refuses every launch runtime-unavailable by name (PREPARED/1) and no request leaves', async () => {
+		const bareDir = path.join(root, 'bare');
+		fs.mkdirSync(bareDir);
+		const bare = await composePair({ dir: bareDir });
+		try {
+			expect(await bare.attach()).toBe('ok');
+			expect(bare.host.policy().policyRevision).toBe(PAIR_POLICY_REVISION);
+			for (const origin of Lib.MANAGED_ORIGINS) {
+				const outcome = await bare.host.authority.admit({
+					context: verifiedContext(bare.verifier, {
+						origin,
+						actor: { kind: 'human', id: PAIR_ACTOR },
+					}),
+					snapshot: Lib.buildDispatchSnapshot(
+						{ command: process.execPath, args: ['-e', 'process.exit(0)'], cwd: bareDir, env: {} },
+						{ provider: SYNTHETIC_PROVIDER_ID, model: Lib.SYNTHETIC_HARNESS_MODEL, resourceIds: [] }
+					),
+					policy: bare.host.policy(),
+				});
+				expect(outcome, origin).toMatchObject({
+					state: 'unavailable',
+					code: 'runtime-unavailable',
+					message: expect.stringContaining(
+						'No negotiated prepared execution authority (PREPARED/1)'
+					),
+				});
+			}
+			expect(bare.host.authority.live()).toEqual([]);
+			expect(
+				bare.fake.calls.filter((c) => (c.body as { operation?: string }).operation === 'execution')
+			).toEqual([]);
+			expect(producer.state.requests).toEqual([]);
+		} finally {
+			await bare.close();
+		}
+	});
 });
 
 describe('full pair: the real endpoint through the harness script', () => {
@@ -662,6 +774,7 @@ describe('full pair: fleet evidence, usage, VIBES, TRACE, governance, commands a
 	const inboxRequests: { action: { kind: string; text?: string }; idempotencyKey: string }[] = [];
 	const repliesSeen: string[] = [];
 	let decisions = 0;
+	const fleetProducer = preparedProducer(now);
 	let live: Awaited<ReturnType<typeof admitChild>>;
 	let second: Awaited<ReturnType<typeof admitChild>>;
 	let lineage: LifecycleLineage;
@@ -776,7 +889,14 @@ describe('full pair: fleet evidence, usage, VIBES, TRACE, governance, commands a
 			anchor: fakeAnchor({ value: null }),
 			platform: 'darwin',
 			now,
-			openPort: (socketPath) => createLocalEndpointClient({ socketPath, timeoutMs: 1_000 }),
+			// The declared local PREPARED/1 producer, on every port the lifecycle opens.
+			openPort: (socketPath) => {
+				const port = createLocalEndpointClient({ socketPath, timeoutMs: 1_000 });
+				Object.defineProperty(port, 'preparedExecution', {
+					value: fleetProducer.create(service.host.authority.authorityId),
+				});
+				return port;
+			},
 		});
 		await service.identity.write({
 			installationId: service.installation.installationId,
@@ -844,7 +964,30 @@ describe('full pair: fleet evidence, usage, VIBES, TRACE, governance, commands a
 		if (!verified.ok) throw new Error(verified.problems.join('; '));
 		return verified.context;
 	};
-	/** Admit through the real bridge (the double answers the broker decision) and start a REAL child under the lease; the test plays the sink. */
+	/**
+	 * The registration names no actor (CP-01/CP-04) and a PREPARED/1 host admits
+	 * only the registered human actor: the test supplies the actor id in custody
+	 * for one admission, says so, and takes it back, so the commands case below
+	 * still sees the real service's registration with none.
+	 */
+	async function asRegisteredActor<T>(fn: () => Promise<T>): Promise<T> {
+		const withActorId = async (actorId: string | null) => {
+			const held = service.identity.read();
+			if (held.status !== 'ok' || !held.record.registration)
+				throw new Error('expected the registered record');
+			await service.identity.write({
+				...held.record,
+				registration: { ...held.record.registration, actorId },
+			});
+		};
+		await withActorId('actor-pair');
+		try {
+			return await fn();
+		} finally {
+			await withActorId(null);
+		}
+	}
+	/** Admit through the real bridge (the declared producer decides) and start a REAL child under the lease; the test plays the sink. */
 	async function admitChild(context: ReturnType<typeof verify>) {
 		const admitted = await service.spawnAuthority.authority.admit({
 			context,
@@ -947,10 +1090,16 @@ describe('full pair: fleet evidence, usage, VIBES, TRACE, governance, commands a
 		expect(service.content.install(CEILING).ok).toBe(true);
 		expect(service.content.standing()).toMatchObject({ mode: 'managed', ok: true });
 
-		const context = verify('run-a', null);
-		lineage = lifecycleLineageOf(context);
-		live = await admitChild(context);
-		expect(live.lease.decision).toMatchObject({ decisionId: 'decision-1' });
+		live = await asRegisteredActor(async () => {
+			const context = verify('run-a', null);
+			lineage = lifecycleLineageOf(context);
+			return admitChild(context);
+		});
+		expect(live.lease.decision).toMatchObject({
+			decisionId: 'decision-1',
+			brokerId: 'prepared-pair',
+		});
+		expect(fleetProducer.state.requests).toHaveLength(1);
 		expect(service.dispatch.receipt(live.lease.leaseId)?.effect.state).toBe('bound');
 		admission = lifecycleAdmissionOfLease(live.lease);
 
@@ -1007,14 +1156,13 @@ describe('full pair: fleet evidence, usage, VIBES, TRACE, governance, commands a
 		expect(capture.facts().every((f) => f.completeness === 'pending_upload')).toBe(true);
 		expect(JSON.stringify(capture.facts())).not.toContain('CANARY');
 		expect(contentDeliveryStanding().available).toBe(false);
-		// Nothing on the wire installed, carried or delivered content: the handshake, attachments, notices, inbox and one execution so far.
+		// Nothing on the wire installed, carried or delivered content: the handshake, attachments, notices and inbox so far; the launch was the producer's, so no execution request left.
 		const handshake = [
 			'/v1/registration/challenge',
 			'/v1/registration/redeem',
 			'attachment',
 			'noticeList',
 			'inbox',
-			'execution',
 		];
 		expect(wireOperations()).toEqual(new Set(handshake));
 	});
@@ -1212,8 +1360,12 @@ describe('full pair: fleet evidence, usage, VIBES, TRACE, governance, commands a
 		]);
 
 		// cancel_run: a second real child under its own run, admitted through the real bridge; the lease is revoked and the process ends.
-		second = await admitChild(verify('run-c', null));
-		expect(second.lease.decision).toMatchObject({ decisionId: 'decision-2' });
+		second = await asRegisteredActor(() => admitChild(verify('run-c', null)));
+		expect(second.lease.decision).toMatchObject({
+			decisionId: 'decision-2',
+			brokerId: 'prepared-pair',
+		});
+		expect(service.lifecycle.status().identity.record?.registration?.actorId).toBeNull();
 		expect(alive(second.child.pid!)).toBe(true);
 		expect(service.dispatch.receipt(second.lease.leaseId)?.effect.state).toBe('bound');
 		const cancelled = await harness.receive(command({ commandId: 'cmd-cancel-1' }));

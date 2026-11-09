@@ -192,6 +192,13 @@ export interface JourneyDeps {
 	approval?(challenge: unknown): Promise<boolean>;
 	timeoutMs?: number;
 	now?: () => number;
+	/**
+	 * The principal the library and headless journeys run as. A PREPARED/1 host
+	 * admits only the registration's human actor, so a caller whose port carries a
+	 * prepared producer names that actor here; absent, the labeled service
+	 * principal, which such a host refuses `unauthenticated` by name.
+	 */
+	actor?: ManagedPrincipalRef;
 }
 
 export interface JourneyStep {
@@ -256,7 +263,7 @@ export async function runPairJourneys(deps: JourneyDeps): Promise<JourneyRun> {
 			parentRunId: null,
 		};
 	};
-	const actor: ManagedPrincipalRef = { kind: 'service', id: 'pair-journeys' };
+	const actor: ManagedPrincipalRef = deps.actor ?? { kind: 'service', id: 'pair-journeys' };
 	const workDir = (name: string): string => {
 		const dir = path.join(deps.workDir, name);
 		fs.mkdirSync(dir, { recursive: true });

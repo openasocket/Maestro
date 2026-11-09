@@ -23,10 +23,15 @@ import { telemetryReportOf } from '../../../main/enterprise/telemetry';
 import type { Anchor } from '../../../main/utils/keyring-anchor';
 import {
 	buildDispatchSnapshot,
+	createLocalHostAuthority,
+	dispatchSnapshotDigest,
 	type AdmissionOutcome,
 	type DispatchLease,
 } from '../../../shared/maestro-lib/managed/authority';
-import { LOCAL_ENDPOINT_PROTOCOL } from '../../../shared/maestro-lib/managed/endpoint-port';
+import {
+	LOCAL_ENDPOINT_PROTOCOL,
+	type PreparedExecutionPort,
+} from '../../../shared/maestro-lib/managed/endpoint-port';
 import type { LifecycleFact } from '../../../shared/maestro-lib/managed/events';
 import { fakeAnchor, fakeSeal } from '../../main/enterprise/fakeCustody';
 import {
@@ -84,10 +89,57 @@ function doubleOptions(now: () => number): Double {
 	};
 }
 
-/** The real desktop composition over the injected custody, one process of it. */
-function compose(dir: string, holder: Holder, pid: number, startedAt: string, now: () => number) {
+let decisions = 0;
+/**
+ * A declared local PREPARED/1 producer: a test double (no endpoint publishes the
+ * prepared protocol yet). It allows while the double holds this process's
+ * registration and, once the endpoint revokes it, answers unavailable in the
+ * endpoint's word, the way an endpoint-authenticated producer learns it. Its
+ * receipt is labeled `prepared-pair`, never a broker's. Decision ids run across
+ * every port and process of the file, as the double's broker ids did.
+ */
+function preparedProducer(
+	authorityId: string,
+	endpoint: Pick<FakeEndpoint, 'registered'>,
+	now: () => number
+): PreparedExecutionPort {
+	const authority = createLocalHostAuthority({
+		authorityId,
+		now,
+		newId: () => `prepared-lease-${decisions}`,
+		decide: (request) => {
+			if (!endpoint.registered())
+				return {
+					decision: 'unavailable',
+					reason: 'the endpoint answered unauthenticated: this registration is revoked',
+				};
+			const { policyRevision } = request.policy;
+			return {
+				decision: 'allow',
+				policyRevision,
+				receipt: {
+					decisionId: `decision-${++decisions}`,
+					requestDigest: dispatchSnapshotDigest(request.snapshot),
+					brokerId: 'prepared-pair',
+					policyRevision: policyRevision ?? 0,
+				},
+			};
+		},
+	});
+	return { ...authority, version: 1 };
+}
+
+/** The real desktop composition over the injected custody, one process of it; `prepared` null opens ports with no producer. */
+function compose(
+	dir: string,
+	holder: Holder,
+	pid: number,
+	startedAt: string,
+	now: () => number,
+	prepared: Pick<FakeEndpoint, 'registered'> | null
+) {
 	const seal = fakeSeal();
-	return createEnterpriseService({
+	const service: EnterpriseService = createEnterpriseService({
 		userDataDir: dir,
 		productionDataDir: dir,
 		hostname: 'offline-recovery-host',
@@ -103,15 +155,36 @@ function compose(dir: string, holder: Holder, pid: number, startedAt: string, no
 		anchor: fakeAnchor(holder),
 		platform: 'darwin',
 		now,
-		openPort: (socketPath) => createLocalEndpointClient({ socketPath, timeoutMs: 1_000 }),
+		openPort: (socketPath) => {
+			const port = createLocalEndpointClient({ socketPath, timeoutMs: 1_000 });
+			if (prepared)
+				Object.defineProperty(port, 'preparedExecution', {
+					value: preparedProducer(service.host.authority.authorityId, prepared, now),
+				});
+			return port;
+		},
 	});
+	return service;
 }
 
-/** A data directory, the double and the desktop over the enrollment left to it (no registration, no policy observed), started; `daemonGone` closes the double first. */
-async function boot(prefix: string, options: Double, holder: Holder, daemonGone = false) {
+/** A data directory, the double and the desktop over the enrollment left to it (no registration, no policy observed), started; `daemonGone` closes the double first, `prepared` false leaves the producer off. */
+async function boot(
+	prefix: string,
+	options: Double,
+	holder: Holder,
+	daemonGone = false,
+	prepared = true
+) {
 	const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
 	const fake = await startFakeEndpoint(options);
-	const service = compose(dir, holder, 4242, '2026-10-25T11:59:00.000Z', options.now!);
+	const service = compose(
+		dir,
+		holder,
+		4242,
+		'2026-10-25T11:59:00.000Z',
+		options.now!,
+		prepared ? fake : null
+	);
 	await service.identity.write({
 		installationId: service.installation.installationId,
 		tenantId: 'tenant-pair',
@@ -128,11 +201,23 @@ async function boot(prefix: string, options: Double, holder: Holder, daemonGone 
 	return { dir, fake, service };
 }
 
-/** The actor's approval, played by the test and labeled: the double has no approval producer. */
+/**
+ * The actor's approval, played by the test and labeled: the double has no
+ * approval producer. V1 registration binds no actor (CP-01/CP-04) and a
+ * PREPARED/1 host admits only the registered human actor, so this local custody
+ * fixture supplies the actor id; the production service never manufactures it.
+ */
 async function register(service: EnterpriseService): Promise<void> {
 	expect((await service.policy.recover()).status).toBe('approval-required');
 	expect((await service.lifecycle.completeRegistration()).status).toBe('ok');
 	expect(service.lifecycle.status().authority).toBe('registered');
+	const enrolled = service.identity.read();
+	if (enrolled.status !== 'ok' || !enrolled.record.registration)
+		throw new Error('expected the registered record');
+	await service.identity.write({
+		...enrolled.record,
+		registration: { ...enrolled.record.registration, actorId: 'actor-pair' },
+	});
 }
 
 let runs = 0;
@@ -310,7 +395,12 @@ describe('offline recovery: drop mid-session, host restart, revoked registration
 		expect(await pump()).toMatchObject({ outcome: 'sent', received: 1, withheld: { family: 1 } });
 		expect([...double.spool.keys()]).toEqual([a.eventId]);
 		const admitted = await admitLaunch(service, dir);
-		expect(admitted).toMatchObject({ state: 'admitted', receipt: { decisionId: 'decision-1' } });
+		expect(admitted).toMatchObject({
+			state: 'admitted',
+			receipt: { decisionId: 'decision-1', brokerId: 'prepared-pair' },
+		});
+		// The declared producer decided; no execution request left for the broker.
+		expect(executions()).toBe(0);
 		first = await startChild(admitted, dir);
 		expect(service.dispatch.receipt(first.lease.leaseId)?.effect.state).toBe('bound');
 
@@ -356,17 +446,21 @@ describe('offline recovery: drop mid-session, host restart, revoked registration
 		const firstKey = service.inbox.receipts()[0]?.idempotencyKey;
 		expect(firstKey).toEqual(expect.any(String));
 		await service.close();
-		// The host is gone; the child it ran is the test's to end, and the lease it held is released by nobody.
-		first.child.kill('SIGTERM');
-		await first.exited;
+		// Closing the desktop authority withdraws the live lease through the producer that owns it: the sink hears it and the real process ends.
+		expect(first.lease.state()).toBe('revoked');
+		expect(first.revocations).toEqual(['The desktop authority is closing.']);
+		expect((await first.exited).signal).toBe('SIGTERM');
+		expect(alive(first.child.pid!)).toBe(false);
 		clock += 5_000;
-		service = compose(dir, holder, 4343, new Date(now()).toISOString(), now);
+		service = compose(dir, holder, 4343, new Date(now()).toISOString(), now, fake);
 		await service.start();
 		service.telemetry.stop();
 
-		// The dispatch ledger: the lease bound at the last exit is unknown, by name, and not live.
-		expect(service.dispatch.receipts().map((r) => r.effect.state)).toEqual(['unknown']);
-		expect(service.dispatch.receipt(first.lease.leaseId)?.effect.reason).toContain('restarted');
+		// The dispatch ledger: the lease the closing authority revoked reads revoked, by name, and is not live.
+		expect(service.dispatch.receipts().map((r) => r.effect.state)).toEqual(['revoked']);
+		expect(service.dispatch.receipt(first.lease.leaseId)?.effect.reason).toBe(
+			'The desktop authority is closing.'
+		);
 		expect(service.dispatch.authority.live()).toEqual([]);
 		// The journal: the two received entries stay received; each boot's inventory stays pending.
 		expect(service.eventJournal.status()).toMatchObject({
@@ -399,7 +493,10 @@ describe('offline recovery: drop mid-session, host restart, revoked registration
 
 	it('a revoked registration turns admission and refresh unauthenticated, revokeAll ends the live child, and a completed registration restores admission', async () => {
 		const admitted = await admitLaunch(service, dir);
-		expect(admitted).toMatchObject({ state: 'admitted', receipt: { decisionId: 'decision-2' } });
+		expect(admitted).toMatchObject({
+			state: 'admitted',
+			receipt: { decisionId: 'decision-2', brokerId: 'prepared-pair' },
+		});
 		const second = await startChild(admitted, dir);
 		expect(alive(second.child.pid!)).toBe(true);
 
@@ -436,7 +533,39 @@ describe('offline recovery: drop mid-session, host restart, revoked registration
 		expect(await pump()).toMatchObject({ outcome: 'sent', received: 1 });
 		expect(double.spool.size).toBe(3);
 		expect(service.dispatch.authority.revokeAll('test over')).toBe(1);
+		expect(executions()).toBe(0);
 	}, 20_000);
+});
+
+describe('offline recovery: a registered, attached host whose ports carry no prepared producer', () => {
+	let booted: Awaited<ReturnType<typeof boot>>;
+	const now = () => T0;
+
+	beforeAll(async () => {
+		booted = await boot('offline-bare-', doubleOptions(now), { value: null }, false, false);
+		await register(booted.service);
+		booted.service.telemetry.stop();
+	}, 30_000);
+	afterAll(async () => {
+		await booted.service.close();
+		await booted.fake.close();
+		fs.rmSync(booted.dir, { recursive: true, force: true });
+	});
+
+	it('refuses every launch runtime-unavailable by name (PREPARED/1); nothing is admitted, no receipt is written and no execution request leaves', async () => {
+		const { service, fake, dir } = booted;
+		expect(service.lifecycle.status().authority).toBe('registered');
+		const held = service.identity.read();
+		expect(held.status === 'ok' ? held.record.registration?.actorId : null).toBe('actor-pair');
+		expect(await admitLaunch(service, dir)).toMatchObject({
+			state: 'unavailable',
+			code: 'runtime-unavailable',
+			message: expect.stringContaining('No negotiated prepared execution authority (PREPARED/1)'),
+		});
+		expect(service.dispatch.authority.live()).toEqual([]);
+		expect(service.dispatch.receipts()).toEqual([]);
+		expect(operations(fake)).not.toContain('execution');
+	});
 });
 
 describe('offline recovery: a daemon speaking another schema version', () => {
