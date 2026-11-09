@@ -18,7 +18,7 @@ import {
 	createHeldHostAdapter,
 	createHostInstallationStanding,
 	HOST_ANCHOR_UNAVAILABLE_REASON,
-	HOST_COMMANDS_UNCOMPOSED_REASON,
+	HOST_COMMAND_REPORT_GAPS,
 	HOST_SEAL_UNAVAILABLE_REASON,
 	resolveHostCustody,
 	type HostCustodyRead,
@@ -42,6 +42,7 @@ import {
 } from '../../../shared/maestro-lib/managed/authority';
 import { inProcessContext } from '../../../shared/maestro-lib/managed/operations';
 import { fakeAnchor, fakeSeal } from '../../main/enterprise/fakeCustody';
+import { anotherCommand } from '../../main/enterprise/fakeManaged';
 import { startFakeEndpoint, type FakeEndpoint } from '../../main/enterprise/fakeEndpoint';
 
 const NOW = Date.parse('2026-10-22T12:00:00Z');
@@ -225,7 +226,7 @@ describe('composeHostManaged', () => {
 		expect(composed.standing.read().standing).toBe('managed');
 	});
 
-	it('composes the notice inbox over the same adapter: ledger first, listed only once registered, receipts recovered after a restart, commands refused by name (MCOMP-21-03A)', async () => {
+	it('composes the notice inbox over the same adapter: ledger first, listed only once registered, receipts recovered after a restart (MCOMP-21-03A)', async () => {
 		const operations: string[] = [];
 		const notice = {
 			campaignId: 'c-1',
@@ -265,11 +266,7 @@ describe('composeHostManaged', () => {
 			now: () => NOW,
 		});
 		if (!composed.composed) throw new Error(composed.reason);
-		// No command service on a detached host: refused by name, never a stand-in.
-		expect(composed.communications.commands).toEqual({
-			composed: false,
-			reason: HOST_COMMANDS_UNCOMPOSED_REASON,
-		});
+		expect(composed.communications.commands()).toBeNull();
 		expect(composed.communications.inbox()).toBeNull();
 		composed.managed.host!(installation);
 		const inbox = composed.communications.inbox();
@@ -317,6 +314,111 @@ describe('composeHostManaged', () => {
 		} finally {
 			await restarted.lifecycle.close();
 		}
+	});
+
+	it('composes the command service over the runtime own authority: ledger before the dial, consumed only once registered, a foreign recipient refused unrecorded, report gaps by name, cancel through the adapter leases (MCOMP-21-03B)', async () => {
+		fake = await startFakeEndpoint({ registrationRequired: true, now: () => NOW });
+		await enroll(fake.socketPath);
+		const ledgerFile = path.join(dir, 'maestro-managed-commands.json');
+		fs.writeFileSync(ledgerFile, '{not json');
+		const composed = composeHostManaged({
+			userDataDir: dir,
+			version: '1.1.0',
+			custody: custody(),
+			now: () => NOW,
+		});
+		if (!composed.composed) throw new Error(composed.reason);
+		expect(composed.communications.commands()).toBeNull();
+		const adapter = composed.managed.host!(installation);
+		const commands = composed.communications.commands();
+		if (!commands) throw new Error('No command service was composed');
+		expect(commands.status()).toMatchObject({ loaded: false, file: ledgerFile });
+
+		// The attach loads the ledger before it dials: a corrupt one is named, and nothing runs on it.
+		const calls = fake.calls.length;
+		await composed.lifecycle.attach();
+		expect(commands.status().load).toMatchObject({ ok: false, reason: 'corrupt' });
+		expect(fake.calls.length).toBeGreaterThan(calls);
+		fs.rmSync(ledgerFile);
+		expect(await commands.load()).toMatchObject({ ok: true, commands: 0 });
+
+		// Unregistered: refused before the ledger records anything.
+		expect(composed.status()?.authority).toBe('none');
+		expect(await commands.issueLocal({ kind: 'report-status' })).toMatchObject({
+			status: 'unavailable',
+		});
+		expect(commands.ledger.list()).toHaveLength(0);
+
+		expect((await composed.control.beginRegistration()).status).toBe('ok');
+		expect((await composed.control.completeRegistration()).status).toBe('ok');
+		expect(composed.status()?.authority).toBe('registered');
+		expect(commands.status().standing).toEqual({ ok: true });
+
+		// A recipient on another installation is refused by name, and the ledger records no acceptance.
+		expect(await commands.receive(anotherCommand('cmd-foreign'))).toMatchObject({
+			status: 'denied',
+			reason: 'stale-run',
+		});
+		expect(commands.ledger.list()).toHaveLength(0);
+
+		// The daemon's registration names no actor (CP-01/CP-04): refused by name, nothing recorded.
+		expect(await commands.issueLocal({ kind: 'report-status' })).toMatchObject({
+			status: 'denied',
+			reason: 'unauthenticated',
+			detail: expect.stringContaining('names no actor'),
+		});
+		expect(commands.ledger.list()).toHaveLength(0);
+		// A record that names the actor, sealed the way the endpoint's registration would leave it.
+		const store = createEnterpriseIdentityStore({
+			file: path.join(dir, 'enterprise-identity.bin'),
+			seal: fakeSeal(),
+			anchor: fakeAnchor(holder),
+			platform: 'darwin',
+			now: () => NOW,
+		});
+		const sealed = store.read();
+		if (sealed.status !== 'ok' || !sealed.record.registration) throw new Error('not registered');
+		await store.write({
+			...sealed.record,
+			registration: { ...sealed.record.registration, actorId: 'actor-1' },
+		});
+
+		// The report says what this host holds and names what it cannot, never a zero.
+		const report = await commands.issueLocal({ kind: 'report-status' });
+		expect(report).toMatchObject({ status: 'completed' });
+		const facts = (report as { facts: Record<string, any> }).facts;
+		expect(facts.installation).toEqual(adapter.installation);
+		expect(facts.versions).toMatchObject({ app: '1.1.0', contracts: 'not-read' });
+		expect(facts.endpoint.authority).toBe('registered');
+		expect(facts.identity).toMatchObject({ tenantId: 'tenant-1', registeredActor: true });
+		expect(facts.runs).toEqual({ live: 0, liveLeases: 0, receipts: null });
+		expect(facts.gaps).toEqual(HOST_COMMAND_REPORT_GAPS);
+
+		// A run with no live lease here is unknown, refused by name.
+		expect(await commands.issueLocal({ kind: 'cancel-run', runId: 'run-x' })).toMatchObject({
+			status: 'denied',
+			reason: 'stale-run',
+		});
+		// A cancel revokes through the adapter's own authority: the leases the runtime admitted.
+		let live = [{ leaseId: 'lease-1', runId: 'run-1' }] as never[];
+		const liveSpy = vi.spyOn(adapter.authority, 'live').mockImplementation(() => live);
+		const revoke = vi.spyOn(adapter.authority, 'revoke').mockImplementation((leaseId) => {
+			live = [];
+			return leaseId === 'lease-1';
+		});
+		const cancel = await commands.issueLocal({ kind: 'cancel-run', runId: 'run-1' });
+		expect(cancel).toMatchObject({ status: 'completed' });
+		expect(revoke).toHaveBeenCalledWith('lease-1', expect.stringContaining('cancel_run'));
+		liveSpy.mockRestore();
+		revoke.mockRestore();
+
+		// Closed: no command decides, and the service is gone.
+		await composed.lifecycle.close();
+		expect(composed.communications.commands()).toBeNull();
+		expect(await commands.issueLocal({ kind: 'report-status' })).toMatchObject({
+			status: 'unavailable',
+		});
+		expect(JSON.parse(fs.readFileSync(ledgerFile, 'utf8'))).toBeTruthy();
 	});
 
 	it('composes no inbox and names no command service without protected custody (MCOMP-21-03A)', async () => {

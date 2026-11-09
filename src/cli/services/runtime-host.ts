@@ -344,8 +344,8 @@ export async function startRuntimeHost(
 				`Re-attaching the managed standing failed: ${error instanceof Error ? error.message : String(error)}`
 			);
 		}
-		// What reaches this host from the endpoint (MCOMP-21-03A), said once: the inbox and its
-		// recovered receipts, and why no command is consumed. A host that composed no standing
+		// What reaches this host from the endpoint (MCOMP-21-03A/03B), said once: the inbox and its
+		// recovered receipts, and the command ledger with what it executes. A host that composed no standing
 		// composes neither and says nothing here; its reason is `managedUnavailable`.
 		if (composition?.composed) {
 			const inbox = composition.communications.inbox()?.status();
@@ -354,7 +354,12 @@ export async function startRuntimeHost(
 					? `Managed inbox: receipts ${inbox.loaded ? `loaded (${inbox.receipts.total})` : `not loaded${inbox.load && !inbox.load.ok ? ` (${inbox.load.reason})` : ''}`}; ${inbox.standing.ok ? 'listing notices' : `no listing: ${inbox.standing.reason}`}.`
 					: 'Managed inbox: not composed (the runtime holds no host adapter).'
 			);
-			log(`Managed commands: none consumed (${composition.communications.commands.reason}).`);
+			const commands = composition.communications.commands()?.status();
+			log(
+				commands
+					? `Managed commands: ledger ${commands.loaded ? `loaded (${commands.commands.total})` : `not loaded${commands.load && !commands.load.ok ? ` (${commands.load.reason})` : ''}`}; executes ${commands.capabilities.join(', ') || 'nothing'}; ${commands.standing.ok ? 'consuming' : `none consumed: ${commands.standing.reason}`}.`
+					: 'Managed commands: not composed (the runtime holds no host adapter).'
+			);
 		}
 		// The bridge is held before anything consumes work (MCOMP-21-03): no telemetry, no Cue, no
 		// socket. A refusal throws `ListenerDeniedError` and the catch below releases the directory.

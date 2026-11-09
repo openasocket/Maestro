@@ -38,6 +38,11 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
+import {
+	createCommandService,
+	type CommandService,
+	type CommandStatusInventory,
+} from '../../main/enterprise/commands';
 import { createLocalEndpointClient } from '../../main/enterprise/endpoint-client';
 import {
 	createEnrollmentLifecycle,
@@ -56,6 +61,7 @@ import {
 	MANAGED_INBOX_RECEIPTS_FILE_NAME,
 	type InboxClient,
 } from '../../main/enterprise/inbox';
+import { createPolicyStatusService } from '../../main/enterprise/policy-status';
 import { ENTERPRISE_SUPPORTED_CAPABILITIES } from '../../main/enterprise/service';
 import {
 	anchorAccountForDirectory,
@@ -77,6 +83,9 @@ import {
 	type ManagedInstallationIdentity,
 	type MaestroRuntimeOptions,
 } from '../../shared/maestro-lib';
+import { MANAGED_COMMAND_LEDGER_FILE_NAME } from '../../shared/maestro-lib/managed/commands';
+import { LOCAL_ENDPOINT_PROTOCOL } from '../../shared/maestro-lib/managed/endpoint-port';
+import { MANAGED_CONTRACT_VERSION } from '../../shared/maestro-lib/managed/types';
 
 /**
  * The custody primitive a detached host is missing. Named here once so the start log, the status
@@ -92,19 +101,18 @@ export const HOST_ANCHOR_UNAVAILABLE_REASON =
 	'credential store), so a rollback could not be told from the newest record';
 
 /**
- * Why the detached host composes no endpoint command service (MCOMP-21-03A). The desktop's
- * `createCommandService` decides a cancel through the broker dispatch bridge's live leases and
- * receipts, a refresh through the policy status service, and a report from the installation
- * inventory; the headless runtime admits through its own host authority and holds none of those,
- * so a command service composed here would revoke leases nothing admitted with and report a run
- * it cannot see. No producer delivers a command to a runtime yet either (CP-02). Until the command
- * ports are composed over the runtime's own work (continuation MCOMP-21-03B), no command is
- * consumed here and the host says so by this name, never with a stand-in.
+ * What a detached host's status report cannot say (MCOMP-21-03B), each by name, never as a zero:
+ * the desktop reports from its installation inventory and its broker dispatch receipts; the
+ * headless runtime admits through its own host authority and keeps neither, so these facts are
+ * absent here and the report says which.
  */
-export const HOST_COMMANDS_UNCOMPOSED_REASON =
-	'the detached host composes no endpoint command service: its cancel, report and refresh ports ' +
-	"need the runtime's own dispatch authority, policy status and inventory, which are not composed " +
-	'headless yet (MCOMP-21-03B), so no endpoint command is consumed here';
+export const HOST_COMMAND_REPORT_GAPS: readonly string[] = [
+	'runtimes: only this detached host is inventoried; the desktop or another host on this installation is not observed from here',
+	'contracts: the detached host does not read the Mega-Maestro contracts pin',
+	'providers: the detached host probes no provider installation; none is reported',
+	'subagents: the detached host projects no subagent inventory; none is reported',
+	'receipts: the detached host keeps no dispatch receipts ledger; a run with no live lease reads unknown here and the receipt count is null',
+];
 
 /** The endpoint communications a composed host holds (MCOMP-21-03A). */
 export interface HostCommunications {
@@ -113,8 +121,12 @@ export interface HostCommunications {
 	 * the runtime has acquired the adapter, and after close.
 	 */
 	inbox(): InboxClient | null;
-	/** Commands are not composed on a detached host; why, by name. */
-	readonly commands: { composed: false; reason: string };
+	/**
+	 * The typed command service over the runtime's own work (MCOMP-21-03B): cancel revokes the
+	 * leases this host's authority admitted, refresh re-attaches through the same lifecycle, report
+	 * names the facts this host holds. Null until the runtime has acquired the adapter, and after close.
+	 */
+	commands(): CommandService | null;
 }
 
 export interface HostCustodyInput {
@@ -195,7 +207,7 @@ export type HostManagedComposition =
 			status(): ManagedEnrollmentStatus | null;
 			/** What this process can say of the installation, composed or not (`createHostInstallationStanding`). */
 			standing: InstallationStandingSource;
-			/** The endpoint inbox and the (uncomposed) command service of this standing. */
+			/** The endpoint inbox and the command service of this standing. */
 			communications: HostCommunications;
 	  }
 	| {
@@ -486,6 +498,9 @@ export function composeHostManaged(deps: HostManagedDeps): HostManagedCompositio
 	let lifecycle: EnrollmentLifecycle | null = null;
 	let adapter: ManagedHostAdapter | null = null;
 	let inbox: InboxClient | null = null;
+	let commands: CommandService | null = null;
+	// Commands being decided, so close waits for them before the standing goes.
+	const deciding = new Set<Promise<unknown>>();
 	// The listing an attach started, so close waits for it before the socket goes.
 	let listing: Promise<unknown> | null = null;
 	let closed = false;
@@ -585,8 +600,78 @@ export function composeHostManaged(deps: HostManagedDeps): HostManagedCompositio
 			}),
 			now,
 		});
+		commands = composeHostCommands(enrollment, adapter);
 		return adapter;
 	};
+
+	/** What this host can report of itself, read per call; the gaps name what it cannot. */
+	function reportInventory(
+		enrollment: EnrollmentLifecycle,
+		current: ManagedHostAdapter
+	): CommandStatusInventory {
+		const standing = status() ?? enrollment.status();
+		const record = standing.identity.status === 'ok' ? standing.identity.record : null;
+		const live = standing.connection?.attached ? standing.endpoint : null;
+		return {
+			at: new Date(now()).toISOString(),
+			installation: { ...current.installation },
+			versions: {
+				app: deps.version,
+				library: MAESTRO_LIB_VERSION,
+				contract: MANAGED_CONTRACT_VERSION,
+				endpointProtocol: LOCAL_ENDPOINT_PROTOCOL,
+				contracts: { status: 'not-read' },
+			},
+			endpoint: {
+				authority: standing.authority,
+				reason: standing.reason,
+				status: live ? { management: live.management, connectivity: live.connectivity } : null,
+				lastDenial: standing.lastDenial ? { ...standing.lastDenial } : null,
+			},
+			identity: {
+				custody: standing.identity.status,
+				management: record?.management ?? null,
+				tenantId: record?.tenantId ?? null,
+				orgId: record?.orgId ?? null,
+				enrollmentId: record?.enrollmentId ?? null,
+				registeredActor: record?.registration?.actorId != null,
+			},
+			policy: current.policyStatus(),
+			completeness: 'partial',
+			gaps: HOST_COMMAND_REPORT_GAPS,
+		};
+	}
+
+	/**
+	 * The command service of this standing (MCOMP-21-03B), over the authority the runtime admits
+	 * with (the adapter's: every live lease here is one this host minted), the lifecycle's re-attach
+	 * and the facts above. Its standing is `status()`, so a closed host decides nothing.
+	 */
+	function composeHostCommands(
+		enrollment: EnrollmentLifecycle,
+		current: ManagedHostAdapter
+	): CommandService {
+		const service = createCommandService({
+			installation: current.installation,
+			lifecycle: { status: () => status() ?? enrollment.status() },
+			host: current,
+			policy: createPolicyStatusService({ lifecycle: enrollment, now }),
+			dispatch: { authority: current.authority },
+			inventory: { snapshot: () => reportInventory(enrollment, current) },
+			file: path.join(deps.userDataDir, MANAGED_COMMAND_LEDGER_FILE_NAME),
+			now,
+		});
+		const track = <T>(work: Promise<T>): Promise<T> => {
+			deciding.add(work);
+			void work.finally(() => deciding.delete(work)).catch(() => undefined);
+			return work;
+		};
+		return {
+			...service,
+			receive: (raw) => track(service.receive(raw)),
+			issueLocal: (action) => track(service.issueLocal(action)),
+		};
+	}
 
 	return {
 		composed: true,
@@ -598,13 +683,15 @@ export function composeHostManaged(deps: HostManagedDeps): HostManagedCompositio
 		status,
 		communications: {
 			inbox: () => (closed ? null : inbox),
-			commands: { composed: false, reason: HOST_COMMANDS_UNCOMPOSED_REASON },
+			commands: () => (closed ? null : commands),
 		},
 		lifecycle: {
 			async attach() {
 				// The receipts recover first: a record pending at the last exit becomes uncertain,
 				// and the listing an attach starts records against the loaded ledger.
 				if (inbox && !closed) await inbox.load();
+				// The command ledger too: an acceptance from an earlier process becomes unknown.
+				if (commands && !closed) await commands.load();
 				// No sealed record, no dial: an unenrolled host never opens a socket here.
 				if (!lifecycle || identity.read().status !== 'ok') return;
 				await control.connect();
@@ -614,6 +701,8 @@ export function composeHostManaged(deps: HostManagedDeps): HostManagedCompositio
 				closing ??= (async () => {
 					// The inbox stops before the standing closes: the listing in flight settles first.
 					await listing;
+					// Commands stop before the standing closes: `closed` refuses new ones, these settle.
+					await Promise.allSettled([...deciding]);
 					await lifecycle?.close();
 					port = null;
 				})();

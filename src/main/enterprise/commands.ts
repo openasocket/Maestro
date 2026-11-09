@@ -72,11 +72,12 @@ import {
 	type ManagedCommandKind,
 	type ManagedRuntimeCommand,
 } from '../../shared/maestro-lib/managed/commands';
+import type { HostAuthority } from '../../shared/maestro-lib/managed/authority';
 import type { ManagedHostAdapter } from '../../shared/maestro-lib/managed/host-adapter';
 import type { ManagedInstallationIdentity } from '../../shared/maestro-lib/managed/types';
-import type { BrokerDispatch } from './dispatch';
+import type { DispatchReceiptRecord } from './dispatch';
 import type { EnrollmentLifecycle, LifecycleOutcome } from './enrollment';
-import type { InstallationInventoryService } from './inventory';
+import type { ContractsPinStatus, InstallationInventory } from './inventory';
 import type { PolicyStatusService } from './policy-status';
 
 /** The actions this desktop does not compose, each with why; a command naming one is refused by name. */
@@ -89,6 +90,41 @@ export const DESKTOP_UNCOMPOSED_COMMANDS: Readonly<
 		'the desktop has no main-process resume of a paused turn, since nothing pauses one; a finished turn is resumed by the operator through the composer',
 };
 
+/** What a run lookup and a cancel read of one receipt. */
+export type CommandRunReceipt = Pick<DispatchReceiptRecord, 'leaseId' | 'runId'> & {
+	effect: Pick<DispatchReceiptRecord['effect'], 'state'>;
+};
+
+/**
+ * The leases a cancel revokes and the receipts that say a run ended: the desktop's broker dispatch
+ * bridge, or a detached host's own authority (MCOMP-21-03B), which keeps no receipts ledger.
+ */
+export interface CommandDispatchPort {
+	authority: Pick<HostAuthority, 'live' | 'revoke'>;
+	/** Absent: no receipts ledger is kept here, so an ended run reads unknown and a report says null, never zero. */
+	receipts?(): readonly CommandRunReceipt[];
+}
+
+/** What a status report is made of: the inventory facts it names, and the gaps beside them. */
+export interface CommandStatusInventory extends Pick<
+	InstallationInventory,
+	'at' | 'installation' | 'identity' | 'policy' | 'completeness' | 'gaps'
+> {
+	versions: Pick<
+		InstallationInventory['versions'],
+		'app' | 'library' | 'contract' | 'endpointProtocol'
+	> & {
+		/** `not-read`: this host does not read the contracts pin, and its gaps say so. */
+		contracts: { status: ContractsPinStatus['status'] | 'not-read' };
+	};
+	endpoint: Pick<InstallationInventory['endpoint'], 'authority' | 'reason' | 'lastDenial'> & {
+		status: Pick<
+			NonNullable<InstallationInventory['endpoint']['status']>,
+			'management' | 'connectivity'
+		> | null;
+	};
+}
+
 export interface CommandServiceDeps {
 	installation: ManagedInstallationIdentity;
 	/** This process's standing, read fresh for every check. */
@@ -98,9 +134,9 @@ export interface CommandServiceDeps {
 	/** The one authenticated status update: a re-attach over the registered socket. */
 	policy: Pick<PolicyStatusService, 'refresh'>;
 	/** The live leases a cancel revokes and the receipts that say a run ended. */
-	dispatch: Pick<BrokerDispatch, 'authority' | 'receipts'>;
+	dispatch: CommandDispatchPort;
 	/** What a status report is made of. */
-	inventory: Pick<InstallationInventoryService, 'snapshot'>;
+	inventory: { snapshot(): CommandStatusInventory };
 	/** The ledger file (`MANAGED_COMMAND_LEDGER_FILE_NAME` in the data directory). Absent: in memory only (a test). */
 	file?: string;
 	now?: () => number;
@@ -189,7 +225,7 @@ export function createCommandService(deps: CommandServiceDeps): CommandService {
 
 	function runState(runId: string): 'live' | 'ended' | 'unknown' {
 		if (deps.dispatch.authority.live().some((lease) => lease.runId === runId)) return 'live';
-		if (deps.dispatch.receipts().some((receipt) => receipt.runId === runId)) return 'ended';
+		if (deps.dispatch.receipts?.().some((receipt) => receipt.runId === runId)) return 'ended';
 		return 'unknown';
 	}
 
@@ -219,8 +255,7 @@ export function createCommandService(deps: CommandServiceDeps): CommandService {
 	async function cancel(runId: string, command: ManagedRuntimeCommand): Promise<CommandPortAnswer> {
 		const live = deps.dispatch.authority.live().filter((lease) => lease.runId === runId);
 		if (live.length === 0) {
-			const ended = deps.dispatch
-				.receipts()
+			const ended = (deps.dispatch.receipts?.() ?? [])
 				.filter((receipt) => receipt.runId === runId)
 				.map((receipt) => ({ leaseId: receipt.leaseId, state: receipt.effect.state }));
 			return {
@@ -294,7 +329,7 @@ export function createCommandService(deps: CommandServiceDeps): CommandService {
 				runs: {
 					live: liveRuns.size,
 					liveLeases: deps.dispatch.authority.live().length,
-					receipts: deps.dispatch.receipts().length,
+					receipts: deps.dispatch.receipts?.().length ?? null,
 				},
 				commands: { total: ledger.list().length, open: ledger.open().length },
 				completeness: inventory.completeness,
