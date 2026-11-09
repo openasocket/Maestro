@@ -35,6 +35,7 @@ import {
 	type RuntimeLockInfo,
 	type RuntimeLockMode,
 } from '../../shared/maestro-lib';
+import { isListenerDeniedError } from '../../main/enterprise/listener-gate';
 import { ExitCode } from '../exit-codes';
 import { composeHostManaged, type HostManagedComposition } from '../services/host-managed';
 import { startRuntimeHost, type RunningHost } from '../services/runtime-host';
@@ -401,6 +402,24 @@ async function runForeground(
 			log: (line) => console.log(line),
 		});
 	} catch (error) {
+		if (isListenerDeniedError(error)) {
+			// The managed listener ceiling held the bridge (MCOMP-21-03): nothing was served and the
+			// directory is released. Said by name, never as a port collision, and never retried.
+			const message = `Host not started: ${error.message}`;
+			if (options.json) {
+				console.log(
+					JSON.stringify(
+						{ started: false, code: 'LISTENER_HELD', managed: error.code, error: message },
+						null,
+						2
+					)
+				);
+			} else {
+				console.error(`Error: ${message}`);
+			}
+			process.exitCode = ExitCode.GeneralError;
+			return;
+		}
 		fail(options, error instanceof Error ? error.message : String(error));
 		return;
 	}

@@ -13,11 +13,23 @@ import { composeHostManaged } from '../../../cli/services/host-managed';
 import {
 	HostPromptsMissingError,
 	HostStartError,
+	RUNTIME_HOST_BIND,
+	runtimeHostListenerAuthority,
 	startRuntimeHost,
 	type RunningHost,
 	type RuntimeHostDeps,
 } from '../../../cli/services/runtime-host';
 import { createEnterpriseIdentityStore } from '../../../main/enterprise/identity-store';
+import {
+	heldListeners,
+	isListenerDeniedError,
+	setListenerAuthority,
+} from '../../../main/enterprise/listener-gate';
+import {
+	listenerVerdict,
+	type ListenerAuthority,
+	type ListenerCeilingEntry,
+} from '../../../main/enterprise/listener-policy';
 import type { Anchor } from '../../../main/utils/keyring-anchor';
 import { fakeAnchor, fakeSeal } from '../../main/enterprise/fakeCustody';
 import {
@@ -32,6 +44,21 @@ import {
 	type ManagedEnrollmentStatus,
 	type ManagedIdentityView,
 } from '../../../shared/maestro-lib';
+
+/**
+ * A ceiling an authenticated endpoint delivered (test fixture only: no published operation
+ * delivers one, DESKTOP-LOCAL/1), judged by the real verdict. Admits the bridge at loopback, so the
+ * cases about what an enrolled host attests can reach a listening host.
+ */
+const deliveredCeiling =
+	(listeners: ListenerCeilingEntry[] = [{ kind: 'runtime-host', reach: 'loopback' }]) =>
+	(): ListenerAuthority => ({
+		evaluateListener: (request) =>
+			listenerVerdict(
+				{ standing: 'managed', ceiling: { policyRevision: 2, listeners }, policyRevision: 2 },
+				request
+			),
+	});
 
 describe('startRuntimeHost', () => {
 	let dir: string;
@@ -59,6 +86,7 @@ describe('startRuntimeHost', () => {
 	const noCue = {
 		startCue: async () => idleCue(),
 		promptsLoad: () => true,
+		listenerAuthority: deliveredCeiling(),
 		composeManaged: (input: Parameters<RuntimeHostDeps['composeManaged']>[0]) =>
 			composeHostManaged({
 				...input,
@@ -97,6 +125,7 @@ describe('startRuntimeHost', () => {
 
 	afterEach(async () => {
 		for (const host of running) await host.stop();
+		setListenerAuthority(null);
 		fs.rmSync(dir, { recursive: true, force: true });
 	});
 
@@ -671,6 +700,154 @@ describe('startRuntimeHost', () => {
 			});
 			expect(runtimeManaged.backgroundParentContext).toBe(own);
 			expect(roundParents).toBeUndefined();
+		});
+	});
+
+	describe('the bridge listener (MCOMP-21-03)', () => {
+		const enrolledRecord = (installationId: string) => ({
+			version: 1,
+			installationId,
+			tenantId: 'tenant-1',
+			orgId: 'org-1',
+			enrollmentId: 'enr-1',
+			endpoint: {
+				socketPath: '/tmp/endpoint.sock',
+				bindingDigest: 'a'.repeat(64),
+				trustRootDigest: null,
+			},
+			management: 'enrolled' as const,
+			registration: null,
+			policy: { desiredRevision: 2, appliedRevision: 2, observedAt: null },
+			enrolledAt: '2026-10-22T12:00:00.000Z',
+			updatedAt: '2026-10-22T12:00:00.000Z',
+		});
+		const enrolledManaged = () => ({
+			host: (installation: Parameters<typeof createManagedHostAdapter>[0]['installation']) => {
+				const view: ManagedIdentityView = {
+					status: 'ok',
+					reason: null,
+					message: null,
+					record: enrolledRecord(installation.installationId),
+				};
+				return createManagedHostAdapter({
+					installation,
+					identity: { read: () => view },
+					endpoint: null,
+					status: () => ({
+						identity: view,
+						connection: null,
+						endpoint: null,
+						authority: 'none',
+						reason: 'not attached in this process',
+						pendingApproval: null,
+						lastDenial: null,
+					}),
+				});
+			},
+		});
+		const real = { ...noCue, listenerAuthority: runtimeHostListenerAuthority };
+
+		it('standalone: binds loopback under the explicit kind and holds nothing', async () => {
+			const startServer = vi.fn(startRuntimeServer);
+			const host = await startRuntimeHost(options(), { ...real, startServer });
+			running.push(host);
+			expect(host.runtime.managedBinding.state().state).toBe('standalone');
+			expect(startServer.mock.calls[0][0].address).toBe(RUNTIME_HOST_BIND);
+			expect(RUNTIME_HOST_BIND).toBe('127.0.0.1');
+			expect(heldListeners()).toEqual([]);
+			expect(readCliServerInfoFrom(dir)?.port).toBe(host.server.port);
+		});
+
+		it('enrolled with no delivered ceiling: refused by name before telemetry, Cue or a socket, and the directory is released', async () => {
+			const startCue = vi.fn(async () => idleCue());
+			const startServer = vi.fn(startRuntimeServer);
+			const error = await startRuntimeHost(
+				{ ...options(), managed: enrolledManaged() },
+				{ ...real, startCue, startServer }
+			).then(
+				() => null,
+				(caught: unknown) => caught
+			);
+			expect(isListenerDeniedError(error)).toBe(true);
+			expect((error as Error).message).toBe(
+				'[managed-unavailable] the managed listener ceiling is unavailable (no listener ceiling is installed for policy revision 2); the runtime-host listener on 127.0.0.1:0 is not opened'
+			);
+			expect(startCue).not.toHaveBeenCalled();
+			expect(startServer).not.toHaveBeenCalled();
+			expect(readCliServerInfoFrom(dir)).toBeNull();
+			expect(heldListeners()).toMatchObject([
+				{ kind: 'runtime-host', bind: '127.0.0.1', code: 'unavailable', policyRevision: 2 },
+			]);
+			// Released: the next process takes the same directory at once.
+			const next = await createMaestroRuntime({
+				dataDir: dir,
+				productionDataDir: dir,
+				mode: 'host',
+			});
+			expect(next.ok).toBe(true);
+			if (next.ok) await next.runtime.connection.close();
+		});
+
+		it('an unreadable standing (a sealed record this process cannot open) is managed, never standalone', async () => {
+			fs.writeFileSync(path.join(dir, 'enterprise-identity.bin'), 'unopenable sealed record');
+			await expect(startRuntimeHost(options(), real)).rejects.toThrow(
+				'[managed-unavailable] the managed listener ceiling is unavailable (no applied policy revision is known for this host); the runtime-host listener on 127.0.0.1:0 is not opened'
+			);
+			expect(readCliServerInfoFrom(dir)).toBeNull();
+		});
+
+		it('names its own kind: a ceiling admitting only web refuses the bridge, one admitting the bridge binds', async () => {
+			await expect(
+				startRuntimeHost(
+					{ ...options(), managed: enrolledManaged() },
+					{ ...noCue, listenerAuthority: deliveredCeiling([{ kind: 'web', reach: 'any' }]) }
+				)
+			).rejects.toThrow(
+				'[managed-kind-denied] the listener ceiling admits no runtime-host listener'
+			);
+			const host = await startRuntimeHost({ ...options(), managed: enrolledManaged() }, noCue);
+			running.push(host);
+			expect(host.runtime.managedBinding.state().state).toBe('enrolled');
+			expect(readCliServerInfoFrom(dir)?.port).toBe(host.server.port);
+		});
+
+		it('judges the runtime binding per bind: standalone admits, every managed state refuses under its revision', () => {
+			const record = { policyRevision: 7 } as never;
+			const authorityOver = (state: unknown, applied: number | null = 9) =>
+				runtimeHostListenerAuthority({
+					managedBinding: { state: () => state } as never,
+					managedHost: { policyStatus: () => ({ appliedRevision: applied }) } as never,
+				});
+			const request = { kind: 'runtime-host' as const, bind: '127.0.0.1', port: 0 };
+			expect(authorityOver({ state: 'standalone', files: [] }).evaluateListener(request)).toEqual({
+				allowed: true,
+			});
+			expect(
+				authorityOver({ state: 'enrolled', record, file: 'b' }).evaluateListener(request)
+			).toMatchObject({ allowed: false, code: 'unavailable', managed: { policyRevision: 9 } });
+			expect(
+				authorityOver({
+					state: 'enrolled-unavailable',
+					record,
+					file: 'b',
+					reason: 'r',
+				}).evaluateListener(request)
+			).toMatchObject({ allowed: false, code: 'unavailable', managed: { policyRevision: 7 } });
+			expect(
+				authorityOver({ state: 'unreadable', file: 'b', reason: 'r' }).evaluateListener(request)
+			).toMatchObject({ allowed: false, code: 'unavailable', managed: { policyRevision: null } });
+			// Read on every bind: the same authority follows the binding as it changes.
+			let state: unknown = { state: 'standalone', files: [] };
+			const live = runtimeHostListenerAuthority({
+				managedBinding: { state: () => state } as never,
+				managedHost: null,
+			});
+			expect(live.evaluateListener(request).allowed).toBe(true);
+			state = { state: 'enrolled', record, file: 'b' };
+			expect(live.evaluateListener(request)).toMatchObject({
+				allowed: false,
+				managed: { policyRevision: 7 },
+			});
 		});
 	});
 });

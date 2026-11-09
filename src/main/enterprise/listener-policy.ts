@@ -12,7 +12,9 @@
  * Tailscale or a LAN interface) and `mdns` (its discovery advertisement),
  * `cue-webhook` and `cue-status` (the Cue engine's webhook receiver and its
  * loopback status server), `relay` (the permission relay bridge), `steering`
- * (the maestro-p steering socket) and `coworking` (the coworking MCP server).
+ * (the maestro-p steering socket), `coworking` (the coworking MCP server) and
+ * `runtime-host` (the loopback bridge of a detached `maestro-cli host`, the
+ * headless twin of `web`, kept apart so admitting one never admits the other).
  * A sink names its kind, the address it is about to bind and the port; the
  * policy answers BEFORE the bind, so a forbidden listener never exists for
  * even a moment.
@@ -70,6 +72,7 @@ export const LISTENER_KINDS = [
 	'relay',
 	'steering',
 	'coworking',
+	'runtime-host',
 ] as const;
 export type ListenerKind = (typeof LISTENER_KINDS)[number];
 

@@ -82,7 +82,7 @@ function read(status: IdentityRead['status']): IdentityRead {
 afterEach(() => setListenerAuthority(null));
 
 describe('kinds and reach', () => {
-	it('names the eleven listener kinds and five reaches in order, narrowest first', () => {
+	it('names the twelve listener kinds and five reaches in order, narrowest first', () => {
 		expect(LISTENER_KINDS).toEqual([
 			'web',
 			'tunnel',
@@ -95,6 +95,7 @@ describe('kinds and reach', () => {
 			'relay',
 			'steering',
 			'coworking',
+			'runtime-host',
 		]);
 		expect(LISTENER_REACHES).toEqual(['loopback', 'tailnet', 'lan', 'any', 'public']);
 		expect(reachWithin('loopback', 'loopback')).toBe(true);
@@ -190,9 +191,9 @@ describe('parseListenerPolicyCeiling', () => {
 		expect(problemsOf(document({ listeners: 'web' }))).toEqual(['listeners is not an array']);
 		expect(
 			problemsOf(
-				document({ listeners: Array.from({ length: 12 }, () => ({ kind: 'web', reach: 'any' })) })
+				document({ listeners: Array.from({ length: 13 }, () => ({ kind: 'web', reach: 'any' })) })
 			)
-		).toEqual(['listeners exceeds 11 entries']);
+		).toEqual(['listeners exceeds 12 entries']);
 		expect(problemsOf(document({ listeners: ['web'] }))).toEqual(['listeners[0] is not an object']);
 		expect(problemsOf(document({ listeners: [{ kind: 'ftp', reach: 'any' }] }))).toEqual([
 			'listeners[0].kind is not a listener kind',
@@ -482,7 +483,7 @@ describe('one entry per kind', () => {
 	});
 	const empty = () => managed(ceilingOf(document({ listeners: [] })));
 
-	it('holds each kind by its own entry alone: the ten others are refused kind-denied under any bind', () => {
+	it('holds each kind by its own entry alone: the eleven others are refused kind-denied under any bind', () => {
 		for (const kind of LISTENER_KINDS) {
 			const alone = managed(ceilingOf(document({ listeners: [{ kind, reach: widest(kind) }] })));
 			expect(listenerVerdict(alone, loopbackRequest(kind))).toMatchObject({
@@ -687,6 +688,14 @@ describe('sink classification by source', () => {
 			call: "listenerHoldFor({ kind: 'steering', bind: socketPath, port: 0 })",
 			before: 'return socketPath;',
 		},
+		{
+			// The loopback bridge of a detached `maestro-cli host` (MCOMP-21-03): held before
+			// telemetry, Cue or the socket, over the runtime's own binding.
+			file: 'src/cli/services/runtime-host.ts',
+			kind: 'runtime-host',
+			call: "holdListener({ kind: 'runtime-host', bind: RUNTIME_HOST_BIND, port: options.port ?? 0 })",
+			before: 'await deps.startServer(',
+		},
 	];
 
 	/**
@@ -698,7 +707,7 @@ describe('sink classification by source', () => {
 	it('every sink names the kind its task assigned, through the leaf gate, before the first thing that reaches a socket', () => {
 		for (const sink of SINKS) {
 			const text = source(sink.file);
-			expect(text, sink.file).toMatch(/from '(\.\.\/)*(\.\/)?enterprise\/listener-gate'/);
+			expect(text, sink.file).toMatch(/from '(\.\.\/)*(\.\/)?(main\/)?enterprise\/listener-gate'/);
 			expect(text, sink.file).not.toMatch(
 				/import \{[^}]*\b(holdListener|listenerHoldFor)\b[^}]*\} from '[./]*enterprise\/listener-policy'/
 			);
@@ -742,6 +751,18 @@ describe('sink classification by source', () => {
 			expect(text, entry.file).toContain(entry.bind);
 			expect(text, entry.file).not.toMatch(/\.listen\([^)]*'(0\.0\.0\.0|::)'/);
 		}
+	});
+
+	it('the held host bridge binds loopback only, at the address it was held for', () => {
+		const text = source('src/cli/services/runtime-host.ts');
+		expect(text).toContain("export const RUNTIME_HOST_BIND = '127.0.0.1';");
+		expect(text).toContain('address: RUNTIME_HOST_BIND,');
+		expect(text.indexOf('setListenerAuthority(deps.listenerAuthority(runtime));')).toBeLessThan(
+			text.indexOf("holdListener({ kind: 'runtime-host'")
+		);
+		expect(text.indexOf("holdListener({ kind: 'runtime-host'")).toBeLessThan(
+			text.indexOf('await deps.startCue(')
+		);
 	});
 
 	it('the held Cue status server still binds loopback only', () => {

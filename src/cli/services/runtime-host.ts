@@ -35,6 +35,12 @@ import {
 	TELEMETRY_HOST_IDLE_POLL_MS,
 	type TelemetryClient,
 } from '../../main/enterprise/telemetry';
+import { holdListener, setListenerAuthority } from '../../main/enterprise/listener-gate';
+import {
+	listenerVerdict,
+	managedListenerStanding,
+	type ListenerAuthority,
+} from '../../main/enterprise/listener-policy';
 import { PROMPT_IDS } from '../../shared/promptDefinitions';
 import { startHostCue, type HostCue } from './host-cue';
 import {
@@ -49,6 +55,42 @@ export class HostStartError extends Error {
 		super(refusal.message);
 		this.name = 'HostStartError';
 	}
+}
+
+/** The one address a detached host's bridge binds: this machine only. */
+export const RUNTIME_HOST_BIND = '127.0.0.1';
+
+/**
+ * The listener authority a detached host holds its bridge to (MCOMP-21-03): the desktop's rule
+ * (`managedListenerStanding` + `listenerVerdict`) over the runtime's OWN binding, read per bind.
+ * Any binding state but `standalone` is managed, so an enrolled-unavailable or unreadable
+ * standing, or an omitted host adapter, never reads as standalone. The revision is the attached
+ * adapter's applied one while enrolled, else the record's kept one. No published operation
+ * delivers a listener ceiling (DESKTOP-LOCAL/1), so a managed host refuses `runtime-host`
+ * `unavailable` by name and never opens the socket; standalone binds as before.
+ */
+export function runtimeHostListenerAuthority(
+	runtime: Pick<MaestroRuntime, 'managedBinding' | 'managedHost'>
+): ListenerAuthority {
+	return {
+		evaluateListener(request) {
+			const binding = runtime.managedBinding.state();
+			const policy =
+				binding.state === 'enrolled' && runtime.managedHost
+					? runtime.managedHost.policyStatus()
+					: 'record' in binding
+						? { appliedRevision: binding.record.policyRevision }
+						: null;
+			return listenerVerdict(
+				managedListenerStanding({
+					enrolled: binding.state !== 'standalone',
+					policy,
+					ceiling: null,
+				}),
+				request
+			);
+		},
+	};
 }
 
 export interface RuntimeHostOptions {
@@ -104,6 +146,8 @@ export interface RuntimeHostDeps {
 	createRuntime: typeof createMaestroRuntime;
 	startServer: typeof startRuntimeServer;
 	startCue: typeof startHostCue;
+	/** What the bridge's listener is held to. Default: `runtimeHostListenerAuthority`. */
+	listenerAuthority(runtime: MaestroRuntime): ListenerAuthority;
 	/** Can the runtime load its bundled prompts, looked for the way it looks for them? */
 	promptsLoad(moduleDirectory: string, userDataDir: string): boolean;
 	randomToken(): string;
@@ -137,6 +181,7 @@ const defaultDeps: RuntimeHostDeps = {
 	createRuntime: createMaestroRuntime,
 	startServer: startRuntimeServer,
 	startCue: startHostCue,
+	listenerAuthority: runtimeHostListenerAuthority,
 	promptsLoad: (moduleDirectory, userDataDir) =>
 		createPromptLoaderFor({ userDataDir, moduleDirectory })?.get(
 			PROMPT_IDS.MAESTRO_SYSTEM_PROMPT
@@ -299,6 +344,11 @@ export async function startRuntimeHost(
 				`Re-attaching the managed standing failed: ${error instanceof Error ? error.message : String(error)}`
 			);
 		}
+		// The bridge is held before anything consumes work (MCOMP-21-03): no telemetry, no Cue, no
+		// socket. A refusal throws `ListenerDeniedError` and the catch below releases the directory.
+		// Installed here, over this runtime's standing: the gate otherwise has no authority headless.
+		setListenerAuthority(deps.listenerAuthority(runtime));
+		holdListener({ kind: 'runtime-host', bind: RUNTIME_HOST_BIND, port: options.port ?? 0 });
 		// With a host adapter and a journal, the journaled events go to the endpoint from here on,
 		// under whatever standing the adapter reports at each pass (MRC-10-03B).
 		if (runtime.managedHost && runtime.managedEvents) {
@@ -323,6 +373,7 @@ export async function startRuntimeHost(
 			token,
 			cliSecret,
 			port: options.port,
+			address: RUNTIME_HOST_BIND,
 			onStopRequested: () => void stop(),
 			...(roundParents ? { roundParents } : {}),
 			describe: () => ({
