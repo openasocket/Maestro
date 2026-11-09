@@ -6880,3 +6880,242 @@ describe('Per-parent discovery with SSH reconciliation', () => {
 		}
 	);
 });
+
+// ============================================================================
+// Worktree discovery through the host commit (MCOMP-23-02E)
+// ============================================================================
+
+describe('Worktree discovery commits through the host (MCOMP-23-02E)', () => {
+	const commitAgent = () =>
+		(window as any).maestro.sessions.commitAgent as ReturnType<typeof vi.fn>;
+	const base = '/projects/worktrees';
+	const subdir = (branch: string) => ({ path: base + '/' + branch, branch, name: branch });
+	const event = (branch: string) => ({ sessionId: 'parent-1', worktree: subdir(branch) });
+	// The host double: refuses exactly the paths in refusedPaths, and answers an
+	// admitted record with a canonical value the draft did not carry.
+	const refusedPaths = new Set<string>();
+	const hostDouble = async (request: any) =>
+		refusedPaths.has(request.record.cwd)
+			? {
+					ok: false,
+					code: 'field',
+					reason: 'A choice is not approved.',
+					policyRevision: 4,
+					fields: [{ field: 'workspace', reason: 'Workspace is not approved.' }],
+				}
+			: {
+					ok: true,
+					record: { ...request.record, customModel: 'host-canonical' },
+					managed: true,
+					policyRevision: 4,
+				};
+	let echo: any;
+	let discover: ((data: any) => Promise<void>) | undefined;
+
+	beforeEach(() => {
+		refusedPaths.clear();
+		discover = undefined;
+		echo = commitAgent().getMockImplementation();
+		commitAgent().mockImplementation(hostDouble);
+		mockGit.onWorktreeDiscovered.mockImplementation((cb: any) => {
+			discover = cb;
+			return () => {};
+		});
+	});
+
+	afterEach(() => {
+		commitAgent().mockImplementation(echo);
+		mockGit.scanWorktreeDirectory.mockResolvedValue({ gitSubdirs: [] });
+		mockGit.onWorktreeDiscovered.mockReturnValue(() => {});
+	});
+
+	const committedPaths = () =>
+		commitAgent().mock.calls.map(([request]: any) => [request.operation, request.record.cwd]);
+	const children = () =>
+		useSessionStore
+			.getState()
+			.sessions.filter((s) => s.parentSessionId === 'parent-1')
+			.map((s) => [s.cwd, s.customModel]);
+	const refusalToasts = () =>
+		vi
+			.mocked(notifyToast)
+			.mock.calls.map(([toast]) => toast)
+			.filter((toast) => /Refused/.test(toast.title ?? ''));
+
+	it.each(['save', 'refresh', 'startup'])(
+		'%s scan inserts only the canonical admitted children and reports the refusals in one toast',
+		async (mode) => {
+			vi.useFakeTimers();
+			refusedPaths.add(base + '/feature-2');
+			refusedPaths.add(base + '/feature-3');
+			mockGit.scanWorktreeDirectory.mockResolvedValue({
+				gitSubdirs: ['feature-1', 'feature-2', 'feature-3'].map(subdir),
+			});
+
+			await runConfiguredScan(mode, mockParentSession);
+
+			expect(committedPaths()).toEqual([
+				['create', base + '/feature-1'],
+				['create', base + '/feature-2'],
+				['create', base + '/feature-3'],
+			]);
+			expect(children()).toEqual([[base + '/feature-1', 'host-canonical']]);
+			const toasts = refusalToasts();
+			expect(toasts).toHaveLength(1);
+			expect(toasts[0]).toMatchObject({ type: 'error', title: 'Worktree Sub-Agents Refused' });
+			expect(toasts[0].message).toContain(
+				'feature-2 (' +
+					base +
+					'/feature-2): A choice is not approved. (workspace: Workspace is not approved.)'
+			);
+			expect(toasts[0].message).toContain('feature-3 (' + base + '/feature-3)');
+		}
+	);
+
+	it('skips a refused worktree on the next scan and watcher event, and asks again after a config save', async () => {
+		refusedPaths.add(base + '/feature-2');
+		mockGit.scanWorktreeDirectory.mockResolvedValue({ gitSubdirs: [subdir('feature-2')] });
+		useSessionStore.setState({
+			sessions: [mockParentSession],
+			activeSessionId: 'parent-1',
+			sessionsLoaded: false,
+		} as any);
+		const { result } = renderHook(() => useWorktreeHandlers());
+
+		await act(async () => {
+			await result.current.refreshWorktreeState();
+		});
+		await act(async () => {
+			await result.current.refreshWorktreeState();
+			await discover!(event('feature-2'));
+		});
+		expect(commitAgent()).toHaveBeenCalledTimes(1);
+		expect(refusalToasts()).toHaveLength(1);
+		expect(children()).toEqual([]);
+
+		// The policy now admits it. Re-saving the worktree config forgets the
+		// refusal, so the next scan (not only the save's own) asks the host again.
+		refusedPaths.clear();
+		mockGit.scanWorktreeDirectory.mockResolvedValueOnce({ gitSubdirs: [] });
+		await act(async () => {
+			await result.current.handleSaveWorktreeConfig(mockParentSession.worktreeConfig);
+		});
+		expect(commitAgent()).toHaveBeenCalledTimes(1);
+		await act(async () => {
+			await result.current.refreshWorktreeState();
+		});
+		expect(commitAgent()).toHaveBeenCalledTimes(2);
+		expect(children()).toEqual([[base + '/feature-2', 'host-canonical']]);
+	});
+
+	it('asks again once the parent moves to another worktree base', async () => {
+		refusedPaths.add(base + '/feature-2');
+		mockGit.scanWorktreeDirectory.mockResolvedValue({ gitSubdirs: [subdir('feature-2')] });
+		useSessionStore.setState({ sessions: [mockParentSession], sessionsLoaded: false } as any);
+		const { result } = renderHook(() => useWorktreeHandlers());
+		await act(async () => {
+			await result.current.refreshWorktreeState();
+		});
+		expect(commitAgent()).toHaveBeenCalledTimes(1);
+
+		useSessionStore.getState().updateSession('parent-1', {
+			worktreeConfig: { basePath: '/projects', watchEnabled: true },
+		});
+		await act(async () => {
+			await result.current.refreshWorktreeState();
+		});
+		expect(commitAgent()).toHaveBeenCalledTimes(2);
+		expect(children()).toEqual([]);
+	});
+
+	it('watcher inserts the canonical record and reports a refused worktree by name', async () => {
+		refusedPaths.add(base + '/feature-9');
+		useSessionStore.setState({ sessions: [mockParentSession], sessionsLoaded: false } as any);
+		renderHook(() => useWorktreeHandlers());
+
+		await act(async () => {
+			await discover!(event('feature-8'));
+			await discover!(event('feature-9'));
+		});
+
+		expect(committedPaths()).toEqual([
+			['create', base + '/feature-8'],
+			['create', base + '/feature-9'],
+		]);
+		expect(children()).toEqual([[base + '/feature-8', 'host-canonical']]);
+		expect(notifyToast).toHaveBeenCalledWith(
+			expect.objectContaining({ title: 'New Worktree Discovered', message: 'feature-8' })
+		);
+		expect(notifyToast).not.toHaveBeenCalledWith(
+			expect.objectContaining({ title: 'New Worktree Discovered', message: 'feature-9' })
+		);
+		const toasts = refusalToasts();
+		expect(toasts).toHaveLength(1);
+		expect(toasts[0]).toMatchObject({ type: 'error', title: 'Worktree Sub-Agent Refused' });
+		expect(toasts[0].message).toContain('workspace: Workspace is not approved.');
+	});
+
+	it('watcher does not ask the host about a worktree the parent already has', async () => {
+		const existing = createChildSession({ cwd: base + '/feature-1', worktreeBranch: 'feature-1' });
+		useSessionStore.setState({
+			sessions: [mockParentSession, existing],
+			sessionsLoaded: false,
+		} as any);
+		renderHook(() => useWorktreeHandlers());
+		await act(async () => {
+			await discover!(event('feature-1'));
+		});
+		expect(commitAgent()).not.toHaveBeenCalled();
+	});
+
+	it('legacy scanner commits each child and inserts only the admitted canonical records', async () => {
+		vi.useFakeTimers();
+		refusedPaths.add(base + '/old-2');
+		mockGit.scanWorktreeDirectory.mockResolvedValueOnce({
+			gitSubdirs: [subdir('old-1'), subdir('old-2')],
+		});
+		const parent = { ...mockParentSession, worktreeConfig: undefined, worktreeParentPath: base };
+		useSessionStore.setState({ sessions: [parent], sessionsLoaded: false } as any);
+		renderHook(() => useWorktreeHandlers());
+		await act(async () => {
+			await vi.runAllTimersAsync();
+		});
+
+		expect(committedPaths()).toEqual([
+			['create', base + '/old-1'],
+			['create', base + '/old-2'],
+		]);
+		const added = useSessionStore.getState().sessions.filter((s) => s.id !== parent.id);
+		expect(added.map((s) => [s.cwd, s.customModel])).toEqual([[base + '/old-1', 'host-canonical']]);
+		expect(refusalToasts()).toHaveLength(1);
+		expect(notifyToast).not.toHaveBeenCalledWith(
+			expect.objectContaining({ title: 'New Worktree Discovered', message: 'old-2 (old-2)' })
+		);
+	});
+
+	it('neither inserts nor remembers a child whose commit failed in transport', async () => {
+		vi.spyOn(logger, 'error').mockImplementation(() => {});
+		commitAgent().mockRejectedValueOnce(new Error('bridge down'));
+		mockGit.scanWorktreeDirectory.mockResolvedValue({ gitSubdirs: [subdir('feature-5')] });
+		useSessionStore.setState({ sessions: [mockParentSession], sessionsLoaded: false } as any);
+		const { result } = renderHook(() => useWorktreeHandlers());
+
+		await act(async () => {
+			await result.current.refreshWorktreeState();
+		});
+		expect(children()).toEqual([]);
+		expect(refusalToasts()).toEqual([]);
+		expect(captureException).toHaveBeenCalledWith(
+			expect.any(Error),
+			expect.objectContaining({
+				extra: expect.objectContaining({ source: 'worktreeDiscoveryCommit' }),
+			})
+		);
+
+		await act(async () => {
+			await result.current.refreshWorktreeState();
+		});
+		expect(commitAgent()).toHaveBeenCalledTimes(2);
+		expect(children()).toEqual([[base + '/feature-5', 'host-canonical']]);
+	});
+});

@@ -533,6 +533,85 @@ async function scanConfiguredWorktrees(
 // buildWorktreeSession and BuildWorktreeSessionParams are imported from ../../utils/worktreeSession
 // normalizePath and sessionMatchesWorktreeRoot are imported from ../../utils/worktreeDedup
 
+/**
+ * Worktree paths the host refused as sub-agents, per parent (MCOMP-23-02E).
+ * Discovery skips them instead of asking again on every scan or watcher event.
+ * An entry holds only while the parent's worktree scope (base path and remote)
+ * is unchanged, and saving the parent's worktree config clears it.
+ */
+type WorktreeRefusals = Map<string, { scope: string; paths: Set<string> }>;
+
+function worktreeRefusalScope(parent: Session): string {
+	const base = parent.worktreeConfig?.basePath ?? parent.worktreeParentPath ?? '';
+	return JSON.stringify([base, getSshRemoteId(parent) ?? null]);
+}
+
+function refusalPathKey(parent: Session, path: string): string {
+	return normalizePath(path, !!getSshRemoteId(parent));
+}
+
+function isRefusedWorktree(refusals: WorktreeRefusals, parent: Session, path: string): boolean {
+	const entry = refusals.get(parent.id);
+	return (
+		!!entry &&
+		entry.scope === worktreeRefusalScope(parent) &&
+		entry.paths.has(refusalPathKey(parent, path))
+	);
+}
+
+function rememberRefusedWorktree(refusals: WorktreeRefusals, parent: Session, path: string): void {
+	const scope = worktreeRefusalScope(parent);
+	let entry = refusals.get(parent.id);
+	if (!entry || entry.scope !== scope) {
+		entry = { scope, paths: new Set() };
+		refusals.set(parent.id, entry);
+	}
+	entry.paths.add(refusalPathKey(parent, path));
+}
+
+/** The parent a discovered child was built under, read from the store now. */
+function parentInStore(draft: Session): Session | undefined {
+	return useSessionStore.getState().sessions.find((s) => s.id === draft.parentSessionId);
+}
+
+/**
+ * Commit discovered worktree children through the host, one at a time, and
+ * return only the CANONICAL records. A refused child is remembered against its
+ * parent and reported once for the whole scan; an IPC failure is logged and the
+ * child is simply not added (the next scan asks again).
+ */
+async function commitDiscoveredWorktrees(
+	drafts: Session[],
+	parentOf: (draft: Session) => Session | undefined,
+	refusals: WorktreeRefusals
+): Promise<Session[]> {
+	const committed: Session[] = [];
+	const refused: string[] = [];
+	for (const draft of drafts) {
+		try {
+			const result = await commitNewAgent('create', draft, { notify: false });
+			if (result.ok) {
+				committed.push(result.session);
+				continue;
+			}
+			const parent = parentOf(draft);
+			if (parent) rememberRefusedWorktree(refusals, parent, draft.cwd);
+			refused.push(`${draft.worktreeBranch || draft.name} (${draft.cwd}): ${result.message}`);
+		} catch (err) {
+			logger.error('[WorktreeScan] Failed to commit worktree ' + draft.cwd + ':', undefined, err);
+			captureException(err, { extra: { path: draft.cwd, source: 'worktreeDiscoveryCommit' } });
+		}
+	}
+	if (refused.length > 0) {
+		notifyToast({
+			type: 'error',
+			title: refused.length === 1 ? 'Worktree Sub-Agent Refused' : 'Worktree Sub-Agents Refused',
+			message: refused.join('\n'),
+		});
+	}
+	return committed;
+}
+
 const EMPTY_RIGHT_PANEL_REF: React.RefObject<RightPanelHandle | null> = { current: null };
 
 // ============================================================================
@@ -555,6 +634,7 @@ export function useWorktreeHandlers(deps: UseWorktreeHandlersDeps = {}): Worktre
 	// ---------------------------------------------------------------------------
 	const recentlyCreatedWorktreePathsRef = useRef(new Set<string>());
 	const unresolvedWorktreeSessionIdsRef = useRef(new Set<string>());
+	const refusedWorktreesRef = useRef<WorktreeRefusals>(new Map());
 
 	// ---------------------------------------------------------------------------
 	// Memoized values
@@ -644,8 +724,10 @@ export function useWorktreeHandlers(deps: UseWorktreeHandlersDeps = {}): Worktre
 		const { defaultSaveToHistory: savToHist, defaultShowThinking: showThink } =
 			useSettingsStore.getState();
 
-		// Save the config first
+		// Save the config first. A changed (or re-saved) config asks the host again
+		// about worktrees it refused before.
 		useSessionStore.getState().updateSession(activeSession.id, { worktreeConfig: config });
+		refusedWorktreesRef.current.delete(activeSession.id);
 
 		// Scan for worktrees and create sub-agent sessions
 		const parentSshRemoteId = getSshRemoteId(activeSession);
@@ -770,8 +852,17 @@ export function useWorktreeHandlers(deps: UseWorktreeHandlersDeps = {}): Worktre
 				}
 
 				if (newWorktreeSessions.length > 0 && isScanCurrent()) {
-					const unmarkedSessions = newWorktreeSessions.filter((s) => !isRecentlyCreated(s.cwd));
-					if (unmarkedSessions.length === 0) return;
+					const unmarked = newWorktreeSessions.filter((s) => !isRecentlyCreated(s.cwd));
+					if (unmarked.length === 0) return;
+					// The host commits each child (MCOMP-23-02E); only canonical records
+					// enter the store, and only while this scan still describes the parent.
+					const committed = await commitDiscoveredWorktrees(
+						unmarked,
+						parentInStore,
+						refusedWorktreesRef.current
+					);
+					const unmarkedSessions = committed.filter((s) => !isRecentlyCreated(s.cwd));
+					if (unmarkedSessions.length === 0 || !isScanCurrent()) return;
 					useSessionStore.getState().setSessions((prev) => [...prev, ...unmarkedSessions]);
 					// Expand worktrees on parent
 					useSessionStore.getState().updateSession(activeSession.id, { worktreesExpanded: true });
@@ -1271,6 +1362,8 @@ export function useWorktreeHandlers(deps: UseWorktreeHandlersDeps = {}): Worktre
 					try {
 						if (isSkippableBranch(subdir.branch)) continue;
 						if (isRecentlyCreated(subdir.path)) continue;
+						if (isRefusedWorktree(refusedWorktreesRef.current, parentSession, subdir.path))
+							continue;
 
 						// Repo-identity check: if we know both the parent's repo root and the
 						// subdir's repo root, skip subdirs that don't match. If either is
@@ -1444,7 +1537,7 @@ export function useWorktreeHandlers(deps: UseWorktreeHandlersDeps = {}): Worktre
 		}
 
 		if (newWorktreeSessions.length > 0) {
-			useSessionStore.getState().setSessions((prev) => {
+			const newIn = (prev: Session[]) => {
 				const pathKey = (session: Session) => {
 					const remoteId = getSshRemoteId(session, true);
 					const normalizeSession = session.parentSessionId
@@ -1468,19 +1561,30 @@ export function useWorktreeHandlers(deps: UseWorktreeHandlersDeps = {}): Worktre
 				const currentRawPaths = new Set(
 					prev.filter((s) => typeof s.cwd === 'string' && s.parentSessionId).map(rawPathKey)
 				);
-				const trulyNew = newWorktreeSessions.filter(
-					(s) =>
-						!!s.parentSessionId &&
-						!!scanGuards.get(s.parentSessionId)?.() &&
-						!creationGuards.get(s.parentSessionId)?.(s.cwd) &&
-						!currentPaths.has(pathKey(s)) &&
-						!currentRawPaths.has(rawPathKey(s))
-				);
+				return (s: Session) =>
+					!!s.parentSessionId &&
+					!!scanGuards.get(s.parentSessionId)?.() &&
+					!creationGuards.get(s.parentSessionId)?.(s.cwd) &&
+					!currentPaths.has(pathKey(s)) &&
+					!currentRawPaths.has(rawPathKey(s));
+			};
+			// Ask the host only about children still new now, then insert only the
+			// canonical records still new once it answered (MCOMP-23-02E).
+			const committed = await commitDiscoveredWorktrees(
+				newWorktreeSessions.filter(newIn(useSessionStore.getState().sessions)),
+				parentInStore,
+				refusedWorktreesRef.current
+			);
+			const inserted: Session[] = [];
+			useSessionStore.getState().setSessions((prev) => {
+				const trulyNew = committed.filter(newIn(prev));
+				inserted.splice(0, inserted.length, ...trulyNew);
 				if (trulyNew.length === 0) return prev;
 				return [...prev, ...trulyNew];
 			});
+			if (inserted.length === 0) return;
 
-			const parentIds = new Set(newWorktreeSessions.map((s) => s.parentSessionId));
+			const parentIds = new Set(inserted.map((s) => s.parentSessionId));
 			useSessionStore
 				.getState()
 				.setSessions((prev) =>
@@ -1568,6 +1672,8 @@ export function useWorktreeHandlers(deps: UseWorktreeHandlersDeps = {}): Worktre
 				const sshRemoteId = getSshRemoteId(parentSession);
 				// Chokidar events are local; an old watcher cannot describe a new SSH target.
 				if (sshRemoteId || !parentSession.worktreeConfig?.watchEnabled) return;
+				// A worktree the host refused stays out until the parent's config changes.
+				if (isRefusedWorktree(refusedWorktreesRef.current, parentSession, worktree.path)) return;
 				const parentIdentity = {
 					cwd: parentSession.cwd,
 					basePath: parentSession.worktreeConfig.basePath,
@@ -1627,7 +1733,7 @@ export function useWorktreeHandlers(deps: UseWorktreeHandlersDeps = {}): Worktre
 					useSettingsStore.getState();
 				const gitInfo = await fetchGitInfo(worktree.path, sshRemoteId);
 
-				const worktreeSession = buildWorktreeSession({
+				const draft = buildWorktreeSession({
 					parentSession,
 					path: worktree.path,
 					branch: worktree.branch,
@@ -1637,8 +1743,8 @@ export function useWorktreeHandlers(deps: UseWorktreeHandlersDeps = {}): Worktre
 					...gitInfo,
 				});
 
-				let added = false;
-				useSessionStore.getState().setSessions((prev) => {
+				// Whether the parent still watches this base and has no child at the path.
+				const canAttach = (prev: Session[]) => {
 					const currentParent = prev.find((s) => s.id === sessionId);
 					if (
 						!currentParent ||
@@ -1649,17 +1755,27 @@ export function useWorktreeHandlers(deps: UseWorktreeHandlersDeps = {}): Worktre
 						currentParent.sessionSshRemoteConfig?.enabled !== parentIdentity.configuredSshEnabled ||
 						currentParent.sessionSshRemoteConfig?.remoteId !== parentIdentity.configuredSshRemoteId
 					)
-						return prev;
-					if (
-						prev.some(
-							(s) =>
-								typeof s.cwd === 'string' &&
-								s.parentSessionId === sessionId &&
-								getSshRemoteId(s, true) === sshRemoteId &&
-								sessionMatchesWorktreeRoot(s, normalizedWorktreePath)
-						)
-					)
-						return prev;
+						return false;
+					return !prev.some(
+						(s) =>
+							typeof s.cwd === 'string' &&
+							s.parentSessionId === sessionId &&
+							getSshRemoteId(s, true) === sshRemoteId &&
+							sessionMatchesWorktreeRoot(s, normalizedWorktreePath)
+					);
+				};
+				if (!canAttach(useSessionStore.getState().sessions)) return;
+				// The host commits the child (MCOMP-23-02E); only its canonical record enters.
+				const [worktreeSession] = await commitDiscoveredWorktrees(
+					[draft],
+					parentInStore,
+					refusedWorktreesRef.current
+				);
+				if (!worktreeSession) return;
+
+				let added = false;
+				useSessionStore.getState().setSessions((prev) => {
+					if (!canAttach(prev)) return prev;
 					added = true;
 					return [...prev, worktreeSession];
 				});
@@ -1756,6 +1872,8 @@ export function useWorktreeHandlers(deps: UseWorktreeHandlersDeps = {}): Worktre
 				const newSessionsToAdd: Session[] = [];
 				// Track paths we're about to add to avoid duplicates within this scan
 				const pathsBeingAdded = new Set<string>();
+				// Legacy children carry no parentSessionId; remember who each was built under.
+				const legacyParents = new Map<string, Session>();
 
 				for (const session of worktreeParentSessions) {
 					try {
@@ -1791,6 +1909,7 @@ export function useWorktreeHandlers(deps: UseWorktreeHandlersDeps = {}): Worktre
 								if (pathsBeingAdded.has(subdir.path)) {
 									continue;
 								}
+								if (isRefusedWorktree(refusedWorktreesRef.current, session, subdir.path)) continue;
 
 								// Found a new worktree - prepare session creation
 								pathsBeingAdded.add(subdir.path);
@@ -1802,6 +1921,7 @@ export function useWorktreeHandlers(deps: UseWorktreeHandlersDeps = {}): Worktre
 								// Fetch git info (with SSH support)
 								const gitInfo = await fetchGitInfo(subdir.path, parentSshRemoteId);
 
+								legacyParents.set(subdir.path, session);
 								newSessionsToAdd.push(
 									buildWorktreeSession({
 										parentSession: session,
@@ -1836,19 +1956,28 @@ export function useWorktreeHandlers(deps: UseWorktreeHandlersDeps = {}): Worktre
 
 				// Add all new sessions in a single update (uses functional update to get fresh state)
 				if (newSessionsToAdd.length > 0) {
-					useSessionStore.getState().setSessions((prev) => {
+					const newIn = (prev: Session[]) => {
 						// Double-check against current state to avoid duplicates
 						const currentPaths = new Set(
 							prev.filter((s) => typeof s.cwd === 'string').map((s) => normalizePath(s.cwd))
 						);
-						const trulyNew = newSessionsToAdd.filter(
-							(s) => !currentPaths.has(normalizePath(s.cwd))
-						);
+						return (s: Session) => !currentPaths.has(normalizePath(s.cwd));
+					};
+					// The host commits each child (MCOMP-23-02E); only canonical records enter.
+					const committed = await commitDiscoveredWorktrees(
+						newSessionsToAdd.filter(newIn(useSessionStore.getState().sessions)),
+						(draft) => legacyParents.get(draft.cwd),
+						refusedWorktreesRef.current
+					);
+					const inserted: Session[] = [];
+					useSessionStore.getState().setSessions((prev) => {
+						const trulyNew = committed.filter(newIn(prev));
+						inserted.splice(0, inserted.length, ...trulyNew);
 						if (trulyNew.length === 0) return prev;
 						return [...prev, ...trulyNew];
 					});
 
-					for (const session of newSessionsToAdd) {
+					for (const session of inserted) {
 						notifyToast({
 							type: 'success',
 							title: 'New Worktree Discovered',
