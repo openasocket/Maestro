@@ -8264,6 +8264,33 @@
 					"id": "MCOMP-33-03A"
 				},
 				{
+					"label": "Register a committed agent as the persistence baseline in the merged event shape",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/__tests__/renderer/hooks/useSessionCrud.test.ts",
+						"src/__tests__/renderer/services/agentCommit.test.ts",
+						"src/renderer/services/agentCommit.ts"
+					],
+					"outcome": "Inserted during execution after MCOMP-33-03A; landed as 2cae42bb6. The MCOMP-33-04 source suite run caught an unhandled `TypeError: sessions is not iterable` in `src/__tests__/renderer/hooks/useSessionCrud.test.ts` (absent on pristine upstream 919d28a66). The second upstream/rc merge changed the `SESSION_PERSISTENCE_BASELINE_EVENT` detail of `src/renderer/hooks/utils/useDebouncedPersistence.ts` to `SessionPersistenceBaseline` (`{ sessions, recovered? }`), but `sessionFromCommittedRecord()` in `src/renderer/services/agentCommit.ts` (MCOMP-23-02A) still dispatched a bare array, so every host-committed new, cloned or imported agent threw in the listener and was never registered as the persistence baseline. Dispatch the typed shape; add a suite that fails when the fix is reverted; realign the useSessionCrud case that pinned the old array. Required inputs: `MAESTRO-CONTRACT-INPUTS-BUILD`. Backlog: VERIFY-01. Limit this task to 1-3 authored files and fewer than 500 changed lines.",
+					"backlog": ["VERIFY-01"],
+					"requires": [],
+					"produces": [],
+					"id": "MCOMP-33-03B"
+				},
+				{
+					"label": "Settle the type errors the acceptance specs pull in from the pair journeys and plugin harness",
+					"kind": "TEST",
+					"targets": [
+						"e2e/fixtures/plugin-harness.ts",
+						"src/__tests__/integration/mega-maestro/journeys.ts"
+					],
+					"outcome": "Inserted during execution after MCOMP-33-03B; landed as 6e2232a4c. The MCOMP-33-04 e2e type check (`e2e/managed-full-journey.spec.ts`, `e2e/standalone-agent.spec.ts`, `e2e/fixtures/acceptance-evidence.ts`) failed with 7 pre-existing errors in files the new specs import: `src/__tests__/integration/mega-maestro/journeys.ts` 317/324 (handshake components inferred `kind: string`) and 558/568/569 (the workflow fence answer not narrowed off `WorkflowFenceRefusal`), and `e2e/fixtures/plugin-harness.ts` 136/155 (`NodeJS.ProcessEnv` passed to `electron.launch`). Type them without changing behavior. Required inputs: `MAESTRO-CONTRACT-INPUTS-BUILD`. Backlog: VERIFY-01. Limit this task to 1-3 authored files and fewer than 500 changed lines.",
+					"backlog": ["VERIFY-01"],
+					"requires": [],
+					"produces": [],
+					"id": "MCOMP-33-03C"
+				},
+				{
 					"label": "Verify and publish implementation inputs",
 					"kind": "VERIFY",
 					"targets": ["Plans/integration-completion/evidence/final-build.json"],
@@ -8287,7 +8314,7 @@
 			"produces": ["MAESTRO-FINAL-CONSUMERS-BUILD"],
 			"id": "MCOMP-33",
 			"path": ".maestro/playbooks/2026-10-29-Maestro-Integration-Completion/MCOMP-33.md",
-			"taskCount": 76,
+			"taskCount": 78,
 			"stage": "S18"
 		},
 		{
@@ -8901,7 +8928,7 @@
 				"MEGA-RUNTIME-ADAPTER-BUILD"
 			],
 			"nativeInputs": false,
-			"taskCount": 77
+			"taskCount": 79
 		},
 		{
 			"id": "S19",
@@ -8951,8 +8978,8 @@
 			"taskCount": 1
 		}
 	],
-	"taskCount": 528,
-	"taskCounts": { "IMPLEMENT": 408, "TEST": 60, "VERIFY": 60 },
+	"taskCount": 530,
+	"taskCounts": { "IMPLEMENT": 409, "TEST": 61, "VERIFY": 60 },
 	"artifacts": {
 		"MEGA-CONTRACTS-FOUNDATION-BUILD": {
 			"producerDocument": "GCOMP-01",
@@ -10117,6 +10144,8 @@
 			"MCOMP-33-02G",
 			"MCOMP-33-03",
 			"MCOMP-33-03A",
+			"MCOMP-33-03B",
+			"MCOMP-33-03C",
 			"MCOMP-33-04",
 			"GCOMP-29-01",
 			"GCOMP-29-02",
