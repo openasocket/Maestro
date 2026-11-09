@@ -19,7 +19,13 @@ import type { IdentityRead } from '../../../../main/enterprise/identity-store';
 import { registerFilesystemHandlers } from '../../../../main/ipc/handlers/filesystem';
 import { getSshRemoteById } from '../../../../main/stores';
 import { logger } from '../../../../main/utils/logger';
-import { deleteManyRemote, deleteRemote } from '../../../../main/utils/remote-fs';
+import {
+	deleteManyRemote,
+	deleteRemote,
+	remotePathWouldBeReplaced,
+	renameRemote,
+	writeFileRemote,
+} from '../../../../main/utils/remote-fs';
 import { runAsTransport } from '../../../../main/web-server/auth/transport-actor';
 
 const registered = new Map<string, (event: unknown, ...args: any[]) => Promise<any>>();
@@ -70,12 +76,18 @@ vi.mock('../../../../main/utils/remote-fs', () => ({
 	deleteRemote: vi.fn(),
 	deleteManyRemote: vi.fn(),
 	existsRemote: vi.fn(),
+	remotePathWouldBeReplaced: vi.fn(),
 	countItemsRemote: vi.fn(),
 	compressFolderRemote: vi.fn(),
 	listTreeRemote: vi.fn(),
 }));
 vi.mock('../../../../main/stores', () => ({ getSshRemoteById: vi.fn() }));
 vi.mock('../../../../main/utils/sentry', () => ({ captureException: vi.fn() }));
+// The real replacement probe resolves the ssh binary first; this suite runs it over an ssh double.
+vi.mock('../../../../shared/maestro-lib/launch/ssh-path', async (original) => ({
+	...(await original<typeof import('../../../../shared/maestro-lib/launch/ssh-path')>()),
+	resolveSshPath: async () => 'ssh',
+}));
 
 const enrolled: IdentityRead = {
 	status: 'ok',
@@ -234,6 +246,132 @@ describe('filesystem deletes under the local-effects ceiling (MRC2-04-09)', () =
 		).rejects.toThrow(/^\[managed-denied\] .*for maestro-cli is refused$/);
 		expect(vi.mocked(logger.warn).mock.calls[0][2]).toMatchObject({
 			receipt: { actor: 'maestro-cli' },
+		});
+	});
+
+	describe('a remote write that replaces what is there is held as a delete (MCOMP-21-11A)', () => {
+		const remote = { id: 'remote-1', host: 'h', username: 'u' };
+
+		/** Answer the replacement probe with the REAL remote-fs check over an ssh double answering `answer`. */
+		async function probeAnswers(answer: { stdout: string; exitCode: number }) {
+			const actual = await vi.importActual<typeof import('../../../../main/utils/remote-fs')>(
+				'../../../../main/utils/remote-fs'
+			);
+			const execSsh = vi.fn(async () => ({ stderr: 'stat: unreadable', ...answer }));
+			vi.mocked(remotePathWouldBeReplaced).mockImplementation((path, config, options) =>
+				actual.remotePathWouldBeReplaced(path, config, options, { execSsh, buildSshArgs: () => [] })
+			);
+			return execSsh;
+		}
+
+		beforeEach(() => {
+			vi.mocked(getSshRemoteById).mockReturnValue(remote as never);
+			vi.mocked(renameRemote).mockResolvedValue({ success: true } as never);
+			vi.mocked(deleteRemote).mockResolvedValue({ success: true } as never);
+			vi.mocked(writeFileRemote).mockResolvedValue({ success: true } as never);
+			vi.mocked(fs.readFile).mockResolvedValue(Buffer.from('bytes') as never);
+			vi.mocked(remotePathWouldBeReplaced).mockResolvedValue(true);
+		});
+
+		it('a rename onto a taken name and an overwriting import are refused before any remote mv or cp', async () => {
+			register('ceiling', 'deny');
+			await expect(call('fs:rename', '/r/old', '/r/taken', 'remote-1')).rejects.toThrow(
+				/^\[managed-denied\] .*deleting \/r\/taken for the operator is refused$/
+			);
+			expect(remotePathWouldBeReplaced).toHaveBeenCalledWith('/r/taken', remote, {
+				source: '/r/old',
+			});
+			await expect(
+				call('fs:copyPath', '/local/a.txt', '/r/taken', {
+					overwrite: true,
+					sshRemoteId: 'remote-1',
+				})
+			).rejects.toThrow(/^\[managed-denied\] .*deleting \/r\/taken/);
+			expect(remotePathWouldBeReplaced).toHaveBeenLastCalledWith('/r/taken', remote, {});
+			expect(renameRemote).not.toHaveBeenCalled();
+			expect(fs.stat).not.toHaveBeenCalled();
+			expect(deleteRemote).not.toHaveBeenCalled();
+			expect(writeFileRemote).not.toHaveBeenCalled();
+			expect(vi.mocked(logger.warn).mock.calls[0][2]).toMatchObject({
+				receipt: { effect: 'delete', class: 'destructive', target: '/r/taken', outcome: 'denied' },
+			});
+		});
+
+		it('the hold is the destructive delete, asked before the write runs; declined runs nothing, confirmed runs it', async () => {
+			register('ceiling', 'confirm');
+			confirm.mockResolvedValueOnce('declined');
+			await expect(call('fs:rename', '/r/old', '/r/taken', 'remote-1')).rejects.toThrow(
+				'[managed-declined]'
+			);
+			expect(renameRemote).not.toHaveBeenCalled();
+			expect(confirm).toHaveBeenCalledWith(
+				expect.objectContaining({ effect: 'delete', class: 'destructive', target: '/r/taken' })
+			);
+			confirm.mockResolvedValueOnce('confirmed');
+			expect(await call('fs:rename', '/r/old', '/r/taken', 'remote-1')).toEqual({ success: true });
+			expect(renameRemote).toHaveBeenCalledWith('/r/old', '/r/taken', remote);
+			confirm.mockResolvedValueOnce('confirmed');
+			expect(
+				await call('fs:copyPath', '/local/a.txt', '/r/taken', {
+					overwrite: true,
+					sshRemoteId: 'remote-1',
+				})
+			).toEqual({ success: true });
+			expect(confirm).toHaveBeenCalledTimes(3);
+			expect(vi.mocked(confirm).mock.invocationCallOrder[2]).toBeLessThan(
+				vi.mocked(deleteRemote).mock.invocationCallOrder[0]
+			);
+			expect(writeFileRemote).toHaveBeenCalledWith('/r/taken', expect.anything(), remote);
+		});
+
+		it('a probe that fails counts as replaced: the real check over ssh exits non-zero and the move is refused', async () => {
+			register('ceiling', 'deny');
+			const execSsh = await probeAnswers({ stdout: '', exitCode: 1 });
+			await expect(call('fs:rename', '/r/old', '/r/unreadable', 'remote-1')).rejects.toThrow(
+				'[managed-denied]'
+			);
+			expect(execSsh).toHaveBeenCalled();
+			expect(renameRemote).not.toHaveBeenCalled();
+			await probeAnswers({ stdout: 'garbled', exitCode: 0 });
+			await expect(call('fs:rename', '/r/old', '/r/unreadable', 'remote-1')).rejects.toThrow(
+				'[managed-denied]'
+			);
+			expect(renameRemote).not.toHaveBeenCalled();
+		});
+
+		it('the same entry (-ef) and a free name replace nothing: they run unheld even under a denying ceiling', async () => {
+			register('ceiling', 'deny');
+			const same = await probeAnswers({ stdout: 'SAME\n', exitCode: 0 });
+			expect(await call('fs:rename', '/r/Name', '/r/name', 'remote-1')).toEqual({ success: true });
+			const probe = (same.mock.calls[0] as unknown as [string, string[]])[1].at(-1);
+			expect(probe).toContain("-ef '/r/Name'");
+			await probeAnswers({ stdout: 'ABSENT\n', exitCode: 0 });
+			expect(await call('fs:rename', '/r/old', '/r/free', 'remote-1')).toEqual({ success: true });
+			expect(
+				await call('fs:copyPath', '/local/a.txt', '/r/free', {
+					overwrite: true,
+					sshRemoteId: 'remote-1',
+				})
+			).toEqual({ success: true });
+			expect(renameRemote).toHaveBeenCalledTimes(2);
+			expect(writeFileRemote).toHaveBeenCalledTimes(1);
+			expect(logger.warn).not.toHaveBeenCalled();
+		});
+
+		it('standalone (no authority): no probe is made and the remote move and import run as before', async () => {
+			register('none');
+			expect(await call('fs:rename', '/r/old', '/r/taken', 'remote-1')).toEqual({ success: true });
+			expect(
+				await call('fs:copyPath', '/local/a.txt', '/r/taken', {
+					overwrite: true,
+					sshRemoteId: 'remote-1',
+				})
+			).toEqual({ success: true });
+			expect(remotePathWouldBeReplaced).not.toHaveBeenCalled();
+			expect(renameRemote).toHaveBeenCalledTimes(1);
+			expect(deleteRemote).toHaveBeenCalledTimes(1);
+			expect(writeFileRemote).toHaveBeenCalledTimes(1);
+			expect(confirm).not.toHaveBeenCalled();
 		});
 	});
 });

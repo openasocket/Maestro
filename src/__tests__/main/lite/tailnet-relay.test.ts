@@ -2,10 +2,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createServer, type Server } from 'node:http';
 import { once } from 'node:events';
 import WebSocket, { WebSocketServer } from 'ws';
-const provider = vi.hoisted(() => ({ port: 0, peerId: 'host-node', reads: 0 }));
+const provider = vi.hoisted(() => ({
+	port: 0,
+	peerId: 'host-node',
+	reads: 0,
+	onRead: undefined as undefined | (() => void),
+}));
 vi.mock('../../../main/lite/tailnet', () => ({
 	tailnetDestination: async () => ({
-		...(provider.reads++, {}),
+		...(provider.reads++, provider.onRead?.(), {}),
 		hostname: '127.0.0.1',
 		port: provider.port,
 		localAddress: '127.0.0.1',
@@ -17,7 +22,7 @@ vi.mock('../../../main/lite/tailnet', () => ({
 vi.mock('../../../main/lite/lan', async (original) => ({
 	...(await original<typeof import('../../../main/lite/lan')>()),
 	lanDestination: async () => ({
-		...(provider.reads++, {}),
+		...(provider.reads++, provider.onRead?.(), {}),
 		hostname: '127.0.0.1',
 		port: provider.port,
 		localAddress: '127.0.0.1',
@@ -35,6 +40,14 @@ import {
 	type ListenerCeilingEntry,
 	type ListenerRequest,
 } from '../../../main/enterprise/listener-policy';
+import { isEgressDeniedError, setEgressAuthority } from '../../../main/utils/fetchWithTimeout';
+import {
+	egressVerdict,
+	managedEgressStanding,
+	parseEgressPolicyCeiling,
+	type EgressPolicyCeiling,
+} from '../../../main/enterprise/egress-policy';
+import { LITE_PEER_EGRESS_CLASS } from '../../../main/lite/pairing/transport';
 const credential = 'A'.repeat(43) + '.' + 'B'.repeat(43);
 let endpoint: URL;
 let server: Server,
@@ -233,6 +246,141 @@ describe.each(['tailscale', 'lan'] as const)(
 					.status
 			).toBe(200);
 			expect(heldListeners()).toEqual([]);
+		});
+	}
+);
+
+/** A ceiling admitting the paired origin as a Lite peer, one admitting another peer only, and one with no peer class. */
+const peerCeiling = (destinations: string[]) => {
+	const parsed = parseEgressPolicyCeiling({
+		policyRevision: 3,
+		classes: [{ class: LITE_PEER_EGRESS_CLASS, destinations }],
+	});
+	if (!parsed.ok) throw new Error(parsed.problems.join('; '));
+	return parsed.ceiling;
+};
+describe.each(['tailscale', 'lan'] as const)(
+	'private paired browser relay lite-peer egress hold over %s (MCOMP-21-12B)',
+	(transport) => {
+		const evaluated: Array<{ url: string; class: string; reads: number }> = [];
+		let installed: EgressPolicyCeiling | null;
+		let upgrades = 0;
+		const open = () =>
+			transport === 'lan'
+				? openLanRelay(endpoint, credential, abort.signal)
+				: openTailnetRelay(endpoint, credential, abort.signal, 'host-node');
+		const get = () =>
+			fetch(relay.url + '/api/sessions', { headers: { [ADMISSION_HEADER]: credential } });
+		const connect = () => {
+			const url = new URL(relay.url);
+			url.protocol = 'ws:';
+			url.pathname = CONNECT_PATH + '/ws';
+			return new WebSocket(url, {
+				origin: relay.url.origin,
+				headers: { [ADMISSION_HEADER]: credential },
+			});
+		};
+		/** The relay has stopped: its loopback port refuses a new connection. */
+		const stopped = () =>
+			vi.waitFor(() => expect(get()).rejects.toThrow(), { timeout: 2000, interval: 20 });
+		/** Pass the two-second destination cache so the next request reads (and awaits) the destination again. */
+		const reconnect = () => {
+			const now = Date.now();
+			vi.spyOn(Date, 'now').mockReturnValue(now + 3000);
+		};
+		beforeEach(() => {
+			endpoint = new URL(
+				(transport === 'lan' ? 'http://192.168.1.10:56036' : 'http://100.64.0.10:56036') +
+					CONNECT_PATH
+			);
+			evaluated.length = 0;
+			installed = peerCeiling([endpoint.origin]);
+			upgrades = 0;
+			server.on('upgrade', () => upgrades++);
+			setEgressAuthority({
+				evaluateEgress: (request) => {
+					evaluated.push({ url: request.url, class: request.class, reads: provider.reads });
+					return egressVerdict(
+						managedEgressStanding({
+							enrolled: true,
+							policy: { appliedRevision: 3 },
+							ceiling: installed,
+						}),
+						request
+					);
+				},
+			});
+		});
+		afterEach(() => {
+			provider.onRead = undefined;
+			setEgressAuthority(null);
+		});
+		it('allowed: holds the paired origin before the first destination read, then on each request and upgrade, and forwards', async () => {
+			relay = await open();
+			expect(evaluated).toEqual([{ url: endpoint.origin, class: 'lite-peer', reads: 0 }]);
+			expect((await get()).status).toBe(200);
+			expect(requests).toBe(1);
+			const socket = connect();
+			await once(socket, 'open');
+			const reply = once(socket, 'message');
+			socket.send('one command');
+			await reply;
+			socket.close();
+			expect(upgrades).toBe(1);
+			expect(commands).toBe(1);
+			expect(evaluated.map((e) => [e.url, e.class])).toEqual(
+				Array(3).fill([endpoint.origin, 'lite-peer'])
+			);
+		});
+		it('a non-paired origin is refused: a ceiling listing another peer only throws before any destination read', async () => {
+			installed = peerCeiling(['http://100.64.9.9:56036', 'http://192.168.1.99:56036']);
+			const error = await open().catch((e: unknown) => e);
+			expect(isEgressDeniedError(error)).toBe(true);
+			expect((error as Error).message).toMatch(/^\[managed-destination-denied\] /);
+			expect(provider.reads).toBe(0);
+			expect(requests).toBe(0);
+		});
+		it('revoked after admission: the next request answers 403, forwards nothing and stops the relay', async () => {
+			relay = await open();
+			installed = null;
+			const response = await get();
+			expect(response.status).toBe(403);
+			expect(requests).toBe(0);
+			await stopped();
+			expect(evaluated).toHaveLength(2);
+		});
+		it('revoked during the reconnect destination await: the hold after it answers 403 with nothing forwarded', async () => {
+			relay = await open();
+			reconnect();
+			provider.onRead = () => {
+				installed = peerCeiling(['http://100.64.9.9:56036']);
+			};
+			expect((await get()).status).toBe(403);
+			expect(provider.reads).toBe(2);
+			expect(evaluated.at(-1)).toMatchObject({ reads: 2 });
+			expect(requests).toBe(0);
+			await stopped();
+		});
+		it('an upgrade revoked during its destination await destroys the socket, opens no upstream and stops the relay', async () => {
+			relay = await open();
+			reconnect();
+			provider.onRead = () => {
+				installed = null;
+			};
+			const socket = connect();
+			const errors: Error[] = [];
+			socket.on('error', (error) => errors.push(error));
+			const code = await new Promise<number>((resolve) => socket.once('close', resolve));
+			expect(errors.map((e) => e.message)).toEqual(['socket hang up']);
+			expect(code).toBe(1006);
+			expect(provider.reads).toBe(2);
+			expect(upgrades).toBe(0);
+			expect(commands).toBe(0);
+			// Re-admit: only the refused upgrade itself can have stopped the relay.
+			provider.onRead = undefined;
+			installed = peerCeiling([endpoint.origin]);
+			await stopped();
+			expect(requests).toBe(0);
 		});
 	}
 );
