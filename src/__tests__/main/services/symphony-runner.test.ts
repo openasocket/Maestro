@@ -1999,6 +1999,241 @@ describe('Symphony Runner under a managed repository gate (MRC-09-05)', () => {
 			expect(fs.rm).not.toHaveBeenCalled();
 		});
 	});
+
+	/**
+	 * MCOMP-21-15: a hold earlier in the call authorizes nothing about a sink
+	 * that runs later. Each case revokes between the admission and the actual
+	 * remote change, branch deletion or clone removal and proves that sink
+	 * never ran; the allowed equivalent proves the same path still works.
+	 */
+	describe('revocation between admission and each later sink (MCOMP-21-15)', () => {
+		const lstat = (fs as unknown as { lstat: unknown }).lstat;
+		const setInodes = (...sequence: number[]) => {
+			let call = 0;
+			(fs as unknown as { lstat: unknown }).lstat = async () => ({
+				dev: 1n,
+				ino: BigInt(sequence[Math.min(call++, sequence.length - 1)]),
+			});
+		};
+
+		/** A ceiling double that admits until `revoke()`, then refuses every effect `unavailable`. */
+		function revocable() {
+			const inner = authority();
+			let revoked = false;
+			return {
+				requests: inner.requests,
+				revoke: () => {
+					revoked = true;
+				},
+				authorize(request: Request): Decision {
+					const decision = inner.authorize(request);
+					if (!revoked) return decision;
+					return {
+						allowed: false,
+						code: 'unavailable' as never,
+						message: `revoked before ${request.effect}`,
+						managed: { ...(decision.managed as object), outcome: 'unavailable' } as never,
+					};
+				},
+			};
+		}
+
+		/** A local-effects double recording every delete it is asked to hold. */
+		function localEffects(refuse = false) {
+			const deletes: Array<{ effect: string; target: string | null; count?: number }> = [];
+			return {
+				deletes,
+				async authorize(request: { effect: string; target: string | null; count?: number }) {
+					deletes.push({ effect: request.effect, target: request.target, count: request.count });
+					if (!refuse) return { allowed: true as const };
+					return {
+						allowed: false as const,
+						code: 'denied' as const,
+						message: 'the local-effects ceiling refuses delete',
+						managed: {
+							policyRevision: 7,
+							class: 'destructive' as const,
+							effect: 'delete' as const,
+							actor: 'ada',
+							target: request.target,
+							count: request.count ?? 1,
+							outcome: 'denied' as const,
+						},
+					};
+				},
+			};
+		}
+
+		/** A fork that is admitted, then asks to repoint origin at the fork (the set-url step). */
+		const forkThenRepoint = (onFork: () => void = () => {}) =>
+			vi.mocked(ensureForkSetup).mockImplementation(async (_path, _slug, options) => {
+				const forkRefusal = await options?.beforeFork?.();
+				if (forkRefusal) return { isFork: false, error: forkRefusal };
+				onFork();
+				const refusal = await options?.beforeRemoteChange?.({
+					step: 'set-url',
+					effect: 'fork',
+					resource: 'remote',
+					remote: 'https://github.com/ada/widgets.git',
+				});
+				return refusal
+					? { isFork: false, error: refusal }
+					: { isFork: true, forkSlug: 'ada/widgets' };
+			});
+
+		afterEach(() => {
+			(fs as unknown as { lstat: unknown }).lstat = lstat;
+		});
+
+		it('allowed: the remote change after the fork is held by itself, against the fork, then the run goes on', async () => {
+			successfulStart();
+			const auth = authority();
+			forkThenRepoint();
+
+			const result = await startContribution(startOptions({ authority: auth, actor }));
+
+			expect(result).toMatchObject({ success: true, isFork: true });
+			expect(auth.requests.map((r) => [r.effect, r.remote])).toEqual([
+				['clone', 'https://github.com/acme/widgets'],
+				['branch', null],
+				['fork', 'https://github.com/acme/widgets'],
+				['fork', 'https://github.com/ada/widgets.git'],
+				['commit', null],
+				['push', 'https://github.com/ada/widgets.git'],
+				['pull-request', 'https://github.com/acme/widgets'],
+			]);
+			expect(vi.mocked(ensureForkSetup).mock.calls[0][2]).toMatchObject({
+				expectedOrigin: 'https://github.com/acme/widgets',
+			});
+		});
+
+		it('revoked after the fork was admitted: the remote change is refused, nothing more runs, the clone goes', async () => {
+			vi.mocked(execFileNoThrow).mockResolvedValue(okExec);
+			const auth = revocable();
+			forkThenRepoint(auth.revoke);
+			const effects = localEffects();
+
+			const result = await startContribution(
+				startOptions({ authority: auth, actor, localEffects: effects as never })
+			);
+
+			expect(result.success).toBe(false);
+			expect(result.error).toBe('[managed-unavailable] revoked before fork');
+			expect(auth.requests.map((r) => r.effect)).toEqual(['clone', 'branch', 'fork', 'fork']);
+			const commands = vi.mocked(execFileNoThrow).mock.calls.map((call) => call[1]);
+			expect(commands).not.toContainEqual(expect.arrayContaining(['commit']));
+			expect(commands).not.toContainEqual(expect.arrayContaining(['push']));
+			// The discard is a delete held by itself, once, of the clone.
+			expect(effects.deletes).toEqual([
+				{ effect: 'delete', target: '/tmp/managed-repo', count: 1 },
+			]);
+			expect(fs.rm).toHaveBeenCalledWith('/tmp/managed-repo', { recursive: true, force: true });
+		});
+
+		it('a refused clone removal leaves the clone in place after a refused push', async () => {
+			vi.mocked(execFileNoThrow).mockResolvedValue(okExec);
+			const effects = localEffects(true);
+
+			const result = await startContribution(
+				startOptions({
+					authority: authority({ push: 'remote-denied' }),
+					actor,
+					localEffects: effects as never,
+				})
+			);
+
+			expect(result.error).toBe('[managed-remote-denied] no push for ada');
+			expect(effects.deletes).toHaveLength(1);
+			expect(fs.rm).not.toHaveBeenCalled();
+		});
+
+		it('a clone swapped after it was made is never the folder the discard removes', async () => {
+			vi.mocked(execFileNoThrow).mockResolvedValue(okExec);
+			setInodes(1, 2);
+
+			const result = await startContribution(
+				startOptions({ authority: authority({ commit: 'outside-ceiling' }), actor })
+			);
+
+			expect(result.error).toBe('[managed-outside-ceiling] no commit for ada');
+			expect(fs.rm).not.toHaveBeenCalled();
+		});
+
+		it('cancel: --delete-branch refused after the cancel was admitted closes nothing and keeps the clone', async () => {
+			vi.mocked(execFileNoThrow).mockResolvedValue({
+				stdout: 'https://github.com/acme/widgets.git\n',
+				stderr: '',
+				exitCode: 0,
+			});
+			const auth = authority({ push: 'remote-denied' });
+
+			const result = await cancelContribution('/tmp/managed-repo', 9, true, undefined, {
+				authority: auth,
+				actor,
+			});
+
+			expect(result.success).toBe(false);
+			expect(result.error).toBe('[managed-remote-denied] no push for ada');
+			expect(auth.requests.map((r) => r.effect)).toEqual(['cancel', 'push']);
+			const commands = vi.mocked(execFileNoThrow).mock.calls.map((call) => call[1]);
+			expect(commands).not.toContainEqual(expect.arrayContaining(['pr', 'close']));
+			expect(fs.rm).not.toHaveBeenCalled();
+		});
+
+		it('cancel: a delete refused after the PR closed keeps the clone and says so', async () => {
+			vi.mocked(execFileNoThrow).mockResolvedValue(okExec);
+			const effects = localEffects(true);
+
+			const result = await cancelContribution('/tmp/managed-repo', 9, true, 'acme/widgets', {
+				authority: authority(),
+				actor,
+				localEffects: effects as never,
+			});
+
+			expect(result).toMatchObject({
+				success: true,
+				cleanupProblem: '[managed-denied] the local-effects ceiling refuses delete',
+			});
+			const commands = vi.mocked(execFileNoThrow).mock.calls.map((call) => call[1]);
+			expect(commands).toContainEqual(['pr', 'close', '9', '--repo', 'acme/widgets']);
+			expect(fs.rm).not.toHaveBeenCalled();
+		});
+
+		it('cancel: a clone swapped during the cancel is left in place and reported', async () => {
+			vi.mocked(execFileNoThrow).mockResolvedValue(okExec);
+			setInodes(1, 2);
+
+			const result = await cancelContribution('/tmp/managed-repo', 9, true, 'acme/widgets', {
+				authority: authority(),
+				actor,
+				localEffects: localEffects() as never,
+			});
+
+			expect(result).toMatchObject({
+				success: true,
+				cleanupProblem: 'the clone changed after it was examined; it was left in place',
+			});
+			expect(fs.rm).not.toHaveBeenCalled();
+		});
+
+		it('cancel: allowed, the delete is held once against the same clone and runs', async () => {
+			vi.mocked(execFileNoThrow).mockResolvedValue(okExec);
+			const effects = localEffects();
+
+			const result = await cancelContribution('/tmp/managed-repo', 9, true, 'acme/widgets', {
+				authority: authority(),
+				actor,
+				localEffects: effects as never,
+			});
+
+			expect(result.success).toBe(true);
+			expect('cleanupProblem' in result).toBe(false);
+			expect(effects.deletes).toEqual([
+				{ effect: 'delete', target: '/tmp/managed-repo', count: 1 },
+			]);
+			expect(fs.rm).toHaveBeenCalledWith('/tmp/managed-repo', { recursive: true, force: true });
+		});
+	});
 });
 
 // ============================================================================

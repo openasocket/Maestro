@@ -437,6 +437,252 @@ describe('worktrees and the setup script under the repository ceiling (MRC2-04-0
 	});
 });
 
+/**
+ * MCOMP-21-15: what was admitted earlier in a handler authorizes nothing about
+ * the sink that runs later. Each case revokes (clears the ceiling, refuses the
+ * delete, or swaps the path) between the admission and the actual checkout,
+ * branch creation, rmdir or recursive delete, and proves the sink never ran;
+ * the allowed equivalent proves the same path still works.
+ */
+describe('revocation between admission and the worktree sink (MCOMP-21-15)', () => {
+	let handlers: Map<string, Handler>;
+	let repository: ReturnType<typeof createRepositoryPolicySource>;
+	const lstat = mockFs.lstat;
+	const deletes: Array<{ target: string | null; count?: number }> = [];
+	let refuseDelete = false;
+
+	/** A local-effects double: records every delete it is asked to hold, refuses on demand. */
+	const localEffects = {
+		authorize: async (request: { effect: string; target: string | null; count?: number }) => {
+			deletes.push({ target: request.target, count: request.count });
+			if (!refuseDelete) return { allowed: true as const };
+			return {
+				allowed: false as const,
+				code: 'denied' as const,
+				message: 'the local-effects ceiling refuses delete',
+				managed: {
+					policyRevision: 3,
+					class: 'destructive' as const,
+					effect: 'delete' as const,
+					actor: 'operator',
+					target: request.target,
+					count: request.count ?? 1,
+					outcome: 'denied' as const,
+				},
+			};
+		},
+	};
+
+	/** Answer like `answer()`, and run `after[key]` once that command line has been answered. */
+	function answerThen(answers: Record<string, string>, after: Record<string, () => void>): void {
+		vi.mocked(execFile.execFileNoThrow).mockImplementation(async (command, args) => {
+			const key = `${command} ${(args as string[]).join(' ')}`;
+			const result =
+				key in answers
+					? { stdout: answers[key], stderr: '', exitCode: 0 }
+					: { stdout: '', stderr: `no answer for ${key}`, exitCode: 1 };
+			after[key]?.();
+			return result;
+		});
+	}
+
+	/** Each lstat answers the next inode in `inodes` (the last one repeats). */
+	function inodes(...sequence: number[]): void {
+		let call = 0;
+		mockFs.lstat = async () => {
+			const ino = BigInt(sequence[Math.min(call++, sequence.length - 1)]);
+			return { dev: 1n, ino };
+		};
+	}
+
+	beforeEach(() => {
+		vi.clearAllMocks();
+		clearWorktreeCreationMarks();
+		deletes.length = 0;
+		refuseDelete = false;
+		mockFs.lstat = lstat;
+		handlers = new Map();
+		vi.mocked(ipcMain.handle).mockImplementation((channel, handler) => {
+			handlers.set(channel, handler as Handler);
+		});
+		registerWorktreeHandlers({
+			settingsStore: { get: vi.fn() },
+			getMainWindow: () => null,
+			localEffects: () => localEffects as never,
+		});
+		mockGetSshRemoteById.mockReturnValue(undefined);
+		mockFs.access.mockResolvedValue(undefined);
+		mockFs.realpath.mockRejectedValue(new Error('ENOENT'));
+		mockFs.readdir.mockResolvedValue([]);
+		mockFs.rm.mockResolvedValue(undefined);
+		mockFs.rmdir.mockResolvedValue(undefined);
+		repository = createRepositoryPolicySource({
+			identity: { read: () => enrolled },
+			policy: () => ({ appliedRevision: 3 }),
+		});
+		const out = repository.install(ceiling);
+		if (!out.installed) throw new Error(out.problems.join('; '));
+		setGitExecutionGate(createGitExecutionGate({ repository }));
+		answer({});
+	});
+
+	afterEach(() => {
+		mockFs.lstat = lstat;
+		setGitExecutionGate(null);
+	});
+
+	const run = (channel: string, ...args: unknown[]) => handlers.get(channel)!({}, ...args);
+
+	describe('git:removeWorktree recursive-delete fallback', () => {
+		/** `worktree remove --force` is admitted and spawned, but git itself fails. */
+		const failedRemove = { 'git remote get-url origin': ORIGIN };
+
+		it('allowed: both holds acquired again at the fallback, then the directory is deleted', async () => {
+			answer(failedRemove);
+			const result = await run('git:removeWorktree', '/wt', true);
+			expect(result).toEqual({ success: true });
+			expect(ran().filter((line) => line === 'git worktree remove --force /wt')).toHaveLength(1);
+			// The origin is read once for the remove and once more for the fallback's own hold.
+			expect(ran().filter((line) => line === 'git remote get-url origin')).toHaveLength(2);
+			expect(deletes).toEqual([{ target: '/wt', count: 1 }]);
+			expect(mockFs.rm).toHaveBeenCalledWith('/wt', { recursive: true, force: true });
+		});
+
+		it('a ceiling cleared after the remove was admitted refuses the fallback: nothing is deleted', async () => {
+			answerThen(failedRemove, {
+				'git worktree remove --force /wt': () => repository.clear(),
+			});
+			const result = await run('git:removeWorktree', '/wt', true);
+			expect(result.success).toBe(false);
+			expect(result.error).toMatch(/^\[managed-unavailable\]/);
+			expect(deletes).toEqual([]);
+			expect(mockFs.rm).not.toHaveBeenCalled();
+		});
+
+		it('a local-effects ceiling refusing the delete leaves the directory in place', async () => {
+			answer(failedRemove);
+			refuseDelete = true;
+			const result = await run('git:removeWorktree', '/wt', true);
+			expect(result).toEqual({
+				success: false,
+				error: '[managed-denied] the local-effects ceiling refuses delete',
+			});
+			expect(deletes).toEqual([{ target: '/wt', count: 1 }]);
+			expect(mockFs.rm).not.toHaveBeenCalled();
+		});
+
+		it('a path swapped after it was examined is left in place and reported, even though both holds admitted', async () => {
+			answer(failedRemove);
+			inodes(1, 2);
+			const result = await run('git:removeWorktree', '/wt', true);
+			expect(result.success).toBe(false);
+			expect(result.error).toBe(
+				'Cleanup incomplete: /wt changed after it was examined and was left in place'
+			);
+			expect(deletes).toEqual([{ target: '/wt', count: 1 }]);
+			expect(mockFs.rm).not.toHaveBeenCalled();
+		});
+
+		it('standalone: the fallback still deletes after only the handle check', async () => {
+			setGitExecutionGate(null);
+			registerWorktreeHandlers({ settingsStore: { get: vi.fn() }, getMainWindow: () => null });
+			answer({});
+			const result = await run('git:removeWorktree', '/wt', true);
+			expect(result).toEqual({ success: true });
+			expect(ran()).toEqual(['git worktree remove --force /wt']);
+			expect(mockFs.rm).toHaveBeenCalledWith('/wt', { recursive: true, force: true });
+		});
+	});
+
+	describe('git:worktreeSetup empty-folder rmdir and branch creation', () => {
+		const emptyFolder = {
+			'git remote get-url origin': ORIGIN,
+			'git worktree add -b feature /wt': 'Preparing worktree',
+		};
+
+		it('allowed: the rmdir is held as `worktree add` plus the delete, then the branch is created', async () => {
+			answer(emptyFolder);
+			const result = await run('git:worktreeSetup', '/main/repo', '/wt', 'feature');
+			expect(result).toMatchObject({ success: true, created: true });
+			expect(deletes).toEqual([{ target: '/wt', count: 1 }]);
+			expect(mockFs.rmdir).toHaveBeenCalledWith('/wt');
+			expect(ran()).toContain('git worktree add -b feature /wt');
+		});
+
+		it('a refused delete leaves the folder and creates no branch', async () => {
+			answer(emptyFolder);
+			refuseDelete = true;
+			const result = await run('git:worktreeSetup', '/main/repo', '/wt', 'feature');
+			expect(result).toEqual({
+				success: false,
+				error: '[managed-denied] the local-effects ceiling refuses delete',
+			});
+			expect(mockFs.rmdir).not.toHaveBeenCalled();
+			expect(ran()).not.toContainEqual(expect.stringContaining('worktree add'));
+			expect(isWorktreeCreatedByMaestro('/wt')).toBe(false);
+		});
+
+		it('a folder swapped while it was listed is left in place and creates no branch', async () => {
+			answer(emptyFolder);
+			inodes(1, 2);
+			const result = await run('git:worktreeSetup', '/main/repo', '/wt', 'feature');
+			expect(result.success).toBe(false);
+			expect(result.error).toMatch(/^Cleanup incomplete: \/wt changed/);
+			expect(mockFs.rmdir).not.toHaveBeenCalled();
+			expect(ran()).not.toContainEqual(expect.stringContaining('worktree add'));
+		});
+
+		it('a ceiling cleared after the rmdir was admitted refuses the branch creation itself', async () => {
+			mockFs.rmdir.mockImplementation(async () => {
+				repository.clear();
+			});
+			answer(emptyFolder);
+			const result = await run('git:worktreeSetup', '/main/repo', '/wt', 'feature');
+			expect(result.success).toBe(false);
+			expect(result.error).toMatch(/^\[managed-unavailable\]/);
+			expect(mockFs.rmdir).toHaveBeenCalledTimes(1);
+			expect(ran()).not.toContainEqual(expect.stringContaining('worktree add'));
+			expect(isWorktreeCreatedByMaestro('/wt')).toBe(false);
+		});
+	});
+
+	describe('git:worktreeCheckout', () => {
+		const clean = {
+			'git status --porcelain': '',
+			'git rev-parse --verify feature': 'abc',
+			'git remote get-url origin': ORIGIN,
+			'git checkout feature': '',
+		};
+
+		it('allowed: the checks and the checkout see the same worktree, so it checks out', async () => {
+			answer(clean);
+			const result = await run('git:worktreeCheckout', '/wt', 'feature', false);
+			expect(result).toEqual({ success: true, hasUncommittedChanges: false });
+			expect(ran()).toContain('git checkout feature');
+		});
+
+		it('a ceiling cleared after the checks passed refuses the checkout with no process', async () => {
+			answerThen(clean, { 'git rev-parse --verify feature': () => repository.clear() });
+			const result = await run('git:worktreeCheckout', '/wt', 'feature', false);
+			expect(result.success).toBe(false);
+			expect(result.error).toMatch(/^\[managed-unavailable\]/);
+			expect(ran()).not.toContainEqual(expect.stringContaining('git checkout'));
+		});
+
+		it('a worktree swapped while it was checked is never checked out, and no hold is spent', async () => {
+			answer(clean);
+			inodes(1, 2);
+			const result = await run('git:worktreeCheckout', '/wt', 'feature', false);
+			expect(result).toEqual({
+				success: false,
+				hasUncommittedChanges: false,
+				error: 'The worktree at /wt changed while it was being checked; nothing was checked out',
+			});
+			expect(ran()).toEqual(['git status --porcelain', 'git rev-parse --verify feature']);
+		});
+	});
+});
+
 describe('web git callbacks carry the host-resolved caller to the executor (MRC2-04-03)', () => {
 	type Callback = (sessionId: string) => Promise<unknown>;
 	let branches: Callback;
