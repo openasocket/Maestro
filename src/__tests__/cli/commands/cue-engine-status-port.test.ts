@@ -81,6 +81,38 @@ import { createStandaloneCueEngine } from '../../../cli/services/cue-standalone-
 import { startCueTriggerInbox } from '../../../cli/services/cue-trigger-inbox';
 import { setCueEngineLockStatusPort } from '../../../main/cue/cue-engine-lock';
 import { cueEngineCheck, cueEngineStart, cueEngineStatus } from '../../../cli/commands/cue-engine';
+import { setListenerAuthority } from '../../../main/enterprise/listener-gate';
+import { listenerVerdict } from '../../../main/enterprise/listener-policy';
+import {
+	registerCueWebhook,
+	resetCueWebhookServerForTests,
+} from '../../../main/cue/cue-webhook-server';
+
+/** Every line a start printed, on any console stream. */
+function allOutput(stderr: { mock: { calls: unknown[][] } }): string[] {
+	return [
+		...logSpy.mock.calls,
+		...vi.mocked(console.error).mock.calls,
+		...vi.mocked(console.warn).mock.calls,
+		...stderr.mock.calls,
+	].map((c) => String(c[0]));
+}
+
+/** The authority an enrolled host with no delivered listener ceiling holds with. */
+function enrolledWithoutCeiling(revision = 7) {
+	setListenerAuthority({
+		evaluateListener: (request) =>
+			listenerVerdict(
+				{
+					standing: 'managed',
+					ceiling: null,
+					policyRevision: revision,
+					reason: `no listener ceiling is installed for policy revision ${revision}`,
+				},
+				request
+			),
+	});
+}
 
 const ready: CueReadinessReport = {
 	ready: true,
@@ -140,6 +172,9 @@ afterEach(async () => {
 		}
 	}
 	await new Promise((resolve) => setTimeout(resolve, 300));
+	setListenerAuthority(null);
+	resetCueWebhookServerForTests();
+	engine.start.mockReset();
 	vi.restoreAllMocks();
 	if (savedUserData === undefined) delete process.env.MAESTRO_USER_DATA;
 	else process.env.MAESTRO_USER_DATA = savedUserData;
@@ -263,6 +298,98 @@ describe('cue engine start --status-port', () => {
 	});
 });
 
+describe('cue engine start under a managed listener ceiling (MCOMP-21-01A)', () => {
+	it('exits 1 with LISTENER_HELD when cue-status is held, before anything is armed', async () => {
+		enrolledWithoutCeiling();
+		const port = await freePort();
+		await expect(cueEngineStart({ dataDir: tmp, statusPort: port, json: true })).rejects.toThrow(
+			'__exit__'
+		);
+		expect(process.exit).toHaveBeenCalledWith(1);
+		expect(engine.start).not.toHaveBeenCalled();
+		expect(startCueTriggerInbox).not.toHaveBeenCalled();
+		expect(setCueEngineLockStatusPort).not.toHaveBeenCalled();
+		const result = JSON.parse(String(logSpy.mock.calls.at(-1)?.[0]));
+		expect(result).toEqual({
+			started: false,
+			code: 'LISTENER_HELD',
+			managed: 'unavailable',
+			error: expect.stringContaining('[managed-unavailable]'),
+		});
+		expect(result.error).toContain('revision 7');
+		// Never bound, and no fallback start without it.
+		await expect(fetch(`http://127.0.0.1:${port}/healthz`)).rejects.toThrow();
+	});
+
+	it('logs one line with the gate message in text mode', async () => {
+		enrolledWithoutCeiling();
+		const stderr = vi.mocked(process.stderr.write);
+		const port = await freePort();
+		await expect(cueEngineStart({ dataDir: tmp, statusPort: port })).rejects.toThrow('__exit__');
+		expect(engine.start).not.toHaveBeenCalled();
+		const text = allOutput(stderr);
+		const held = text.filter((line) => line.includes('[managed-unavailable]'));
+		expect(held).toHaveLength(1);
+		expect(held[0]).toContain('Status server not started');
+	});
+
+	it('still binds the status server when the ceiling admits it', async () => {
+		setListenerAuthority({ evaluateListener: () => ({ allowed: true }) });
+		const port = await freePort();
+		void cueEngineStart({ dataDir: tmp, statusPort: port, json: true });
+		await vi.waitFor(() => expect(startCueTriggerInbox).toHaveBeenCalled());
+		expect(JSON.parse(String(logSpy.mock.calls.at(-1)?.[0]))).toMatchObject({
+			started: true,
+			statusPort: port,
+		});
+		expect(JSON.parse(String(logSpy.mock.calls.at(-1)?.[0]))).not.toHaveProperty('webhookListener');
+	});
+
+	it('reports a held webhook listener once after the engine starts', async () => {
+		enrolledWithoutCeiling(9);
+		engine.start.mockImplementation(() => {
+			registerCueWebhook({
+				id: 'sub-1',
+				path: 'hook',
+				secret: 's3cret',
+				onDelivery: () => {},
+				onLog: () => {},
+			} as unknown as Parameters<typeof registerCueWebhook>[0]);
+		});
+		void cueEngineStart({ dataDir: tmp, json: true });
+		await vi.waitFor(() => expect(startCueTriggerInbox).toHaveBeenCalled());
+		const result = JSON.parse(String(logSpy.mock.calls.at(-1)?.[0]));
+		expect(result).toMatchObject({
+			started: true,
+			webhookListener: { held: true, managed: 'unavailable' },
+		});
+		expect(result.webhookListener.error).toContain('[managed-unavailable]');
+		expect(result.webhookListener.error).toContain('cue-webhook');
+	});
+
+	it('says why webhook subscriptions receive nothing in text mode', async () => {
+		enrolledWithoutCeiling();
+		engine.start.mockImplementation(() => {
+			registerCueWebhook({
+				id: 'sub-1',
+				path: 'hook',
+				secret: 's3cret',
+				onDelivery: () => {},
+				onLog: () => {},
+			} as unknown as Parameters<typeof registerCueWebhook>[0]);
+		});
+		const stderr = vi.mocked(process.stderr.write);
+		void cueEngineStart({ dataDir: tmp });
+		await vi.waitFor(() => expect(startCueTriggerInbox).toHaveBeenCalled());
+		await vi.waitFor(() => {
+			const text = allOutput(stderr);
+			expect(
+				text.filter((line) => line.includes('webhook.received subscriptions receive nothing'))
+			).toHaveLength(1);
+		});
+	});
+});
+
 describe('cue engine status', () => {
 	it('reports the status port recorded in the lock', async () => {
 		lock.statusPort = 7433;
@@ -308,7 +435,7 @@ describe('cue engine start --notify-webhook', () => {
 			notifyWebhook: 'https://hook-user:hook-pass@hooks.example.com/in?token=s3cr3t-token',
 		});
 		await vi.waitFor(() => expect(startCueTriggerInbox).toHaveBeenCalled());
-		const text = [...logSpy.mock.calls, ...stderr.mock.calls].map((c) => String(c[0])).join('\n');
+		const text = allOutput(stderr).join('\n');
 		expect(text).toContain('Notify webhook: https://hooks.example.com/in');
 		expect(text).not.toContain('s3cr3t-token');
 		expect(text).not.toContain('hook-pass');

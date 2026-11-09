@@ -314,11 +314,15 @@ export async function cueEngineStart(options: CueEngineStartOptions = {}): Promi
 	});
 
 	// The status server binds BEFORE the engine starts, so a taken port fails
-	// the command with nothing armed: no lock, no trigger, no inbox.
+	// the command with nothing armed: no lock, no trigger, no inbox. So does a
+	// managed listener ceiling refusing `cue-status` (MCOMP-21-01A): a
+	// decision, not a transient failure, so no retry and no start without the
+	// server the caller asked for.
 	let statusServer: CueStatusServerHandle | null = null;
 	if (options.statusPort !== undefined) {
 		const { startCueStatusServer, CueStatusPortInUseError, CUE_STATUS_HOST } =
 			await import('../../main/cue/cue-status-server');
+		const { isListenerDeniedError } = await import('../../main/enterprise/listener-gate');
 		try {
 			statusServer = await startCueStatusServer({
 				port: options.statusPort,
@@ -327,6 +331,21 @@ export async function cueEngineStart(options: CueEngineStartOptions = {}): Promi
 			});
 		} catch (err) {
 			health.dispose();
+			if (isListenerDeniedError(err)) {
+				if (options.json) {
+					logger.writeStdout(
+						JSON.stringify({
+							started: false,
+							code: 'LISTENER_HELD',
+							managed: err.code,
+							error: err.message,
+						})
+					);
+				} else {
+					log('error', `Status server not started: ${err.message}`);
+				}
+				process.exit(1);
+			}
 			if (!(err instanceof CueStatusPortInUseError)) throw err;
 			if (options.json) {
 				logger.writeStdout(
@@ -445,6 +464,13 @@ export async function cueEngineStart(options: CueEngineStartOptions = {}): Promi
 	);
 	health.markRunning();
 
+	// Sessions initialize inside start(), so the webhook listener has already
+	// been held (or bound) by now. A held one is reported once here, so an
+	// enrolled engine says why its webhook.received subscriptions receive
+	// nothing; the rest of the engine still runs.
+	const { getCueWebhookListenerHold } = await import('../../main/cue/cue-webhook-server');
+	const webhookHold = getCueWebhookListenerHold();
+
 	if (options.json) {
 		logger.writeStdout(
 			JSON.stringify({
@@ -454,6 +480,15 @@ export async function cueEngineStart(options: CueEngineStartOptions = {}): Promi
 				ready: readiness.ready,
 				gaps: readiness.gaps.length,
 				...(statusServer ? { statusPort: statusServer.port } : {}),
+				...(webhookHold
+					? {
+							webhookListener: {
+								held: true,
+								managed: webhookHold.code,
+								error: webhookHold.message,
+							},
+						}
+					: {}),
 			})
 		);
 	} else {
@@ -462,6 +497,12 @@ export async function cueEngineStart(options: CueEngineStartOptions = {}): Promi
 			'info',
 			`Engine started (pid ${process.pid}). Watching ${sessionCount} agent(s) for .maestro/cue.yaml. Press Ctrl+C to stop.`
 		);
+		if (webhookHold) {
+			log(
+				'warn',
+				`Webhook listener held, so webhook.received subscriptions receive nothing: ${webhookHold.message}`
+			);
+		}
 	}
 
 	// Block forever - the process stays alive on the SIGINT/SIGTERM

@@ -55,6 +55,7 @@ The whole contract a Dockerfile, systemd unit or install script builds against, 
 | `start`: `better-sqlite3` cannot load in this runtime                                                         | 1     | `error: "sqlite_unavailable"` |
 | `start --require-ready` with a gap                                                                            | 1     | `NOT_READY`                   |
 | `start`: status port taken                                                                                    | 1     | `STATUS_PORT_IN_USE`          |
+| `start`: managed listener ceiling holds the status server                                                     | 1     | `LISTENER_HELD`               |
 | `start`: another engine holds the lock                                                                        | 1     |                               |
 | `start`: bad `--notify-webhook` URL                                                                           | 2     | `INVALID_OPTIONS`             |
 | `start`: malformed `--status-port`, `--drain-timeout`, `--log-format` value (rejected by the argument parser) | 1     |                               |
@@ -244,6 +245,7 @@ Not checked (each would need a probe the launch does not make yet): whether `gh`
 - **Documented port: `7433`.** `0` lets the OS pick (tests).
 - **Separate from the webhook listener** (`cue-webhook-server.ts`, port 17997): its own port and its own lifetime.
 - **Bound before the engine starts.** A taken port prints one line (`Status port 7433 on 127.0.0.1 is already in use...`; under `--json`, `{"started":false,"code":"STATUS_PORT_IN_USE","port":7433}`) and exits 1 with no lock, trigger or inbox armed. It closes on shutdown and when the lock is held by another engine.
+- **Held by the managed listener ceiling.** On an enrolled machine the `cue-status` listener is asked of the ceiling before it binds (MCOMP-21-01). A refusal prints one line with the gate's `[managed-<code>]` message (under `--json`, `{"started":false,"code":"LISTENER_HELD","managed":"unavailable","error":"..."}`) and exits 1 with nothing armed; the engine never starts without the server it was asked for and never retries. A held webhook listener does not stop the engine: the start summary says so once (`webhookListener: { held, managed, error }` under `--json`), since `webhook.received` subscriptions then receive nothing.
 - **Only `GET` and `HEAD` on the three paths.** Any other path is 404; another method on a known path is 405 with `Allow: GET, HEAD`. A query string is ignored, a request body is never read, and requests time out after 5 seconds. Every response is `application/json` with `Cache-Control: no-store`.
 
 | Endpoint   | Question                                  | 200                                                                                    | 503                                                                                                      |
