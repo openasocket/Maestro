@@ -37,6 +37,7 @@ import {
 } from '../../shared/maestro-lib/managed/event-journal';
 import type {
 	EndpointComponent,
+	EndpointNativePort,
 	EndpointPort,
 } from '../../shared/maestro-lib/managed/endpoint-port';
 import type { ManagedEffectProducer } from '../../shared/maestro-lib/managed/effects';
@@ -94,7 +95,7 @@ import {
 	type InboxRefresh,
 	type ManagedInboxView,
 } from './inbox';
-import { createLocalEndpointClient } from './endpoint-client';
+import { createPlatformEndpointClient } from './endpoint-client';
 import { createEnrollmentLifecycle, type EnrollmentLifecycle } from './enrollment';
 import {
 	createEnterpriseIdentityStore,
@@ -595,6 +596,12 @@ export interface EnterpriseServiceDeps {
 	/** Test seam: how a port is opened for a socket path. */
 	openPort?: Parameters<typeof createEnrollmentLifecycle>[0]['openPort'];
 	/**
+	 * Host-injected NATIVE-ENDPOINT/1 port naming the process behind each connection.
+	 * None is installed in production, so on macOS and Windows the default client
+	 * refuses to open the endpoint (enrollment answers `no-endpoint`); Linux needs none.
+	 */
+	endpointNative?: EndpointNativePort;
+	/**
 	 * Trusted host injection after authenticated EFFECT/1 negotiation on this port.
 	 * Return the same producer while its connection/generation remains current,
 	 * or null when unavailable. The default v1 client has no effect producer.
@@ -806,7 +813,13 @@ export function createEnterpriseService(deps: EnterpriseServiceDeps): Enterprise
 	// Close once: the quit handler's cleanup and a later will-quit can both reach it.
 	let closing: Promise<void> | null = null;
 	const openPort =
-		deps.openPort ?? ((socketPath: string) => createLocalEndpointClient({ socketPath }));
+		deps.openPort ??
+		((socketPath: string) =>
+			createPlatformEndpointClient({
+				socketPath,
+				platform: deps.platform ?? process.platform,
+				...(deps.endpointNative ? { native: deps.endpointNative } : {}),
+			}));
 	const lifecycle = createEnrollmentLifecycle({
 		identity,
 		openPort: (socketPath) => {

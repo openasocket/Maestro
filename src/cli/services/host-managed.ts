@@ -43,7 +43,7 @@ import {
 	type CommandService,
 	type CommandStatusInventory,
 } from '../../main/enterprise/commands';
-import { createLocalEndpointClient } from '../../main/enterprise/endpoint-client';
+import { createPlatformEndpointClient } from '../../main/enterprise/endpoint-client';
 import {
 	createEnrollmentLifecycle,
 	type EnrollmentLifecycle,
@@ -84,7 +84,10 @@ import {
 	type MaestroRuntimeOptions,
 } from '../../shared/maestro-lib';
 import { MANAGED_COMMAND_LEDGER_FILE_NAME } from '../../shared/maestro-lib/managed/commands';
-import { LOCAL_ENDPOINT_PROTOCOL } from '../../shared/maestro-lib/managed/endpoint-port';
+import {
+	LOCAL_ENDPOINT_PROTOCOL,
+	type EndpointNativePort,
+} from '../../shared/maestro-lib/managed/endpoint-port';
 import { MANAGED_CONTRACT_VERSION } from '../../shared/maestro-lib/managed/types';
 
 /**
@@ -176,6 +179,11 @@ export interface HostManagedDeps {
 	custody?: HostCustodyRead;
 	/** Test seam: how a port is opened for the record's socket path. Default: the real client. */
 	openPort?(socketPath: string): EndpointPort;
+	/**
+	 * Host-injected NATIVE-ENDPOINT/1 port for the default client. None is installed,
+	 * so a macOS or Windows host refuses to open the endpoint by name; Linux needs none.
+	 */
+	endpointNative?: EndpointNativePort;
 	/** Test seam for the installation standing: the anchor of a directory's record. Default: its keyring anchor. */
 	anchorFor?(dir: string): AnchorStore;
 	platform?: NodeJS.Platform;
@@ -492,7 +500,13 @@ export function composeHostManaged(deps: HostManagedDeps): HostManagedCompositio
 		now,
 	});
 	const openPort =
-		deps.openPort ?? ((socketPath: string) => createLocalEndpointClient({ socketPath }));
+		deps.openPort ??
+		((socketPath: string) =>
+			createPlatformEndpointClient({
+				socketPath,
+				platform: deps.platform ?? process.platform,
+				...(deps.endpointNative ? { native: deps.endpointNative } : {}),
+			}));
 	// The socket the lifecycle opened last, so the adapter speaks over the same connection.
 	let port: EndpointPort | null = null;
 	let lifecycle: EnrollmentLifecycle | null = null;

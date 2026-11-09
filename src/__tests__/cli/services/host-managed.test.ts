@@ -23,6 +23,7 @@ import {
 	resolveHostCustody,
 	type HostCustodyRead,
 } from '../../../cli/services/host-managed';
+import { createLocalEndpointClient } from '../../../main/enterprise/endpoint-client';
 import { createEnterpriseIdentityStore } from '../../../main/enterprise/identity-store';
 import { obscuringSeal } from '../../../main/utils/safe-storage-seal';
 import type { Anchor, AnchorStore } from '../../../main/utils/keyring-anchor';
@@ -40,12 +41,44 @@ import {
 	buildDispatchSnapshot,
 	createContextVerifier,
 } from '../../../shared/maestro-lib/managed/authority';
+import {
+	ENDPOINT_NATIVE_PORT_VERSION,
+	type EndpointNativePort,
+	type EndpointPort,
+} from '../../../shared/maestro-lib/managed/endpoint-port';
 import { inProcessContext } from '../../../shared/maestro-lib/managed/operations';
 import { fakeAnchor, fakeSeal } from '../../main/enterprise/fakeCustody';
 import { anotherCommand } from '../../main/enterprise/fakeManaged';
 import { startFakeEndpoint, type FakeEndpoint } from '../../main/enterprise/fakeEndpoint';
 
 const NOW = Date.parse('2026-10-22T12:00:00Z');
+
+/** The raw client over the fake's Unix socket, for tests about the composition rather than the platform rule. */
+const unixSocketPort = (socketPath: string): EndpointPort =>
+	createLocalEndpointClient({ socketPath });
+
+/** A declared NATIVE-ENDPOINT/1 fixture for macOS: it names a fixed server, it reads no OS peer. */
+function darwinFixturePort(): EndpointNativePort & { verified: string[] } {
+	const verified: string[] = [];
+	return {
+		version: ENDPOINT_NATIVE_PORT_VERSION,
+		platform: 'darwin',
+		transport: 'unix-socket',
+		verified,
+		verifyServer: async ({ address }) => {
+			verified.push(address);
+			return {
+				status: 'verified',
+				server: {
+					pid: 4242,
+					processBirthDigest: 'a'.repeat(64),
+					executableDigest: 'b'.repeat(64),
+					principal: '_megamaestro',
+				},
+			};
+		},
+	};
+}
 
 describe('resolveHostCustody', () => {
 	it('is refused by name in a plain Node process, before the anchor is consulted', () => {
@@ -159,6 +192,7 @@ describe('composeHostManaged', () => {
 		fake = await startFakeEndpoint({ registrationRequired: true, now: () => NOW });
 		await enroll(fake.socketPath);
 		const composed = composeHostManaged({
+			openPort: unixSocketPort,
 			userDataDir: dir,
 			version: '1.1.0',
 			custody: custody(),
@@ -260,6 +294,7 @@ describe('composeHostManaged', () => {
 		await enroll(fake.socketPath);
 		const ledgerFile = path.join(dir, 'maestro-managed-inbox-receipts.json');
 		const composed = composeHostManaged({
+			openPort: unixSocketPort,
 			userDataDir: dir,
 			version: '1.1.0',
 			custody: custody(),
@@ -298,6 +333,7 @@ describe('composeHostManaged', () => {
 		await fake.close();
 		fake = undefined;
 		const restarted = composeHostManaged({
+			openPort: unixSocketPort,
 			userDataDir: dir,
 			version: '1.1.0',
 			custody: custody(),
@@ -322,6 +358,7 @@ describe('composeHostManaged', () => {
 		const ledgerFile = path.join(dir, 'maestro-managed-commands.json');
 		fs.writeFileSync(ledgerFile, '{not json');
 		const composed = composeHostManaged({
+			openPort: unixSocketPort,
 			userDataDir: dir,
 			version: '1.1.0',
 			custody: custody(),
@@ -478,6 +515,7 @@ describe('composeHostManaged', () => {
 			},
 		});
 		const composed = composeHostManaged({
+			openPort: unixSocketPort,
 			userDataDir: dir,
 			version: '1.1.0',
 			custody: custody(),
@@ -813,11 +851,13 @@ describe('composeHostManaged', () => {
 
 		fake = await startFakeEndpoint({ capabilities: ['execution'], now: () => NOW });
 		await enroll(fake.socketPath);
+		const native = darwinFixturePort();
 		const enrolled = composeHostManaged({
 			userDataDir: dir,
 			version: '1.1.0',
 			custody: custody(),
 			platform: 'darwin',
+			endpointNative: native,
 			now: () => NOW,
 		});
 		if (!enrolled.composed) throw new Error('unreachable');
@@ -825,6 +865,7 @@ describe('composeHostManaged', () => {
 		await enrolled.lifecycle.attach();
 		const status = enrolled.status();
 		expect(status?.connection).toMatchObject({ attached: true });
+		expect(native.verified).toEqual([fake.socketPath]);
 		expect(status?.endpoint).not.toBeNull();
 		// The fake's registration gate is off, but authority is still this process's own registration.
 		expect(status?.authority).toBe('none');
@@ -835,6 +876,57 @@ describe('composeHostManaged', () => {
 		await enrolled.lifecycle.close();
 		expect(enrolled.status()).toMatchObject({ authority: 'none', connection: null });
 		expect(enrolled.identity.read()).toMatchObject({ status: 'ok' });
+	});
+
+	it('opens the endpoint through the platform client: macOS and Windows with no native port refuse by name, Linux is unchanged (MCOMP-31-04A)', async () => {
+		fake = await startFakeEndpoint({ capabilities: ['execution', 'enrollment'], now: () => NOW });
+		const compose = (platform: NodeJS.Platform) => {
+			const composed = composeHostManaged({
+				userDataDir: dir,
+				version: '1.1.0',
+				custody: custody(),
+				platform,
+				now: () => NOW,
+			});
+			if (!composed.composed) throw new Error(composed.reason);
+			composed.managed.host!(installation);
+			return composed;
+		};
+		// Windows, unenrolled: a local pipe name is a valid address, but nothing names its server.
+		const windows = compose('win32');
+		const enrollment = await windows.control.requestEnrollment({
+			socketPath: '\\\\.\\pipe\\mega-maestro-endpoint-a1',
+			tenantId: 'tenant-1',
+			orgId: 'org-1',
+			mode: 'attended',
+			invitation: 'fixture-invitation',
+			collectionProfile: 'metadata',
+			trustRootDigest: 'a'.repeat(64),
+			keyPossessionProof: 'fixture-proof',
+		});
+		expect(enrollment).toMatchObject({ status: 'refused', reason: 'no-endpoint' });
+		expect(enrollment.status === 'refused' && enrollment.message).toMatch(
+			/No native endpoint port is installed for win32/
+		);
+		expect(windows.identity.read()).toMatchObject({ status: 'none' });
+		await windows.lifecycle.close();
+
+		await enroll(fake.socketPath);
+		const mac = compose('darwin');
+		const refused = await mac.control.connect();
+		expect(refused).toMatchObject({ status: 'refused', reason: 'no-endpoint' });
+		expect(refused.status === 'refused' && refused.message).toMatch(
+			/No native endpoint port is installed for darwin/
+		);
+		expect(fake.calls).toHaveLength(0);
+		expect(mac.identity.read()).toMatchObject({ status: 'ok' });
+		await mac.lifecycle.close();
+
+		const linux = compose('linux');
+		await linux.lifecycle.attach();
+		expect(linux.status()?.connection).toMatchObject({ attached: true });
+		expect(fake.calls.some((call) => call.path === '/v1/invoke')).toBe(true);
+		await linux.lifecycle.close();
 	});
 });
 

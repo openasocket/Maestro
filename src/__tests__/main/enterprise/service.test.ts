@@ -26,7 +26,11 @@ import {
 	effectGranted,
 	type ManagedEffectProducer,
 } from '../../../shared/maestro-lib/managed/effects';
-import type { EndpointPort } from '../../../shared/maestro-lib/managed/endpoint-port';
+import {
+	ENDPOINT_NATIVE_PORT_VERSION,
+	type EndpointNativePort,
+	type EndpointPort,
+} from '../../../shared/maestro-lib/managed/endpoint-port';
 import type { LifecycleFact } from '../../../shared/maestro-lib/managed/events';
 import type { Anchor } from '../../../main/utils/keyring-anchor';
 import { fakeAnchor, fakeSeal } from './fakeCustody';
@@ -57,7 +61,10 @@ describe('enterprise service', () => {
 
 	function compose(
 		anchor = fakeAnchor(holder),
-		extra: Pick<EnterpriseServiceDeps, 'openPort' | 'effectProducer' | 'liveRunCheckMs'> = {}
+		extra: Pick<
+			EnterpriseServiceDeps,
+			'openPort' | 'effectProducer' | 'liveRunCheckMs' | 'platform' | 'endpointNative'
+		> = {}
 	) {
 		const seal = fakeSeal();
 		const service = createEnterpriseService({
@@ -1033,5 +1040,87 @@ describe('enterprise service', () => {
 			});
 			expect(reopened.host.authority.live()).toHaveLength(0);
 		});
+	});
+
+	it('opens the endpoint through the platform client by default: macOS and Windows with no native port refuse by name, a declared port is accepted, Linux is unchanged (MCOMP-31-04A)', async () => {
+		const enrollIn = (service: EnterpriseService) =>
+			service.identity.write({
+				installationId: service.installation.installationId,
+				tenantId: 'tenant-1',
+				orgId: 'org-1',
+				enrollmentId: 'enr-1',
+				endpoint: {
+					socketPath: fake.socketPath,
+					bindingDigest: 'a'.repeat(64),
+					trustRootDigest: null,
+				},
+				management: 'enrolled',
+				registration: null,
+				policy: { desiredRevision: null, appliedRevision: null, observedAt: null },
+				enrolledAt: new Date(NOW).toISOString(),
+			});
+		// Windows, unenrolled: a valid local pipe name, but no port names the server behind it.
+		const windows = compose(undefined, { openPort: undefined, platform: 'win32' });
+		const enrollment = await windows.lifecycle.requestEnrollment({
+			socketPath: '\\\\.\\pipe\\mega-maestro-endpoint-a1',
+			tenantId: 'tenant-1',
+			orgId: 'org-1',
+			mode: 'attended',
+			invitation: 'fixture-invitation',
+			collectionProfile: 'metadata',
+			trustRootDigest: 'a'.repeat(64),
+			keyPossessionProof: 'fixture-proof',
+		});
+		expect(enrollment).toMatchObject({ status: 'refused', reason: 'no-endpoint' });
+		expect(enrollment.status === 'refused' && enrollment.message).toMatch(
+			/No native endpoint port is installed for win32/
+		);
+		expect(windows.identity.read()).toMatchObject({ status: 'none' });
+		await windows.close();
+
+		const mac = compose(undefined, { openPort: undefined, platform: 'darwin' });
+		await enrollIn(mac);
+		const refused = await mac.lifecycle.connect();
+		expect(refused).toMatchObject({ status: 'refused', reason: 'no-endpoint' });
+		expect(refused.status === 'refused' && refused.message).toMatch(
+			/No native endpoint port is installed for darwin/
+		);
+		expect(fake.calls).toHaveLength(0);
+		await mac.close();
+
+		// A declared fixture port (it names a fixed server and reads no OS peer) is accepted.
+		const verified: string[] = [];
+		const native: EndpointNativePort = {
+			version: ENDPOINT_NATIVE_PORT_VERSION,
+			platform: 'darwin',
+			transport: 'unix-socket',
+			verifyServer: async ({ address }) => {
+				verified.push(address);
+				return {
+					status: 'verified',
+					server: {
+						pid: 4242,
+						processBirthDigest: 'a'.repeat(64),
+						executableDigest: 'b'.repeat(64),
+						principal: '_megamaestro',
+					},
+				};
+			},
+		};
+		const verifiedMac = compose(undefined, {
+			openPort: undefined,
+			platform: 'darwin',
+			endpointNative: native,
+		});
+		await verifiedMac.lifecycle.connect();
+		expect(verified).toEqual([fake.socketPath]);
+		expect(fake.calls.length).toBeGreaterThan(0);
+		await verifiedMac.close();
+
+		const before = fake.calls.length;
+		const linux = compose(undefined, { openPort: undefined, platform: 'linux' });
+		await linux.lifecycle.connect();
+		expect(fake.calls.length).toBeGreaterThan(before);
+		await linux.close();
 	});
 });
