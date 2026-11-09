@@ -1685,7 +1685,7 @@
 				{
 					"label": "Implement authenticated actor approval bridge",
 					"kind": "IMPLEMENT",
-					"targets": ["scripts/mega-maestro-approval.mjs", "scripts/mega-maestro-pair.mjs"],
+					"targets": ["scripts/mega-maestro-pair.mjs"],
 					"outcome": "Compose the already existing Mega browser-session/CSRF approval API and endpoint challenge/redemption into a bounded owned bridge. Never treat absent --approve-command as proof API source is absent. No supplied actorId JSON, device bearer as human authority or embedded user cookies. Emit a consumer build input before any paired enrollment verification.",
 					"requires": ["MEGA-CONTRACTS-FOUNDATION-BUILD"],
 					"produces": [],
