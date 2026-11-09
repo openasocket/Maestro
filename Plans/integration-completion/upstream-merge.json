@@ -1545,6 +1545,29 @@
 				"semanticConflictsForC": [],
 				"notes": "No new semantic conflict. The suite already exercises the R04 contract (binding at index 10), so it pins the shape R07 (HeadlessAgentRunner trailing binding), R06 (the desktop runner reads it there) and R09 (index.ts wiring) must match.",
 				"unmergedAfter": 86
+			},
+			"MCOMP-33-00R06": {
+				"resolvedAt": "2026-11-09",
+				"resolvedBy": "Maestro-Claude",
+				"files": [
+					"src/main/plugins/plugin-headless-agent-runner.ts",
+					"src/__tests__/main/plugins/plugin-headless-agent-runner.test.ts"
+				],
+				"method": "Five hunks (three in the runner, two in the suite) resolved by a shape-asserting script (Working/mcomp-33-00r06/resolve.mjs, both sides read in full); staged through merge-tool.mjs stage (prettier exit 0, unchanged). Runner: 180 added, 29 removed against the integration side; 139 added, 2 removed against upstream. Suite: every test and describe title of both sides is present (38; the one integration title absent is upstream's own rename of the 60-minute case to six-hour). Suites run in the worktree: plugin-headless-agent-runner plus plugin-host-handlers 248 of 248 pass.",
+				"hunks": {
+					"src/main/plugins/plugin-headless-agent-runner.ts": [
+						"Header: upstream's acquireProviderSessionWriter and isAutoModel imports, then the integration's managed doc comment (MRC-09-02 / MRC-09-02A) in place of upstream's one-line summary.",
+						"Runner parameters: upstream's _writerLeaseHeld (slot 8) and turn settings (slot 9), then the integration's consent binding as the trailing slot 10, the 00R04/00R05 contract. The writer-lease wrapper upstream added still reads args[8].",
+						"Preflight: upstream's bounded preflight (custom binary, detection and system prompt raced against the deadline and the abort signal) taken whole; the integration's early proof file and audit were the pre-restructure copies upstream now does after preflight, so they are not duplicated. The integration's managed authority selection (deps.managed read per run; pluginBoundHeadlessAuthority when the call carries a binding, else pluginHeadlessAuthority by origin chain) re-applied right after upstream's single audit, before the abort/deadline check, so it reaches the auto-merged `...(managed ? { managed } : {})` spawn option on every send path, attachment turns included."
+					],
+					"src/__tests__/main/plugins/plugin-headless-agent-runner.test.ts": [
+						"Hunks 1 and 2 (one region): both sides appended top-level blocks sharing a four-line deps tail. The integration describe 'managed admission through the host authority (MRC-09-02)' kept whole with its own copy of the tail, then upstream's 'bounds stalled %s preparation by %s without late authority' it.each and 'stamps %s provenance before exposing a headless proof' it.each whole with theirs.",
+						"The two consent-bound cases move the binding from argument 9 (slot 8) to argument 11 (slot 10), passing undefined for the writer lease and turn settings, per the 00R04 contract."
+					]
+				},
+				"semanticConflictsForC": [],
+				"notes": "No new semantic conflict. The runner now declares the binding at slot 10 while HeadlessAgentRunner in plugin-manager-singleton.ts (unmerged, R07) still has to add the trailing binding parameter after turn; until R07 the destructured `binding` has no declared type, which 00C type-checks.",
+				"unmergedAfter": 84
 			}
 		}
 	}
