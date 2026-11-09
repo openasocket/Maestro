@@ -771,6 +771,40 @@ describe('handleCreateWorktreeFromConfig', () => {
 		expect(useSessionStore.getState().activeSessionId).toBe(newSession!.id);
 	});
 
+	it('commits the child through the host and inserts nothing on refusal (MCOMP-23-02B)', async () => {
+		useSessionStore.setState({
+			sessions: [mockParentSession],
+			activeSessionId: 'parent-1',
+		} as any);
+		const commitAgent = (window as any).maestro.sessions.commitAgent;
+		commitAgent.mockResolvedValueOnce({
+			ok: false,
+			code: 'field',
+			reason: 'A choice is not approved.',
+			policyRevision: 3,
+			fields: [{ field: 'workspace', reason: 'Workspace is not approved.' }],
+		});
+
+		const { result } = renderHook(() => useWorktreeHandlers());
+
+		await expect(
+			act(async () => {
+				await result.current.handleCreateWorktreeFromConfig('feature-new', '/projects/worktrees');
+			})
+		).rejects.toThrow('workspace: Workspace is not approved.');
+
+		expect(commitAgent.mock.calls[0][0]).toMatchObject({
+			operation: 'create',
+			record: { cwd: '/projects/worktrees/feature-new', parentSessionId: 'parent-1' },
+		});
+		expect(useSessionStore.getState().sessions).toEqual([mockParentSession]);
+		expect(useSessionStore.getState().activeSessionId).toBe('parent-1');
+		expect(notifyToast).toHaveBeenCalledTimes(1);
+		expect(notifyToast).toHaveBeenCalledWith(
+			expect.objectContaining({ type: 'error', title: 'Failed to Create Worktree' })
+		);
+	});
+
 	it('shows error toast on IPC failure and re-throws error', async () => {
 		useSessionStore.setState({
 			sessions: [mockParentSession],
@@ -982,6 +1016,48 @@ describe('handleCreateWorktree', () => {
 
 		const sessions = useSessionStore.getState().sessions;
 		expect(sessions.some((s) => s.worktreeBranch === 'new-branch')).toBe(true);
+	});
+
+	it('inserts the canonical record the host returns (MCOMP-23-02B)', async () => {
+		getModalActions().setCreateWorktreeSession(mockParentSession);
+		(window as any).maestro.sessions.commitAgent.mockImplementationOnce(async (request: any) => ({
+			ok: true,
+			record: { ...request.record, customModel: 'host-canonical' },
+			managed: true,
+			policyRevision: 3,
+		}));
+
+		const { result } = renderHook(() => useWorktreeHandlers());
+
+		await act(async () => {
+			await result.current.handleCreateWorktree('new-branch');
+		});
+
+		const child = useSessionStore
+			.getState()
+			.sessions.find((s) => s.worktreeBranch === 'new-branch');
+		expect(child?.customModel).toBe('host-canonical');
+	});
+
+	it('rejects with the refusal and inserts nothing when the host refuses (MCOMP-23-02B)', async () => {
+		useSessionStore.setState({ sessions: [mockParentSession] } as any);
+		getModalActions().setCreateWorktreeSession(mockParentSession);
+		(window as any).maestro.sessions.commitAgent.mockResolvedValueOnce({
+			ok: false,
+			code: 'field',
+			reason: 'A choice is not approved.',
+			policyRevision: 3,
+			fields: [{ field: 'workspace', reason: 'Workspace is not approved.' }],
+		});
+
+		const { result } = renderHook(() => useWorktreeHandlers());
+
+		await expect(
+			act(async () => {
+				await result.current.handleCreateWorktree('new-branch');
+			})
+		).rejects.toThrow('workspace: Workspace is not approved.');
+		expect(useSessionStore.getState().sessions).toEqual([mockParentSession]);
 	});
 
 	it('auto-focuses the new worktree session after creation', async () => {

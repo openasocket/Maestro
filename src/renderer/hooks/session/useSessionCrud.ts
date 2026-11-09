@@ -27,10 +27,9 @@ import { validateNewSession } from '../../utils/sessionValidation';
 import { getTerminalSessionId } from '../../utils/terminalTabHelpers';
 import { gitService } from '../../services/git';
 import {
-	commitAgentRecord,
-	describeAgentCommitRefusal,
-	sessionFromCommittedRecord,
+	commitNewAgent,
 	type AgentCommitRefusal,
+	type NewAgentOperation,
 } from '../../services/agentCommit';
 import { buildNewAgentRecord, newAgentClaudeInteractive } from '../../../shared/newAgentRecord';
 import type { CodexTransport } from '../../../shared/codexTransport';
@@ -100,7 +99,9 @@ export interface UseSessionCrudReturn {
 		/** Codex only: spend a reset credit automatically on quota exhaustion. Defaults off. */
 		codexAutoResetOnExhaustion?: boolean,
 		/** Codex only: which transport chat turns use. `undefined` means `exec`. */
-		codexTransport?: CodexTransport
+		codexTransport?: CodexTransport,
+		/** `clone` when the form duplicates an agent; the host checks it as a clone. */
+		operation?: NewAgentOperation
 	) => Promise<CreateNewSessionResult>;
 	/** Opens the delete agent confirmation modal */
 	deleteSession: (id: string) => void;
@@ -197,7 +198,9 @@ export function useSessionCrud(deps: UseSessionCrudDeps): UseSessionCrudReturn {
 			/** Codex only: spend a reset credit automatically on quota exhaustion. Defaults off. */
 			codexAutoResetOnExhaustion?: boolean,
 			/** Codex only: which transport chat turns use. `undefined` means `exec`. */
-			codexTransport?: CodexTransport
+			codexTransport?: CodexTransport,
+			/** `clone` when the form duplicates an agent; the host checks it as a clone. */
+			operation: NewAgentOperation = 'create'
 		): Promise<CreateNewSessionResult> => {
 			try {
 				// Get agent definition to get correct command
@@ -296,17 +299,11 @@ export function useSessionCrud(deps: UseSessionCrudDeps): UseSessionCrudReturn {
 				// The host checks the record exactly as it will be stored and commits it
 				// (MCOMP-23-02). Only the canonical record it returns enters the store; a
 				// refusal wrote nothing, so the form keeps its draft.
-				const outcome = await commitAgentRecord('create', draft);
-				if (!outcome.ok) {
-					const message = describeAgentCommitRefusal(outcome);
-					logger.warn(`Agent creation refused: ${message}`, undefined, {
-						code: outcome.code,
-						fields: outcome.fields.map((field) => field.field),
-					});
-					notifyToast({ type: 'error', title: 'Agent Creation Refused', message });
-					return { ok: false, error: message, refusal: outcome };
+				const committed = await commitNewAgent(operation, draft);
+				if (!committed.ok) {
+					return { ok: false, error: committed.message, refusal: committed.refusal };
 				}
-				const newSession = sessionFromCommittedRecord(draft, outcome.record);
+				const newSession = committed.session;
 
 				setSessions((prev) => [...prev, newSession]);
 				setActiveSessionId(newId);

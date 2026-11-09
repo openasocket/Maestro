@@ -729,6 +729,24 @@ describe('useSessionCrud', () => {
 				expect.objectContaining({ title: 'Agent Creation Refused' })
 			);
 		});
+
+		it('sends a duplicate to the host as a clone (MCOMP-23-02B)', async () => {
+			const { result } = renderHook(() => useSessionCrud(createDeps()));
+			const args = Array<undefined>(19).fill(undefined);
+
+			await act(async () => {
+				await result.current.createNewSession(
+					'claude-code',
+					'/test/project',
+					'Copy',
+					...(args as []),
+					'clone'
+				);
+			});
+
+			expect(mockMaestro.sessions.commitAgent.mock.calls[0][0].operation).toBe('clone');
+			expect(useSessionStore.getState().sessions).toHaveLength(1);
+		});
 	});
 
 	// ========================================================================

@@ -23,6 +23,7 @@ import {
 } from './worktreeDedup';
 import { sanitizeGitBranchName } from '../../shared/gitUtils';
 import { runWorktreeSetupScript } from './worktreeSetupScript';
+import { commitNewAgent } from '../services/agentCommit';
 
 /**
  * TTL for the pre-`git worktree add` dedup mark. Sized to comfortably outlast a
@@ -239,7 +240,7 @@ export async function spawnWorktreeAgentAndDispatch(
 
 		// Step 4: Build the session
 		const { defaultSaveToHistory, defaultShowThinking } = useSettingsStore.getState();
-		const newSession = buildWorktreeSession({
+		const draft = buildWorktreeSession({
 			parentSession,
 			path: worktreePath,
 			branch: branchName,
@@ -249,7 +250,16 @@ export async function spawnWorktreeAgentAndDispatch(
 			defaultShowThinking,
 		});
 
-		// Step 5: Add session to store and expand parent's worktrees
+		// Step 5: The host commits the child (MCOMP-23-02B); only its canonical
+		// record enters the store. A refusal is toasted by name and inserts
+		// nothing, which the callers already report as a failed spawn.
+		const committed = await commitNewAgent('create', draft, {
+			title: 'Worktree Agent Refused',
+		});
+		if (!committed.ok) return null;
+		const newSession = committed.session;
+
+		// Add session to store and expand parent's worktrees
 		useSessionStore
 			.getState()
 			.setSessions((prev) => [

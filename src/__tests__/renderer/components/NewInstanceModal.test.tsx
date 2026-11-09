@@ -882,7 +882,8 @@ describe('NewInstanceModal', () => {
 				true, // retryOnTokenExhaustion
 				undefined, // additionalDirectories
 				false, // codexAutoResetOnExhaustion: off by default
-				'exec' // codexTransport: Standard by default
+				'exec', // codexTransport: Standard by default
+				'create' // operation
 			);
 		});
 
@@ -939,7 +940,8 @@ describe('NewInstanceModal', () => {
 				true, // retryOnTokenExhaustion
 				undefined, // additionalDirectories
 				false, // codexAutoResetOnExhaustion: off by default
-				'exec' // codexTransport: Standard by default
+				'exec', // codexTransport: Standard by default
+				'create' // operation
 			);
 		});
 
@@ -996,7 +998,8 @@ describe('NewInstanceModal', () => {
 				true, // retryOnTokenExhaustion
 				undefined, // additionalDirectories
 				false, // codexAutoResetOnExhaustion: off by default
-				'exec' // codexTransport: Standard by default
+				'exec', // codexTransport: Standard by default
+				'create' // operation
 			);
 		});
 	});
@@ -1054,7 +1057,8 @@ describe('NewInstanceModal', () => {
 				true, // retryOnTokenExhaustion
 				undefined, // additionalDirectories
 				false, // codexAutoResetOnExhaustion: off by default
-				'exec' // codexTransport: Standard by default
+				'exec', // codexTransport: Standard by default
+				'create' // operation
 			);
 			expect(onClose).toHaveBeenCalled();
 		});
@@ -1610,7 +1614,8 @@ describe('NewInstanceModal', () => {
 				true, // retryOnTokenExhaustion
 				undefined, // additionalDirectories
 				false, // codexAutoResetOnExhaustion: off by default
-				'exec' // codexTransport: Standard by default
+				'exec', // codexTransport: Standard by default
+				'create' // operation
 			);
 		});
 
@@ -1767,7 +1772,8 @@ describe('NewInstanceModal', () => {
 				true, // retryOnTokenExhaustion
 				undefined, // additionalDirectories
 				false, // codexAutoResetOnExhaustion: off by default
-				'exec' // codexTransport: Standard by default
+				'exec', // codexTransport: Standard by default
+				'create' // operation
 			);
 		});
 	});
@@ -2427,7 +2433,9 @@ describe('NewInstanceModal', () => {
 				expected.retryOnTokenExhaustion,
 				expected.additionalDirectories,
 				expected.codexAutoResetOnExhaustion,
-				expected.codexTransport
+				expected.codexTransport,
+				// A duplicate reaches the host as a clone (MCOMP-23-02B).
+				'clone'
 			);
 		});
 
@@ -3009,7 +3017,8 @@ describe('NewInstanceModal', () => {
 				true, // retryOnTokenExhaustion
 				undefined, // additionalDirectories
 				false, // codexAutoResetOnExhaustion: off by default
-				'exec' // codexTransport: Standard by default
+				'exec', // codexTransport: Standard by default
+				'create' // operation
 			);
 		});
 
@@ -3243,7 +3252,8 @@ describe('NewInstanceModal', () => {
 				true, // retryOnTokenExhaustion
 				undefined, // additionalDirectories
 				false, // codexAutoResetOnExhaustion: off by default
-				'exec' // codexTransport: Standard by default
+				'exec', // codexTransport: Standard by default
+				'create' // operation
 			);
 		});
 
@@ -3556,7 +3566,8 @@ describe('NewInstanceModal', () => {
 				true, // retryOnTokenExhaustion
 				undefined, // additionalDirectories
 				false, // codexAutoResetOnExhaustion: off by default
-				'exec' // codexTransport: Standard by default
+				'exec', // codexTransport: Standard by default
+				'clone' // operation: a duplicate is checked as a clone
 			);
 		});
 

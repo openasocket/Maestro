@@ -36,6 +36,7 @@ import {
 	clearRecentlyCreatedWorktreePath,
 } from '../../../renderer/utils/worktreeDedup';
 import { useSessionStore } from '../../../renderer/stores/sessionStore';
+import { notifyToast } from '../../../renderer/stores/notificationStore';
 import { useSettingsStore } from '../../../renderer/stores/settingsStore';
 import type { BatchRunConfig } from '../../../renderer/types';
 
@@ -183,6 +184,39 @@ describe('spawnWorktreeAgentAndDispatch parent-scoped reuse', () => {
 		const created = useSessionStore.getState().sessions.find((s) => s.id === result);
 		expect(created?.parentSessionId).toBe('parent-1');
 		expect(created?.cwd).toBe(resolvedPath);
+	});
+
+	it('commits a new child through the host and returns null with nothing inserted on refusal (MCOMP-23-02B)', async () => {
+		useSessionStore.setState({
+			sessions: [parentSession],
+			activeSessionId: 'parent-1',
+			sessionsLoaded: true,
+		} as any);
+		mockGit.worktreeSetup.mockResolvedValue({ success: true, created: true });
+		const commitAgent = (window as any).maestro.sessions.commitAgent;
+		commitAgent.mockResolvedValueOnce({
+			ok: false,
+			code: 'unavailable',
+			reason: 'Managed agent changes are unavailable.',
+			policyRevision: null,
+			fields: [],
+		});
+
+		const result = await spawnWorktreeAgentAndDispatch(parentSession, makeConfig());
+
+		expect(result).toBeNull();
+		expect(commitAgent.mock.calls[0][0]).toMatchObject({
+			operation: 'create',
+			record: { parentSessionId: 'parent-1', worktreeBranch: 'feat-autorun' },
+		});
+		expect(useSessionStore.getState().sessions).toEqual([parentSession]);
+		expect(notifyToast).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: 'error',
+				title: 'Worktree Agent Refused',
+				message: 'Managed agent changes are unavailable.',
+			})
+		);
 	});
 
 	it('refuses to duplicate into a worktree a BUSY sibling is already running in', async () => {

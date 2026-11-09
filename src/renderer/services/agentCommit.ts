@@ -16,6 +16,8 @@ import type { Session } from '../types';
 import type { DesktopAuthoringOperation } from '../../shared/maestro-lib/managed/desktop-contract';
 import type { ManagedAgentFieldRefusal } from '../../shared/maestro-lib/managed/agent-policy';
 import { applyAgentConfigEdit } from '../../shared/sessionPersistenceMerge';
+import { notifyToast } from '../stores/notificationStore';
+import { logger } from '../utils/logger';
 import {
 	prepareSessionForPersistence,
 	SESSION_PERSISTENCE_BASELINE_EVENT,
@@ -152,4 +154,44 @@ export function applyCommittedEdit(
 		live as unknown as Record<string, unknown>,
 		edit
 	) as unknown as Session;
+}
+
+/** A new agent operation: everything except an edit of an existing record. */
+export type NewAgentOperation = Exclude<DesktopAuthoringOperation, 'edit'>;
+
+export type NewAgentCommitResult =
+	| { ok: true; session: Session; managed: boolean; policyRevision: number | null }
+	| { ok: false; refusal: AgentCommitRefusal; message: string };
+
+/**
+ * Commit a NEW agent (create, clone, import) and return the session it enters
+ * the store as, built from the canonical record. Every creation path (the New
+ * Agent form, a duplicate, the onboarding wizard, a worktree child, CLI
+ * `create-worktree`) goes through here, so none inserts its draft first. A
+ * refusal inserted nothing; it is logged and toasted under `title` (pass
+ * `notify: false` when the caller reports it itself) and returned with its
+ * one-line description.
+ */
+export async function commitNewAgent(
+	operation: NewAgentOperation,
+	draft: Session,
+	options: AgentCommitOptions & { title?: string; notify?: boolean } = {}
+): Promise<NewAgentCommitResult> {
+	const { title = 'Agent Creation Refused', notify = true, ...commitOptions } = options;
+	const outcome = await commitAgentRecord(operation, draft, commitOptions);
+	if (!outcome.ok) {
+		const message = describeAgentCommitRefusal(outcome);
+		logger.warn(`Agent ${operation} refused: ${message}`, undefined, {
+			code: outcome.code,
+			fields: outcome.fields.map((field) => field.field),
+		});
+		if (notify) notifyToast({ type: 'error', title, message });
+		return { ok: false, refusal: outcome, message };
+	}
+	return {
+		ok: true,
+		session: sessionFromCommittedRecord(draft, outcome.record),
+		managed: outcome.managed,
+		policyRevision: outcome.policyRevision,
+	};
 }

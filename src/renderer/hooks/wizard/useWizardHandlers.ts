@@ -80,6 +80,7 @@ import type { WizardState } from '../../components/Wizard/WizardContext';
 import type { HistoryEntryInput } from '../agent/useAgentSessionManagement';
 import type { AgentSpawnResult } from '../agent/useAgentExecution';
 import { logger } from '../../utils/logger';
+import { AgentCommitRefusedError, commitNewAgent } from '../../services/agentCommit';
 import { getClaudeTokenSourceFields } from '../../../shared/claudeTokenMode';
 
 // ============================================================================
@@ -1300,7 +1301,7 @@ export function useWizardHandlers(deps: UseWizardHandlersDeps): UseWizardHandler
 			const resolvedEnableMaestroP =
 				enableMaestroP ?? (isAdaptiveModeDefaultOn(selectedAgent) || undefined);
 
-			const newSession: Session = {
+			const draft: Session = {
 				id: newId,
 				name: sessionName,
 				toolType: selectedAgent as ToolType,
@@ -1371,6 +1372,13 @@ export function useWizardHandlers(deps: UseWizardHandlersDeps): UseWizardHandler
 				claudeInteractive:
 					selectedAgent === 'claude-code' ? { mode: 'api', modeReason: 'auto' } : undefined,
 			};
+
+			// The host checks the record as it will be stored and commits it
+			// (MCOMP-23-02B); only the canonical record enters the store. A refusal
+			// wrote nothing, so the wizard keeps its state and shows the error.
+			const committed = await commitNewAgent('create', draft);
+			if (!committed.ok) throw new AgentCommitRefusedError(committed.refusal);
+			const newSession = committed.session;
 
 			setSessions((prev) => [...prev, newSession]);
 			setActiveSessionId(newId);

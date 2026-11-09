@@ -32,6 +32,7 @@ import { useSettingsStore } from '../../stores/settingsStore';
 import { gitService } from '../../services/git';
 import { notifyToast } from '../../stores/notificationStore';
 import { buildWorktreeSession } from '../../utils/worktreeSession';
+import { AgentCommitRefusedError, commitNewAgent } from '../../services/agentCommit';
 import { isPathAtOrUnderRoot } from '../../../shared/worktreePaths';
 import {
 	isRecentlyCreatedWorktreePath,
@@ -911,15 +912,23 @@ export function useWorktreeHandlers(deps: UseWorktreeHandlersDeps = {}): Worktre
 				// Fetch git info for the worktree (pass SSH remote ID for remote sessions)
 				const gitInfo = await fetchGitInfo(actualPath, sshRemoteId);
 
-				const worktreeSession = buildWorktreeSession({
-					parentSession: activeSession,
-					path: actualPath,
-					branch: branchName,
-					name: branchName,
-					defaultSaveToHistory: savToHist,
-					defaultShowThinking: showThink,
-					...gitInfo,
-				});
+				// The host commits the child (MCOMP-23-02B); only its canonical record
+				// enters the store. A refusal inserts nothing and reaches the modal.
+				const committed = await commitNewAgent(
+					'create',
+					buildWorktreeSession({
+						parentSession: activeSession,
+						path: actualPath,
+						branch: branchName,
+						name: branchName,
+						defaultSaveToHistory: savToHist,
+						defaultShowThinking: showThink,
+						...gitInfo,
+					}),
+					{ notify: false }
+				);
+				if (!committed.ok) throw new AgentCommitRefusedError(committed.refusal);
+				const worktreeSession = committed.session;
 
 				// Single setSessions call: add child + expand parent (avoids transient state + extra IPC write)
 				useSessionStore
@@ -1037,15 +1046,23 @@ export function useWorktreeHandlers(deps: UseWorktreeHandlersDeps = {}): Worktre
 			// Fetch git info for the worktree (pass SSH remote ID for remote sessions)
 			const gitInfo = await fetchGitInfo(actualPath, sshRemoteId);
 
-			const worktreeSession = buildWorktreeSession({
-				parentSession: createWtSession,
-				path: actualPath,
-				branch: branchName,
-				name: branchName,
-				defaultSaveToHistory: savToHist,
-				defaultShowThinking: showThink,
-				...gitInfo,
-			});
+			// The host commits the child (MCOMP-23-02B); only its canonical record
+			// enters the store. A refusal inserts nothing and reaches the modal.
+			const committed = await commitNewAgent(
+				'create',
+				buildWorktreeSession({
+					parentSession: createWtSession,
+					path: actualPath,
+					branch: branchName,
+					name: branchName,
+					defaultSaveToHistory: savToHist,
+					defaultShowThinking: showThink,
+					...gitInfo,
+				}),
+				{ notify: false }
+			);
+			if (!committed.ok) throw new AgentCommitRefusedError(committed.refusal);
+			const worktreeSession = committed.session;
 
 			// Single setSessions call: add child + expand parent + save config (avoids transient state + extra IPC writes)
 			const needsConfig = !createWtSession.worktreeConfig?.basePath;

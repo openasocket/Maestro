@@ -619,7 +619,8 @@ export function NewInstanceModal({
 			retryTokenByAgent[selectedAgent] ?? true,
 			normalizeAdditionalDirectories(additionalDirectories, homeDir),
 			codexAutoResetByAgent[selectedAgent] ?? false,
-			codexTransportByAgent[selectedAgent] ?? 'exec'
+			codexTransportByAgent[selectedAgent] ?? 'exec',
+			sourceSession ? 'clone' : 'create'
 		);
 		onClose();
 
@@ -689,6 +690,7 @@ export function NewInstanceModal({
 		retryTokenByAgent,
 		codexAutoResetByAgent,
 		codexTransportByAgent,
+		sourceSession,
 	]);
 
 	// Check if form is valid for submission

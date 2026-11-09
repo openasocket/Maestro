@@ -234,6 +234,14 @@ const mockMaestro = {
 		setMany: vi.fn().mockResolvedValue(undefined),
 		getActiveSessionId: vi.fn().mockResolvedValue(''),
 		setActiveSessionId: vi.fn().mockResolvedValue(undefined),
+		// The standalone host: every well-formed new or edited record is admitted
+		// and returned as the canonical record (sessions:commitAgent, MCOMP-23-02).
+		commitAgent: vi.fn(async (request: { record: Record<string, unknown> }) => ({
+			ok: true,
+			record: request.record,
+			managed: false,
+			policyRevision: null,
+		})),
 	},
 	groups: {
 		get: vi.fn().mockResolvedValue([]),

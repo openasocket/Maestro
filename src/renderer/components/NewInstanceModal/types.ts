@@ -63,7 +63,9 @@ export interface NewInstanceModalProps {
 		/** Codex only: spend a reset credit automatically on quota exhaustion. Defaults off. */
 		codexAutoResetOnExhaustion?: boolean,
 		/** Codex only: which transport chat turns use. `undefined` means `exec`. */
-		codexTransport?: CodexTransport
+		codexTransport?: CodexTransport,
+		/** `clone` when duplicating `sourceSession`, so the host checks it as a clone. */
+		operation?: 'create' | 'clone'
 	) => void;
 	theme: Theme;
 	existingSessions: Session[];

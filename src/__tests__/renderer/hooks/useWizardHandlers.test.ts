@@ -252,6 +252,16 @@ const setupMaestroMocks = () => {
 		stats: {
 			recordSessionCreated: vi.fn(),
 		},
+		// The standalone host double: admits and echoes the record as canonical.
+		sessions: {
+			setActiveSessionId: vi.fn().mockResolvedValue(undefined),
+			commitAgent: vi.fn(async (request: { record: Record<string, unknown> }) => ({
+				ok: true,
+				record: request.record,
+				managed: false,
+				policyRevision: null,
+			})),
+		},
 		// `/wizard <input>` names the tab from the argument, which logs and spawns
 		// the ephemeral namer through these two bridges.
 		logger: {
@@ -2975,6 +2985,57 @@ describe('useWizardHandlers', () => {
 			expect(sessions[0].customArgs).toBe('--verbose');
 			expect(sessions[0].customEnvVars).toEqual({ API_KEY: '123' });
 			expect(sessions[0].sessionSshRemoteConfig).toEqual(sshConfig);
+		});
+
+		it('commits the wizard agent as a create and inserts the canonical record (MCOMP-23-02B)', async () => {
+			useSessionStore.setState({ sessions: [], activeSessionId: null });
+			const commitAgent = (window as any).maestro.sessions.commitAgent;
+			commitAgent.mockImplementationOnce(async (request: any) => ({
+				ok: true,
+				record: { ...request.record, customModel: 'host-canonical' },
+				managed: true,
+				policyRevision: 4,
+			}));
+			const deps = createMockDeps();
+			const { result } = renderHook(() => useWizardHandlers(deps));
+
+			await act(async () => {
+				await result.current.handleWizardLaunchSession(false);
+			});
+
+			expect(commitAgent).toHaveBeenCalledTimes(1);
+			const request = commitAgent.mock.calls[0][0];
+			expect(request.operation).toBe('create');
+			expect(request.record).toMatchObject({ toolType: 'claude-code', cwd: '/projects/test' });
+			const sessions = useSessionStore.getState().sessions;
+			expect(sessions).toHaveLength(1);
+			expect(sessions[0].id).toBe(request.record.id);
+			expect(sessions[0].customModel).toBe('host-canonical');
+		});
+
+		it('inserts nothing and keeps the wizard open when the host refuses (MCOMP-23-02B)', async () => {
+			useSessionStore.setState({ sessions: [], activeSessionId: null });
+			(window as any).maestro.sessions.commitAgent.mockResolvedValueOnce({
+				ok: false,
+				code: 'field',
+				reason: 'A choice is not approved.',
+				policyRevision: 4,
+				fields: [{ field: 'provider', code: 'unapproved', reason: 'Provider is not approved.' }],
+			});
+			const deps = createMockDeps();
+			const { result } = renderHook(() => useWizardHandlers(deps));
+
+			let thrown: unknown;
+			await act(async () => {
+				thrown = await result.current.handleWizardLaunchSession(false).catch((error) => error);
+			});
+
+			expect(thrown).toBeInstanceOf(Error);
+			expect((thrown as Error).name).toBe('AgentCommitRefusedError');
+			expect((thrown as Error).message).toContain('provider: Provider is not approved.');
+			expect(useSessionStore.getState().sessions).toHaveLength(0);
+			expect(deps.wizardContext.completeWizard).not.toHaveBeenCalled();
+			expect((window as any).maestro.stats.recordSessionCreated).not.toHaveBeenCalled();
 		});
 	});
 
