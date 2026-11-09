@@ -4744,6 +4744,20 @@
 					"produces": []
 				},
 				{
+					"id": "MCOMP-17-03BW",
+					"label": "Tell the room Auto Run port which room asked",
+					"kind": "IMPLEMENT",
+					"targets": [
+						"src/shared/maestro-lib/runtime/group-chats.ts",
+						"src/shared/maestro-lib/runtime/__tests__/group-chats-autorun.test.ts",
+						"Plans/integration-completion/program.json"
+					],
+					"outcome": "Consume MAESTRO-EFFECT-CONSUMERS-BUILD and its pinned MAESTRO-CONTRACT-INPUTS-BUILD dependency. Bounded prerequisite continuation of MCOMP-17-03 after MCOMP-17-03BV and the third slice of group-chat Auto Run propagation: the shared group chat runtime's autoRun port launch takes the room that asked ({ chatId }) as a third argument, so the hosting runtime can nest a participant's !autorun under that room's authenticated parent instead of refusing it. Exercise the room id the port receives and a mutation check. Still pending: replacing the room Auto Run refusal in runtime/index.ts with launchNested. Reuse WORKFLOW-CONTEXT/1; no new wire capability, producer mapping or paired/provider/native qualification. Keep to three authored files and fewer than 500 changed lines.",
+					"backlog": ["M-04"],
+					"requires": ["MAESTRO-EFFECT-CONSUMERS-BUILD"],
+					"produces": []
+				},
+				{
 					"label": "Bind Auto Run Cue and nested work at dispatch",
 					"kind": "IMPLEMENT",
 					"targets": [
@@ -4786,7 +4800,7 @@
 			"produces": ["MAESTRO-WORKFLOW-CONSUMERS-BUILD"],
 			"id": "MCOMP-17",
 			"path": ".maestro/playbooks/2026-10-29-Maestro-Integration-Completion/MCOMP-17.md",
-			"taskCount": 79,
+			"taskCount": 80,
 			"stage": "S10"
 		},
 		{
@@ -6576,7 +6590,7 @@
 				"PAIR-DIRECT-EVIDENCE"
 			],
 			"nativeInputs": false,
-			"taskCount": 86
+			"taskCount": 87
 		},
 		{
 			"id": "S11",
@@ -6780,8 +6794,8 @@
 			"taskCount": 1
 		}
 	],
-	"taskCount": 399,
-	"taskCounts": { "IMPLEMENT": 290, "TEST": 49, "VERIFY": 60 },
+	"taskCount": 400,
+	"taskCounts": { "IMPLEMENT": 291, "TEST": 49, "VERIFY": 60 },
 	"artifacts": {
 		"MEGA-CONTRACTS-FOUNDATION-BUILD": {
 			"producerDocument": "GCOMP-01",
@@ -7596,6 +7610,7 @@
 			"MCOMP-17-03BT",
 			"MCOMP-17-03BU",
 			"MCOMP-17-03BV",
+			"MCOMP-17-03BW",
 			"MCOMP-17-03",
 			"MCOMP-17-04",
 			"MCOMP-17-05",

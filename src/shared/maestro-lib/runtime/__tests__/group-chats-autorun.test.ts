@@ -54,7 +54,7 @@ describe('a participant’s !autorun in a headless chat', () => {
 	let bus: EventBus;
 	let chats: RuntimeGroupChats;
 	let provider: FakeGroupChatProvider;
-	let launches: Array<{ agentId: string; files: string[] }>;
+	let launches: Array<{ agentId: string; files: string[]; chatId: string }>;
 	let stops: string[];
 	let launchResult: ClientResult<void>;
 	let script: FakeScript;
@@ -135,8 +135,12 @@ describe('a participant’s !autorun in a headless chat', () => {
 			metrics,
 			autoRun: {
 				api: {
-					launch: async (agentId, input) => {
-						launches.push({ agentId, files: input.documents.map((d) => d.file) });
+					launch: async (agentId, input, room) => {
+						launches.push({
+							agentId,
+							files: input.documents.map((d) => d.file),
+							chatId: room.chatId,
+						});
 						return launchResult;
 					},
 					stop: async (agentId) => {
@@ -171,7 +175,8 @@ describe('a participant’s !autorun in a headless chat', () => {
 			await chats.api.create({ name: 'Room', participantIds: ['a1'], message: 'Run the plan' })
 		);
 		await vi.waitFor(() => expect(launches).toHaveLength(1), { timeout: 10_000 });
-		expect(launches[0]).toEqual({ agentId: 'a1', files: [path.join(folder, 'plan.md')] });
+		// The launch names the room that asked, so a host can nest the run under it (MCOMP-17-03BW).
+		expect(launches[0]).toEqual({ agentId: 'a1', files: [path.join(folder, 'plan.md')], chatId });
 
 		// The run works, then ends: the last counts it reported are the summary.
 		emitRun('a1', progress({ tasksDone: 1 }));

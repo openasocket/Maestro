@@ -88,8 +88,21 @@ export interface RuntimeGroupChatsOptions {
 	background: BackgroundTurns;
 	/** The turn clock and usage ledger, shared with the background runner's `beginTurn`. */
 	metrics: GroupChatTurnMetrics;
-	/** The run service: a participant's `!autorun` runs through it, and a running Auto Run makes its agent busy. */
-	autoRun: { api: Pick<AutoRunApi, 'launch' | 'stop'>; holds(agentId: string): boolean };
+	/**
+	 * The run service: a participant's `!autorun` runs through it, and a running Auto Run makes its
+	 * agent busy. `launch` is told the room that asked, so a host can nest the run under that
+	 * room's authenticated parent (MCOMP-17-03BW).
+	 */
+	autoRun: {
+		api: Pick<AutoRunApi, 'stop'> & {
+			launch(
+				agentId: string,
+				input: Parameters<AutoRunApi['launch']>[1],
+				room: { chatId: string }
+			): ReturnType<AutoRunApi['launch']>;
+		};
+		holds(agentId: string): boolean;
+	};
 	options?: RuntimeTurnOptions;
 	now?: () => number;
 }
@@ -403,9 +416,11 @@ export function createRuntimeGroupChats(options: RuntimeGroupChatsOptions): Runt
 							method: 'autoRun.launch',
 						},
 					} satisfies ClientResult<never>)
-				: await options.autoRun.api.launch(agent.id, {
-						documents: files.map((file) => ({ file })),
-					});
+				: await options.autoRun.api.launch(
+						agent.id,
+						{ documents: files.map((file) => ({ file })) },
+						{ chatId }
+					);
 		if (!launched.ok) {
 			unsubscribe();
 			await finishParticipantRun(
