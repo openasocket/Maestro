@@ -2256,6 +2256,45 @@
 				],
 				"notes": "No param, guard or upstream behavior dropped; the HEAD block removed in browserTab hunk 2 is the same listener/availability/send that upstream moved below the timeout.",
 				"unmergedAfter": 26
+			},
+			"MCOMP-33-00R31": {
+				"resolvedAt": "2026-11-09",
+				"resolvedBy": "Maestro-Claude",
+				"files": [
+					"src/main/web-server/managers/CallbackRegistry.ts",
+					"src/main/web-server/handlers/bridgeHandlers.ts",
+					"src/__tests__/main/web-server/web-server-factory.test.ts"
+				],
+				"method": "Eleven hunks resolved by a shape-asserting script (Working/mcomp-33-00r31/resolve.mjs, both sides read in full, every replacement computed before any write); four auto-merged factory cases moved onto the merged wire by fix-suite.mjs and fix-suite2.mjs; staged through merge-tool.mjs stage (23 unmerged left; prettier left all three unchanged). Working/mcomp-33-00r31/check.mjs: 0 syntax diagnostics, no markers, no LOW seam, no HEAD or MERGE_HEAD case title missing from the factory suite. web-server-factory + bridgeHandlers 226/226.",
+				"positionalOrder": "R29 order in CallbackRegistry: executeCommand (..., mentionRouting, requireDeliveryReceipt, pianolaDispatchId, delegation, dispatchTicket); newAITabWithPrompt (..., mentionRouting, control, delegation, dispatchTicket) returning upstream's NewAITabWithPromptResult; enqueueCommand (..., mentionRouting, dispatchCallback, control, delegation, dispatchTicket). The registry forwards upstream's omit-when-unset shape when no integration arg is set and pads upstream's trailing slots when delegation or dispatchTicket is set.",
+				"hunks": {
+					"src/main/web-server/managers/CallbackRegistry.ts": [
+						"Hunk 1 (executeCommand params): upstream requireDeliveryReceipt, pianolaDispatchId, then HEAD delegation, dispatchTicket.",
+						"Hunk 2 (executeCommand forward): [requireDeliveryReceipt, pianolaDispatchId, delegation, dispatchTicket] when an integration arg is set, else upstream's spread unchanged.",
+						"Hunk 3 (newAITabWithPrompt params): upstream control and NewAITabWithPromptResult return type, then HEAD delegation, dispatchTicket.",
+						"Hunk 4 (newAITabWithPrompt forward): control always, delegation, dispatchTicket spread only when set.",
+						"Hunk 5 (enqueueCommand params): upstream dispatchCallback, control, then HEAD delegation, dispatchTicket.",
+						"Hunk 6 (enqueueCommand forward): dispatchCallback, control always, delegation, dispatchTicket spread only when set."
+					],
+					"src/main/web-server/handlers/bridgeHandlers.ts": [
+						"Hunk 1 (comment vs process:spawn override): HEAD's comment (client context: acting user AND acting transport via runAsClient, provider credentials never cross) kept, followed by upstream's process:spawn shape check and querySource 'auto' override, which runs before HEAD's agents:setConfig sanitize and the runAsClient handler call. HEAD's runAsClient supersedes upstream's runAsActingUser (it establishes the same acting user plus the transport)."
+					],
+					"src/__tests__/main/web-server/web-server-factory.test.ts": [
+						"Hunk 1 (imports): both kept (HEAD cross-agent-router bind/withdraw, upstream autorun-state-tracker and pianola-scope-cycle).",
+						"Hunk 2 (executeCommand cases): both kept. HEAD MRC-07-04C delegation case moved to the merged slots: delegation passed at arg 11 (after requireDeliveryReceipt, pianolaDispatchId); wire expects the padded pianolaDispatchId before delegation, ticket at call[11], receipt channel at call[12]. Upstream strict-receipt case kept as is.",
+						"Hunk 3 (enqueue smoke wire): upstream's (no trailing slot when unset).",
+						"Hunk 4 (enqueue routing wire + upstream dispatch-callback case): upstream's, which also adds its dispatch-callback mark case."
+					]
+				},
+				"outsideHunks": [
+					"Factory suite, auto-merged HEAD cases on HEAD's fixed-arity wire, moved to the merged wire: newAITab dispatch slots (upstream control slot padded before delegation), plain newAITab (wire length 8: hidden, routing, control ride; integration slots omitted), enqueue MRC-07-04C delegation (dispatchCallback and control padded before delegation), owner-window executeCommand routing (upstream's 8 args + channel, as in upstream's own version). The two newAITab cases answer through ipcMain.on with the owning window's sender, matching upstream's restructured listener (R30)."
+				],
+				"semanticConflictsForC": [
+					"src/__tests__/main/web-server/managers/CallbackRegistry.test.ts (auto-merged, outside this task's files): six executeCommand cases kept HEAD's fixed 10-arg expectation; the merged registry forwards upstream's 8-arg shape when nothing is set, which is upstream's own version of those six cases. 00C/00S: take the MERGE_HEAD expectations for those six and add one case forwarding delegation/dispatchTicket at slots 11-12. 6 failed, 87 passed (93) there today.",
+					"No other semantic conflict: the bridge keeps HEAD's managed operations (bridgeGuardViolation, desktop-only channels, remote setting/secret reads, sanitizeRemoteConfiguration, sanitizeRemoteResult, runAsClient) and upstream's spawn origin override."
+				],
+				"notes": "No param, guard, handler or case dropped.",
+				"unmergedAfter": 23
 			}
 		}
 	}
