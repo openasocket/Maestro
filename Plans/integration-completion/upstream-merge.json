@@ -1606,6 +1606,38 @@
 				"semanticConflictsForC": [],
 				"notes": "No new semantic conflict. The guard outside the hunk (admit on the directory branch) is a semantic fix the textual merge would have dropped silently. PluginSetChange's update variant carries no plugin id, so the hold stays { op: 'update' }; install and uninstall holds were auto-merged unchanged.",
 				"unmergedAfter": 80
+			},
+			"MCOMP-33-00R09": {
+				"resolvedAt": "2026-11-09",
+				"resolvedBy": "Maestro-Claude",
+				"files": [
+					"src/main/index.ts",
+					"src/main/ipc/handlers/system.ts",
+					"src/main/ipc/handlers/persistence.ts"
+				],
+				"method": "Nine hunks resolved by a shape-asserting script (Working/mcomp-33-00r09/resolve.mjs, both sides read in full); staged through merge-tool.mjs stage (prettier exit 0, 77 unmerged left). TypeScript transpile of each file: 0 syntax diagnostics. Managed seam counts identical to HEAD (index.ts: setEgressAuthority, setUpdateAuthority, setListenerAuthority, setInstallAuthority, localEffects, setGitExecutionGate, setCredentialAuthority, spawnAuthority, setSpecPromptInstallAuthority, setMarketplaceInstallAuthority; system.ts: holdLocalEffect, holdManagedKey; persistence.ts: mergeUsagePeaks, mergeAutoRunStats, holdSettingWrite, holdTouchedAgentRecords, sendHeldAgentRecordCorrections). The persistence and system suites cannot load yet: persistence*.test.ts import src/shared/maestro-lib/launch/agent-args.ts (MCOMP-33-00R21) and system*.test.ts reach src/main/web-server/handlers/bridgeHandlers.ts, both still unmerged; not a defect of these files.",
+				"hunks": {
+					"src/main/index.ts": [
+						"imports (top): upstream's federation import kept (createFederationSupervisorHooks is wired at the supervisor); upstream's re-placed `import { execFile } from 'child_process'` dropped because the integration branch removed index.ts's only execFile use (it lives behind the plugin host) and nothing in the merged file calls it.",
+						"imports (sentry): union; the integration's restoreManagedPromptPins, restoreManagedSyncPath, restoreManagedRemoteAccess imports plus upstream's captureException, attachSentryScopeTags, noteSentryAgentInventory, noteSentryWorkReasons.",
+						"module slots: union; the integration's enterpriseService slot and upstream's releaseQueueItemInPersistence / confirmQueueItemInPersistence receipt slots.",
+						"setPluginSessionsRaw: the integration's per-record hold (holdTouchedAgentRecords against the stored records, MCOMP-21-08 / MCOMP-23-02) writes the held list, then upstream's noteSentryAgentInventory runs over the held list (what was actually stored)."
+					],
+					"src/main/ipc/handlers/system.ts": [
+						"imports: union, one shared/syncPath import (INSTALL_DIR_SYNC_PATH_ERROR, isInsideInstallDir, isValidSyncPath) and isLinux, isMacOS; local-effects-policy, settings-policy and managedSettingsLock imports kept.",
+						"sync:setCustomPath: the integration's holdManagedKey(SYNC_PATH_LOCK_KEY) refusal first, then upstream's install-directory refusal (isInsideInstallDir against getInstallDir(app)), then the integration's applySyncPath(), which is the same migration upstream still inlines (asserted: SETTINGS_FILES loop, backup copy, customSyncPath and iCloudSyncEnabled bootstrap writes, requiresRestart)."
+					],
+					"src/main/ipc/handlers/persistence.ts": [
+						"imports: union, one sessionPersistenceMerge import (applyAgentConfigEdit, mergeSessionPersistenceChanges, restoreGovernedAgentFields) plus the agent-config-writes, managed type and settings-policy imports and upstream's canonicalJson, queue-item-receipt types and mergeGroupPersistenceChanges.",
+						"sessions:setAll merge: the integration's holdTouchedAgentRecords wrapper kept, with upstream's new mergeSessionPersistenceChanges arguments (remote, false, remote: preserveClient, preserveLive, remoteQueue), the same shape the auto-merged setMany path has.",
+						"after the setAll write: upstream's noteSentryAgentInventory(sessionsToPersist) then the integration's sendHeldAgentRecordCorrections(event, corrections, refusedIds)."
+					]
+				},
+				"semanticConflictsForC": [
+					"restoreManagedSyncPath() (system.ts) validates a pinned Storage Location with isValidSyncPath only; upstream's install-directory refusal lives in the sync:setCustomPath handler and needs the Electron app for getInstallDir(). A policy pin inside the install directory would still be applied at startup. 00C should decide whether the restore path also refuses it (pass the install dir in from index.ts)."
+				],
+				"notes": "No guard dropped. execFile removal is deliberate (HEAD removed it with its only use); the federation import is used at line ~2404.",
+				"unmergedAfter": 77
 			}
 		}
 	}
