@@ -22,10 +22,17 @@ import { heldUpdate, setUpdateAuthority } from '../../main/update-checker';
 import { denyingEgressAuthority } from '../helpers/egressAuthority';
 
 const ipcHandlers = new Map<string, (...args: unknown[]) => unknown>();
+/** Every app event listener the module registered, by event (`before-quit`). */
+const appListeners = new Map<string, Array<() => void>>();
 
 vi.mock('electron', () => ({
 	BrowserWindow: class {},
-	app: { getVersion: () => '1.0.0' },
+	app: {
+		getVersion: () => '1.0.0',
+		on: (event: string, fn: () => void) => {
+			appListeners.set(event, [...(appListeners.get(event) ?? []), fn]);
+		},
+	},
 	ipcMain: {
 		handle: (channel: string, fn: (...args: unknown[]) => unknown) => {
 			ipcHandlers.set(channel, fn);
@@ -351,5 +358,101 @@ describe('auto-updater under an update authority', () => {
 			message: expect.stringContaining('Check for an available update first.'),
 		});
 		expect(mockAutoUpdater.downloadUpdate).not.toHaveBeenCalled();
+	});
+
+	/** Report the download of a version as electron-updater would. */
+	function reportDownloaded(version: string) {
+		const downloaded = mockAutoUpdater.on.mock.calls.find(
+			([event]) => event === 'update-downloaded'
+		);
+		(downloaded![1] as (info: { version: string }) => void)({ version });
+	}
+
+	/** Fire the app's before-quit listeners, as Electron does before the updater's quit handler. */
+	function quit() {
+		for (const listener of appListeners.get('before-quit') ?? []) listener();
+	}
+
+	it('holds install-on-quit at the quit when a ceiling lands after an admitted download (MCOMP-19-04)', async () => {
+		// One listener, registered once at init.
+		expect(appListeners.get('before-quit')).toHaveLength(1);
+		const source = managed({});
+		await handler('updates:download')({}, 'v1.3.0');
+		reportDownloaded('1.3.0');
+		mockAutoUpdater.autoInstallOnAppQuit = true;
+		// Within the ceiling at quit: the flag is left alone and nothing is recorded.
+		quit();
+		expect(mockAutoUpdater.autoInstallOnAppQuit).toBe(true);
+		expect(lastStatus().status).toBe('downloaded');
+
+		source.install({ policyRevision: 3, hold: true, channel: 'stable', pin: null });
+		quit();
+		// electron-updater reads the flag in its own quit handler, after before-quit.
+		expect(mockAutoUpdater.autoInstallOnAppQuit).toBe(false);
+		expect(mockAutoUpdater.quitAndInstall).not.toHaveBeenCalled();
+		expect(lastStatus()).toMatchObject({
+			status: 'held-by-policy',
+			info: { version: '1.3.0' },
+			held: { code: 'held', candidate: '1.3.0' },
+		});
+		expect(heldUpdate()).toMatchObject({ code: 'held', candidate: '1.3.0' });
+	});
+
+	it('leaves install-on-quit to electron-updater standalone and with nothing downloaded', async () => {
+		mockAutoUpdater.autoInstallOnAppQuit = true;
+		reportDownloaded('1.3.0');
+		const evaluated = sent.length;
+		expect(mod.holdInstallOnQuit()).toBeNull();
+		expect(mockAutoUpdater.autoInstallOnAppQuit).toBe(true);
+		expect(sent.length).toBe(evaluated);
+		// A pin the downloaded version meets: admitted, the flag untouched.
+		managed({ pin: '1.3.0' });
+		expect(mod.holdInstallOnQuit()).toBeNull();
+		expect(mockAutoUpdater.autoInstallOnAppQuit).toBe(true);
+		// With the flag already off there is nothing to hold.
+		managed({ hold: true });
+		mockAutoUpdater.autoInstallOnAppQuit = false;
+		expect(mod.holdInstallOnQuit()).toBeNull();
+	});
+
+	it('refuses a download tag that is not a release version before any feed is pointed or read', async () => {
+		for (const tag of ['../../evil/repo/releases/download/v9.9.9', 'v1.3.0/../x', 'latest', '']) {
+			const result = await handler('updates:download')({}, tag);
+			expect(result).toMatchObject({
+				success: false,
+				error: expect.stringContaining('is not a release tag'),
+			});
+		}
+		// Refused standalone too: the tag is the feed's source, not a policy question.
+		managed({});
+		const managedResult = await handler('updates:download')({}, 'https://example.test/');
+		expect(managedResult).toMatchObject({ success: false });
+		expect(mockAutoUpdater.setFeedURL).not.toHaveBeenCalled();
+		expect(mockAutoUpdater.checkForUpdates).not.toHaveBeenCalled();
+		expect(mockAutoUpdater.downloadUpdate).not.toHaveBeenCalled();
+		expect(sent).toEqual([]);
+		// A prerelease tag is a release version and passes to the ceiling.
+		await expect(handler('updates:download')({}, 'v1.3.0-rc.1')).resolves.toMatchObject({
+			held: { code: 'channel-denied' },
+		});
+	});
+
+	it('holds the connection flow restart when a ceiling lands after its download (MCOMP-19-04)', async () => {
+		const source = managed({});
+		const checked = await mod.connectionUpdateAction('check');
+		expect(checked).toMatchObject({ status: 'available', version: '1.3.0' });
+		await expect(mod.connectionUpdateAction('download')).resolves.toMatchObject({
+			status: 'downloaded',
+		});
+		expect(mockAutoUpdater.autoInstallOnAppQuit).toBe(false);
+		source.install({ policyRevision: 3, hold: false, channel: 'stable', pin: '1.2.0' });
+		const install = await mod.connectionUpdateAction('install');
+		expect(install).toMatchObject({
+			status: 'held-by-policy',
+			version: '1.3.0',
+			message: expect.stringContaining('[managed-pin-denied]'),
+		});
+		expect(mockAutoUpdater.quitAndInstall).not.toHaveBeenCalled();
+		expect(heldUpdate()).toMatchObject({ code: 'pin-denied', candidate: '1.3.0' });
 	});
 });

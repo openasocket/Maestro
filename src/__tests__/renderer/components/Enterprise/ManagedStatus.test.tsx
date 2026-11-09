@@ -9,14 +9,28 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import {
+	act,
+	fireEvent,
+	render,
+	renderHook,
+	screen,
+	waitFor,
+	within,
+} from '@testing-library/react';
 import {
 	ManagedStatus,
 	STATUS_COPY,
 	STANDING_TINT,
 } from '../../../../renderer/components/Enterprise/ManagedStatus';
 import { ManagedInbox, INBOX_COPY } from '../../../../renderer/components/Enterprise/ManagedInbox';
-import { MANAGED_STANDING_COPY } from '../../../../renderer/hooks/enterprise/useManagedStatus';
+import {
+	MANAGED_STANDING_COPY,
+	MANAGED_UPDATE_COPY,
+	managedUpdateState,
+	useManagedStatus,
+} from '../../../../renderer/hooks/enterprise/useManagedStatus';
+import type { UpdateStatus } from '../../../../shared/types';
 import { clearCachedResources } from '../../../../renderer/hooks/utils/useCachedResource';
 import type { ManagedInboxView, NoticeView } from '../../../../main/enterprise/inbox';
 import type { ManagedStanding, ManagedStateView } from '../../../../main/enterprise/managed-state';
@@ -547,5 +561,82 @@ describe('ManagedInbox', () => {
 		expect(screen.getByText(INBOX_COPY.desktopOnly)).toBeInTheDocument();
 		expect(screen.getByRole('region', { name: INBOX_COPY.heading })).toBeInTheDocument();
 		expect(screen.queryByRole('button')).not.toBeInTheDocument();
+	});
+});
+
+describe('the managed roll-forward word (MCOMP-19-04)', () => {
+	const hold = { code: 'pin-denied', message: 'pinned to 1.2.0', policyRevision: 3 };
+	const projection = (held: (typeof hold & { candidate: string | null }) | null) =>
+		({ update: { held } }) as unknown as ManagedStateView;
+
+	it('reads held first, then an admitted download as restart-needed, else none', () => {
+		expect(MANAGED_UPDATE_COPY).toEqual({
+			held: 'Update held by policy',
+			'restart-needed': 'Restart needed to install',
+		});
+		expect(managedUpdateState(undefined, undefined)).toEqual({
+			word: 'none',
+			version: null,
+			message: '',
+		});
+		const downloaded = { status: 'downloaded', info: { version: '1.3.0' } } as UpdateStatus;
+		expect(managedUpdateState(null, downloaded)).toEqual({
+			word: 'restart-needed',
+			version: '1.3.0',
+			message: 'Update 1.3.0 is downloaded and admitted; restart Maestro to install it.',
+		});
+		// A hold the projection carries wins over the waiting download: never offered as a restart.
+		const held = managedUpdateState(projection({ ...hold, candidate: '1.3.0' }), downloaded);
+		expect(held.word).toBe('held');
+		expect(held.version).toBe('1.3.0');
+		expect(held.message).toContain('[managed-pin-denied] pinned to 1.2.0');
+		// The updater's own held report (a hold at quit or at install) is read without a projection.
+		const atQuit = managedUpdateState(null, {
+			status: 'held-by-policy',
+			info: { version: '1.3.0' },
+			held: { ...hold, code: 'held', candidate: null },
+		} as UpdateStatus);
+		expect(atQuit).toMatchObject({ word: 'held', version: '1.3.0' });
+		// A held check names no version.
+		expect(managedUpdateState(projection({ ...hold, candidate: null }), null).message).toMatch(
+			/^The update check is held: /
+		);
+		expect(managedUpdateState(null, { status: 'available' } as UpdateStatus).word).toBe('none');
+	});
+
+	it('follows the updater status events in the hook', async () => {
+		const originalUpdates = maestro.updates;
+		let emit: ((status: UpdateStatus) => void) | null = null;
+		let status: UpdateStatus = { status: 'idle' };
+		const getStatus = vi.fn(async () => status);
+		maestro.enterprise = { managedState: vi.fn(async () => projection(null)) };
+		maestro.updates = {
+			getStatus,
+			onStatus: (cb: (s: UpdateStatus) => void) => {
+				emit = cb;
+				return () => {
+					emit = null;
+				};
+			},
+		};
+		try {
+			const { result, unmount } = renderHook(() => useManagedStatus({ pollMs: 0 }));
+			await waitFor(() => expect(getStatus).toHaveBeenCalled());
+			expect(result.current.update.word).toBe('none');
+			status = { status: 'downloaded', info: { version: '1.3.0' } } as UpdateStatus;
+			await act(async () => emit!(status));
+			await waitFor(() => expect(result.current.update.word).toBe('restart-needed'));
+			status = {
+				status: 'held-by-policy',
+				info: { version: '1.3.0' },
+				held: { ...hold, code: 'held', candidate: '1.3.0' },
+			} as UpdateStatus;
+			await act(async () => emit!(status));
+			await waitFor(() => expect(result.current.update.word).toBe('held'));
+			unmount();
+			expect(emit).toBeNull();
+		} finally {
+			maestro.updates = originalUpdates;
+		}
 	});
 });

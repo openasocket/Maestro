@@ -14,10 +14,19 @@
  * `updateHoldFor()`. A held step reads no feed, downloads no byte and installs
  * nothing; it is reported as `held-by-policy` with the hold by name, never as
  * an error and never as "no update". Standalone nothing is consulted.
+ *
+ * Two paths relaunch into a downloaded version without the Install button:
+ * electron-updater's install-on-quit and the Lite connection flow's restart.
+ * Both are held at the moment of relaunch (MCOMP-19-04), so a ceiling that
+ * lands after an admitted download keeps the qualified version: a held quit
+ * turns install-on-quit off and records the hold. A release tag the renderer
+ * names is the source pin of the per-tag feed, so anything but a release
+ * version is refused before the feed is pointed anywhere.
  */
 
 import type { UpdateInfo, ProgressInfo, AppUpdater } from 'electron-updater';
 import { app, BrowserWindow, ipcMain } from 'electron';
+import semver from 'semver';
 import { logger } from './utils/logger';
 import { captureException } from './utils/sentry';
 import { isWebContentsAvailable } from './utils/safe-send';
@@ -29,7 +38,7 @@ import {
 	RELEASES_ATOM_FEED_URL,
 	updateHoldFor,
 } from './update-checker';
-import type { UpdateHold } from './enterprise/update-policy';
+import { isUpdateVersion, type UpdateHold } from './enterprise/update-policy';
 
 export interface UpdateStatus {
 	status:
@@ -52,6 +61,9 @@ let mainWindow: BrowserWindow | null = null;
 let currentStatus: UpdateStatus = { status: 'idle' };
 let ipcHandlersRegistered = false;
 let onBeforeQuitAndInstall: (() => void) | null = null;
+/** The version electron-updater last reported downloaded: what a quit would install. */
+let downloadedInfo: UpdateInfo | null = null;
+let quitHoldRegistered = false;
 
 /** Number of attempts (1 initial + retries) for transient GitHub failures. */
 const UPDATE_MAX_ATTEMPTS = 3;
@@ -174,7 +186,13 @@ function heldUpdaterStep(
 	candidate: string | null,
 	prerelease?: boolean
 ): UpdateHold | null {
-	const hold = updateHoldFor({ current: runningVersion(), candidate, prerelease });
+	// A false prerelease flag (the person's opt-in is off) never vouches for a
+	// candidate: the candidate's own version then decides the channel.
+	const hold = updateHoldFor({
+		current: runningVersion(),
+		candidate,
+		prerelease: prerelease || undefined,
+	});
 	if (hold) return hold;
 	try {
 		holdEgress(feedUrl, 'updates');
@@ -196,6 +214,46 @@ function reportHeld(step: string, held: UpdateHold, info?: UpdateInfo): void {
 	recordUpdateHold(held);
 	currentStatus = { status: 'held-by-policy', info, held };
 	sendStatusToRenderer();
+}
+
+/**
+ * Hold the install electron-updater would run on quit. Called on `before-quit`,
+ * which runs before the updater's own `quit` handler reads
+ * `autoInstallOnAppQuit`: a held version turns it off, so the quit relaunches
+ * into nothing new. Only ever lowers the flag; a quit that is then cancelled
+ * leaves the Install button (held again itself) as the way forward.
+ */
+export function holdInstallOnQuit(): UpdateHold | null {
+	const updater = _autoUpdater;
+	if (!updater || !downloadedInfo || !updater.autoInstallOnAppQuit) return null;
+	const hold = updateHoldFor({ current: runningVersion(), candidate: downloadedInfo.version });
+	if (!hold) return null;
+	updater.autoInstallOnAppQuit = false;
+	reportHeld('install on quit', hold, downloadedInfo);
+	return hold;
+}
+
+/** Register the install-on-quit hold once on the app's `before-quit`. */
+function registerQuitHold(): void {
+	if (quitHoldRegistered) return;
+	let quitting: Pick<typeof app, 'on'> | undefined;
+	try {
+		quitting = app;
+	} catch {
+		// Only a test double of electron lacks `app`; it never quits.
+		return;
+	}
+	if (typeof quitting?.on !== 'function') return;
+	quitHoldRegistered = true;
+	quitting.on('before-quit', () => {
+		holdInstallOnQuit();
+	});
+}
+
+/** The refusal a release tag that is not a release version meets; null for a release tag. */
+function invalidReleaseTag(tag: string | undefined): string | null {
+	if (tag === undefined || isUpdateVersion(tag)) return null;
+	return `"${String(tag).slice(0, 80)}" is not a release tag; no update feed was read`;
 }
 
 // Lazy-loaded autoUpdater instance
@@ -285,6 +343,7 @@ export function initAutoUpdater(window: BrowserWindow, options?: InitAutoUpdater
 	// Update downloaded
 	autoUpdater.on('update-downloaded', (info: UpdateInfo) => {
 		logger.info(`Update downloaded: ${info.version}`, 'AutoUpdater');
+		downloadedInfo = info;
 		currentStatus = { status: 'downloaded', info };
 		sendStatusToRenderer();
 	});
@@ -297,6 +356,9 @@ export function initAutoUpdater(window: BrowserWindow, options?: InitAutoUpdater
 		currentStatus = { status: 'error', error: describeUpdateError(err) };
 		sendStatusToRenderer();
 	});
+
+	// Hold install-on-quit at the quit itself.
+	registerQuitHold();
 
 	// Set up IPC handlers
 	setupIpcHandlers();
@@ -384,6 +446,11 @@ function setupIpcHandlers(): void {
 			// Held first, before the feed is pointed anywhere: the tag the renderer
 			// offers (or the feed itself, with no tag) on the update ceiling, the
 			// feed URL as an `updates` request on the egress ceiling.
+			const badTag = invalidReleaseTag(targetTag);
+			if (badTag) {
+				logger.warn(`Update download refused: ${badTag}`, 'AutoUpdater');
+				return { success: false, error: badTag };
+			}
 			applyPrereleaseCeiling(autoUpdater);
 			const feedUrl = targetTag ? getReleaseDownloadFeedUrl(targetTag) : RELEASES_ATOM_FEED_URL;
 			const gate = heldUpdaterStep(feedUrl, targetTag ?? null, autoUpdater.allowPrerelease);
@@ -580,9 +647,8 @@ export async function connectionUpdateAction(action: string): Promise<typeof con
 			const result = await withUpdateRetry('connection update check', () =>
 				updater.checkForUpdates()
 			);
-			const current = require('electron').app.getVersion();
-			const newer =
-				result?.updateInfo?.version && require('semver').gt(result.updateInfo.version, current);
+			const current = runningVersion();
+			const newer = result?.updateInfo?.version && semver.gt(result.updateInfo.version, current);
 			const hold = newer ? updateHoldFor({ current, candidate: result!.updateInfo.version }) : null;
 			connectionUpdate = hold
 				? {
@@ -632,6 +698,21 @@ export async function connectionUpdateAction(action: string): Promise<typeof con
 			};
 		} else {
 			if (connectionUpdate.status !== 'downloaded') throw new Error('Download an update first.');
+			// Held again at the restart: a ceiling that landed after the download
+			// keeps the qualified version, and nothing relaunches.
+			const hold = updateHoldFor({
+				current: runningVersion(),
+				candidate: connectionUpdate.version ?? null,
+			});
+			if (hold) {
+				recordUpdateHold(hold);
+				connectionUpdate = {
+					...connectionUpdate,
+					status: 'held-by-policy',
+					message: heldMessage(hold),
+				};
+				return { ...connectionUpdate };
+			}
 			onBeforeQuitAndInstall?.();
 			updater.quitAndInstall(false, true);
 		}

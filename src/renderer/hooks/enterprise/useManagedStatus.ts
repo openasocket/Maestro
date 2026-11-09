@@ -17,6 +17,13 @@
  * recovery returns is handed back once and never kept here. Nothing here can
  * switch management off: the verbs refresh, recover and complete; leaving a
  * managed record is refused by the main process by name.
+ *
+ * `update` is the roll-forward word beside the standing (MCOMP-19-04):
+ * `held` when the update ceiling holds a check, download or install (the
+ * projection's hold first, the updater's own report second), `restart-needed`
+ * when an admitted download waits for a restart to install, `none` otherwise.
+ * It follows the updater's status events, so a hold that lands at quit or at
+ * install is seen without a poll.
  */
 
 import { useCallback, useEffect } from 'react';
@@ -25,11 +32,14 @@ import type {
 	RegistrationApprovalHandoff,
 } from '../../../main/enterprise/enrollment';
 import type { ManagedStanding, ManagedStateView } from '../../../main/enterprise/managed-state';
+import type { UpdateStatus } from '../../../shared/types';
+import { formatManagedHold } from '../../../shared/formatters';
 import type { PolicyRecovery } from '../../../main/enterprise/policy-status';
 import { ipcErrorMessage } from '../../utils/ipcErrorMessage';
 import { useCachedResource } from '../utils/useCachedResource';
 
 export const MANAGED_STATE_RESOURCE_KEY = 'enterprise:managedState';
+export const UPDATER_STATUS_RESOURCE_KEY = 'updates:status';
 /** How often a mounted pane re-reads the standing. */
 export const MANAGED_STATE_POLL_MS = 30_000;
 
@@ -80,6 +90,53 @@ export const MANAGED_STANDING_COPY: Record<ManagedStanding, { label: string; det
 		detail: 'This desktop holds no enrollment and runs unmanaged.',
 	},
 };
+
+export type ManagedUpdateWord = 'held' | 'restart-needed' | 'none';
+
+export interface ManagedUpdateState {
+	word: ManagedUpdateWord;
+	/** The version held or waiting for the restart; null for a held check or nothing. */
+	version: string | null;
+	/** One sentence for the pane; empty for `none`. */
+	message: string;
+}
+
+/** The labels for the roll-forward words; `none` draws nothing. */
+export const MANAGED_UPDATE_COPY: Record<Exclude<ManagedUpdateWord, 'none'>, string> = {
+	held: 'Update held by policy',
+	'restart-needed': 'Restart needed to install',
+};
+
+/**
+ * The roll-forward word from the managed projection and the updater's status.
+ * A hold wins over a waiting download: a held version is never offered as a
+ * restart. Pure, so a pane and a test read the same answer.
+ */
+export function managedUpdateState(
+	state: ManagedStateView | null | undefined,
+	updater: UpdateStatus | null | undefined
+): ManagedUpdateState {
+	const held =
+		// An older host projects no `update` section; it then reads as nothing held.
+		state?.update?.held ?? (updater?.status === 'held-by-policy' ? updater.held : undefined);
+	if (held) {
+		const version = held.candidate ?? updater?.info?.version ?? null;
+		return {
+			word: 'held',
+			version,
+			message: `${version ? `Update ${version}` : 'The update check'} is held: ${formatManagedHold(held)}`,
+		};
+	}
+	if (updater?.status === 'downloaded') {
+		const version = updater.info?.version ?? null;
+		return {
+			word: 'restart-needed',
+			version,
+			message: `${version ? `Update ${version}` : 'An update'} is downloaded and admitted; restart Maestro to install it.`,
+		};
+	}
+	return { word: 'none', version: null, message: '' };
+}
 
 export type ManagedActionVerb = 'refreshPolicy' | 'recoverPolicy' | 'completeRegistration';
 
@@ -150,6 +207,8 @@ export interface UseManagedStatusResult {
 	fetchedAt: number;
 	refresh: () => Promise<void>;
 	run: (verb: ManagedActionVerb) => Promise<ManagedActionResult>;
+	/** The roll-forward word: held, restart-needed, or none. */
+	update: ManagedUpdateState;
 }
 
 export function useManagedStatus(options: { pollMs?: number } = {}): UseManagedStatusResult {
@@ -160,13 +219,29 @@ export function useManagedStatus(options: { pollMs?: number } = {}): UseManagedS
 		supported ? MANAGED_STATE_RESOURCE_KEY : null,
 		() => api.managedState()
 	);
-	const { refresh } = resource;
+	const { refresh: refreshState } = resource;
+	const updates = window.maestro?.updates;
+	const updaterSupported = supported && typeof updates?.getStatus === 'function';
+	const updater = useCachedResource<UpdateStatus>(
+		updaterSupported ? UPDATER_STATUS_RESOURCE_KEY : null,
+		() => updates.getStatus()
+	);
+	const { refresh: refreshUpdater } = updater;
+	const refresh = useCallback(async () => {
+		await Promise.all([refreshState(), refreshUpdater()]);
+	}, [refreshState, refreshUpdater]);
 
 	useEffect(() => {
 		if (!supported || pollMs <= 0) return;
 		const timer = setInterval(() => void refresh(), pollMs);
 		return () => clearInterval(timer);
 	}, [supported, pollMs, refresh]);
+
+	// The updater reports a hold or a finished download as it happens.
+	useEffect(() => {
+		if (!updaterSupported || typeof updates?.onStatus !== 'function') return;
+		return updates.onStatus(() => void refreshUpdater());
+	}, [updaterSupported, updates, refreshUpdater]);
 
 	const run = useCallback(
 		async (verb: ManagedActionVerb): Promise<ManagedActionResult> => {
@@ -199,5 +274,6 @@ export function useManagedStatus(options: { pollMs?: number } = {}): UseManagedS
 		fetchedAt: resource.fetchedAt,
 		refresh,
 		run,
+		update: managedUpdateState(resource.data, updater.data),
 	};
 }
