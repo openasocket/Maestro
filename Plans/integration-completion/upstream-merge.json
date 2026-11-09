@@ -1336,5 +1336,112 @@
 			"suites": "package-mega-maestro-runtime, mega-maestro-handoff, managed contracts, standalone, built-entry: 5 files, 56 passed",
 			"closes": "MCOMP-01-03"
 		}
+	},
+	"secondSelection": {
+		"task": "MCOMP-33-00",
+		"standing": "a second, later selection recorded beside the first; the first selection above (MCOMP-01-03, upstream/rc 3c8569162) is unchanged and stays the pin of MCOMP-01-03",
+		"recordedAt": "2026-11-09T12:51:55.877Z",
+		"selection": {
+			"ref": "upstream/rc",
+			"remote": "upstream = https://github.com/RunMaestro/Maestro.git",
+			"commit": "919d28a662f14e442389c874fef7b7efba116037",
+			"committedAt": "2026-11-07T04:11:45-06:00",
+			"describe": "v1.1.0-RC-823-g919d28a66",
+			"readFrom": "git fetch upstream rc on 2026-11-09 (5eb134ca9..919d28a66); the tip current when the S18 refresh opened",
+			"upstreamCommitsSinceFirstSelection": 600,
+			"rule": "fixed at this commit for every 33-00 continuation; a later upstream/rc is another integration with its own record"
+		},
+		"target": {
+			"branch": "feature/mega-maestro-v1.1.0-rc",
+			"head": "40ec42bab70fa96d49a5749aa9f9e648cc9b5d4a",
+			"committedAt": "2026-11-09T07:44:19-05:00"
+		},
+		"base": {
+			"commit": "3c85691621acc55aa55309b6676dfb0e759841bd",
+			"note": "the first selection is the merge base; integration commits since it: 601"
+		},
+		"dryRun": {
+			"command": "git merge-tree --write-tree --name-only HEAD upstream/rc",
+			"mergedTree": "e87ee5a755d5ee23381fe2000e25991f1701b3d7",
+			"conflictedFiles": 97,
+			"conflictLines": 8806,
+			"conflictKinds": "content only; no delete, rename or mode conflict",
+			"upstreamDiffstat": "1376 files changed, 173272 insertions(+), 10457 deletions(-) against the base",
+			"integrationDiffstat": "852 files changed, 217428 insertions(+), 4660 deletions(-) against the base",
+			"filesChangedOnBothSides": 232,
+			"generatedFilesMoved": ["package.json", "package-lock.json"],
+			"previousReading": "the 2026-11-05 amendment read 57 conflicting files at an older upstream tip and HEAD; recomputed here as 97"
+		},
+		"worktree": {
+			"path": "/Users/dr3/dev-shit/worktrees/integrate/upstream-rc-919d28a",
+			"branch": "integrate/upstream-rc-919d28a",
+			"baseBranch": "feature/mega-maestro-v1.1.0-rc",
+			"cutAt": "40ec42bab70fa96d49a5749aa9f9e648cc9b5d4a",
+			"parentAgent": "e5de8eb6-e05e-49b6-9944-47149ae54c64 (Maestro-Claude)",
+			"worktreeAgent": "6ad3b46d-3cab-4218-a6f4-d7d862bce5b1",
+			"createdBy": "maestro-cli create-worktree --background",
+			"nodeModules": "a symlink to the main checkout node_modules; delete it before git worktree remove",
+			"mergeStarted": {
+				"command": "git merge --no-commit --no-ff 919d28a662f14e442389c874fef7b7efba116037",
+				"mergeHead": "919d28a662f14e442389c874fef7b7efba116037",
+				"unmergedFiles": 97
+			},
+			"rule": "the merge stays uncommitted in this worktree until every group is staged; the main checkout is never touched by a resolution task"
+		},
+		"groups": {
+			"MCOMP-33-00R01": "the agent guides and CLAUDE.md (3 files, 345 conflict lines): docs/agent-guides/CLI-UI-PARITY.md, docs/agent-guides/CANONICAL-UTILITIES.md, CLAUDE.md",
+			"MCOMP-33-00R02": "the Cue, IPC and settings guides (3 files, 22 conflict lines): CLAUDE-CUE.md, CLAUDE-IPC.md, CLAUDE-SETTINGS.md",
+			"MCOMP-33-00R03": "the ignore list and the library version (3 files, 44 conflict lines): .gitignore, docs/maestro-lib.md, src/shared/maestro-lib/version.ts",
+			"MCOMP-33-00R04": "the plugin host handlers (1 file, 538 conflict lines): src/main/plugins/plugin-host-handlers.ts",
+			"MCOMP-33-00R05": "the plugin host handlers suite (1 file, 1300 conflict lines): src/__tests__/main/plugins/plugin-host-handlers.test.ts",
+			"MCOMP-33-00R06": "the headless plugin agent runner and its suite (2 files, 430 conflict lines): src/main/plugins/plugin-headless-agent-runner.ts, src/__tests__/main/plugins/plugin-headless-agent-runner.test.ts",
+			"MCOMP-33-00R07": "the plugin authorization ledger suite and the plugin manager singleton (2 files, 439 conflict lines): src/__tests__/main/plugins/authorization-ledger.test.ts, src/main/plugins/plugin-manager-singleton.ts",
+			"MCOMP-33-00R08": "the plugin manager and the plugin IPC handlers (2 files, 79 conflict lines): src/main/plugins/plugin-manager.ts, src/main/ipc/handlers/plugins.ts",
+			"MCOMP-33-00R09": "the main entry, the system handlers and persistence (3 files, 223 conflict lines): src/main/index.ts, src/main/ipc/handlers/system.ts, src/main/ipc/handlers/persistence.ts",
+			"MCOMP-33-00R10": "the agent IPC handlers and the agent store (2 files, 314 conflict lines): src/main/ipc/handlers/agents.ts, src/renderer/stores/agentStore.ts",
+			"MCOMP-33-00R11": "the process manager types (1 file, 433 conflict lines): src/main/process-manager/types.ts",
+			"MCOMP-33-00R12": "the process manager, the child process spawner and the env builder suite (3 files, 192 conflict lines): src/main/process-manager/ProcessManager.ts, src/main/process-manager/spawners/ChildProcessSpawner.ts, src/__tests__/main/process-manager/utils/envBuilder.test.ts",
+			"MCOMP-33-00R13": "the Codex app server and OpenCode server spawners (2 files, 446 conflict lines): src/main/process-manager/spawners/CodexAppServerSpawner.ts, src/main/process-manager/spawners/OpencodeServerSpawner.ts",
+			"MCOMP-33-00R14": "the OpenCode server manager and the process spawn handlers (3 files, 312 conflict lines): src/main/opencode-server/OpencodeServerManager.ts, src/main/ipc/handlers/process.ts, src/main/ipc/handlers/process/handle-spawn.ts",
+			"MCOMP-33-00R15": "the CLI agent spawner and the SSH spawn wrapper suite (2 files, 237 conflict lines): src/cli/services/agent-spawner.ts, src/__tests__/main/utils/ssh-spawn-wrapper.test.ts",
+			"MCOMP-33-00R16": "the CLI agent spawner suite (1 file, 637 conflict lines): src/__tests__/cli/services/agent-spawner.test.ts",
+			"MCOMP-33-00R17": "the CLI ask and host verbs and the SSH remote update suite (3 files, 167 conflict lines): src/cli/commands/ask.ts, src/cli/commands/host.ts, src/__tests__/cli/commands/update-ssh-remote.test.ts",
+			"MCOMP-33-00R18": "the CLI runtime host, its suite and the host Cue engine (3 files, 91 conflict lines): src/cli/services/runtime-host.ts, src/__tests__/cli/services/runtime-host.test.ts, src/cli/services/host-cue.ts",
+			"MCOMP-33-00R19": "the runtime server, its requests and the runtime turns (3 files, 116 conflict lines): src/shared/maestro-lib/runtime/server.ts, src/shared/maestro-lib/runtime/server-requests.ts, src/shared/maestro-lib/runtime/turns.ts",
+			"MCOMP-33-00R20": "the runtime client types, host control and the socket client suite (3 files, 56 conflict lines): src/shared/maestro-lib/client/types.ts, src/shared/maestro-lib/client/host-control.ts, src/shared/maestro-lib/client/__tests__/ws-client.test.ts",
+			"MCOMP-33-00R21": "the launch arguments, the launch environment and the consult service (3 files, 69 conflict lines): src/shared/maestro-lib/launch/agent-args.ts, src/shared/maestro-lib/launch/env.ts, src/shared/maestro-lib/agents/consult.ts",
+			"MCOMP-33-00R22": "the cross-agent router, the consult runner and the cross-agent types (3 files, 161 conflict lines): src/main/cross-agent/cross-agent-router.ts, src/main/cross-agent/consult-runner.ts, src/shared/crossAgentTypes.ts",
+			"MCOMP-33-00R23": "the cross-agent IPC handlers and the group chat spawn (2 files, 110 conflict lines): src/main/ipc/handlers/cross-agent.ts, src/main/group-chat/spawnGroupChatAgent.ts",
+			"MCOMP-33-00R24": "the capture service, its listener and the git handler suite (3 files, 42 conflict lines): src/main/agent-run/capture-service.ts, src/main/agent-run/setup-capture-listener.ts, src/__tests__/main/ipc/handlers/git.test.ts",
+			"MCOMP-33-00R25": "the Cue process lifecycle and the Cue run router (2 files, 62 conflict lines): src/main/cue/cue-process-lifecycle.ts, src/main/cue/cue-run-router.ts",
+			"MCOMP-33-00R26": "the permission relay server and its integration (2 files, 129 conflict lines): src/main/permission-relay/PermissionRelayServer.ts, src/main/permission-relay/integration.ts",
+			"MCOMP-33-00R27": "the Pianola lifecycle and supervisor (2 files, 124 conflict lines): src/main/pianola/pianola-lifecycle.ts, src/main/pianola/pianola-supervisor.ts",
+			"MCOMP-33-00R28": "the Lite entry and tunnel (2 files, 44 conflict lines): src/main/lite/index.ts, src/main/lite/tunnel.ts",
+			"MCOMP-33-00R29": "the web server core, its types and the socket route (3 files, 125 conflict lines): src/main/web-server/WebServer.ts, src/main/web-server/types.ts, src/main/web-server/routes/wsRoute.ts",
+			"MCOMP-33-00R30": "the web server callbacks (3 files, 61 conflict lines): src/main/web-server/callbacks/browserTabCallbacks.ts, src/main/web-server/callbacks/commandCallbacks.ts, src/main/web-server/callbacks/queueCallbacks.ts",
+			"MCOMP-33-00R31": "the callback registry, the bridge handlers and the web server factory suite (3 files, 209 conflict lines): src/main/web-server/managers/CallbackRegistry.ts, src/main/web-server/handlers/bridgeHandlers.ts, src/__tests__/main/web-server/web-server-factory.test.ts",
+			"MCOMP-33-00R32": "the socket message handler, commands and handler types (3 files, 68 conflict lines): src/main/web-server/handlers/messageHandlers/WebSocketMessageHandler.ts, src/main/web-server/handlers/messageHandlers/commands.ts, src/main/web-server/handlers/messageHandlers/types.ts",
+			"MCOMP-33-00R33": "the session and tab message handlers (2 files, 91 conflict lines): src/main/web-server/handlers/messageHandlers/sessions.ts, src/main/web-server/handlers/messageHandlers/tabs.ts",
+			"MCOMP-33-00R34": "the preload remotes (3 files, 76 conflict lines): src/main/preload/process/browserTabRemote.ts, src/main/preload/process/commandRemote.ts, src/main/preload/process/queueRemote.ts",
+			"MCOMP-33-00R35": "the preload core, the renderer globals and the remote handlers (3 files, 86 conflict lines): src/main/preload/process/core.ts, src/renderer/global.d.ts, src/renderer/hooks/remote/useRemoteHandlers.ts",
+			"MCOMP-33-00R36": "the remote integration hook, the session CRUD hook and the idle notification (3 files, 205 conflict lines): src/renderer/hooks/remote/useRemoteIntegration.ts, src/renderer/hooks/session/useSessionCrud.ts, src/renderer/hooks/ui/useIdleNotification.ts",
+			"MCOMP-33-00R37": "the remote integration suite (1 file, 379 conflict lines): src/__tests__/renderer/hooks/useRemoteIntegration.test.ts",
+			"MCOMP-33-00R38": "the new agent modal, the edit agent modal and their types (3 files, 99 conflict lines): src/renderer/components/NewInstanceModal/NewInstanceModal.tsx, src/renderer/components/NewInstanceModal/EditAgentModal.tsx, src/renderer/components/NewInstanceModal/types.ts",
+			"MCOMP-33-00R39": "the agent modal suites and the session modals (3 files, 52 conflict lines): src/__tests__/renderer/components/NewInstanceModal/EditAgentModal.test.tsx, src/__tests__/renderer/components/shared/AgentConfigPanel.test.tsx, src/renderer/components/AppModals/AppSessionModals.tsx",
+			"MCOMP-33-00R40": "the notifications panel and the privacy section (2 files, 193 conflict lines): src/renderer/components/NotificationsPanel.tsx, src/renderer/components/Settings/tabs/GeneralTab/components/PrivacySection.tsx"
+		},
+		"steps": {
+			"MCOMP-33-00C": "Commit the second upstream/rc merge in the integration worktree and type-check the merged tree",
+			"MCOMP-33-00S": "Run the suites the second upstream/rc merge touched in the integration worktree",
+			"MCOMP-33-00L": "Land the second integration on the feature branch and rescan the effect and credential paths",
+			"MCOMP-33-00P": "Re-pin MAESTRO-M0-RUNTIME after the second upstream/rc merge and close the refresh"
+		},
+		"rules": "the rules of the first selection apply unchanged (no forced reset, checkout loss, history rewrite or signing change; landing only on feature/mega-maestro-v1.1.0-rc by a merge commit; enterprise guards and standalone semantics survive; the desktop host stays Electron)",
+		"tool": ".maestro/playbooks/Working/mcomp-33-00/merge-tool.mjs (the MCOMP-01-03 driver with the second worktree and selection; not in git)",
+		"status": {
+			"state": "merge started, 97 files unmerged; resolution groups MCOMP-33-00R01..R40 open",
+			"updatedBy": "MCOMP-33-00"
+		},
+		"progress": {}
 	}
 }
