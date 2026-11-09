@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Folder, AlertTriangle } from 'lucide-react';
-import type { AdditionalDirectory, AgentConfig, Session, ToolType } from '../../types';
+import type { AdditionalDirectory, AgentConfig, Session, Theme, ToolType } from '../../types';
 import type { SshRemoteConfig, AgentSshRemoteConfig } from '../../../shared/types';
 import { MODAL_PRIORITIES } from '../../constants/modalPriorities';
 import { validateNewSession } from '../../utils/sessionValidation';
@@ -15,7 +15,7 @@ import { SshRemoteSelector } from '../shared/SshRemoteSelector';
 import { ThemedSelect } from '../shared/ThemedSelect';
 import { useSessionStore } from '../../stores/sessionStore';
 import { formatShortcutKeys } from '../../utils/shortcutFormatter';
-import type { AgentDebugInfo, NewInstanceModalProps } from './types';
+import type { AgentDebugInfo, NewAgentFormOutcome, NewInstanceModalProps } from './types';
 import { SUPPORTED_AGENTS, NEW_SESSION_MESSAGE_MAX_LENGTH } from './types';
 import { useRemotePathValidation } from '../../hooks/agent/useRemotePathValidation';
 import { NudgeMessageField } from './NudgeMessageField';
@@ -31,6 +31,133 @@ import { getEffortConfigKey, readEffortFromConfig } from '../../utils/agentEffor
 import { gitService } from '../../services/git';
 import { withBlankEnvVarRow } from '../../../shared/envVarCatalog';
 import { buildDuplicateAgentInput } from '../../../shared/newAgentRecord';
+import { useManagedAgentOptions } from '../../hooks/enterprise/useManagedAgentOptions';
+import type { AgentCommitRefusal } from '../../services/agentCommit';
+import type {
+	GovernedAgentKind,
+	ManagedAgentOptions,
+} from '../../../shared/maestro-lib/managed/agent-policy';
+import { GOVERNED_AGENT_KINDS } from '../../../shared/maestro-lib/managed/agent-policy';
+
+const MANAGED_FIELD_LABELS: Record<GovernedAgentKind, string> = {
+	provider: 'Provider',
+	model: 'Model',
+	account: 'Account',
+	workspace: 'Working directory',
+	credential: 'Credential',
+	permission: 'Permission mode',
+	transport: 'Transport',
+};
+
+const POLICY_SOURCE_LABELS: Record<'endpoint' | 'cached' | 'none', string> = {
+	endpoint: 'from the endpoint',
+	cached: 'installed copy (offline)',
+	none: 'no policy source',
+};
+
+/**
+ * The approved choices the desktop host projects for a managed installation
+ * (MCOMP-23-03): the policy revision and its source, each governed field's
+ * approved references (opaque host references, never values or secrets) and
+ * why a field is fixed, plus the host's per-field reasons for the last refused
+ * create. Advisory only: the host revalidates the record at commit. Renders
+ * nothing on a standalone (unenrolled) desktop, whose form stays as it was.
+ */
+export function ManagedChoicesNotice({
+	theme,
+	managed,
+	options,
+	policySource,
+	refreshing,
+	onRefresh,
+	refusal,
+}: {
+	theme: Theme;
+	managed: boolean;
+	options: ManagedAgentOptions;
+	policySource: 'endpoint' | 'cached' | 'none';
+	refreshing: boolean;
+	onRefresh: () => void;
+	refusal: AgentCommitRefusal | null;
+}) {
+	if (!managed && !refusal) return null;
+	const refusedFields = new Map((refusal?.fields ?? []).map((f) => [f.field, f.reason]));
+	return (
+		<div
+			className="rounded border p-3 text-xs space-y-2"
+			style={{ borderColor: theme.colors.border, color: theme.colors.textMain }}
+			data-testid="managed-choices-notice"
+		>
+			{managed && (
+				<div className="flex items-center justify-between gap-2">
+					<span>
+						<span className="font-bold">Managed by policy</span>
+						<span style={{ color: theme.colors.textDim }} data-testid="managed-policy-revision">
+							{' '}
+							{options.policyRevision === null
+								? 'no applied revision'
+								: `revision ${options.policyRevision}`}
+							{`, ${POLICY_SOURCE_LABELS[policySource]}, ${options.freshness}`}
+						</span>
+					</span>
+					<button
+						type="button"
+						className="px-2 py-1 rounded border row-hover"
+						style={{ borderColor: theme.colors.border }}
+						onClick={onRefresh}
+						disabled={refreshing}
+					>
+						{refreshing ? 'Refreshing...' : 'Refresh policy'}
+					</button>
+				</div>
+			)}
+			{managed && options.outcome === 'unavailable' && (
+				<p style={{ color: theme.colors.warning }} data-testid="managed-choices-unavailable">
+					Approved choices are unavailable: {options.reason} The host checks the new agent when you
+					create it and may refuse it.
+				</p>
+			)}
+			{managed && options.outcome === 'available' && (
+				<ul className="space-y-1">
+					{GOVERNED_AGENT_KINDS.map((kind) => {
+						const field = options.fields[kind];
+						if (!field) return null;
+						const refs = [...new Set(field.choices.map((choice) => choice.ref))];
+						return (
+							<li key={kind} data-testid={`managed-field-${kind}`}>
+								<span className="font-bold">{MANAGED_FIELD_LABELS[kind]}:</span>{' '}
+								<span className="font-mono">{refs.length ? refs.join(', ') : 'none approved'}</span>
+								{field.lockedReason ? (
+									<span style={{ color: theme.colors.textDim }}> ({field.lockedReason})</span>
+								) : !field.editable ? (
+									<span style={{ color: theme.colors.textDim }}> (fixed by policy)</span>
+								) : null}
+							</li>
+						);
+					})}
+				</ul>
+			)}
+			{refusal && (
+				<div style={{ color: theme.colors.error }} role="alert" data-testid="managed-refusal">
+					<p>
+						{refusal.code === 'stale'
+							? 'The policy changed while this form was open. Approved choices were refreshed; review them and create again.'
+							: `Not created: ${refusal.reason}`}
+					</p>
+					{refusedFields.size > 0 && (
+						<ul className="list-disc ml-4">
+							{[...refusedFields].map(([field, reason]) => (
+								<li key={field} data-testid={`managed-refusal-${field}`}>
+									{MANAGED_FIELD_LABELS[field]}: {reason}
+								</li>
+							))}
+						</ul>
+					)}
+				</div>
+			)}
+		</div>
+	);
+}
 
 export function NewInstanceModal({
 	isOpen,
@@ -103,6 +230,12 @@ export function NewInstanceModal({
 	// Group placement: '' means "No Group (Ungrouped)". Initialized when the modal
 	// opens from the source session (when duplicating) or the caller's preset.
 	const [selectedGroupId, setSelectedGroupId] = useState<string>('');
+	// Managed installations: the host's approved choices, and the last refused create.
+	const managedChoices = useManagedAgentOptions();
+	const formPolicyRevision = managedChoices.managed ? managedChoices.options.policyRevision : null;
+	const refreshManagedChoices = managedChoices.refresh;
+	const [creating, setCreating] = useState(false);
+	const [createRefusal, setCreateRefusal] = useState<AgentCommitRefusal | null>(null);
 	const groups = useSessionStore((s) => s.groups);
 
 	const nameInputRef = useRef<HTMLInputElement>(null);
@@ -505,9 +638,10 @@ export function NewInstanceModal({
 		[agents, dynamicOptions]
 	);
 
-	const handleCreate = React.useCallback(() => {
+	const handleCreate = React.useCallback(async () => {
 		const name = instanceName.trim();
 		if (!name) return; // Name is required
+		if (creating) return; // One commit at a time
 
 		const sshConfig = agentSshRemoteConfigs[selectedAgent] || agentSshRemoteConfigs['_pending_'];
 		const sshRemoteId = sshConfig?.enabled ? sshConfig?.remoteId : null;
@@ -597,31 +731,55 @@ export function NewInstanceModal({
 			? (maestroPModeByAgent[selectedAgent] ?? 'dynamic')
 			: undefined;
 
-		onCreate(
-			selectedAgent,
-			effectiveWorkingDir,
-			name,
-			nudgeMessage.trim() || undefined,
-			newSessionMessage.trim() || undefined,
-			agentCustomPath,
-			agentCustomArgs,
-			agentCustomEnvVars,
-			agentCustomModel,
-			agentCustomContextWindow,
-			agentCustomProviderPath,
-			sessionSshRemoteConfig,
-			agentCustomEffort,
-			targetGroupId ?? undefined,
-			agentEnableMaestroP,
-			agentMaestroPPath,
-			agentMaestroPMode,
-			retryAvailabilityByAgent[selectedAgent] ?? true,
-			retryTokenByAgent[selectedAgent] ?? true,
-			normalizeAdditionalDirectories(additionalDirectories, homeDir),
-			codexAutoResetByAgent[selectedAgent] ?? false,
-			codexTransportByAgent[selectedAgent] ?? 'exec',
-			sourceSession ? 'clone' : 'create'
-		);
+		setCreating(true);
+		setCreateRefusal(null);
+		let outcome: NewAgentFormOutcome | void;
+		try {
+			outcome = await onCreate(
+				selectedAgent,
+				effectiveWorkingDir,
+				name,
+				nudgeMessage.trim() || undefined,
+				newSessionMessage.trim() || undefined,
+				agentCustomPath,
+				agentCustomArgs,
+				agentCustomEnvVars,
+				agentCustomModel,
+				agentCustomContextWindow,
+				agentCustomProviderPath,
+				sessionSshRemoteConfig,
+				agentCustomEffort,
+				targetGroupId ?? undefined,
+				agentEnableMaestroP,
+				agentMaestroPPath,
+				agentMaestroPMode,
+				retryAvailabilityByAgent[selectedAgent] ?? true,
+				retryTokenByAgent[selectedAgent] ?? true,
+				normalizeAdditionalDirectories(additionalDirectories, homeDir),
+				codexAutoResetByAgent[selectedAgent] ?? false,
+				codexTransportByAgent[selectedAgent] ?? 'exec',
+				sourceSession ? 'clone' : 'create',
+				{
+					expectedPolicyRevision: formPolicyRevision,
+				}
+			);
+		} finally {
+			setCreating(false);
+		}
+		if (outcome && !outcome.ok) {
+			// Refused: nothing was created. Keep the draft and show the host's reasons by field.
+			setCreateRefusal(
+				outcome.refusal ?? {
+					ok: false,
+					code: 'invalid',
+					reason: outcome.error,
+					policyRevision: null,
+					fields: [],
+				}
+			);
+			if (outcome.refusal?.code === 'stale') void refreshManagedChoices();
+			return;
+		}
 		onClose();
 
 		// Reset
@@ -691,6 +849,9 @@ export function NewInstanceModal({
 		codexAutoResetByAgent,
 		codexTransportByAgent,
 		sourceSession,
+		creating,
+		formPolicyRevision,
+		refreshManagedChoices,
 	]);
 
 	// Check if form is valid for submission
@@ -739,7 +900,7 @@ export function NewInstanceModal({
 			if ((e.metaKey || e.ctrlKey) && (e.key === 'Enter' || e.key === 's') && !e.shiftKey) {
 				e.preventDefault();
 				if (isFormValid) {
-					handleCreate();
+					void handleCreate();
 				}
 			}
 		};
@@ -902,9 +1063,9 @@ export function NewInstanceModal({
 				<ModalFooter
 					theme={theme}
 					onCancel={onClose}
-					onConfirm={handleCreate}
-					confirmLabel="Create Agent"
-					confirmDisabled={!isFormValid}
+					onConfirm={() => void handleCreate()}
+					confirmLabel={creating ? 'Creating...' : 'Create Agent'}
+					confirmDisabled={!isFormValid || creating}
 				/>
 			}
 		>
@@ -948,6 +1109,16 @@ export function NewInstanceModal({
 						/>
 					</div>
 				)}
+
+				<ManagedChoicesNotice
+					theme={theme}
+					managed={managedChoices.managed}
+					options={managedChoices.options}
+					policySource={managedChoices.policySource}
+					refreshing={managedChoices.refreshing}
+					onRefresh={() => void managedChoices.refresh()}
+					refusal={createRefusal}
+				/>
 
 				{/* Agent Selection */}
 				<AgentPickerGrid
@@ -1105,7 +1276,11 @@ export function NewInstanceModal({
 							? `Enter remote path${sshRemoteHost ? ` on ${sshRemoteHost}` : ''} (e.g., /home/user/project)`
 							: 'Select directory...'
 					}
-					error={validation.errorField === 'directory' ? validation.error : undefined}
+					error={
+						validation.errorField === 'directory'
+							? validation.error
+							: createRefusal?.fields.find((field) => field.field === 'workspace')?.reason
+					}
 					monospace
 					heightClass="p-2"
 					addon={

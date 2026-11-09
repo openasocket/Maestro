@@ -2,6 +2,7 @@ import type React from 'react';
 import type { AdditionalDirectory, AgentConfig, Session, ToolType, Theme } from '../../types';
 import { PICKABLE_AGENT_IDS } from '../../../shared/agentMetadata';
 import type { CodexTransport } from '../../../shared/codexTransport';
+import type { AgentCommitRefusal } from '../../services/agentCommit';
 
 // Maximum character length for nudge message and new session message
 export const NUDGE_MESSAGE_MAX_LENGTH = 1000;
@@ -15,6 +16,15 @@ export const NEW_SESSION_MESSAGE_MAX_LENGTH = 5000;
  * dropdown the way it did while Grok and Qwen3 Coder were listed only here.
  */
 export const SUPPORTED_AGENTS: readonly string[] = PICKABLE_AGENT_IDS;
+
+/**
+ * What a create answered, when the caller awaits the host commit
+ * (`CreateNewSessionResult`). A refusal keeps the form open with its draft and
+ * the host's per-field reasons; `void` (an older caller) is read as success.
+ */
+export type NewAgentFormOutcome =
+	| { ok: true }
+	| { ok: false; error: string; refusal?: AgentCommitRefusal };
 
 export interface AgentDebugInfo {
 	agentId: string;
@@ -65,8 +75,10 @@ export interface NewInstanceModalProps {
 		/** Codex only: which transport chat turns use. `undefined` means `exec`. */
 		codexTransport?: CodexTransport,
 		/** `clone` when duplicating `sourceSession`, so the host checks it as a clone. */
-		operation?: 'create' | 'clone'
-	) => void;
+		operation?: 'create' | 'clone',
+		/** The policy revision the approved choices on screen were read from (null: none shown). */
+		policy?: { expectedPolicyRevision: number | null }
+	) => void | Promise<NewAgentFormOutcome | void>;
 	theme: Theme;
 	existingSessions: Session[];
 	sourceSession?: Session; // Optional session to duplicate from

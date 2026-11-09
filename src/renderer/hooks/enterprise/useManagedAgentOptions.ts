@@ -4,6 +4,11 @@ import { useManagedStatus } from './useManagedStatus';
 
 /** Read the same host projection as `maestro-cli managed status --json`.
  * Drafts remain the caller's; refresh never selects a replacement on their behalf.
+ *
+ * `managed` is true for any enrolled standing (an unenrolled or absent host is
+ * standalone and keeps its normal editable form); `policySource` says where the
+ * revision came from (`endpoint`, `cached` offline copy, or `none`). Neither is
+ * authority: the host revalidates every commit.
  */
 export function useManagedAgentOptions() {
 	const resource = useManagedStatus();
@@ -33,8 +38,12 @@ export function useManagedAgentOptions() {
 						? options.reason
 						: 'Refresh policy to load current approved choices.',
 			};
+	const standing = resource.state?.standing ?? null;
 	return {
 		options: result,
+		managed: standing !== null && standing !== 'unenrolled',
+		standing,
+		policySource: resource.state?.policy?.source ?? 'none',
 		loading: resource.loading,
 		refreshing: resource.refreshing,
 		error: resource.error,

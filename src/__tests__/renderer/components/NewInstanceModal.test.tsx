@@ -14,6 +14,7 @@ import type { Theme, Session } from '../../../renderer/types';
 import type { AgentConfig } from '../../../renderer/types';
 import { buildDuplicateAgentInput } from '../../../shared/newAgentRecord';
 import { createMockSession } from '../../helpers/mockSession';
+import { clearCachedResources } from '../../../renderer/hooks/utils/useCachedResource';
 
 // lucide-react icons are mocked globally in src/__tests__/setup.ts using a Proxy
 
@@ -883,7 +884,8 @@ describe('NewInstanceModal', () => {
 				undefined, // additionalDirectories
 				false, // codexAutoResetOnExhaustion: off by default
 				'exec', // codexTransport: Standard by default
-				'create' // operation
+				'create', // operation
+				{ expectedPolicyRevision: null } // standalone: no approved choices shown
 			);
 		});
 
@@ -941,7 +943,8 @@ describe('NewInstanceModal', () => {
 				undefined, // additionalDirectories
 				false, // codexAutoResetOnExhaustion: off by default
 				'exec', // codexTransport: Standard by default
-				'create' // operation
+				'create', // operation
+				{ expectedPolicyRevision: null } // standalone: no approved choices shown
 			);
 		});
 
@@ -999,7 +1002,8 @@ describe('NewInstanceModal', () => {
 				undefined, // additionalDirectories
 				false, // codexAutoResetOnExhaustion: off by default
 				'exec', // codexTransport: Standard by default
-				'create' // operation
+				'create', // operation
+				{ expectedPolicyRevision: null } // standalone: no approved choices shown
 			);
 		});
 	});
@@ -1058,7 +1062,8 @@ describe('NewInstanceModal', () => {
 				undefined, // additionalDirectories
 				false, // codexAutoResetOnExhaustion: off by default
 				'exec', // codexTransport: Standard by default
-				'create' // operation
+				'create', // operation
+				{ expectedPolicyRevision: null } // standalone: no approved choices shown
 			);
 			expect(onClose).toHaveBeenCalled();
 		});
@@ -1615,7 +1620,8 @@ describe('NewInstanceModal', () => {
 				undefined, // additionalDirectories
 				false, // codexAutoResetOnExhaustion: off by default
 				'exec', // codexTransport: Standard by default
-				'create' // operation
+				'create', // operation
+				{ expectedPolicyRevision: null } // standalone: no approved choices shown
 			);
 		});
 
@@ -1773,7 +1779,8 @@ describe('NewInstanceModal', () => {
 				undefined, // additionalDirectories
 				false, // codexAutoResetOnExhaustion: off by default
 				'exec', // codexTransport: Standard by default
-				'create' // operation
+				'create', // operation
+				{ expectedPolicyRevision: null } // standalone: no approved choices shown
 			);
 		});
 	});
@@ -2435,7 +2442,8 @@ describe('NewInstanceModal', () => {
 				expected.codexAutoResetOnExhaustion,
 				expected.codexTransport,
 				// A duplicate reaches the host as a clone (MCOMP-23-02B).
-				'clone'
+				'clone',
+				{ expectedPolicyRevision: null } // standalone: no approved choices shown
 			);
 		});
 
@@ -3018,7 +3026,8 @@ describe('NewInstanceModal', () => {
 				undefined, // additionalDirectories
 				false, // codexAutoResetOnExhaustion: off by default
 				'exec', // codexTransport: Standard by default
-				'create' // operation
+				'create', // operation
+				{ expectedPolicyRevision: null } // standalone: no approved choices shown
 			);
 		});
 
@@ -3253,7 +3262,8 @@ describe('NewInstanceModal', () => {
 				undefined, // additionalDirectories
 				false, // codexAutoResetOnExhaustion: off by default
 				'exec', // codexTransport: Standard by default
-				'create' // operation
+				'create', // operation
+				{ expectedPolicyRevision: null } // standalone: no approved choices shown
 			);
 		});
 
@@ -3567,7 +3577,8 @@ describe('NewInstanceModal', () => {
 				undefined, // additionalDirectories
 				false, // codexAutoResetOnExhaustion: off by default
 				'exec', // codexTransport: Standard by default
-				'clone' // operation: a duplicate is checked as a clone
+				'clone', // operation: a duplicate is checked as a clone
+				{ expectedPolicyRevision: null } // standalone: no approved choices shown
 			);
 		});
 
@@ -3818,6 +3829,222 @@ describe('NewInstanceModal', () => {
 				expect(screen.getByLabelText('Working Directory')).toHaveValue('/source/project');
 			});
 			expect(screen.getByLabelText('Agent Name')).toHaveValue('Source (Copy)');
+		});
+	});
+
+	describe('Managed approved choices (MCOMP-23-03)', () => {
+		const original = window.maestro.enterprise;
+		const managedState = vi.fn();
+		const now = Date.now();
+		const available = (revision = 7) => ({
+			standing: 'managed',
+			policy: { source: 'endpoint' },
+			agentOptions: {
+				outcome: 'available',
+				authority: 'none',
+				policyRevision: revision,
+				freshness: 'fresh',
+				expiresAt: new Date(now + 3_600_000).toISOString(),
+				operations: ['create', 'clone'],
+				fields: {
+					provider: {
+						choices: [{ kind: 'provider', ref: 'prov-claude' }],
+						editable: true,
+						minimum: 1,
+						maximum: 1,
+						lockedReason: null,
+					},
+					model: {
+						choices: [{ kind: 'model', ref: 'model-sonnet', providerRef: 'prov-claude' }],
+						editable: false,
+						minimum: 0,
+						maximum: 1,
+						lockedReason: 'This choice is fixed by policy.',
+					},
+					workspace: {
+						choices: [{ kind: 'workspace', ref: 'ws-project' }],
+						editable: true,
+						minimum: 1,
+						maximum: 1,
+						lockedReason: null,
+					},
+				},
+			},
+		});
+
+		const renderAndFill = async (create = onCreate) => {
+			render(
+				<NewInstanceModal
+					isOpen={true}
+					onClose={onClose}
+					onCreate={create}
+					theme={theme}
+					existingSessions={[]}
+				/>
+			);
+			await waitFor(() => expect(screen.getByLabelText('Agent Name')).toBeInTheDocument());
+			fireEvent.change(screen.getByLabelText('Agent Name'), { target: { value: 'Managed One' } });
+			fireEvent.change(screen.getByPlaceholderText('Select directory...'), {
+				target: { value: '/my/project' },
+			});
+		};
+
+		beforeEach(() => {
+			clearCachedResources();
+			managedState.mockReset();
+			(window.maestro as { enterprise: unknown }).enterprise = { ...original, managedState };
+		});
+		afterEach(() => {
+			clearCachedResources();
+			(window.maestro as { enterprise: unknown }).enterprise = original;
+		});
+
+		it('keeps the standalone form unchanged on an unenrolled desktop', async () => {
+			managedState.mockResolvedValue({ standing: 'unenrolled', policy: { source: 'none' } });
+			await renderAndFill();
+			expect(screen.queryByTestId('managed-choices-notice')).not.toBeInTheDocument();
+			await act(async () => {
+				fireEvent.click(screen.getByText('Create Agent'));
+			});
+			expect(onCreate.mock.calls[0][23]).toEqual({ expectedPolicyRevision: null });
+			expect(onClose).toHaveBeenCalled();
+		});
+
+		it('shows the policy revision, source and approved references, and sends the revision', async () => {
+			managedState.mockResolvedValue(available(7));
+			await renderAndFill();
+			await waitFor(() =>
+				expect(screen.getByTestId('managed-policy-revision')).toHaveTextContent(
+					'revision 7, from the endpoint, fresh'
+				)
+			);
+			expect(screen.getByTestId('managed-field-provider')).toHaveTextContent('prov-claude');
+			expect(screen.getByTestId('managed-field-model')).toHaveTextContent(
+				'model-sonnet (This choice is fixed by policy.)'
+			);
+			await act(async () => {
+				fireEvent.click(screen.getByText('Create Agent'));
+			});
+			const args = onCreate.mock.calls[0];
+			expect(args[23]).toEqual({ expectedPolicyRevision: 7 });
+			// References never become environment values or other record fields.
+			expect(args[7]).toBeUndefined();
+			expect(JSON.stringify(args.slice(0, 23))).not.toMatch(/prov-claude|model-sonnet|ws-project/);
+		});
+
+		it('keeps the draft and shows field reasons when the host refuses', async () => {
+			managedState.mockResolvedValue(available(7));
+			const refuse = vi.fn().mockResolvedValue({
+				ok: false,
+				error: 'refused',
+				refusal: {
+					ok: false,
+					code: 'field',
+					reason: 'Some choices are not approved by policy.',
+					policyRevision: 7,
+					fields: [
+						{ field: 'workspace', reason: 'This working directory is not an approved choice.' },
+						{
+							field: 'model',
+							reason: 'This model is not an approved choice for the selected parent.',
+						},
+					],
+				},
+			});
+			await renderAndFill(refuse);
+			await act(async () => {
+				fireEvent.click(screen.getByText('Create Agent'));
+			});
+			expect(onClose).not.toHaveBeenCalled();
+			expect(screen.getByLabelText('Agent Name')).toHaveValue('Managed One');
+			expect(screen.getByPlaceholderText('Select directory...')).toHaveValue('/my/project');
+			expect(screen.getByTestId('managed-refusal')).toHaveTextContent(
+				'Not created: Some choices are not approved by policy.'
+			);
+			expect(screen.getByTestId('managed-refusal-model')).toHaveTextContent(
+				'Model: This model is not an approved choice for the selected parent.'
+			);
+			// The working directory reason sits on the field itself too.
+			expect(
+				screen.getByText('This working directory is not an approved choice.')
+			).toBeInTheDocument();
+			expect(screen.getByTestId('managed-refusal-workspace')).toHaveTextContent(
+				'Working directory: This working directory is not an approved choice.'
+			);
+		});
+
+		it('refreshes approved choices after a stale refusal and keeps the draft', async () => {
+			managedState.mockResolvedValue(available(7));
+			const stale = vi.fn().mockResolvedValue({
+				ok: false,
+				error: 'stale',
+				refusal: {
+					ok: false,
+					code: 'stale',
+					reason: 'The policy changed. Refresh to load the current approved choices.',
+					policyRevision: 8,
+					fields: [],
+				},
+			});
+			await renderAndFill(stale);
+			await waitFor(() =>
+				expect(screen.getByTestId('managed-policy-revision')).toHaveTextContent('revision 7')
+			);
+			const reads = managedState.mock.calls.length;
+			managedState.mockResolvedValue(available(8));
+			await act(async () => {
+				fireEvent.click(screen.getByText('Create Agent'));
+			});
+			expect(managedState.mock.calls.length).toBeGreaterThan(reads);
+			await waitFor(() =>
+				expect(screen.getByTestId('managed-policy-revision')).toHaveTextContent('revision 8')
+			);
+			expect(screen.getByTestId('managed-refusal')).toHaveTextContent('The policy changed');
+			expect(onClose).not.toHaveBeenCalled();
+			expect(screen.getByLabelText('Agent Name')).toHaveValue('Managed One');
+		});
+
+		it('awaits the host commit: one create at a time, closing only after it answers', async () => {
+			managedState.mockResolvedValue(available(7));
+			let answer: (value: { ok: true }) => void = () => {};
+			const pending = vi.fn(() => new Promise<{ ok: true }>((resolve) => (answer = resolve)));
+			await renderAndFill(pending);
+			await act(async () => {
+				fireEvent.click(screen.getByText('Create Agent'));
+			});
+			expect(screen.getByText('Creating...')).toBeInTheDocument();
+			await act(async () => {
+				fireEvent.click(screen.getByText('Creating...'));
+			});
+			expect(pending).toHaveBeenCalledTimes(1);
+			expect(onClose).not.toHaveBeenCalled();
+			await act(async () => {
+				answer({ ok: true });
+			});
+			expect(onClose).toHaveBeenCalledTimes(1);
+		});
+
+		it('names why approved choices are unavailable on a managed desktop', async () => {
+			managedState.mockResolvedValue({
+				standing: 'offline',
+				policy: { source: 'cached' },
+				agentOptions: {
+					outcome: 'unavailable',
+					authority: 'none',
+					policyRevision: 4,
+					freshness: 'stale',
+					reason: 'No current policy observation.',
+				},
+			});
+			await renderAndFill();
+			await waitFor(() =>
+				expect(screen.getByTestId('managed-choices-unavailable')).toHaveTextContent(
+					'No current policy observation.'
+				)
+			);
+			expect(screen.getByTestId('managed-policy-revision')).toHaveTextContent(
+				'revision 4, installed copy (offline), stale'
+			);
 		});
 	});
 });
