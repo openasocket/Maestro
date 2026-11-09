@@ -1993,6 +1993,38 @@
 				],
 				"notes": "No case, field or guard dropped. consult.test cannot load until crossAgentTypes.ts (00R22).",
 				"unmergedAfter": 48
+			},
+			"MCOMP-33-00R22": {
+				"resolvedAt": "2026-11-09",
+				"resolvedBy": "Maestro-Claude",
+				"files": [
+					"src/main/cross-agent/cross-agent-router.ts",
+					"src/main/cross-agent/consult-runner.ts",
+					"src/shared/crossAgentTypes.ts"
+				],
+				"method": "Five hunks plus two call-site edits outside them resolved by a shape-asserting script (Working/mcomp-33-00r22/resolve.mjs, both sides read in full, every replacement computed before any write); staged through merge-tool.mjs stage (prettier left all three unchanged, 45 unmerged left). Working/mcomp-33-00r22/check.mjs: 0 syntax diagnostics, no markers, every seam count at least the larger side. consult-runner.test plus the renderer cross-agent services, useCrossAgentDispatch and crossAgentContext suites: 180/180.",
+				"hunks": {
+					"src/shared/crossAgentTypes.ts": [
+						"Hunk 1 (CrossAgentSendRequest intersection): both fields: HEAD dispatchTicket (claimed by cross-agent:send, never reaches the consult) and upstream managedQueue locator. Upstream ManagedQueueRoutingProgress merged outside the hunk."
+					],
+					"src/main/cross-agent/consult-runner.ts": [
+						"Hunk 1 (createDesktopConsultRunner params): upstream nativeAdmission stays the third positional (its consult-runner suite passes it there); HEAD options { actor, dispatchedBy } move to a trailing fourth parameter, default {}.",
+						"Hunk 2 (spawn): upstream shape (inline toSpawnGroupChatAgentConfig, beforeSpawn fence calling nativeAdmission.beforeSpawn, started journal in a captured try, uncertain start returns { success: false, unknown: true }) with HEAD actor and dispatchedBy spread into the spawn config. Added: a managed refusal at the sink (result.managed) is never turned into an uncertain start even after the fence ran; it stays a definite nonstart that keeps its named state, calls notStarted and detaches."
+					],
+					"src/main/cross-agent/cross-agent-router.ts": [
+						"Hunk 1 (imports): HEAD managed imports (delegation, ManagedDenialCode, providerRouteSupport, GroupChatSpawnLineage, dispatchedChildContext, spawn actor/authority types, logger, DISPATCH_TICKET_TTL_MS) with the consult-runner import taking upstream's type NativeConsultAdmission.",
+						"Hunk 2 (startCrossAgentRequest body): HEAD lineage, withdrawn-ticket refusal, consultRefusal() ahead of every spawn and running registration kept; upstream's one-call body is folded into HEAD's later consultService.start call. Both HEAD early returns (withdrawn ask, managed refusal) now call opts.nativeAdmission?.notStarted?.() first, since nothing was spawned."
+					]
+				},
+				"outsideHunks": [
+					"cross-agent-router.ts consultService.start call: runner built as createDesktopConsultRunner(processManager, sshStore, opts.nativeAdmission, { actor, dispatchedBy }) and onNotStarted: opts.nativeAdmission?.notStarted passed to the service (upstream's two router additions)."
+				],
+				"semanticConflictsForC": [
+					"src/main/group-chat/spawnGroupChatAgent.ts is still unmerged: its continuation must call config.beforeSpawn after preparation and BEFORE spawnAdmitted, and keep returning result.managed on a sink refusal, which the consult runner now relies on to tell a refusal from an uncertain start.",
+					"GroupChatTurnStart has no unknown field (carried from 00R21): 00C confirms the runner's { success: false, unknown: true } return satisfies ConsultRunner.start's intersected type."
+				],
+				"notes": "No case, field or guard dropped. cross-agent-router.test waits on bridgeHandlers.ts (00R31), cross-agent-router.managed.test on spawnGroupChatAgent.ts, ipc/handlers/cross-agent.test on ipc/handlers/cross-agent.ts.",
+				"unmergedAfter": 45
 			}
 		}
 	}
