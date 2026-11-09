@@ -34,6 +34,7 @@ import { createMockFileTab, createMockAITab } from '../../helpers/mockTab';
 import { createMockSession as baseCreateMockSession } from '../../helpers/mockSession';
 import { createGroupFromTabRefs } from '../../../renderer/utils/panelLayout';
 import { notifyToast } from '../../../renderer/stores/notificationStore';
+import { AgentCommitRefusedError } from '../../../renderer/services/agentCommit';
 
 vi.mock('../../../renderer/stores/notificationStore', () => ({ notifyToast: vi.fn() }));
 
@@ -131,6 +132,16 @@ beforeEach(() => {
 		groups: {
 			setAll: vi.fn(),
 		},
+		// Standalone host: admits the edit and answers with the record as stored.
+		sessions: {
+			setActiveSessionId: vi.fn().mockResolvedValue(undefined),
+			commitAgent: vi.fn(async (request: { record: Record<string, unknown> }) => ({
+				ok: true,
+				record: request.record,
+				managed: false,
+				policyRevision: null,
+			})),
+		},
 	};
 });
 
@@ -150,14 +161,14 @@ describe('useSessionLifecycle', () => {
 	// ======================================================================
 
 	describe('handleSaveEditAgent', () => {
-		it('updates session with all agent configuration fields', () => {
+		it('updates session with all agent configuration fields', async () => {
 			const session = createMockSession({ id: 'session-1', name: 'Old Name' });
 			useSessionStore.setState({ sessions: [session], activeSessionId: 'session-1' });
 
 			const { result } = renderHook(() => useSessionLifecycle(createDeps()));
 
-			act(() => {
-				result.current.handleSaveEditAgent(
+			await act(async () => {
+				await result.current.handleSaveEditAgent(
 					'session-1',
 					'New Name',
 					undefined, // toolType unchanged
@@ -190,7 +201,7 @@ describe('useSessionLifecycle', () => {
 			});
 		});
 
-		it('persists parked env vars alongside the live ones', () => {
+		it('persists parked env vars alongside the live ones', async () => {
 			// The editor keeps switched-off vars OUT of customEnvVars so no spawn
 			// path has to filter. If this argument were dropped here, the parked
 			// rows would vanish the moment the user saved.
@@ -199,8 +210,8 @@ describe('useSessionLifecycle', () => {
 
 			const { result } = renderHook(() => useSessionLifecycle(createDeps()));
 
-			act(() => {
-				result.current.handleSaveEditAgent(
+			await act(async () => {
+				await result.current.handleSaveEditAgent(
 					'session-1',
 					'Agent',
 					undefined, // toolType unchanged
@@ -234,48 +245,51 @@ describe('useSessionLifecycle', () => {
 		it.each([
 			[undefined, 'app-server', 'app-server'],
 			['app-server', 'exec', undefined],
-		] as const)('saves codexTransport (stored %s, chosen %s) as %s', (before, chosen, after) => {
-			const session = createMockSession({
-				id: 'session-1',
-				toolType: 'codex',
-				codexTransport: before,
-			});
-			useSessionStore.setState({ sessions: [session], activeSessionId: 'session-1' });
+		] as const)(
+			'saves codexTransport (stored %s, chosen %s) as %s',
+			async (before, chosen, after) => {
+				const session = createMockSession({
+					id: 'session-1',
+					toolType: 'codex',
+					codexTransport: before,
+				});
+				useSessionStore.setState({ sessions: [session], activeSessionId: 'session-1' });
 
-			const { result } = renderHook(() => useSessionLifecycle(createDeps()));
+				const { result } = renderHook(() => useSessionLifecycle(createDeps()));
 
-			act(() => {
-				result.current.handleSaveEditAgent(
-					'session-1',
-					'Agent',
-					undefined, // toolType unchanged
-					undefined, // nudgeMessage
-					undefined, // newSessionMessage
-					undefined, // customPath
-					undefined, // customArgs
-					undefined, // customEnvVars
-					undefined, // customModel
-					undefined, // customEffort
-					undefined, // customContextWindow
-					undefined, // sessionSshRemoteConfig
-					undefined, // enableMaestroP
-					undefined, // maestroPPath
-					undefined, // maestroPMode
-					undefined, // retryOnAvailabilityErrors
-					undefined, // retryOnTokenExhaustion
-					undefined, // additionalDirectories
-					undefined, // contextWindowSource
-					undefined, // customEnvVarsDisabled
-					undefined, // workingDirectory
-					undefined, // codexAutoResetOnExhaustion
-					chosen
-				);
-			});
+				await act(async () => {
+					await result.current.handleSaveEditAgent(
+						'session-1',
+						'Agent',
+						undefined, // toolType unchanged
+						undefined, // nudgeMessage
+						undefined, // newSessionMessage
+						undefined, // customPath
+						undefined, // customArgs
+						undefined, // customEnvVars
+						undefined, // customModel
+						undefined, // customEffort
+						undefined, // customContextWindow
+						undefined, // sessionSshRemoteConfig
+						undefined, // enableMaestroP
+						undefined, // maestroPPath
+						undefined, // maestroPMode
+						undefined, // retryOnAvailabilityErrors
+						undefined, // retryOnTokenExhaustion
+						undefined, // additionalDirectories
+						undefined, // contextWindowSource
+						undefined, // customEnvVarsDisabled
+						undefined, // workingDirectory
+						undefined, // codexAutoResetOnExhaustion
+						chosen
+					);
+				});
 
-			expect(useSessionStore.getState().sessions[0].codexTransport).toBe(after);
-		});
+				expect(useSessionStore.getState().sessions[0].codexTransport).toBe(after);
+			}
+		);
 
-		it('only modifies the targeted session', () => {
+		it('only modifies the targeted session', async () => {
 			const session1 = createMockSession({ id: 'session-1', name: 'Session 1' });
 			const session2 = createMockSession({ id: 'session-2', name: 'Session 2' });
 			useSessionStore.setState({
@@ -285,8 +299,8 @@ describe('useSessionLifecycle', () => {
 
 			const { result } = renderHook(() => useSessionLifecycle(createDeps()));
 
-			act(() => {
-				result.current.handleSaveEditAgent('session-2', 'Updated Session 2');
+			await act(async () => {
+				await result.current.handleSaveEditAgent('session-2', 'Updated Session 2');
 			});
 
 			const sessions = useSessionStore.getState().sessions;
@@ -294,7 +308,7 @@ describe('useSessionLifecycle', () => {
 			expect(sessions[1].name).toBe('Updated Session 2');
 		});
 
-		it('writes the save to disk right away, since the next spawn routes from it', () => {
+		it('writes the save to disk right away, since the next spawn routes from it', async () => {
 			// Persistence is debounced and re-armed by every store change; a streaming
 			// agent would otherwise hold a transport change past the next turn.
 			useSessionStore.setState({
@@ -304,15 +318,15 @@ describe('useSessionLifecycle', () => {
 			const { result } = renderHook(() => useSessionLifecycle(createDeps()));
 			mockFlushSessionPersistence.mockClear();
 
-			act(() => {
-				result.current.handleSaveEditAgent('session-1', 'Renamed');
+			await act(async () => {
+				await result.current.handleSaveEditAgent('session-1', 'Renamed');
 			});
 			vi.runAllTimers();
 
 			expect(mockFlushSessionPersistence).toHaveBeenCalledTimes(1);
 		});
 
-		it('sets optional fields to undefined when not provided', () => {
+		it('sets optional fields to undefined when not provided', async () => {
 			const session = createMockSession({
 				id: 'session-1',
 				nudgeMessage: 'old nudge',
@@ -323,8 +337,8 @@ describe('useSessionLifecycle', () => {
 
 			const { result } = renderHook(() => useSessionLifecycle(createDeps()));
 
-			act(() => {
-				result.current.handleSaveEditAgent('session-1', 'Name Only');
+			await act(async () => {
+				await result.current.handleSaveEditAgent('session-1', 'Name Only');
 			});
 
 			const updated = useSessionStore.getState().sessions[0];
@@ -362,7 +376,7 @@ describe('useSessionLifecycle', () => {
 				workingDirectory
 			);
 
-		it('moves every path field when the working directory changes', () => {
+		it('moves every path field when the working directory changes', async () => {
 			const session = createMockSession({
 				id: 'session-1',
 				shellCwd: '/projects/myapp',
@@ -372,8 +386,8 @@ describe('useSessionLifecycle', () => {
 
 			const { result } = renderHook(() => useSessionLifecycle(createDeps()));
 
-			act(() => {
-				saveWithWorkingDirectory(result.current.handleSaveEditAgent, '/projects/moved');
+			await act(async () => {
+				await saveWithWorkingDirectory(result.current.handleSaveEditAgent, '/projects/moved');
 			});
 
 			const updated = useSessionStore.getState().sessions[0];
@@ -384,28 +398,28 @@ describe('useSessionLifecycle', () => {
 			expect(updated.autoRunFolderPath).toBe('/projects/moved/.maestro/playbooks');
 		});
 
-		it('does not refuse a busy agent when the directory differs only by a trailing slash', () => {
+		it('does not refuse a busy agent when the directory differs only by a trailing slash', async () => {
 			const session = createMockSession({ id: 'session-1', state: 'busy' });
 			useSessionStore.setState({ sessions: [session], activeSessionId: 'session-1' });
 
 			const { result } = renderHook(() => useSessionLifecycle(createDeps()));
 
-			act(() => {
-				saveWithWorkingDirectory(result.current.handleSaveEditAgent, '/projects/myapp/');
+			await act(async () => {
+				await saveWithWorkingDirectory(result.current.handleSaveEditAgent, '/projects/myapp/');
 			});
 
 			expect(notifyToast).not.toHaveBeenCalled();
 			expect(useSessionStore.getState().sessions[0].projectRoot).toBe('/projects/myapp');
 		});
 
-		it('keeps the directory when the agent started running before save', () => {
+		it('keeps the directory when the agent started running before save', async () => {
 			const session = createMockSession({ id: 'session-1', state: 'busy' });
 			useSessionStore.setState({ sessions: [session], activeSessionId: 'session-1' });
 
 			const { result } = renderHook(() => useSessionLifecycle(createDeps()));
 
-			act(() => {
-				saveWithWorkingDirectory(result.current.handleSaveEditAgent, '/projects/moved');
+			await act(async () => {
+				await saveWithWorkingDirectory(result.current.handleSaveEditAgent, '/projects/moved');
 			});
 
 			const updated = useSessionStore.getState().sessions[0];
@@ -569,7 +583,7 @@ describe('useSessionLifecycle', () => {
 			expect(updated.executionQueue).toBe(session.executionQueue);
 		});
 
-		it('does not reset tabs when toolType is same as current', () => {
+		it('does not reset tabs when toolType is same as current', async () => {
 			const tab = createMockAITab({ id: 'my-tab', agentSessionId: 'my-session' });
 			const session = createMockSession({
 				id: 'session-1',
@@ -581,8 +595,8 @@ describe('useSessionLifecycle', () => {
 
 			const { result } = renderHook(() => useSessionLifecycle(createDeps()));
 
-			act(() => {
-				result.current.handleSaveEditAgent(
+			await act(async () => {
+				await result.current.handleSaveEditAgent(
 					'session-1',
 					'Same Provider',
 					'claude-code' as any // Same provider
@@ -1798,18 +1812,140 @@ describe('useSessionLifecycle', () => {
 	});
 
 	// ======================================================================
+	// handleSaveEditAgent through the host commit (MCOMP-23-02A)
+	// ======================================================================
+
+	describe('handleSaveEditAgent through the host commit', () => {
+		const commitAgent = () =>
+			(window as any).maestro.sessions.commitAgent as ReturnType<typeof vi.fn>;
+		const refusal = {
+			ok: false as const,
+			code: 'field' as const,
+			reason: 'This agent configuration is outside the approved choices.',
+			policyRevision: 3,
+			fields: [{ field: 'model' as const, reason: 'model is not approved' }],
+		};
+		const saveModel = (
+			save: ReturnType<typeof useSessionLifecycle>['handleSaveEditAgent'],
+			model: string,
+			toolType?: Session['toolType']
+		) =>
+			save(
+				'session-1',
+				'Agent',
+				toolType,
+				undefined,
+				undefined,
+				undefined,
+				undefined,
+				undefined,
+				model
+			);
+
+		it('applies the canonical configuration and keeps the transcript', async () => {
+			const session = createMockSession({
+				id: 'session-1',
+				aiTabs: [
+					createMockAITab({
+						id: 'tab-1',
+						logs: [{ id: 'l1', timestamp: 1, source: 'user', text: 'hello' }],
+					}),
+				],
+			});
+			useSessionStore.setState({ sessions: [session], activeSessionId: 'session-1' });
+			commitAgent().mockImplementationOnce(
+				async (request: { record: Record<string, unknown> }) => ({
+					ok: true,
+					// The host answers with its own value and no rows: the store takes the
+					// value and keeps the transcript, which persists separately.
+					record: { ...request.record, customModel: 'host-model', aiTabs: [] },
+					managed: true,
+					policyRevision: 3,
+				})
+			);
+			const { result } = renderHook(() => useSessionLifecycle(createDeps()));
+
+			await act(async () => {
+				await saveModel(result.current.handleSaveEditAgent, 'form-model');
+			});
+
+			const request = commitAgent().mock.calls[0][0];
+			expect(request.operation).toBe('edit');
+			expect(request.record).toMatchObject({ id: 'session-1', customModel: 'form-model' });
+			const updated = useSessionStore.getState().sessions[0];
+			expect(updated.customModel).toBe('host-model');
+			expect(updated.aiTabs[0].logs).toHaveLength(1);
+		});
+
+		it('changes nothing and rejects with the field reasons when the host refuses', async () => {
+			const session = createMockSession({ id: 'session-1', customModel: 'old-model' });
+			useSessionStore.setState({ sessions: [session], activeSessionId: 'session-1' });
+			commitAgent().mockResolvedValueOnce(refusal);
+			const { result } = renderHook(() => useSessionLifecycle(createDeps()));
+			mockFlushSessionPersistence.mockClear();
+
+			const failure = saveModel(result.current.handleSaveEditAgent, 'denied-model');
+			await expect(failure).rejects.toBeInstanceOf(AgentCommitRefusedError);
+			await expect(failure).rejects.toMatchObject({
+				refusal,
+				message: expect.stringContaining('model: model is not approved'),
+			});
+			expect(useSessionStore.getState().sessions[0]).toBe(session);
+			expect(notifyToast).toHaveBeenCalledWith(
+				expect.objectContaining({ title: 'Agent settings not saved' })
+			);
+			vi.runAllTimers();
+			expect(mockFlushSessionPersistence).not.toHaveBeenCalled();
+		});
+
+		it('sends a plain provider switch for approval and leaves the provider when refused', async () => {
+			const session = createMockSession({ id: 'session-1', toolType: 'claude-code' });
+			useSessionStore.setState({ sessions: [session], activeSessionId: 'session-1' });
+			commitAgent().mockResolvedValueOnce({ ...refusal, fields: [] });
+			const { result } = renderHook(() => useSessionLifecycle(createDeps()));
+
+			await expect(
+				saveModel(result.current.handleSaveEditAgent, 'gpt-5', 'codex')
+			).rejects.toBeInstanceOf(AgentCommitRefusedError);
+
+			expect(commitAgent().mock.calls[0][0].record.toolType).toBe('codex');
+			expect(useSessionStore.getState().sessions[0]).toBe(session);
+		});
+
+		it('refuses a held plain switch before asking the host', async () => {
+			const session = createMockSession({
+				id: 'session-1',
+				toolType: 'claude-code',
+				providerMigration: {
+					operationId: 'op',
+					destination: 'codex',
+					state: 'deferred',
+					verification: 'unverified',
+				},
+			});
+			useSessionStore.setState({ sessions: [session], activeSessionId: 'session-1' });
+			const { result } = renderHook(() => useSessionLifecycle(createDeps()));
+
+			await expect(saveModel(result.current.handleSaveEditAgent, 'gpt-5', 'codex')).rejects.toThrow(
+				'conversion is in progress'
+			);
+			expect(commitAgent()).not.toHaveBeenCalled();
+		});
+	});
+
+	// ======================================================================
 	// handleSaveEditAgent edge cases
 	// ======================================================================
 
 	describe('handleSaveEditAgent edge cases', () => {
-		it('does not modify sessions when sessionId does not match any session', () => {
+		it('does not modify sessions when sessionId does not match any session', async () => {
 			const session = createMockSession({ id: 'session-1', name: 'Original' });
 			useSessionStore.setState({ sessions: [session], activeSessionId: 'session-1' });
 
 			const { result } = renderHook(() => useSessionLifecycle(createDeps()));
 
-			act(() => {
-				result.current.handleSaveEditAgent('non-existent-id', 'New Name');
+			await act(async () => {
+				await result.current.handleSaveEditAgent('non-existent-id', 'New Name');
 			});
 
 			const sessions = useSessionStore.getState().sessions;
@@ -1817,14 +1953,14 @@ describe('useSessionLifecycle', () => {
 			expect(sessions[0].name).toBe('Original');
 		});
 
-		it('updates session name to empty string when provided', () => {
+		it('updates session name to empty string when provided', async () => {
 			const session = createMockSession({ id: 'session-1', name: 'Old Name' });
 			useSessionStore.setState({ sessions: [session], activeSessionId: 'session-1' });
 
 			const { result } = renderHook(() => useSessionLifecycle(createDeps()));
 
-			act(() => {
-				result.current.handleSaveEditAgent('session-1', '');
+			await act(async () => {
+				await result.current.handleSaveEditAgent('session-1', '');
 			});
 
 			const updated = useSessionStore.getState().sessions[0];

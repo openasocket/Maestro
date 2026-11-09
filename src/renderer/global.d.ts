@@ -352,6 +352,10 @@ interface MaestroAPI {
 		 * tree on every change.
 		 */
 		setMany: (updates: any[], removeIds?: string[], baselines?: any[]) => Promise<boolean>;
+		/** Host create/edit of one agent record (MCOMP-23-02); see services/agentCommit.ts. */
+		commitAgent: (
+			request: import('./services/agentCommit').AgentCommitRequest
+		) => Promise<import('./services/agentCommit').AgentCommitOutcome>;
 		getActiveSessionId: () => Promise<string>;
 		setActiveSessionId: (id: string) => Promise<void>;
 		publishTranscript: (

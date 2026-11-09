@@ -26,6 +26,12 @@ import { generateId } from '../../utils/ids';
 import { validateNewSession } from '../../utils/sessionValidation';
 import { getTerminalSessionId } from '../../utils/terminalTabHelpers';
 import { gitService } from '../../services/git';
+import {
+	commitAgentRecord,
+	describeAgentCommitRefusal,
+	sessionFromCommittedRecord,
+	type AgentCommitRefusal,
+} from '../../services/agentCommit';
 import { buildNewAgentRecord, newAgentClaudeInteractive } from '../../../shared/newAgentRecord';
 import type { CodexTransport } from '../../../shared/codexTransport';
 import { logger } from '../../utils/logger';
@@ -36,6 +42,14 @@ import { withAgentInGroup } from '../../../shared/maestro-lib/agents/rules';
 // ============================================================================
 // Dependencies interface
 // ============================================================================
+
+/**
+ * What `createNewSession` did. A refusal (validation, or the host's typed
+ * `refusal` naming its fields) inserted nothing, so the caller keeps its draft.
+ */
+export type CreateNewSessionResult =
+	| { ok: true; sessionId: string }
+	| { ok: false; error: string; refusal?: AgentCommitRefusal };
 
 export interface UseSessionCrudDeps {
 	/** Flush session persistence immediately (from useDebouncedPersistence) */
@@ -87,7 +101,7 @@ export interface UseSessionCrudReturn {
 		codexAutoResetOnExhaustion?: boolean,
 		/** Codex only: which transport chat turns use. `undefined` means `exec`. */
 		codexTransport?: CodexTransport
-	) => Promise<void>;
+	) => Promise<CreateNewSessionResult>;
 	/** Opens the delete agent confirmation modal */
 	deleteSession: (id: string) => void;
 	/** Deletes entire worktree group and all its agents */
@@ -184,13 +198,13 @@ export function useSessionCrud(deps: UseSessionCrudDeps): UseSessionCrudReturn {
 			codexAutoResetOnExhaustion?: boolean,
 			/** Codex only: which transport chat turns use. `undefined` means `exec`. */
 			codexTransport?: CodexTransport
-		) => {
+		): Promise<CreateNewSessionResult> => {
 			try {
 				// Get agent definition to get correct command
 				const agent = await (window as any).maestro.agents.get(agentId);
 				if (!agent) {
 					logger.error(`Agent not found: ${agentId}`);
-					return;
+					return { ok: false, error: `Agent not found: ${agentId}` };
 				}
 				const currentSessions = useSessionStore.getState().sessions;
 				const validation = validateNewSession(
@@ -207,7 +221,7 @@ export function useSessionCrud(deps: UseSessionCrudDeps): UseSessionCrudReturn {
 						title: 'Agent Creation Failed',
 						message: validation.error || 'Cannot create duplicate agent',
 					});
-					return;
+					return { ok: false, error: validation.error || 'Cannot create duplicate agent' };
 				}
 
 				const newId = generateId();
@@ -232,7 +246,7 @@ export function useSessionCrud(deps: UseSessionCrudDeps): UseSessionCrudReturn {
 				}
 
 				const currentDefaults = useSettingsStore.getState();
-				const newSession: Session = {
+				const draft: Session = {
 					...buildNewAgentRecord(
 						{
 							id: newId,
@@ -279,6 +293,21 @@ export function useSessionCrud(deps: UseSessionCrudDeps): UseSessionCrudReturn {
 					claudeInteractive: newAgentClaudeInteractive(agentId),
 				};
 
+				// The host checks the record exactly as it will be stored and commits it
+				// (MCOMP-23-02). Only the canonical record it returns enters the store; a
+				// refusal wrote nothing, so the form keeps its draft.
+				const outcome = await commitAgentRecord('create', draft);
+				if (!outcome.ok) {
+					const message = describeAgentCommitRefusal(outcome);
+					logger.warn(`Agent creation refused: ${message}`, undefined, {
+						code: outcome.code,
+						fields: outcome.fields.map((field) => field.field),
+					});
+					notifyToast({ type: 'error', title: 'Agent Creation Refused', message });
+					return { ok: false, error: message, refusal: outcome };
+				}
+				const newSession = sessionFromCommittedRecord(draft, outcome.record);
+
 				setSessions((prev) => [...prev, newSession]);
 				setActiveSessionId(newId);
 				// The first spawn reads its routing (Codex transport, Claude token mode)
@@ -303,8 +332,10 @@ export function useSessionCrud(deps: UseSessionCrudDeps): UseSessionCrudReturn {
 
 				setActiveFocus('main');
 				setTimeout(() => inputRef.current?.focus(), 50);
+				return { ok: true, sessionId: newId };
 			} catch (error) {
 				logger.error('Failed to create session:', undefined, error);
+				return { ok: false, error: error instanceof Error ? error.message : String(error) };
 			}
 		},
 		[

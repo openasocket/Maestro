@@ -185,11 +185,21 @@ export async function requestProviderTranslation(
  *
  * Returns one line per piece of state that could not be parked.
  */
-export function switchProviderWithoutConversion(agentId: string, destination: ToolType): string[] {
+/**
+ * Throws when a plain provider switch may not run now (a conversion holds the
+ * agent). Callers that commit the switch elsewhere first (the edit save) check
+ * this before committing, so a refusal here never follows a stored switch.
+ */
+export function assertPlainProviderSwitchAllowed(agentId: string): void {
 	const session = useSessionStore.getState().sessions.find((s) => s.id === agentId);
 	if (!session) throw new Error('Agent not found');
 	if (pending.has(agentId) || migrationHoldsTurns(session.providerMigration))
 		throw new Error('A provider conversion is in progress for this agent. Wait for it to finish.');
+}
+
+export function switchProviderWithoutConversion(agentId: string, destination: ToolType): string[] {
+	assertPlainProviderSwitchAllowed(agentId);
+	const session = useSessionStore.getState().sessions.find((s) => s.id === agentId)!;
 	if (session.toolType === destination) return [];
 	let notices: string[] = [];
 	updateSessionWith(agentId, (s) => {

@@ -87,6 +87,16 @@ const mockMaestro = {
 	agentSessions: {
 		setSessionName: vi.fn().mockResolvedValue(undefined),
 	},
+	// Standalone host: admits the create and answers with the record as stored.
+	sessions: {
+		setActiveSessionId: vi.fn().mockResolvedValue(undefined),
+		commitAgent: vi.fn(async (request: { record: Record<string, unknown> }) => ({
+			ok: true,
+			record: request.record,
+			managed: false,
+			policyRevision: null,
+		})),
+	},
 };
 
 (window as any).maestro = mockMaestro;
@@ -644,6 +654,80 @@ describe('useSessionCrud', () => {
 			});
 
 			expect(useSessionStore.getState().sessions[0].codexTransport).toBe(stored);
+		});
+	});
+
+	// ========================================================================
+	// createNewSession through the host commit (MCOMP-23-02A)
+	// ========================================================================
+	describe('createNewSession through the host commit', () => {
+		it('commits the record first and inserts the canonical record the host returns', async () => {
+			const baselines: unknown[] = [];
+			const onBaseline = (event: Event) => baselines.push((event as CustomEvent).detail);
+			window.addEventListener('maestro:session-persistence-baseline', onBaseline);
+			mockMaestro.sessions.commitAgent.mockImplementationOnce(
+				async (request: { record: Record<string, unknown> }) => ({
+					ok: true,
+					// The host's record differs from the draft: the store must hold it.
+					record: { ...request.record, customModel: 'host-canonical' },
+					managed: true,
+					policyRevision: 7,
+				})
+			);
+			const { result } = renderHook(() => useSessionCrud(createDeps()));
+
+			let outcome: Awaited<ReturnType<typeof result.current.createNewSession>> | undefined;
+			await act(async () => {
+				outcome = await result.current.createNewSession(
+					'claude-code',
+					'/test/project',
+					'Committed',
+					undefined,
+					undefined,
+					undefined,
+					undefined,
+					undefined,
+					'draft-model'
+				);
+			});
+			window.removeEventListener('maestro:session-persistence-baseline', onBaseline);
+
+			const request = mockMaestro.sessions.commitAgent.mock.calls[0][0];
+			expect(request.operation).toBe('create');
+			expect(request.record).toMatchObject({ name: 'Committed', customModel: 'draft-model' });
+			const [inserted] = useSessionStore.getState().sessions;
+			expect(inserted.customModel).toBe('host-canonical');
+			expect(outcome).toEqual({ ok: true, sessionId: inserted.id });
+			expect(useSessionStore.getState().activeSessionId).toBe(inserted.id);
+			// The committed record is the persistence baseline, so the next flush is a merge.
+			expect(baselines).toEqual([[expect.objectContaining({ id: inserted.id })]]);
+		});
+
+		it('inserts nothing and returns the typed refusal when the host refuses', async () => {
+			const refusal = {
+				ok: false as const,
+				code: 'field' as const,
+				reason: 'This agent configuration is outside the approved choices.',
+				policyRevision: 4,
+				fields: [{ field: 'model' as const, reason: 'model is not approved' }],
+			};
+			mockMaestro.sessions.commitAgent.mockResolvedValueOnce(refusal);
+			useSessionStore.setState({ activeSessionId: 'previous' });
+			const { result } = renderHook(() => useSessionCrud(createDeps()));
+
+			let outcome: Awaited<ReturnType<typeof result.current.createNewSession>> | undefined;
+			await act(async () => {
+				outcome = await result.current.createNewSession('claude-code', '/test/project', 'Denied');
+			});
+
+			expect(useSessionStore.getState().sessions).toHaveLength(0);
+			expect(useSessionStore.getState().activeSessionId).toBe('previous');
+			expect(mockMaestro.stats.recordSessionCreated).not.toHaveBeenCalled();
+			expect(outcome).toMatchObject({ ok: false, refusal });
+			expect(outcome?.ok === false && outcome.error).toContain('model: model is not approved');
+			expect(notifyToast).toHaveBeenCalledWith(
+				expect.objectContaining({ title: 'Agent Creation Refused' })
+			);
 		});
 	});
 

@@ -12,6 +12,7 @@ import type { Group } from '../../shared/types';
 import type { ManagedSettingLocksView } from '../../shared/managedSettingsLock';
 import type { MediaToolStatus } from '../../shared/plugins/media-tools';
 import type { SessionTranscriptPatch } from '../../shared/sessionTranscript';
+import type { AgentCommitOutcome, AgentCommitRequest } from '../ipc/handlers/persistence';
 
 /**
  * Stored session data for persistence.
@@ -62,6 +63,13 @@ export function createSessionsApi() {
 		 */
 		setMany: (updates: StoredSession[], removeIds: string[] = [], baselines?: StoredSession[]) =>
 			ipcRenderer.invoke('sessions:setMany', updates, removeIds, baselines),
+		/**
+		 * The one host create/edit operation (MCOMP-23-02): the record is checked
+		 * exactly as it will be stored and committed only when admitted. Insert the
+		 * returned canonical record, never the draft; a refusal wrote nothing.
+		 */
+		commitAgent: (request: AgentCommitRequest) =>
+			ipcRenderer.invoke('sessions:commitAgent', request) as Promise<AgentCommitOutcome>,
 		getActiveSessionId: () => ipcRenderer.invoke('sessions:getActiveSessionId') as Promise<string>,
 		setActiveSessionId: (id: string) => ipcRenderer.invoke('sessions:setActiveSessionId', id),
 		publishTranscript: (patch: SessionTranscriptPatch, requestId?: string) =>

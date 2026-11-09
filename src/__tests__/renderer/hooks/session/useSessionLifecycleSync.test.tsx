@@ -305,4 +305,29 @@ describe('useSessionLifecycleSync', () => {
 		expect(current.aiTabs.map((tab) => tab.id)).toContain('peer-tab');
 		expect(useSessionStore.getState().activeSessionId).toBe('shared');
 	});
+
+	// MCOMP-23-02A: a whole-record flush the host refused comes back to the
+	// writer as a lifecycle correction: a refused new record is removed and a
+	// refused edit's governed fields are put back, while other changes stay.
+	it('applies the host correction for a refused flushed record', async () => {
+		const sent = createMockSession({ id: 'edited', customModel: 'denied-model', name: 'Renamed' });
+		useSessionStore.setState({
+			sessions: [sent, createMockSession({ id: 'refused-new' })],
+			activeSessionId: 'refused-new',
+		});
+		renderHook(() => useSessionLifecycleSync(restoreSession));
+		handler!({
+			added: [],
+			removedIds: ['refused-new'],
+			updated: [{ ...sent, customModel: 'approved-model' }],
+			baselines: [sent],
+		});
+		await waitFor(() =>
+			expect(useSessionStore.getState().sessions.map((s) => s.id)).toEqual(['edited'])
+		);
+		const [edited] = useSessionStore.getState().sessions;
+		expect(edited.customModel).toBe('approved-model');
+		expect(edited.name).toBe('Renamed');
+		expect(useSessionStore.getState().activeSessionId).toBe('edited');
+	});
 });

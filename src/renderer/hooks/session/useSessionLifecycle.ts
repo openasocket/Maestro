@@ -1,4 +1,5 @@
 import {
+	assertPlainProviderSwitchAllowed,
 	requestProviderTranslation,
 	switchProviderWithoutConversion,
 } from '../../services/providerTranslation';
@@ -50,6 +51,12 @@ import {
 	withWorkingDirectory,
 	workingDirectoryChangeBlocker,
 } from '../../utils/agentWorkingDirectory';
+import { switchAgentProvider } from '../../../shared/maestro-lib/agents/providerSwap';
+import {
+	AgentCommitRefusedError,
+	applyCommittedEdit,
+	commitAgentRecord,
+} from '../../services/agentCommit';
 
 // ============================================================================
 // Dependencies interface
@@ -212,13 +219,8 @@ export function useSessionLifecycle(deps: SessionLifecycleDeps): SessionLifecycl
 			const before = useSessionStore.getState().sessions.find((s) => s.id === sessionId);
 			const switchingProvider = !!toolType && !!before && toolType !== before.toolType;
 			const converting = switchingProvider && convertProviderHistory === true;
-			if (switchingProvider && !converting) {
-				// The overrides passed in were seeded from what the new provider had
-				// parked, so applying them below keeps that provider's configuration.
-				const notices = switchProviderWithoutConversion(sessionId, toolType!);
-				for (const message of notices)
-					notifyToast({ color: 'yellow', title: 'Queued message settings cleared', message });
-			}
+			const switchingPlainly = switchingProvider && !converting;
+			if (switchingPlainly) assertPlainProviderSwitchAllowed(sessionId);
 			if (converting) {
 				if (customPath || customArgs || Object.keys(customEnvVars ?? {}).length)
 					throw new Error(
@@ -256,7 +258,7 @@ export function useSessionLifecycle(deps: SessionLifecycleDeps): SessionLifecycl
 				notifyToast({ color: 'yellow', title: 'Working directory not changed', message: blocker });
 			}
 
-			updateSessionWith(sessionId, (s) => {
+			const buildEdited = (s: Session): Session => {
 				const updatedFields: Partial<Session> = {
 					name,
 					nudgeMessage,
@@ -297,7 +299,32 @@ export function useSessionLifecycle(deps: SessionLifecycleDeps): SessionLifecycl
 
 				const next = { ...s, ...updatedFields };
 				return relocateTo ? withWorkingDirectory(next, relocateTo) : next;
-			});
+			};
+
+			// The host checks the edited record exactly as it will be stored and
+			// commits it (MCOMP-23-02) before anything changes here. A refusal wrote
+			// nothing: the store keeps the old record and the dialog keeps its draft.
+			// An agent that is gone has nothing to save (closed while the dialog was open).
+			if (!current) return;
+			const switched = switchingPlainly
+				? { ...switchAgentProvider(current, toolType!).agent, providerMigration: undefined }
+				: current;
+			const sent = buildEdited(switched);
+			const outcome = await commitAgentRecord('edit', sent);
+			if (!outcome.ok) {
+				const refused = new AgentCommitRefusedError(outcome);
+				notifyToast({ color: 'red', title: 'Agent settings not saved', message: refused.message });
+				throw refused;
+			}
+			if (switchingPlainly) {
+				// The overrides passed in were seeded from what the new provider had
+				// parked, so applying them below keeps that provider's configuration.
+				const notices = switchProviderWithoutConversion(sessionId, toolType!);
+				for (const message of notices)
+					notifyToast({ color: 'yellow', title: 'Queued message settings cleared', message });
+			}
+			// Configuration from the CANONICAL record; transcript and live state kept.
+			updateSessionWith(sessionId, (s) => applyCommittedEdit(buildEdited(s), sent, outcome.record));
 			// The spawn path routes from the PERSISTED record (Codex transport, Claude
 			// token mode), so a stale renderer cannot send a turn somewhere other than
 			// what is saved. Persistence is debounced and re-arms on every store

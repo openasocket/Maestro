@@ -71,7 +71,7 @@ const METHODS: Record<string, string> = {
 		'broadcast-user-input cancelCommand getActiveProcesses getHeadlessActivity interrupt isTerminalBusy kill resize runCommand spawn spawnTerminalTab write',
 	prompts: 'get getAll getAllIds getBundledDefault getPath listFiles reset save',
 	sessions:
-		'getActiveSessionId getAll getBootstrap getDeferredContent setActiveSessionId setAll setMany',
+		'commitAgent getActiveSessionId getAll getBootstrap getDeferredContent setActiveSessionId setAll setMany',
 	settings: 'get getAll managedLocks set',
 	shell: 'trashItem',
 	shells: 'detect',
