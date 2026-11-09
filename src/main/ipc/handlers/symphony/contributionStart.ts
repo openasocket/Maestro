@@ -32,6 +32,8 @@ import {
 	holdRepositoryEffect,
 	managedRefusal,
 	readOriginRemote,
+	readCloneHandle,
+	removeClone,
 	SymphonyHandlerDependencies,
 	SYMPHONY_DOCUMENT_FETCH_TIMEOUT_MS,
 	type RepositoryRefusal,
@@ -253,11 +255,24 @@ async function setUpFork(
 	return { result, refused: gate.refused };
 }
 
-/** Remove the clone `symphony:start` made itself when a later step fails. */
-async function discardClone(localPath: string): Promise<void> {
-	await fs
-		.rm(localPath, { recursive: true, force: true })
-		.catch((err) => logger.warn(`Failed to clean up directory ${localPath}: ${err}`, LOG_CONTEXT));
+/**
+ * Remove the clone `symphony:start` made itself when a later step fails. The
+ * removal is a delete held by itself under a ceiling (MCOMP-21-11), against
+ * the handle read right after the clone: the clone grant, a refused branch or
+ * a failed fork never permits it, and a refused or swapped path stays put.
+ */
+async function discardClone(
+	localPath: string,
+	handle: Awaited<ReturnType<typeof readCloneHandle>>
+): Promise<void> {
+	try {
+		const removal = await removeClone(localPath, handle);
+		if (removal !== 'removed') {
+			logger.warn(`Left the failed clone ${localPath} in place (${removal})`, LOG_CONTEXT);
+		}
+	} catch (err) {
+		logger.warn(`Failed to clean up directory ${localPath}: ${err}`, LOG_CONTEXT);
+	}
 }
 
 /**
@@ -354,6 +369,8 @@ export function registerContributionStartHandlers({
 				if (!cloneResult.success) {
 					return { error: `Clone failed: ${cloneResult.error}` };
 				}
+				// What this handler now owns: the only entry a failed later step may remove.
+				const cloneHandle = await readCloneHandle(localPath);
 
 				// Detect default branch (don't rely on hardcoded 'main')
 				const baseBranch = params.baseBranch || (await getDefaultBranch(localPath));
@@ -364,12 +381,12 @@ export function registerContributionStartHandlers({
 					remote: null,
 				});
 				if (!branchHold.allowed) {
-					await discardClone(localPath);
+					await discardClone(localPath, cloneHandle);
 					return { error: managedRefusal(branchHold) };
 				}
 				const branchResult = await createBranch(localPath, branchName);
 				if (!branchResult.success) {
-					await discardClone(localPath);
+					await discardClone(localPath, cloneHandle);
 					return { error: `Branch creation failed: ${branchResult.error}` };
 				}
 
@@ -379,7 +396,7 @@ export function registerContributionStartHandlers({
 				const fork = await setUpFork(localPath, repoSlug, repoUrl);
 				const forkResult = fork.result;
 				if (forkResult.error) {
-					await discardClone(localPath);
+					await discardClone(localPath, cloneHandle);
 					return {
 						error: fork.refused
 							? managedRefusal(fork.refused)
@@ -427,7 +444,7 @@ This PR will be updated automatically when the Auto Run completes.`;
 					forkOwner
 				);
 				if (!prResult.success) {
-					await discardClone(localPath);
+					await discardClone(localPath, cloneHandle);
 					// A managed refusal keeps its name; it is not a PR failure a retry would fix.
 					return {
 						error: prResult.refused ? prResult.error : `PR creation failed: ${prResult.error}`,

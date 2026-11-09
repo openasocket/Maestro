@@ -19,6 +19,13 @@ import {
 	type RepositoryEffectRequest,
 } from '../../../enterprise/repository-policy';
 import {
+	callingLocalEffectActor,
+	holdDeleteOfHandles,
+	readLocalPathHandle,
+	type LocalEffectAuthority,
+	type LocalPathHandle,
+} from '../../../enterprise/local-effects-policy';
+import {
 	SYMPHONY_STATE_PATH,
 	SYMPHONY_CACHE_PATH,
 	SYMPHONY_REPOS_DIR,
@@ -45,6 +52,11 @@ export interface SymphonyHandlerDependencies {
 	 * nothing is held.
 	 */
 	getRepositoryAuthority?: () => RepositoryEffectAuthority | null;
+	/**
+	 * The local-effects ceiling a clone removal is held to (MCOMP-21-11).
+	 * Absent, or answering null, a removal runs exactly as it always has.
+	 */
+	getLocalEffectAuthority?: () => LocalEffectAuthority | null;
 }
 
 /**
@@ -76,6 +88,61 @@ let readRepositoryAuthority: () => RepositoryEffectAuthority | null = () => null
 
 export function setRepositoryAuthority(reader: () => RepositoryEffectAuthority | null): void {
 	readRepositoryAuthority = reader;
+}
+
+/**
+ * The local-effects ceiling, bound once by `registerSymphonyHandlers`
+ * (MCOMP-21-11). Removing a clone is a destructive local delete held by
+ * itself: the repository effect that led to it (a refused branch, a failed
+ * fork, a cancel) grants no delete, and a `cleanup` flag widens nothing.
+ */
+let readLocalEffectAuthority: () => LocalEffectAuthority | null = () => null;
+
+export function setLocalEffectAuthority(reader: () => LocalEffectAuthority | null): void {
+	readLocalEffectAuthority = reader;
+}
+
+/**
+ * What a clone path names now, read when the sink takes ownership of it (right
+ * after the clone, or before a cancel checks the directory is the
+ * contribution's own). Null standalone: no ceiling, no extra read.
+ */
+export async function readCloneHandle(localPath: string): Promise<LocalPathHandle | null> {
+	return readLocalEffectAuthority() ? readLocalPathHandle(localPath) : null;
+}
+
+export type CloneRemoval = 'removed' | 'refused' | 'moved';
+
+/**
+ * Remove a Symphony clone recursively (MCOMP-21-11). Standalone this is the
+ * plain `fs.rm` it always was. Under a ceiling the `delete` is held right
+ * before the removal against the calling transport, and then the handle read
+ * when the sink took ownership is compared with what is there now: a refused
+ * delete, or a path swapped across the awaits (a symlink planted, another
+ * folder moved in), is left in place and answered by name, never removed.
+ * A removal that fails rejects, for the caller to report as it always has.
+ */
+export async function removeClone(
+	localPath: string,
+	handle: LocalPathHandle | null
+): Promise<CloneRemoval> {
+	const authority = readLocalEffectAuthority();
+	if (authority) {
+		try {
+			const held = await holdDeleteOfHandles(
+				authority,
+				[{ path: localPath, handle: handle ?? 'unknown' }],
+				callingLocalEffectActor(),
+				LOG_CONTEXT
+			);
+			if (held.current.length === 0) return 'moved';
+		} catch (error) {
+			if ((error as Error)?.name === 'LocalEffectRefusedError') return 'refused';
+			throw error;
+		}
+	}
+	await fs.rm(localPath, { recursive: true, force: true });
+	return 'removed';
 }
 
 /** Whether a ceiling is in place: asked before a git call a sink only needs under one. */

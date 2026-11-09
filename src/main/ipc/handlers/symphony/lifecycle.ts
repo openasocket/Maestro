@@ -1,5 +1,4 @@
 import { ipcMain } from 'electron';
-import fs from 'fs/promises';
 import { logger } from '../../../utils/logger';
 import { createSafeSend } from '../../../utils/safe-send';
 import { createIpcHandler } from '../../../utils/ipcHandler';
@@ -20,6 +19,8 @@ import {
 	writeState,
 	broadcastSymphonyUpdate,
 	isContributionClone,
+	readCloneHandle,
+	removeClone,
 	holdRepositoryEffect,
 	holdRemoteEffectBeforeGh,
 	SymphonyHandlerDependencies,
@@ -475,7 +476,10 @@ export function registerLifecycleHandlers({
 		'symphony:cancel',
 		createIpcHandler(
 			handlerOpts('cancel'),
-			async (contributionId: string, cleanup?: boolean): Promise<{ cancelled: boolean }> => {
+			async (
+				contributionId: string,
+				cleanup?: boolean
+			): Promise<{ cancelled: boolean; cleanupProblem?: string }> => {
 				const state = await readState(app);
 				const index = state.active.findIndex((c) => c.id === contributionId);
 
@@ -500,10 +504,27 @@ export function registerLifecycleHandlers({
 				// user may legitimately choose any working directory, so confirm the
 				// directory is this contribution's clone before removing it
 				// recursively rather than trusting the stored path.
+				//
+				// The removal is a delete held by itself under a ceiling (MCOMP-21-11):
+				// the cancel above grants no delete, and `cleanup` widens nothing. The
+				// handle is read BEFORE the ownership check, so a path swapped while
+				// the check awaits git is never what gets removed.
+				let cleanupProblem: string | undefined;
 				if (cleanup && contribution.localPath) {
+					const cloneHandle = await readCloneHandle(contribution.localPath);
 					if (await isContributionClone(contribution.localPath, contribution.repoSlug)) {
 						try {
-							await fs.rm(contribution.localPath, { recursive: true, force: true });
+							const removal = await removeClone(contribution.localPath, cloneHandle);
+							if (removal !== 'removed') {
+								cleanupProblem =
+									removal === 'refused'
+										? 'Removing the clone was refused by the managed local-effects ceiling; it was left in place'
+										: 'The clone changed after it was checked; it was left in place';
+								logger.warn('Contribution clone left in place', LOG_CONTEXT, {
+									contributionId,
+									removal,
+								});
+							}
 						} catch (e) {
 							void captureException(e);
 							logger.warn('Failed to cleanup contribution directory', LOG_CONTEXT, { error: e });
@@ -524,7 +545,7 @@ export function registerLifecycleHandlers({
 
 				broadcastSymphonyUpdate(safeSend);
 
-				return { cancelled: true };
+				return cleanupProblem ? { cancelled: true, cleanupProblem } : { cancelled: true };
 			}
 		)
 	);

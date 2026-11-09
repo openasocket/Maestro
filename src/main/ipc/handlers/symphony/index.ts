@@ -6,6 +6,7 @@ import { registerContributionFinishHandlers } from './contributionFinish';
 import { registerSyncHandlers } from './sync';
 import {
 	logHandlersRegistered,
+	setLocalEffectAuthority,
 	setRepositoryAuthority,
 	setSymphonyEnabledCheck,
 	SymphonyHandlerDependencies,
@@ -39,6 +40,8 @@ export function registerSymphonyHandlers(deps: SymphonyHandlerDependencies): voi
 	setSymphonyEnabledCheck(() => isEncoreFeatureEnabled(deps.settingsStore, 'symphony'));
 	// The repository ceiling every clone, push, draft, finalize and cancel below is held to.
 	setRepositoryAuthority(deps.getRepositoryAuthority ?? (() => null));
+	// The local-effects ceiling every clone removal (failed start, cancel cleanup) is held to.
+	setLocalEffectAuthority(deps.getLocalEffectAuthority ?? (() => null));
 	registerDiscoveryHandlers(deps);
 	registerDashboardHandlers(deps);
 	registerLifecycleHandlers(deps);

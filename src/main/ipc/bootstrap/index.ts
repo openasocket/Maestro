@@ -584,6 +584,7 @@ export function setupIpcHandlers(deps: IpcBootstrapDependencies): void {
 		sessionsStore: deps.sessionsStore,
 		settingsStore: deps.settingsStore,
 		getRepositoryAuthority: deps.getRepositoryAuthority,
+		getLocalEffectAuthority: deps.getLocalEffectAuthority,
 	});
 
 	// Register tab naming handlers for automatic tab naming

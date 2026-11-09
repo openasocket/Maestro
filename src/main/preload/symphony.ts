@@ -282,8 +282,12 @@ export function createSymphonyApi() {
 		cancel: (
 			contributionId: string,
 			cleanup?: boolean
-		): Promise<{ success: boolean; cancelled?: boolean; error?: string }> =>
-			ipcRenderer.invoke('symphony:cancel', contributionId, cleanup),
+		): Promise<{
+			success: boolean;
+			cancelled?: boolean;
+			cleanupProblem?: string;
+			error?: string;
+		}> => ipcRenderer.invoke('symphony:cancel', contributionId, cleanup),
 
 		checkPRStatuses: (): Promise<{
 			success: boolean;
