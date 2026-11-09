@@ -309,10 +309,36 @@ export interface ManagedOperations {
 	run(leaseId: string): ManagedRunView | null;
 }
 
-export function createManagedOperations(deps: ManagedOperationsDeps): ManagedOperations {
-	const holds = deps.holds ?? DEFAULT_MANAGED_HOLDS;
-	const locks = deps.locks ?? readManagedSettingLocks;
-	const providers = deps.providers ?? PICKABLE_AGENT_IDS;
+/** The inbox and command half of the facade: what a detached host serves over its bridge too (MCOMP-29-03). */
+export type ManagedCommunications = Pick<
+	ManagedOperations,
+	'inboxList' | 'inboxAct' | 'command' | 'commandStatus'
+>;
+
+export interface ManagedCommunicationsDeps {
+	/** The custody a paired device's act is checked against (MRC-08-03). */
+	identity: Pick<EnterpriseIdentityStore, 'read'>;
+	/** Read per call: a host composes its inbox once the runtime holds the adapter, and drops it at close. */
+	inbox: () => InboxClient | null | undefined;
+	commands: () => CommandService | null | undefined;
+	/** Where the answer says nothing is composed, with its preposition. Default: `in this desktop`. */
+	place?: string;
+}
+
+/**
+ * The one implementation of the inbox and command verbs (MRC2-07-02), shared by the desktop facade
+ * and a detached host's bridge (MCOMP-29-03), so `maestro-cli managed inbox|command` reads the
+ * same sentence from either. Nothing here reads a ledger file: no inbox or no service composed is
+ * a refusal by name.
+ */
+export function createManagedCommunications(
+	deps: ManagedCommunicationsDeps
+): ManagedCommunications {
+	const place = deps.place ?? 'in this desktop';
+	const noInbox: InboxActionOutcome =
+		deps.place === undefined
+			? NO_INBOX_OUTCOME
+			: { status: 'unavailable', detail: `No notice inbox is composed ${place}.` };
 	const denied = (detail: string): InboxActionOutcome => ({
 		status: 'denied',
 		reason: 'unknown-message',
@@ -320,39 +346,15 @@ export function createManagedOperations(deps: ManagedOperationsDeps): ManagedOpe
 		record: null,
 	});
 	return {
-		status: () =>
-			projectManagedState({
-				status: deps.lifecycle.status(),
-				policy: deps.policy.status(),
-				agentOptions: deps.policy.agentOptions?.(locks()),
-				custody: deps.identity.custody(),
-				supported: ENTERPRISE_SUPPORTED_CAPABILITIES,
-				egress: holds.egress(),
-				update: holds.update(),
-				listeners: holds.listeners(),
-			}),
-		requestEnrollment: (input) => deps.lifecycle.requestEnrollment(input),
-		refreshPolicy: () => deps.policy.refresh(),
-		inventory: () => deps.inventory.snapshot(),
-		supportMatrix: () => ({
-			library: MAESTRO_LIB_VERSION,
-			contract: MANAGED_CONTRACT_VERSION,
-			endpointProtocols: MANAGED_ENDPOINT_PROTOCOLS,
-			counterpartRevision: COUNTERPART_SUPPORT_REVISION,
-			capabilities: MANAGED_CAPABILITY_SUPPORT,
-			counterpart: COUNTERPART_SUPPORT,
-			routes: providers.flatMap((agentId) => providerRouteSupport(agentId)),
-		}),
-		locks: () => locks(),
 		async inboxList(options = {}) {
-			const inbox = deps.inbox;
+			const inbox = deps.inbox();
 			if (!inbox) return null;
 			const refresh = options.refresh === false ? null : await inbox.refresh();
 			return { refresh, view: inboxView(inbox) };
 		},
 		async inboxAct({ messageId, campaignId, action, actor }) {
-			const inbox = deps.inbox;
-			if (!inbox) return NO_INBOX_OUTCOME;
+			const inbox = deps.inbox();
+			if (!inbox) return noInbox;
 			// The standing first: an unmanaged host is told so, not that it holds no message.
 			const standing = inbox.status().standing;
 			if (!standing.ok) return { status: 'unavailable', detail: standing.reason };
@@ -381,15 +383,55 @@ export function createManagedOperations(deps: ManagedOperationsDeps): ManagedOpe
 			}
 			return inbox.act({ campaignId: held[0].campaignId, messageId, action });
 		},
-		command: (action) =>
-			deps.commands
-				? deps.commands.issueLocal(action)
+		command: (action) => {
+			const commands = deps.commands();
+			return commands
+				? commands.issueLocal(action)
 				: Promise.resolve({
 						status: 'unavailable',
 						commandId: null,
-						detail: 'No command service is composed in this desktop.',
-					}),
-		commandStatus: () => deps.commands?.status() ?? null,
+						detail: `No command service is composed ${place}.`,
+					});
+		},
+		commandStatus: () => deps.commands()?.status() ?? null,
+	};
+}
+
+export function createManagedOperations(deps: ManagedOperationsDeps): ManagedOperations {
+	const holds = deps.holds ?? DEFAULT_MANAGED_HOLDS;
+	const locks = deps.locks ?? readManagedSettingLocks;
+	const providers = deps.providers ?? PICKABLE_AGENT_IDS;
+	const communications = createManagedCommunications({
+		identity: deps.identity,
+		inbox: () => deps.inbox,
+		commands: () => deps.commands,
+	});
+	return {
+		...communications,
+		status: () =>
+			projectManagedState({
+				status: deps.lifecycle.status(),
+				policy: deps.policy.status(),
+				agentOptions: deps.policy.agentOptions?.(locks()),
+				custody: deps.identity.custody(),
+				supported: ENTERPRISE_SUPPORTED_CAPABILITIES,
+				egress: holds.egress(),
+				update: holds.update(),
+				listeners: holds.listeners(),
+			}),
+		requestEnrollment: (input) => deps.lifecycle.requestEnrollment(input),
+		refreshPolicy: () => deps.policy.refresh(),
+		inventory: () => deps.inventory.snapshot(),
+		supportMatrix: () => ({
+			library: MAESTRO_LIB_VERSION,
+			contract: MANAGED_CONTRACT_VERSION,
+			endpointProtocols: MANAGED_ENDPOINT_PROTOCOLS,
+			counterpartRevision: COUNTERPART_SUPPORT_REVISION,
+			capabilities: MANAGED_CAPABILITY_SUPPORT,
+			counterpart: COUNTERPART_SUPPORT,
+			routes: providers.flatMap((agentId) => providerRouteSupport(agentId)),
+		}),
+		locks: () => locks(),
 		run: (leaseId) => {
 			const receipt = deps.dispatch?.receipt(leaseId) ?? null;
 			return receipt ? managedRunViewOfReceipt(receipt) : null;

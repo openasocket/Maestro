@@ -48,6 +48,7 @@ import { autoRunStateFrame, createFrameState, framesForEvent, type Frame } from 
 import {
 	createRequestHandler,
 	runtimeManagedScope,
+	type ManagedCommunicationsPort,
 	type RoundParentCustody,
 } from './server-requests';
 
@@ -86,6 +87,12 @@ export interface RuntimeServerOptions {
 	 * `backgroundParentContext`. Absent: a round runs with no parent, as before.
 	 */
 	roundParents?: Pick<RoundParentCustody, 'run'>;
+	/**
+	 * The endpoint inbox and command service this host composed (MCOMP-29-03): handed to the
+	 * request handler, so `maestro-cli managed inbox|command` reaches this host the way it reaches a
+	 * desktop. Absent: each of those verbs is refused by name.
+	 */
+	communications?: ManagedCommunicationsPort;
 }
 
 export interface RuntimeServer {
@@ -183,6 +190,7 @@ export async function startRuntimeServer(options: RuntimeServerOptions): Promise
 	const handle = createRequestHandler(runtime, {
 		managedScope: runtimeManagedScope(runtime),
 		...(options.roundParents ? { roundParents: options.roundParents } : {}),
+		...(options.communications ? { communications: options.communications } : {}),
 	});
 	const frameState = createFrameState();
 	const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_PAYLOAD_BYTES });

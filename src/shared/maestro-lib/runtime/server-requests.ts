@@ -607,6 +607,63 @@ async function answerManaged(
 }
 
 // ---------------------------------------------------------------------------
+// Endpoint communications over the bridge (MCOMP-29-03)
+// ---------------------------------------------------------------------------
+
+/**
+ * The inbox and command verbs `maestro-cli managed inbox|command` sends, spelled as the desktop
+ * bridge spells them (`src/main/web-server/handlers/messageHandlers/managed.ts`), so the same verb
+ * reaches a detached host and gets the same `<type>_result` back.
+ */
+export const MANAGED_COMMUNICATION_TYPES = [
+	'managed_inbox_list',
+	'managed_inbox_act',
+	'managed_command',
+	'managed_command_status',
+] as const;
+export type ManagedCommunicationType = (typeof MANAGED_COMMUNICATION_TYPES)[number];
+
+export function isManagedCommunicationType(type: unknown): type is ManagedCommunicationType {
+	return (MANAGED_COMMUNICATION_TYPES as readonly unknown[]).includes(type);
+}
+
+/**
+ * What a host composes to answer the communication verbs: the inbox and command service of its
+ * own standing, behind the facade the desktop answers from. `answer` returns the reply's named
+ * field (`listing`, `outcome`, `execution`, `status`) or throws the sentence a refusal carries.
+ * Every caller over this transport was admitted on the host's per-boot secret, the CLI's own
+ * credential: the port decides what the standing allows, never this handler.
+ */
+export interface ManagedCommunicationsPort {
+	answer(type: ManagedCommunicationType, message: Request): Promise<Frame>;
+}
+
+export const NO_MANAGED_COMMUNICATIONS_MESSAGE =
+	'This host composes no managed inbox or command service, so nothing was listed, recorded or executed.';
+
+/**
+ * Answer one communication verb with `<type>_result`. No port is a refusal by name: a host never
+ * falls back to reading or writing the receipt or command ledger files directly, which on an
+ * enrolled installation would act without the standing the port checks.
+ */
+async function answerCommunication(
+	port: ManagedCommunicationsPort | undefined,
+	type: ManagedCommunicationType,
+	message: Request
+): Promise<Frame> {
+	const reply = `${type}_result`;
+	if (!port) return refusal(reply, NO_MANAGED_COMMUNICATIONS_MESSAGE);
+	try {
+		const fields = await port.answer(type, message);
+		// The port names the field; it never decides the reply type or the success flag.
+		const { type: _type, success: _success, error: _error, ...named } = fields;
+		return { type: reply, success: true, ...named };
+	} catch (error) {
+		return refusal(reply, error instanceof Error ? error.message : String(error));
+	}
+}
+
+// ---------------------------------------------------------------------------
 // A plain send on the host's standing (MCOMP-09-02)
 // ---------------------------------------------------------------------------
 
@@ -872,6 +929,12 @@ export interface RequestHandlerOptions {
 	 * binding reads `standalone`. Absent: a round runs with no parent, as before.
 	 */
 	roundParents?: Pick<RoundParentCustody, 'run'>;
+	/**
+	 * The endpoint inbox and command service a host composed (MCOMP-29-03): the four
+	 * `MANAGED_COMMUNICATION_TYPES` are answered from it. Absent: each is refused with
+	 * `NO_MANAGED_COMMUNICATIONS_MESSAGE`, never answered from the ledgers on disk.
+	 */
+	communications?: ManagedCommunicationsPort;
 }
 
 /** Answer the desktop bridge's typed messages with `client`. */
@@ -891,6 +954,17 @@ export function createRequestHandler(
 			// -- managed operations (MRC-08-05) -----------------------------
 			case MANAGED_OPERATION_MESSAGE:
 				return answerManaged(client.managed, options.managedScope, message);
+
+			// -- endpoint communications (MCOMP-29-03) ----------------------
+			case 'managed_inbox_list':
+			case 'managed_inbox_act':
+			case 'managed_command':
+			case 'managed_command_status':
+				return answerCommunication(
+					options.communications,
+					message.type as ManagedCommunicationType,
+					message
+				);
 
 			case 'get_sessions':
 				return { type: 'sessions_list', sessions: await projectSessions(client) };
