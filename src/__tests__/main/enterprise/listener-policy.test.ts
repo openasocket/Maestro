@@ -648,6 +648,13 @@ describe('sink classification by source', () => {
 			before: 'http.createServer(',
 		},
 		{
+			// The loopback-only status server of a headless Cue engine (MCOMP-21-01).
+			file: 'src/main/cue/cue-status-server.ts',
+			kind: 'cue-status',
+			call: "holdListener({ kind: 'cue-status', bind: CUE_STATUS_HOST, port: options.port })",
+			before: 'http.createServer(',
+		},
+		{
 			file: 'src/main/permission-relay/PermissionRelayServer.ts',
 			kind: 'relay',
 			call: "holdListener({ kind: 'relay', bind: socketPath, port: 0 })",
@@ -682,14 +689,11 @@ describe('sink classification by source', () => {
 		},
 	];
 
-	/** The kinds no sink of this build holds: the loopback-only Cue status server. */
-	const UNHELD: ReadonlyArray<{ file: string; kind: ListenerKind; bind: string }> = [
-		{
-			file: 'src/main/cue/cue-status-server.ts',
-			kind: 'cue-status',
-			bind: 'server.listen(options.port, CUE_STATUS_HOST)',
-		},
-	];
+	/**
+	 * The kinds no sink of this build holds. Empty since MCOMP-21-01 held the Cue
+	 * status server; a kind that appears here must be loopback-only by record.
+	 */
+	const UNHELD: ReadonlyArray<{ file: string; kind: ListenerKind; bind: string }> = [];
 
 	it('every sink names the kind its task assigned, through the leaf gate, before the first thing that reaches a socket', () => {
 		for (const sink of SINKS) {
@@ -728,7 +732,7 @@ describe('sink classification by source', () => {
 		expect(text).toContain('server.listen(socketPath)');
 	});
 
-	it('the one kind no sink holds is loopback-only by record, and consults no gate', () => {
+	it('every listener kind is held by a sink, and the rest are loopback-only and consult no gate', () => {
 		const held = new Set(SINKS.map((sink) => sink.kind));
 		expect(LISTENER_KINDS.filter((kind) => !held.has(kind))).toEqual(UNHELD.map((u) => u.kind));
 		for (const entry of UNHELD) {
@@ -738,9 +742,13 @@ describe('sink classification by source', () => {
 			expect(text, entry.file).toContain(entry.bind);
 			expect(text, entry.file).not.toMatch(/\.listen\([^)]*'(0\.0\.0\.0|::)'/);
 		}
-		expect(source('src/main/cue/cue-status-server.ts')).toContain(
-			"export const CUE_STATUS_HOST = '127.0.0.1';"
-		);
+	});
+
+	it('the held Cue status server still binds loopback only', () => {
+		const text = source('src/main/cue/cue-status-server.ts');
+		expect(text).toContain("export const CUE_STATUS_HOST = '127.0.0.1';");
+		expect(text).toContain('server.listen(options.port, CUE_STATUS_HOST)');
+		expect(text).not.toMatch(/\.listen\([^)]*'(0\.0\.0\.0|::)'/);
 	});
 
 	it('the gate is a leaf: one runtime import (the formatter) and only types of the policy', () => {
