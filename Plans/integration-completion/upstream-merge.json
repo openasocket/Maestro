@@ -3142,6 +3142,35 @@
 				},
 				"static": "prettier --check clean; eslint ignores src/__tests__",
 				"tools": "Working/mcomp-33-00s9 (debug.mjs temp source probe, pristine.mjs, repeat.mjs, load.mjs, probe.mjs / probe-main.mjs parallel watcher probe, tsc-suite.mjs, commit-wt.mjs, record.mjs)"
+			},
+			"MCOMP-33-00S10": {
+				"completedAt": "2026-11-09",
+				"completedBy": "Maestro-Claude",
+				"worktreeHead": "6ebc358e7",
+				"verdict": "Clean: only the expected failures remain, no new continuation. Full suite (default vitest config) in the integration worktree at 6ebc358e7: 2912 files, 67004 tests, 66865 passed, 15 failed in 4 files (601s), down from 298 failed in 23 files at 00S. Remaining: the feature branch baseline (integration/mega-maestro full-pair 9, offline-recovery 3, main/utils/remote-worktree-paths 2) and shared/maestro-lib/managed/contracts.test 1 (the committed runtime pin, replaced by MCOMP-33-00P). Every one of the 19 merge-introduced files settled by 00S1-00S9 passes.",
+				"classification": {
+					"featureBranchBaseline": {
+						"src/__tests__/integration/mega-maestro/full-pair.test.ts": 9,
+						"src/__tests__/integration/mega-maestro/offline-recovery.test.ts": 3,
+						"src/__tests__/main/utils/remote-worktree-paths.test.ts": 2
+					},
+					"waitsOnMCOMP3300P": {
+						"src/__tests__/shared/maestro-lib/managed/contracts.test.ts": 1
+					},
+					"loadFlakeBothSides": {
+						"src/__tests__/main/cue/cue-file-watcher-missing-base.test.ts": "\"fires for a file written in the same tick the folder is created\" passed in this run; per 00S9 it fails under parallel load on BOTH checkouts (worktree 5/40, feature branch 7/40 and 4/40): a trailing FSEvents change, and rarely a duplicate add (pre-existing watcher defect, backlog candidate). Not a merge defect."
+					},
+					"upstreamBaseline": {
+						"src/__tests__/main/pianola/pianola-native-acceptance.integration.test.ts": "Not in the default run (vitest.integration.config.ts only). Per 00S7 it fails to load on a pristine export of 919d28a66 as well (three upstream defects; CI never runs the integration config). Upstream baseline, not a merge defect."
+					}
+				},
+				"static": {
+					"scope": "the 21 files 00S1-00S9 changed (git diff 5db2b18ee..6ebc358e7)",
+					"eslint": "exit 0, 0 errors (suites under src/__tests__ are ignored by the main config, 18 warnings)",
+					"eslintDashes": "exit 0",
+					"prettier": "exit 0, clean"
+				},
+				"tools": "Working/mcomp-33-00s/suites.mjs full <wt> s10 (full-s10.summary.json), Working/mcomp-33-00s10/static.mjs (static.json), record.mjs"
 			}
 		}
 	}
