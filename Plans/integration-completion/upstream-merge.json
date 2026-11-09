@@ -2947,6 +2947,31 @@
 					"result": "590 passed, 0 failed (was 40 failed: 6 + 34)"
 				},
 				"tools": "Working/mcomp-33-00s1 (show.mjs, survey.mjs, reslot.mjs, fix-cr.mjs, commit-wt.mjs, record.mjs)"
+			},
+			"MCOMP-33-00S2": {
+				"completedAt": "2026-11-09",
+				"completedBy": "Maestro-Claude",
+				"worktreeCommit": "e95025401",
+				"worktreeParent": "d7e65cc6f",
+				"carries": ["00R33"],
+				"verdict": "One cause, suite side: upstream WebSocketMessageHandler.send goes through sendBounded (src/main/web-server/services/socket-send.ts), which returns without sending unless socket.readyState is WebSocket.OPEN. All three suites built their socket doubles as { send } alone, so no reply frame reached them. No managed handler registration, managed reply or ticket slot was lost: with the doubles OPEN every managed type answers and both Quick Chat tickets are minted and claimed at the sink. No source repair, so no mutation case.",
+				"secondCarry": "quick-chat-controller.managed.test: upstream handle-spawn now holds the provider session writer of config.sessionId until the turn exits; the suite spawn spy never exits, so the second handleProcessSpawn on PROCESS in the file waited forever (6 cases timed out at 10s, each passed alone). The harness records its ProcessManagers and afterEach emits exit for PROCESS, as upstream process.test does.",
+				"change": {
+					"src/__tests__/main/web-server/handlers/messageHandlers.managed.test.ts": "socket double readyState WebSocket.OPEN (+ ws import).",
+					"src/__tests__/cli/commands/managed.test.ts": "bridge socket double readyState WebSocket.OPEN (+ ws import).",
+					"src/__tests__/main/quick-chat/quick-chat-controller.managed.test.ts": "socket double readyState WebSocket.OPEN (+ ws import); harnessManagers + afterEach exit for PROCESS."
+				},
+				"typeCheck": {
+					"tsconfig.lint.json": {
+						"exit": 0,
+						"errors": 0
+					}
+				},
+				"suites": {
+					"run": "messageHandlers.managed, cli/commands/managed, quick-chat-controller.managed",
+					"result": "40 passed, 0 failed (was 26 failed: 8 + 9 + 9)"
+				},
+				"tools": "Working/mcomp-33-00s2 (apply.mjs, apply-exit.mjs, commit-wt.mjs, record.mjs)"
 			}
 		}
 	}
