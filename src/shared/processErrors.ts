@@ -28,3 +28,42 @@ export function isAgentAlreadyRunningError(error: unknown): boolean {
 	const message = error instanceof Error ? error.message : String(error ?? '');
 	return message.includes(AGENT_ALREADY_RUNNING_PREFIX);
 }
+
+/** A spawn a managed host refused at the sink (`SpawnResult.managed` plus its message). */
+export interface ManagedSpawnRefusal {
+	state: 'denied' | 'unavailable' | 'unknown';
+	code: string;
+	message: string;
+}
+
+/** Prefix of the refusal `process:spawn` rejects with when a managed host refused the spawn. */
+export const MANAGED_SPAWN_REFUSAL_PREFIX = 'Managed host refused this turn';
+
+const MANAGED_SPAWN_REFUSAL_PATTERN = new RegExp(
+	`${MANAGED_SPAWN_REFUSAL_PREFIX} \\((denied|unavailable|unknown)/([A-Za-z0-9_.:-]+)\\): ([\\s\\S]*)$`
+);
+
+/**
+ * The message `process:spawn` rejects with for a managed sink refusal. The
+ * state and code ride in the text because an IPC rejection keeps nothing else;
+ * read them back with `parseManagedSpawnRefusal()`, never by re-typing this.
+ */
+export function managedSpawnRefusalMessage(refusal: ManagedSpawnRefusal): string {
+	return `${MANAGED_SPAWN_REFUSAL_PREFIX} (${refusal.state}/${refusal.code}): ${refusal.message}`;
+}
+
+/**
+ * The managed refusal a failed spawn carried, including through Electron's
+ * `Error invoking remote method 'process:spawn': Error: ...` wrapping; null for
+ * any other failure.
+ */
+export function parseManagedSpawnRefusal(error: unknown): ManagedSpawnRefusal | null {
+	const text = error instanceof Error ? error.message : String(error ?? '');
+	const match = MANAGED_SPAWN_REFUSAL_PATTERN.exec(text);
+	if (!match) return null;
+	return {
+		state: match[1] as ManagedSpawnRefusal['state'],
+		code: match[2],
+		message: match[3],
+	};
+}

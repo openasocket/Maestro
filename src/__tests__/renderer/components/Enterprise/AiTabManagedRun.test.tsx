@@ -26,7 +26,8 @@ import {
 import { RUN_STATE_COPY } from '../../../../renderer/components/Enterprise/ManagedRunState';
 import { interruptTurn } from '../../../../renderer/services/turnInterrupt';
 import { sendQueuedItemNow } from '../../../../renderer/services/queuedPrompt';
-import { noteTurnManagedRun } from '../../../../renderer/services/process';
+import { noteTurnManagedRefusal, noteTurnManagedRun } from '../../../../renderer/services/process';
+import { managedSpawnRefusalMessage } from '../../../../shared/processErrors';
 import { useSessionStore } from '../../../../renderer/stores/sessionStore';
 import { clearCachedResources } from '../../../../renderer/hooks/utils/useCachedResource';
 import type { ManagedRunView } from '../../../../main/enterprise/dispatch';
@@ -247,5 +248,38 @@ describe('noteTurnManagedRun records the host refusal', () => {
 		const before = storedTab();
 		act(() => noteTurnManagedRun(SESSION_ID, 'tab-1', { pid: 1, success: true } as never));
 		expect(storedTab()).toBe(before);
+	});
+});
+
+describe('noteTurnManagedRefusal reads the refusal off a rejected spawn (MCOMP-25-04A)', () => {
+	it('records the host refusal from the IPC rejection and nothing for another failure', () => {
+		seed(createMockAITab({ id: 'tab-1' }));
+		const before = storedTab();
+		let noted = true;
+		act(() => {
+			noted = noteTurnManagedRefusal(SESSION_ID, 'tab-1', new Error('spawn ENOENT'));
+		});
+		expect(noted).toBe(false);
+		expect(storedTab()).toBe(before);
+
+		const message = managedSpawnRefusalMessage({
+			state: 'unavailable',
+			code: 'runtime-unavailable',
+			message: 'No endpoint is attached.',
+		});
+		act(() => {
+			noted = noteTurnManagedRefusal(
+				SESSION_ID,
+				'tab-1',
+				new Error(`Error invoking remote method 'process:spawn': Error: ${message}`)
+			);
+		});
+		expect(noted).toBe(true);
+		expect(storedTab().managedRefusal).toEqual({
+			state: 'unavailable',
+			code: 'runtime-unavailable',
+			message: 'No endpoint is attached.',
+		});
+		expect(storedTab().managedRun).toBeUndefined();
 	});
 });

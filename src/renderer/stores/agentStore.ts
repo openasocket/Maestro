@@ -45,7 +45,11 @@ import {
 	takePendingMergedContext,
 	updateSessionWith,
 } from './sessionStore';
-import { noteTurnManagedRun, probeSessionAiProcesses } from '../services/process';
+import {
+	noteTurnManagedRefusal,
+	noteTurnManagedRun,
+	probeSessionAiProcesses,
+} from '../services/process';
 // Agent Resilience: snapshot dispatched prompts for auto-retry. Import cycle
 // with retryStore is safe - both sides only touch each other inside runtime
 // callbacks, never at module-eval time.
@@ -769,6 +773,11 @@ export const useAgentStore = create<AgentStore>()((set, get) => ({
 			const isTransientCollision =
 				isSpawnCollision && noteSpawnCollision(item.id) < SPAWN_COLLISION_MAX_ATTEMPTS;
 			if (!isTransientCollision) clearSpawnCollision(item.id);
+			// A managed host's refusal shows on the tab with its own words.
+			const refusedTabId =
+				item.tabId ??
+				useSessionStore.getState().sessions.find((s) => s.id === sessionId)?.activeTabId;
+			if (refusedTabId) noteTurnManagedRefusal(sessionId, refusedTabId, error);
 			const errorLogEntry: LogEntry = {
 				id: generateId(),
 				timestamp: Date.now(),

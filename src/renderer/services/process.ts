@@ -9,6 +9,7 @@ import { logger } from '../utils/logger';
 import type { ProcessConfig } from '../types';
 import type { ManagedRunView } from '../../main/enterprise/dispatch';
 import { updateAiTab, useSessionStore } from '../stores/sessionStore';
+import { parseManagedSpawnRefusal } from '../../shared/processErrors';
 
 export type { ProcessConfig } from '../types';
 
@@ -74,6 +75,22 @@ export function noteTurnManagedRun(
 	if (tab.managedRun === managedRun && !tab.managedRefusal && !managedRefusal) return;
 	if (!tab.managedRun && !managedRun && !tab.managedRefusal && !managedRefusal) return;
 	updateAiTab(sessionId, tabId, (t) => ({ ...t, managedRun, managedRefusal }));
+}
+
+/**
+ * Record on an AI tab the managed refusal a rejected spawn carried, so the tab
+ * shows the host's refusal (MCOMP-25-04A). `process:spawn` rejects on every
+ * failed spawn, so the refusal arrives as the error, not a result. Returns
+ * whether the failure was a managed refusal; writes nothing otherwise.
+ */
+export function noteTurnManagedRefusal(sessionId: string, tabId: string, error: unknown): boolean {
+	const refusal = parseManagedSpawnRefusal(error);
+	if (!refusal) return false;
+	noteTurnManagedRun(sessionId, tabId, {
+		managed: { state: refusal.state, code: refusal.code },
+		error: refusal.message,
+	});
+	return true;
 }
 
 export const processService = {

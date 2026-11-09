@@ -17,6 +17,7 @@
  *   before the launch plan, never lowered to fit;
  * - a standalone host and a bare manager are unchanged.
  */
+import { parseManagedSpawnRefusal } from '../../../../../shared/processErrors';
 import * as os from 'os';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
@@ -291,9 +292,17 @@ describe('process:spawn under management: admission and classification', () => {
 	it('a spawn the policy refuses never reaches the spawner: the handler fails with the reason and no lease is left live', async () => {
 		const port = denyProvider('codex', 'codex is not an approved provider on this host');
 		const h = harness(port);
-		await expect(handleProcessSpawn(payload(), h.deps)).rejects.toThrow(
-			/codex is not an approved provider/
+		const rejected = await handleProcessSpawn(payload(), h.deps).then(
+			() => null,
+			(error: unknown) => error
 		);
+		expect(String(rejected)).toMatch(/codex is not an approved provider/);
+		// The refusal keeps its state and code through the rejection (MCOMP-25-04A).
+		expect(parseManagedSpawnRefusal(rejected)).toEqual({
+			state: 'denied',
+			code: expect.any(String),
+			message: expect.stringMatching(/codex is not an approved provider/),
+		});
 		expect(port.asked).toHaveLength(1);
 		expect(h.spawn).not.toHaveBeenCalled();
 		expect(port.authority.live()).toHaveLength(0);

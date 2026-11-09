@@ -44,7 +44,11 @@ import {
 	hasRunnableQueueItem,
 	hasWorkAheadOfNewMessage,
 } from '../../utils/executionQueue';
-import { noteTurnManagedRun, probeSessionAiProcesses } from '../../services/process';
+import {
+	noteTurnManagedRefusal,
+	noteTurnManagedRun,
+	probeSessionAiProcesses,
+} from '../../services/process';
 import { isAgentAlreadyRunningError } from '../../../shared/processErrors';
 import { hasPendingRetry, noteDirectDispatch } from '../../stores/retryStore';
 import { resolveForceParallel } from '../../stores/settingsStore';
@@ -1738,6 +1742,12 @@ export function useInputProcessing(deps: UseInputProcessingDeps): UseInputProces
 								errorTabId
 							);
 						});
+						// A managed host's refusal shows on the tab with its own words.
+						const refusedTabId =
+							targetTabId ??
+							useSessionStore.getState().sessions.find((s) => s.id === resolvedSessionId)
+								?.activeTabId;
+						if (refusedTabId) noteTurnManagedRefusal(resolvedSessionId, refusedTabId, error);
 					}
 				})();
 			} else if (currentMode === 'terminal') {

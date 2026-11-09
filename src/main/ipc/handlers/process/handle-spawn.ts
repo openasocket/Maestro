@@ -105,6 +105,7 @@ import {
 } from '../../../agents/omp-model-catalog';
 import type { SpawnProcessConfig } from './spawn-types';
 import { managedRunViewOf } from '../../../enterprise/dispatch';
+import { managedSpawnRefusalMessage } from '../../../../shared/processErrors';
 
 const LOG_CONTEXT = '[ProcessManager]';
 
@@ -1281,8 +1282,12 @@ async function handleProcessSpawnImpl(
 		}
 	);
 	if (!result.success) {
+		const reason =
+			result.error || `Failed to spawn ${config.toolType}: agent process did not start`;
+		// A managed sink refusal keeps its state and code through the IPC
+		// rejection, so the AI tab can show the host's refusal (MCOMP-25-04A).
 		throw new Error(
-			result.error || `Failed to spawn ${config.toolType}: agent process did not start`
+			result.managed ? managedSpawnRefusalMessage({ ...result.managed, message: reason }) : reason
 		);
 	}
 

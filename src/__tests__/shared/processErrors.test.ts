@@ -11,6 +11,8 @@ import {
 	AGENT_ALREADY_RUNNING_PREFIX,
 	agentAlreadyRunningMessage,
 	isAgentAlreadyRunningError,
+	managedSpawnRefusalMessage,
+	parseManagedSpawnRefusal,
 } from '../../shared/processErrors';
 
 describe('isAgentAlreadyRunningError', () => {
@@ -38,5 +40,29 @@ describe('isAgentAlreadyRunningError', () => {
 		expect(isAgentAlreadyRunningError(null)).toBe(false);
 		expect(isAgentAlreadyRunningError(undefined)).toBe(false);
 		expect(isAgentAlreadyRunningError(AGENT_ALREADY_RUNNING_PREFIX)).toBe(true);
+	});
+});
+
+describe('managed spawn refusal through the IPC rejection (MCOMP-25-04A)', () => {
+	const refusal = {
+		state: 'unavailable' as const,
+		code: 'runtime-unavailable',
+		message: 'No negotiated prepared execution authority (PREPARED/1); nothing ran.\nSecond line.',
+	};
+
+	it('round-trips state, code and the whole message, also inside Electron wrapping', () => {
+		const message = managedSpawnRefusalMessage(refusal);
+		expect(parseManagedSpawnRefusal(new Error(message))).toEqual(refusal);
+		const wrapped = new Error(`Error invoking remote method 'process:spawn': Error: ${message}`);
+		expect(parseManagedSpawnRefusal(wrapped)).toEqual(refusal);
+	});
+
+	it('is null for any other failure, including a collision and a forged state', () => {
+		expect(parseManagedSpawnRefusal(new Error(agentAlreadyRunningMessage('s-ai-t')))).toBeNull();
+		expect(parseManagedSpawnRefusal(new Error('spawn ENOENT'))).toBeNull();
+		expect(
+			parseManagedSpawnRefusal('Managed host refused this turn (allowed/policy-denied): x')
+		).toBeNull();
+		expect(parseManagedSpawnRefusal(undefined)).toBeNull();
 	});
 });
