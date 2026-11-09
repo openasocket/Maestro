@@ -2456,6 +2456,24 @@
 				"outsideHunks": "AppSessionModals.tsx: the auto-merged onSaveEditAgent stopped at harnessControlMode and returned void; extended with acceptTranslationLimitations, selectedUserResources, migrationPlanId, convertProviderHistory and policy, returning void | Promise<void>, matching EditAgentModalProps.onSave. EditAgentModal.test.tsx (auto-merged HEAD cases): five full toHaveBeenCalledWith lists gain the harnessControlMode slot (undefined) after codexTransport, three slice(23) tails gain one undefined, three policy index reads move 27 to 28, and the MCOMP-23-04A length assertion moves 28 to 29.",
 				"semanticFor00C": [],
 				"tests": "src/__tests__/renderer/components/NewInstanceModal (incl. EditAgentModal.test, NewInstanceModal.test), AgentConfigPanel.test and AppModals: 8 files, 344/344."
+			},
+			"MCOMP-33-00R40": {
+				"resolvedAt": "2026-11-09",
+				"resolvedBy": "Maestro-Claude",
+				"files": [
+					"src/renderer/components/NotificationsPanel.tsx",
+					"src/renderer/components/Settings/tabs/GeneralTab/components/PrivacySection.tsx"
+				],
+				"method": "Four hunks resolved by a shape-asserting script (Working/mcomp-33-00r40/resolve.mjs, every replacement computed before any write). It first proves that the working file with every hunk at upstream equals MERGE_HEAD plus HEAD auto-merged ManagedSettingSection import, i.e. HEAD changed nothing in these files but the section roots, then re-applies those roots on upstream shape. Staged through merge-tool.mjs stage (0 unmerged left; prettier left both unchanged). check.mjs: 0 syntax diagnostics, no seam count below either side.",
+				"hunks": {
+					"NotificationsPanel.tsx custom notification opener (1)": "upstream remote ? <p>managed on the host desktop</p> : <> branch (web-desktop and Lite own no local shell), with the custom section root as HEAD ManagedSettingSection settingId notifications-custom.",
+					"NotificationsPanel.tsx custom closer and idle opener (1)": "upstream re-indented body; custom section closes with </ManagedSettingSection>, idle section root is ManagedSettingSection settingId notifications-idle.",
+					"NotificationsPanel.tsx idle closer (1)": "upstream fragment and remote branch closers, idle section closes with </ManagedSettingSection>.",
+					"PrivacySection.tsx root (1)": "upstream fragment with its new User Journey row; crash reporting keeps HEAD ManagedSettingSection settingId general-crash-reporting (crashReportingEnabled is lockable); general-user-journey keeps upstream plain div because userJourneyEnabled is not lockable in SETTINGS_METADATA and the registry names no settingKeys for it."
+				},
+				"outsideHunks": "None. The shell ceiling on configured notification commands (holdNotificationCommand, main process) is not in these files and is unchanged; on a remote client the commands are not configurable at all, so the remote branch needs no lock.",
+				"semanticFor00C": [],
+				"tests": "NotificationsPanel.test, remoteOwnership.test, ManagedSettingSection.test, searchableSettings.test and the GeneralTab folder: 7 files, 302/302."
 			}
 		}
 	}
