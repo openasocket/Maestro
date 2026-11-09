@@ -32,6 +32,13 @@ import {
 	writeSessionsStoreFile,
 } from '../../../../main/stores/sessions-store-file';
 import { acquireCueEngineLock, releaseCueEngineLock } from '../../../../main/cue/cue-engine-lock';
+import {
+	authorizeManagedAgentCommand,
+	type ManagedAgentCommand,
+	type ManagedAgentCommandOutcome,
+} from '../../../../main/agents/agent-config-writes';
+import { managedBindingPath } from '../../../../shared/maestro-lib/managed/binding';
+import type { ManagedAgentOptions } from '../../../../shared/maestro-lib/managed/agent-policy';
 import { loadCueConfigDetailed } from '../../../../main/cue/cue-yaml-loader';
 import { loadPipelineLayout } from '../../../../main/cue/pipeline-layout-store';
 import { readSessions } from '../../../../cli/services/storage';
@@ -657,6 +664,136 @@ describe('importCueBundle against a fixture bundle', () => {
 			);
 			expect(plan.managed).toEqual([]);
 			expect(validateCredentialRefs).not.toHaveBeenCalled();
+		});
+	});
+
+	describe('host create/edit command (MCOMP-23-02D)', () => {
+		const refusing = (command: ManagedAgentCommand): ManagedAgentCommandOutcome => ({
+			allowed: false,
+			code: 'field',
+			reason: 'A governed choice is not approved.',
+			policyRevision: 9,
+			fields: [{ field: 'model', reason: `${command.after.toolType} model is not approved` }],
+		});
+
+		it('asks about every new agent as an import, with the record exactly as it will be written', async () => {
+			const asked: ManagedAgentCommand[] = [];
+			const authorizeAgent = vi.fn((command: ManagedAgentCommand): ManagedAgentCommandOutcome => {
+				asked.push(command);
+				return { allowed: true, managed: true, policyRevision: 9 };
+			});
+			await importCueBundle(options({}, { authorizeAgent }));
+			expect(asked).toHaveLength(1);
+			const [command] = asked;
+			expect(command.operation).toBe('import');
+			expect(command.before).toBeNull();
+			expect(command.expectedPolicyRevision).toBeNull();
+			const [written] = readSessionsStoreFile(dataDir).sessions;
+			expect(command.after).toMatchObject({
+				id: 'agent-a',
+				name: 'Alpha',
+				toolType: 'claude-code',
+				cwd: projRoot,
+				projectRoot: projRoot,
+			});
+			expect(written).toMatchObject({ id: 'agent-a', toolType: 'claude-code', cwd: projRoot });
+		});
+
+		it('refuses the whole import, dry run included, naming every refused field, and writes nothing', async () => {
+			const dry = await refused(options({}, { authorizeAgent: refusing, dryRun: true }));
+			expect(dry.code).toBe('AGENT_REFUSED');
+			expect(dry.message).toContain('agent "Alpha"');
+			expect(dry.message).toContain('model: claude-code model is not approved');
+			expect(dry.details.agents).toEqual([
+				{
+					agentId: 'agent-a',
+					agentName: 'Alpha',
+					code: 'field',
+					reason: 'A governed choice is not approved.',
+					policyRevision: 9,
+					fields: [{ field: 'model', reason: 'claude-code model is not approved' }],
+				},
+			]);
+			await expect(
+				planCueBundleImport(options({}, { authorizeAgent: refusing }))
+			).rejects.toMatchObject({ code: 'AGENT_REFUSED' });
+			const applied = await refused(options({}, { authorizeAgent: refusing }));
+			expect(applied.code).toBe('AGENT_REFUSED');
+			expect(writeSessionsStoreFile).not.toHaveBeenCalledWith(dataDir, expect.anything());
+		});
+
+		it('asks about an overwritten agent as an edit of the stored record', async () => {
+			writeJson(path.join(dataDir, 'maestro-sessions.json'), {
+				sessions: [
+					{ id: 'agent-a', name: 'Alpha', toolType: 'codex', cwd: projRoot, projectRoot: projRoot },
+				],
+			});
+			const authorizeAgent = vi.fn(
+				(_command: ManagedAgentCommand): ManagedAgentCommandOutcome => ({
+					allowed: true,
+					managed: false,
+				})
+			);
+			await importCueBundle(options({}, { authorizeAgent, force: true }));
+			const [command] = authorizeAgent.mock.calls[0];
+			expect(command.operation).toBe('edit');
+			expect(command.before).toMatchObject({ id: 'agent-a', toolType: 'codex' });
+			expect(command.after).toMatchObject({ id: 'agent-a', toolType: 'claude-code' });
+			expect(readSessionsStoreFile(dataDir).sessions[0].toolType).toBe('claude-code');
+		});
+
+		it('meets the real host command: standalone admits, a managed policy without import refuses by operation', async () => {
+			const standalone = (command: ManagedAgentCommand) =>
+				authorizeManagedAgentCommand(
+					{ isManaged: () => false, options: () => ({}) as ManagedAgentOptions, resolver: null },
+					command
+				);
+			const plan = await planCueBundleImport(options({}, { authorizeAgent: standalone }));
+			expect(plan.agents.map((agent) => agent.action)).toEqual(['create']);
+
+			const managed = (command: ManagedAgentCommand) =>
+				authorizeManagedAgentCommand(
+					{
+						isManaged: () => true,
+						options: () =>
+							({
+								outcome: 'available',
+								authority: 'none',
+								policyRevision: 4,
+								freshness: 'fresh',
+								expiresAt: '2099-01-01T00:00:00.000Z',
+								operations: ['create', 'edit', 'clone'],
+								fields: {},
+							}) as unknown as ManagedAgentOptions,
+						resolver: { version: 1, resolve: () => null },
+					},
+					command
+				);
+			const error = await refused(options({}, { authorizeAgent: managed, dryRun: true }));
+			expect(error.code).toBe('AGENT_REFUSED');
+			expect((error.details.agents as Array<{ code: string }>)[0].code).toBe('operation');
+
+			const unreadable = (command: ManagedAgentCommand) =>
+				authorizeManagedAgentCommand(
+					{
+						isManaged: () => true,
+						options: () => {
+							throw new Error('policy service down');
+						},
+						resolver: null,
+					},
+					command
+				);
+			const down = await refused(options({}, { authorizeAgent: unreadable }));
+			expect((down.details.agents as Array<{ code: string }>)[0].code).toBe('unavailable');
+		});
+
+		it('fails closed for an enrolled data directory when no host command is given', async () => {
+			write(managedBindingPath(dataDir), '{}');
+			const error = await refused(options({}, { dryRun: true }));
+			expect(error.code).toBe('AGENT_REFUSED');
+			expect(error.message).toContain('enrolled with a management peer');
+			expect((error.details.agents as Array<{ code: string }>)[0].code).toBe('unavailable');
 		});
 	});
 

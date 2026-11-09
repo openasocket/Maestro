@@ -63,6 +63,16 @@ import {
 	type SecretSource,
 } from '../../../shared/serverSecrets';
 import type { ThinkingMode } from '../../../shared/types';
+import {
+	managedBindingPath,
+	readManagedBindingFile,
+} from '../../../shared/maestro-lib/managed/binding';
+import type { ManagedAgentFieldRefusal } from '../../../shared/maestro-lib/managed/agent-policy';
+import type { AgentRecord } from '../../../shared/maestro-lib/store/records';
+import type {
+	ManagedAgentCommand,
+	ManagedAgentCommandOutcome,
+} from '../../agents/agent-config-writes';
 import { assertNoSymlinkOnPath } from '../../utils/zip-archive';
 import { atomicWriteFile } from '../../utils/atomic-json-store';
 import {
@@ -140,6 +150,8 @@ export type CueBundleImportErrorCode =
 	| 'MANAGED_POLICY_REQUIRED'
 	/** The host policy refused at least one declared credential reference. */
 	| 'MANAGED_CREDENTIAL_REFUSED'
+	/** The host create/edit command refused at least one agent the import would write. */
+	| 'AGENT_REFUSED'
 	/** A target path exists and is not a regular file. */
 	| 'TARGET_NOT_A_FILE'
 	/** A workspace's existing cue.yaml is not valid YAML. */
@@ -202,6 +214,16 @@ export interface CueBundleImportOptions {
 	 * reference before scheduling. Required when any agent declares one.
 	 */
 	managedPolicy?: CueBundleManagedPolicy;
+	/**
+	 * The host create/edit command (`authorizeAgentRecord()` in the desktop's
+	 * persistence handlers, the one `sessions:commitAgent` runs). Every agent the
+	 * import would create (`import`) or overwrite (`edit`) is checked with it,
+	 * exactly as it will be written, while planning, so a dry run refuses too.
+	 * Absent: a standalone data directory admits as before, and an enrolled
+	 * one (its managed binding file exists) refuses every agent as unavailable,
+	 * because only the running desktop holds the policy to decide.
+	 */
+	authorizeAgent?: (command: ManagedAgentCommand) => ManagedAgentCommandOutcome;
 	/** The bundle zip. */
 	bundlePath: string;
 	/** Target Maestro data directory. Created when missing (and logged). */
@@ -714,6 +736,45 @@ function assertDataDirIdle(
 
 // ─── Planning ───────────────────────────────────────────────────────────────
 
+/** One agent the host create/edit command refused, as {@link CueBundleImportError} details carry it. */
+export interface CueBundleRefusedAgent {
+	agentId: string;
+	agentName: string;
+	code: Extract<ManagedAgentCommandOutcome, { allowed: false }>['code'];
+	reason: string;
+	policyRevision: number | null;
+	fields: ManagedAgentFieldRefusal[];
+}
+
+function describeRefusedAgent(agent: CueBundleRefusedAgent): string {
+	const fields = agent.fields.map((field) => `${field.field}: ${field.reason}`);
+	return `agent "${agent.agentName}": ${agent.reason}${fields.length > 0 ? ` (${fields.join('; ')})` : ''}`;
+}
+
+/**
+ * The create/edit decision this import meets. The caller's host command when
+ * given; otherwise standalone admits, and a data directory enrolled with a
+ * management peer (a binding file, readable or not) is unavailable: nothing
+ * here holds the policy, so nothing governed is written around it.
+ */
+function resolveAgentAuthority(
+	options: CueBundleImportOptions,
+	dataDir: string
+): (command: ManagedAgentCommand) => ManagedAgentCommandOutcome {
+	if (options.authorizeAgent) return options.authorizeAgent;
+	if (readManagedBindingFile(managedBindingPath(dataDir)).status === 'none') {
+		return () => ({ allowed: true, managed: false });
+	}
+	return () => ({
+		allowed: false,
+		code: 'unavailable',
+		reason:
+			'This data directory is enrolled with a management peer; import its agents through the running desktop, which holds the policy.',
+		policyRevision: null,
+		fields: [],
+	});
+}
+
 async function buildPlan(options: CueBundleImportOptions): Promise<InternalPlan> {
 	const log = options.onLog ?? (() => {});
 	if (!options.bundlePath) {
@@ -1050,6 +1111,8 @@ async function buildPlan(options: CueBundleImportOptions): Promise<InternalPlan>
 	const envReports: CueBundleImportEnvReport[] = [];
 	const unknownTypes: string[] = [];
 	const nameTaken: string[] = [];
+	const authorizeAgent = resolveAgentAuthority(options, dataDir);
+	const refusedAgents: CueBundleRefusedAgent[] = [];
 	const nextSessions = [...existingSessions] as Array<SessionInfo & Record<string, unknown>>;
 	const bundleAgentIds = new Set(manifest.agents.map((a) => a.id));
 	const autoRunFolders = new Map<string, string>();
@@ -1258,34 +1321,56 @@ async function buildPlan(options: CueBundleImportOptions): Promise<InternalPlan>
 		}
 
 		const existingIndex = nextSessions.findIndex((s) => s.id === agent.id);
-		if (existingIndex >= 0) {
+		const before = existingIndex >= 0 ? nextSessions[existingIndex] : null;
+		const record = (
+			before
+				? { ...before, ...fields }
+				: {
+						...buildNewAgentRecord(
+							{
+								id: agent.id,
+								name: settings.name,
+								toolType: settings.toolType,
+								cwd,
+								autoRunFolderPath: bundleFields.autoRunFolderPath,
+								groupId: options.groupId,
+								saveToHistory,
+								showThinking,
+							},
+							{ generateId: generateUUID }
+						),
+						...fields,
+						claudeInteractive: newAgentClaudeInteractive(settings.toolType),
+					}
+		) as SessionInfo & Record<string, unknown>;
+		// The host create/edit command, on the record exactly as it will be
+		// written. Every refusal is collected so the error names them all.
+		const outcome = authorizeAgent({
+			operation: before ? 'edit' : 'import',
+			expectedPolicyRevision: null,
+			before: before as unknown as AgentRecord | null,
+			after: record as unknown as AgentRecord,
+		});
+		if (!outcome.allowed) {
+			refusedAgents.push({
+				agentId: agent.id,
+				agentName: settings.name,
+				code: outcome.code,
+				reason: outcome.reason,
+				policyRevision: outcome.policyRevision,
+				fields: outcome.fields,
+			});
+			continue;
+		}
+		if (before) {
 			conflicts.push({
 				kind: 'agent',
 				target: agent.id,
-				message: `Agent ${agent.id} ("${nextSessions[existingIndex].name}") already exists`,
+				message: `Agent ${agent.id} ("${before.name}") already exists`,
 			});
-			nextSessions[existingIndex] = {
-				...nextSessions[existingIndex],
-				...fields,
-			} as SessionInfo & Record<string, unknown>;
+			nextSessions[existingIndex] = record;
 		} else {
-			nextSessions.push({
-				...buildNewAgentRecord(
-					{
-						id: agent.id,
-						name: settings.name,
-						toolType: settings.toolType,
-						cwd,
-						autoRunFolderPath: bundleFields.autoRunFolderPath,
-						groupId: options.groupId,
-						saveToHistory,
-						showThinking,
-					},
-					{ generateId: generateUUID }
-				),
-				...fields,
-				claudeInteractive: newAgentClaudeInteractive(settings.toolType),
-			} as SessionInfo & Record<string, unknown>);
+			nextSessions.push(record);
 		}
 		agents.push({
 			id: agent.id,
@@ -1314,6 +1399,13 @@ async function buildPlan(options: CueBundleImportOptions): Promise<InternalPlan>
 			'AGENT_NAME_TAKEN',
 			`Another agent already uses the name ${nameTaken.join(', ')}. Rename it before importing.`,
 			{ agents: nameTaken }
+		);
+	}
+	if (refusedAgents.length > 0) {
+		throw new CueBundleImportError(
+			'AGENT_REFUSED',
+			`The host policy refused ${refusedAgents.map(describeRefusedAgent).join('; ')}`,
+			{ agents: refusedAgents }
 		);
 	}
 

@@ -257,6 +257,38 @@ describe('importBundleIntoApp', () => {
 		});
 	});
 
+	it("checks every imported agent with the app's host command and refuses before handing anything over", async () => {
+		const bundlePath = await bundle();
+		const dst = target();
+		const ctx: CueBundleAppContext = {
+			...context([]),
+			authorizeAgent: vi.fn(() => ({
+				allowed: false as const,
+				code: 'unavailable' as const,
+				reason: 'The approved agent choices could not be read.',
+				policyRevision: null,
+				fields: [],
+			})),
+		};
+		for (const dryRun of [true, false]) {
+			const outcome = await importBundleIntoApp(ctx, {
+				bundlePath,
+				workspaces: { planner: dst },
+				dryRun,
+			});
+			expect(outcome).toMatchObject({
+				ok: false,
+				code: 'AGENT_REFUSED',
+				details: { agents: [expect.objectContaining({ agentId: AGENT_ID, code: 'unavailable' })] },
+			});
+		}
+		expect(ctx.authorizeAgent).toHaveBeenCalledWith(
+			expect.objectContaining({ operation: 'import', before: null })
+		);
+		expect(ctx.applyAgents).not.toHaveBeenCalled();
+		expect(fs.existsSync(path.join(dst, '.maestro/cue.yaml'))).toBe(false);
+	});
+
 	it("runs overlapping imports one after the other, so neither loses the other's MCP server", async () => {
 		async function bundleWithServer(name: string, id: string, server: string): Promise<string> {
 			const root = path.join(tmp, name, 'proj');

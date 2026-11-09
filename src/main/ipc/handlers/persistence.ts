@@ -211,8 +211,12 @@ const STANDALONE_AGENT_AUTHORITY: ManagedAgentAuthorityDeps = {
 	resolver: null,
 };
 
-/** Run one command through the installed authority (standalone when none is installed). */
-function authorizeAgentRecord(command: ManagedAgentCommand) {
+/**
+ * Run one command through the installed authority (standalone when none is
+ * installed). Exported for writers outside this module that add or replace
+ * agent records, such as a Cue bundle import into the running app.
+ */
+export function authorizeAgentRecord(command: ManagedAgentCommand) {
 	return authorizeManagedAgentCommand(
 		agentMutationAuthority ?? STANDALONE_AGENT_AUTHORITY,
 		command

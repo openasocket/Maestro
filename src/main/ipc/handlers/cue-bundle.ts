@@ -17,6 +17,7 @@ import { withIpcErrorLogging, type CreateHandlerOptions } from '../../utils/ipcH
 import { isWebContentsAvailable } from '../../utils/safe-send';
 import { getProductionDataPath, getSettingsStore } from '../../stores/getters';
 import { filterLiveAgents } from '../../../shared/agentVisibility';
+import { authorizeAgentRecord } from './persistence';
 import type { SessionsData } from '../../stores/types';
 import type { SessionInfo } from '../../../shared/types';
 import type { CueBundleAgentChange } from '../../../shared/cue-bundle-types';
@@ -100,6 +101,9 @@ export function registerCueBundleHandlers(deps: CueBundleHandlerDependencies): v
 				getSettingsStore().get('encoreFeatures')
 			),
 		applyAgents: (change) => applyAgentsInRenderer(getMainWindow, change),
+		// The same host decision `sessions:commitAgent` runs, so an imported
+		// agent cannot reach the renderer (and its flush) around the policy.
+		authorizeAgent: authorizeAgentRecord,
 	};
 	const ctx = appContext;
 

@@ -59,6 +59,8 @@ export interface CueBundleAppContext {
 	flushSessions?(): void;
 	/** Add and update agents in the app (the renderer owns them). */
 	applyAgents(change: CueBundleAgentChange): Promise<void>;
+	/** The host create/edit command every imported agent meets (`sessions:commitAgent`'s). */
+	authorizeAgent?: CueBundleImportOptions['authorizeAgent'];
 }
 
 /** A refusal, as data. */
@@ -244,6 +246,7 @@ function importOptions(
 		refuseShellCommands: request.refuseShellCommands,
 		useLocal: request.useLocal,
 		groupId: request.groupId,
+		...(ctx.authorizeAgent ? { authorizeAgent: ctx.authorizeAgent } : {}),
 		host: {
 			sessions: ctx.getSessions(),
 			applyAgents: (change) => ctx.applyAgents(change),
