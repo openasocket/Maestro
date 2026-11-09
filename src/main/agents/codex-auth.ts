@@ -20,6 +20,16 @@
  * the opaque reference `managedAccountRef()` derives from the resolved
  * CODEX_HOME. `codexAccountEgress()` is that one spelling, so the policy's
  * approved-account list and the two sinks agree on the digest.
+ *
+ * Custody (MCOMP-21-06): the login file is the user's own OAuth credential in a
+ * plain file. Every read is held by `holdCredentialCustody('codex.auth')` as
+ * plain-file custody BEFORE the file is opened, and held again after the read
+ * resolves, so a host that became managed while the read was in flight hands
+ * nothing on. A managed host has no protected-custody reader for a Codex login,
+ * so it reads none: the refusal is the `managed` kind, never a fallback to the
+ * file and never a value or an e-mail decoded from it. An approved account
+ * (the egress ceiling's list) is not a reader either; it only names which
+ * account a protected reader would be allowed to resolve.
  */
 
 import fs from 'fs/promises';
@@ -27,6 +37,11 @@ import path from 'path';
 
 import { managedAccountRef } from '../../shared/maestro-lib/managed/credentials';
 import type { FetchEgressOptions } from '../utils/fetchWithTimeout';
+import {
+	formatCredentialRefusal,
+	holdCredentialCustody,
+	type CredentialCustodyDecision,
+} from '../enterprise/credential-custody';
 
 /** The provider id the account reference is digested under; the agent's `toolType`. */
 const CODEX_PROVIDER_ID = 'codex';
@@ -60,9 +75,11 @@ interface CodexAuthFileShape {
 /**
  * Why a read failed, kept apart because the remedies differ: `missing_auth`
  * means this CODEX_HOME was never logged in, `unauthenticated` means the file
- * is there but carries no usable token (a partial or revoked login).
+ * is there but carries no usable token (a partial or revoked login), `managed`
+ * means a managed host holds the login file and nothing was read (signing in
+ * again is not the remedy).
  */
-export type CodexAuthFailureKind = 'missing_auth' | 'unauthenticated';
+export type CodexAuthFailureKind = 'missing_auth' | 'unauthenticated' | 'managed';
 
 export interface CodexAuthSuccess {
 	ok: true;
@@ -83,13 +100,29 @@ export interface CodexAuthFailure {
 
 export type CodexAuthResult = CodexAuthSuccess | CodexAuthFailure;
 
+/** The custody hold on one login file; the path is named, never its content. */
+function holdCodexLogin(authPath: string): CredentialCustodyDecision {
+	return holdCredentialCustody('codex.auth', { kind: 'plain-file', file: authPath });
+}
+
+function managedRefusal(decision: { code: string; message: string }): CodexAuthFailure {
+	return { ok: false, kind: 'managed', error: formatCredentialRefusal(decision) };
+}
+
 /** Read and classify `CODEX_HOME/auth.json`. Never throws. */
 export async function readCodexAuth(codexHomeKey: string): Promise<CodexAuthResult> {
 	const authPath = path.join(codexHomeKey, 'auth.json');
 
+	const before = holdCodexLogin(authPath);
+	if (!before.allowed) return managedRefusal(before);
+
 	let auth: CodexAuthFileShape;
 	try {
-		auth = JSON.parse(await fs.readFile(authPath, 'utf8')) as CodexAuthFileShape;
+		const raw = await fs.readFile(authPath, 'utf8');
+		// The standing may have changed while the read was in flight.
+		const after = holdCodexLogin(authPath);
+		if (!after.allowed) return managedRefusal(after);
+		auth = JSON.parse(raw) as CodexAuthFileShape;
 	} catch (err) {
 		return {
 			ok: false,

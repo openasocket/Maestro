@@ -96,7 +96,8 @@ export async function sampleCodexUsage(opts: SampleCodexUsageOptions): Promise<C
 		return {
 			sampledAt,
 			codexHomeKey,
-			authState: auth.kind,
+			// A managed hold is not a login problem: `error`, so no sign-in is offered.
+			authState: auth.kind === 'managed' ? 'error' : auth.kind,
 			...(auth.email ? { email: auth.email } : {}),
 			error: auth.error,
 		};

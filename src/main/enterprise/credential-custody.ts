@@ -16,6 +16,10 @@
  * support package, is refused. The feature that needs the value is then off on
  * that host, by name, and the value is never persisted around the refusal.
  *
+ * A Codex account login is held the same way (MCOMP-21-06): `CODEX_HOME/auth.json`
+ * is a plain file the user's own `codex login` wrote, so a managed host never
+ * reads it, not even for a label, and no approved account turns it into one.
+ *
  * A command-line value is refused the same way (MCOMP-21-02A): the user info
  * of `cue engine start --notify-webhook https://user:pass@host/` is visible in
  * the process list and the shell history, so a managed host sends no
@@ -50,6 +54,7 @@ export const MANAGED_CREDENTIALS = [
 	'cue.odinToken',
 	'cue.notifyWebhookCredential',
 	'web.authToken',
+	'codex.auth',
 ] as const;
 export type ManagedCredential = (typeof MANAGED_CREDENTIALS)[number];
 
@@ -59,6 +64,7 @@ const CREDENTIAL_LABELS: Record<ManagedCredential, string> = {
 	'cue.odinToken': 'the 0DIN API token',
 	'cue.notifyWebhookCredential': 'the notify webhook URL credential',
 	'web.authToken': 'the persistent web link token',
+	'codex.auth': 'the Codex account login',
 };
 
 /** Where a value would be kept, as the sink about to keep or read it knows. */
