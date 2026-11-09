@@ -2050,6 +2050,33 @@
 				],
 				"notes": "No case, field or guard dropped. spawnGroupChatAgent.test, group-chat agent/router/moderator suites and both cross-agent-router suites cannot load until src/main/web-server/handlers/bridgeHandlers.ts merges (00R31); 00S runs them.",
 				"unmergedAfter": 43
+			},
+			"MCOMP-33-00R24": {
+				"resolvedAt": "2026-11-09",
+				"resolvedBy": "Maestro-Claude",
+				"files": [
+					"src/main/agent-run/capture-service.ts",
+					"src/main/agent-run/setup-capture-listener.ts",
+					"src/__tests__/main/ipc/handlers/git.test.ts"
+				],
+				"method": "Three hunks resolved by a shape-asserting script (Working/mcomp-33-00r24/resolve.mjs, both sides read in full, every replacement computed before any write); staged through merge-tool.mjs stage (prettier left all three unchanged, 40 unmerged left). Working/mcomp-33-00r24/check.mjs: 0 syntax diagnostics, no markers, every seam count at least the larger side, no git suite case title lost. main/agent-run suites plus ipc/handlers/git.test: 9 files, 359/359.",
+				"hunks": {
+					"src/main/agent-run/capture-service.ts": [
+						"Hunk 1 (imports): both sets. HEAD autorun attribution, childDelegationContext, managed lifecycle events, ManagedRunState, resolveOwningMaestroSessionId; upstream nativeTabSession/NativeTabSession, AgentError, canonicalJson. The two process-manager/types imports joined into one (ProcessConfig, ProcessSpawnAdmission, TurnSettlement)."
+					],
+					"src/main/agent-run/setup-capture-listener.ts": [
+						"Hunk 1 (spawn listener head): both. HEAD lineage = spawnLifecycleLineage(config) (the lifecycle projection stays on the capture path, with spawnLifecycleAdmission below), then upstream nativeCurrentTurns.spawning and const run = service.captureSpawn(...) so the auto-merged nativeCurrentTurns.begin and pianolaNewTabSpawns.captured follow-ups receive the run."
+					],
+					"src/__tests__/main/ipc/handlers/git.test.ts": [
+						"Hunk 1 (fs/promises mock): both members. HEAD lstat stable handle (MCOMP-21-09 cleanup/checkout re-read) and upstream stat resolving by default for the worktree .git precheck. The repository-ceiling cases (holdGit) auto-merged and are kept; title sets of both sides fully covered."
+					]
+				},
+				"outsideHunks": [
+					"capture-service.ts: upstream captureSessionAnnouncement, captureError, resolveNativeTabSession and settlement-aware captureExit auto-merged beside HEAD bindAndProject lifecycle projection; captureSpawn returns the saved run on the ledger path and projects omitted sessions."
+				],
+				"semanticConflictsForC": [],
+				"notes": "No case, field or guard dropped. No semantic conflict left for 00C from these files.",
+				"unmergedAfter": 40
 			}
 		}
 	}
