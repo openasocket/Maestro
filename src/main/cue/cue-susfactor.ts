@@ -31,11 +31,26 @@
  * ceiling before it is read: an environment variable is not protected custody,
  * so the check is off on that host, said once by name, and every item passes
  * as it does with no token. Standalone, unchanged.
+ *
+ * ## Optional enrichment vs mandatory scanning (MCOMP-21-02)
+ *
+ * Fail-open is the policy of OPTIONAL enrichment, the only requirement a
+ * standalone host has. A host process can install a scan requirement
+ * ({@link setSusFactorScanPolicy}); when it answers `required`, scanning is
+ * mandatory and fail-open never applies: an item with third-party text
+ * reaches an agent only after a completed scoring below the threshold, so a
+ * refused token, a refused destination, a timeout, an upstream error, a
+ * missing token or the subscription's own `susfactor_enabled: false` holds
+ * the item by name instead of passing it. Before any byte is sent both 0DIN
+ * destinations are held at the egress chokepoint (`holdEgress`), so a
+ * ceiling that admits one and refuses the other never receives the API token
+ * or the scored input. No authority installed (the desktop today, a test):
+ * optional, unchanged.
  */
 
 import * as crypto from 'crypto';
 import { mapWithConcurrency } from '../utils/concurrency';
-import { fetchWithTimeout, isEgressDeniedError } from '../utils/fetchWithTimeout';
+import { fetchWithTimeout, holdEgress, isEgressDeniedError } from '../utils/fetchWithTimeout';
 import type { EgressClass } from '../enterprise/egress-policy';
 import { formatCredentialRefusal, holdCredentialCustody } from '../enterprise/credential-custody';
 
@@ -131,12 +146,59 @@ let cachedJwt: string | null = null;
 let cachedJwtAt = 0;
 /** The custody refusal already said once; the ceiling is read on every item regardless. */
 let reportedRefusal: string | null = null;
+/** The mandatory-scan hold reason already said once at warn; each held item still logs its own line. */
+let reportedRequiredHold: string | null = null;
 
 /** Exposed for tests - drops the cached JWT so the next call re-exchanges. */
 export function resetSusFactorTokenCache(): void {
 	cachedJwt = null;
 	cachedJwtAt = 0;
 	reportedRefusal = null;
+	reportedRequiredHold = null;
+}
+
+// ─── Scan requirement ────────────────────────────────────────────────────────
+
+/**
+ * Whether scoring is optional enrichment (fail open) or mandatory scanning
+ * (fail closed). `required` names why, so a held item says which policy held
+ * it.
+ */
+export type SusFactorScanRequirement =
+	| { requirement: 'optional' }
+	| { requirement: 'required'; reason: string };
+
+/** Read on every item, so a standing that changes mid-run is honored at once. */
+export type SusFactorScanPolicy = () => SusFactorScanRequirement;
+
+let scanPolicy: SusFactorScanPolicy | null = null;
+
+/** Install (or, with null, remove) the scan requirement every guarded item is judged under. */
+export function setSusFactorScanPolicy(policy: SusFactorScanPolicy | null): void {
+	scanPolicy = policy;
+}
+
+/**
+ * The requirement in force. None installed: optional. A policy that throws or
+ * answers something else cannot be read as optional: it is required.
+ */
+export function currentSusFactorScanRequirement(): SusFactorScanRequirement {
+	if (!scanPolicy) return { requirement: 'optional' };
+	try {
+		const answer = scanPolicy();
+		if (answer?.requirement === 'optional') return { requirement: 'optional' };
+		if (answer?.requirement === 'required' && typeof answer.reason === 'string')
+			return { requirement: 'required', reason: answer.reason };
+		return {
+			requirement: 'required',
+			reason: 'the scan requirement answered no known requirement',
+		};
+	} catch (err) {
+		return {
+			requirement: 'required',
+			reason: `the scan requirement could not be read (${err instanceof Error ? err.message : String(err)})`,
+		};
+	}
 }
 
 const ODIN_TOKEN_CUSTODY = { kind: 'environment', name: 'ODIN_API_TOKEN' } as const;
@@ -256,8 +318,11 @@ export async function scoreSusFactor(
 	text: string,
 	threshold: number,
 	onLog: Logger,
-	context: string
+	context: string,
+	/** `closed` under a mandatory scan: a null verdict holds the item, so the log must not say it passes. */
+	failMode: 'open' | 'closed' = 'open'
 ): Promise<SusFactorVerdict | null> {
+	const passing = failMode === 'open' ? 'processing normally' : 'holding the item (mandatory scan)';
 	const chunks = chunkForScoring(text);
 	if (chunks.length === 0) return null;
 
@@ -265,10 +330,15 @@ export async function scoreSusFactor(
 	const startedAt = Date.now();
 
 	try {
+		// Both destinations are held before anything is sent: a ceiling that
+		// admits the token exchange but refuses the scorer (or the reverse)
+		// must never receive the API token or a chunk of the input.
+		holdEgress(ACCESS_TOKEN_URL, EGRESS_CLASS);
+		holdEgress(SUS_URL, EGRESS_CLASS);
 		let jwt = await getJwt(startedAt, false);
 		if (!jwt) {
 			const why = readApiToken().refused ?? 'ODIN_API_TOKEN is not set';
-			onLog('warn', `[CUE] SusFactor skipped for ${context}: ${why} - processing normally`);
+			onLog('warn', `[CUE] SusFactor skipped for ${context}: ${why} - ${passing}`);
 			return null;
 		}
 
@@ -285,10 +355,7 @@ export async function scoreSusFactor(
 
 		const usable = scores.filter((s): s is number => s !== null);
 		if (usable.length === 0) {
-			onLog(
-				'warn',
-				`[CUE] SusFactor returned no usable score for ${context} - processing normally`
-			);
+			onLog('warn', `[CUE] SusFactor returned no usable score for ${context} - ${passing}`);
 			return null;
 		}
 
@@ -311,14 +378,14 @@ export async function scoreSusFactor(
 			// line never reads as 0DIN being down, and still fail open.
 			onLog(
 				'warn',
-				`[CUE] SusFactor skipped for ${context}: the managed egress ceiling refused the 0DIN call (${err.message}) - processing normally (fail-open)`
+				`[CUE] SusFactor skipped for ${context}: the managed egress ceiling refused the 0DIN call (${err.message}) - ${passing}${failMode === 'open' ? ' (fail-open)' : ''}`
 			);
 			return null;
 		}
 		// Fail open: 0DIN being slow or down must not halt Cue processing.
 		onLog(
 			'warn',
-			`[CUE] SusFactor check failed for ${context} - processing normally (fail-open): ${err instanceof Error ? err.message : String(err)}`
+			`[CUE] SusFactor check failed for ${context} - ${passing}${failMode === 'open' ? ' (fail-open)' : ''}: ${err instanceof Error ? err.message : String(err)}`
 		);
 		return null;
 	}
@@ -494,7 +561,10 @@ export interface GuardScoredTextParams {
  * normally emits synchronously keep doing so when no check can run.
  */
 export function wouldScoreText(enabled: boolean, scorableText: string): boolean {
-	return enabled && isSusFactorConfigured() && scorableText.trim() !== '';
+	if (scorableText.trim() === '') return false;
+	// Mandatory scanning: the guard decides even with no token or the toggle off.
+	if (currentSusFactorScanRequirement().requirement === 'required') return true;
+	return enabled && isSusFactorConfigured();
 }
 
 /**
@@ -506,9 +576,16 @@ export function wouldScoreText(enabled: boolean, scorableText: string): boolean 
  * Never throws - any unexpected failure falls through to `true` (fail open).
  */
 export async function guardScoredText(params: GuardScoredTextParams): Promise<boolean> {
+	const requirement = currentSusFactorScanRequirement();
 	try {
-		return await guardScoredTextInner(params);
+		return await guardScoredTextInner(params, requirement);
 	} catch (err) {
+		if (requirement.requirement === 'required')
+			return holdRequired(
+				params,
+				requirement,
+				`the guard errored (${err instanceof Error ? err.message : String(err)})`
+			);
 		// Belt and braces on the documented never-throws contract: the caller is
 		// a fire-and-forget poll callback, so a rejection here would be an
 		// unhandled rejection AND would silently drop the event.
@@ -520,10 +597,41 @@ export async function guardScoredText(params: GuardScoredTextParams): Promise<bo
 	}
 }
 
-async function guardScoredTextInner(params: GuardScoredTextParams): Promise<boolean> {
+/**
+ * Hold an item a mandatory scan could not clear: it never reaches an agent,
+ * and no SusFactor block is recorded because nothing scored it. The policy's
+ * reason is said once at warn; every held item logs its own line.
+ */
+function holdRequired(
+	params: GuardScoredTextParams,
+	requirement: Extract<SusFactorScanRequirement, { requirement: 'required' }>,
+	why: string
+): false {
+	if (requirement.reason !== reportedRequiredHold) {
+		reportedRequiredHold = requirement.reason;
+		params.onLog(
+			'warn',
+			`[CUE] SusFactor scanning is required on this host (${requirement.reason}); an item it cannot score does not reach an agent`
+		);
+	}
+	params.onLog(
+		'warn',
+		`[CUE] SusFactor HELD ${params.itemRef} (${params.event.type}): mandatory scan not completed - ${why}. The agent was not run.`
+	);
+	return false;
+}
+
+async function guardScoredTextInner(
+	params: GuardScoredTextParams,
+	requirement: SusFactorScanRequirement
+): Promise<boolean> {
 	const { event, enabled, threshold, onLog, scorableText: text, itemRef } = params;
-	if (!enabled || text.trim() === '') return true;
+	if (text.trim() === '') return true;
+	const required = requirement.requirement === 'required' ? requirement : null;
+	if (!enabled && !required) return true;
 	const token = readApiToken();
+	if (token.token === null && required)
+		return holdRequired(params, required, token.refused ?? 'ODIN_API_TOKEN is not set');
 	if (token.token === null) {
 		// A held token is said once per reason: off on this host by name, never
 		// silently. An unset token passes the item as it always did.
@@ -557,8 +665,17 @@ async function guardScoredTextInner(params: GuardScoredTextParams): Promise<bool
 		return false;
 	}
 
-	const verdict = await scoreSusFactor(text, threshold, onLog, context);
-	// Fail open: null means the check could not run, not that the item is clean.
+	const verdict = await scoreSusFactor(
+		text,
+		threshold,
+		onLog,
+		context,
+		required ? 'closed' : 'open'
+	);
+
+	// Optional: null means the check could not run, not that the item is clean,
+	// so it fails open. Required: an item no scoring cleared is held.
+	if (!verdict && required) return holdRequired(params, required, 'the scorer returned no verdict');
 	if (!verdict || !verdict.suspicious) return true;
 
 	const url = params.url ?? null;

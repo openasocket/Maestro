@@ -78,6 +78,9 @@ import type { CueRunResult } from '../../shared/cue/contracts';
 import type { CueExternalNotification } from '../../main/cue/cue-notify-webhook';
 import type { ListenerAuthority } from '../../main/enterprise/listener-policy';
 import type { GitExecutionGate } from '../../main/enterprise/repository-policy';
+import type { EgressAuthority } from '../../main/enterprise/egress-policy';
+import type { CredentialCustodyAuthority } from '../../main/enterprise/credential-custody';
+import type { SusFactorScanPolicy } from '../../main/cue/cue-susfactor';
 import { formatJsonLogLine } from '../../shared/jsonLogLine';
 // The managed binding and the headless port: plain maestro-lib, no Electron,
 // the same modules `agent-spawner.ts` holds statically for every CLI verb.
@@ -723,6 +726,105 @@ export async function buildStandaloneCueGitExecutionGate(options: {
 	});
 }
 
+/**
+ * The egress authority a standalone Cue engine holds its outbound HTTP to
+ * (MCOMP-21-02): the `--notify-webhook` POSTs (`user-webhook`), the
+ * SusFactor token exchange and scorer (`vendor-telemetry`) and the Cue stats
+ * flush all leave through `fetchWithTimeout()`, which consults nothing until
+ * `setEgressAuthority()` installs an authority, and only the desktop's
+ * app-ready block did. Read fresh on every request over the same
+ * installation standing the listener authority reads
+ * (`readStandaloneCueCeilingStanding`) and judged with the desktop's rule
+ * (`managedEgressStanding` + `egressVerdict`). Standalone admits every
+ * request, unchanged. Managed, no endpoint operation delivers an egress
+ * ceiling (DESKTOP-LOCAL/1), so every request is refused `unavailable` by
+ * name before a socket opens: no body, token or credential leaves.
+ *
+ * Async because `egress-policy.ts` is loaded on demand.
+ */
+export async function buildStandaloneCueEgressAuthority(options: {
+	managedHost: StandaloneCueManagedHost | null;
+	/** The installation standing the binding is held to. Default: this process's own read. */
+	standing?: InstallationStandingSource;
+	now?: () => number;
+}): Promise<EgressAuthority> {
+	const { egressVerdict, managedEgressStanding } =
+		await import('../../main/enterprise/egress-policy');
+	const startedAt = new Date().toISOString();
+	const now = options.now ?? (() => Date.now());
+	return {
+		evaluateEgress(request) {
+			const { enrolled, policy } = readStandaloneCueCeilingStanding(
+				options.managedHost,
+				now,
+				startedAt,
+				options.standing
+			);
+			return egressVerdict(managedEgressStanding({ enrolled, policy, ceiling: null }), request);
+		},
+	};
+}
+
+/**
+ * The credential custody authority a standalone Cue engine reads its 0DIN
+ * token under (MCOMP-21-02): `holdCredentialCustody('cue.odinToken', ...)`
+ * answers allowed with no authority installed, and only the desktop installed
+ * one, so an enrolled machine's headless engine read `ODIN_API_TOKEN` from
+ * the environment and sent it. The desktop's own verdict
+ * (`headlessCredentialAuthority`) over the installation standing, read per
+ * hold: standalone keeps every custody, managed refuses the environment
+ * variable by name and SusFactor never reads the token.
+ */
+export async function buildStandaloneCueCredentialAuthority(options: {
+	managedHost: StandaloneCueManagedHost | null;
+	/** The installation standing the binding is held to. Default: this process's own read. */
+	standing?: InstallationStandingSource;
+	now?: () => number;
+}): Promise<CredentialCustodyAuthority> {
+	const { headlessCredentialAuthority } = await import('../../main/enterprise/credential-custody');
+	const startedAt = new Date().toISOString();
+	const now = options.now ?? (() => Date.now());
+	return headlessCredentialAuthority({
+		standing: () =>
+			readStandaloneCueCeilingStanding(options.managedHost, now, startedAt, options.standing)
+				.enrolled
+				? 'managed'
+				: 'standalone',
+	});
+}
+
+/**
+ * Why a managed standalone engine scans third-party input as mandatory: no
+ * endpoint operation delivers an enterprise detection requirement
+ * (CUE-DETECTION/1 in `Plans/integration-completion/contract-coverage.json`
+ * is proposed, not negotiated), so a managed host cannot know that scanning is
+ * optional and never takes the standalone fail-open path.
+ */
+export const STANDALONE_CUE_REQUIRED_SCAN_REASON =
+	'no detection requirement is delivered to this managed host, so scanning is mandatory';
+
+/**
+ * The SusFactor scan requirement a standalone Cue engine judges GitHub and
+ * webhook items under (MCOMP-21-02). Standalone: optional enrichment, fail
+ * open, unchanged. Managed (any binding state but `standalone`): required,
+ * so an item the scorer cannot clear (refused custody or egress, no token,
+ * an upstream failure, the toggle off) is held by name and never reaches an
+ * agent. Read per item over the installation standing.
+ */
+export function buildStandaloneCueSusFactorScanPolicy(options: {
+	managedHost: StandaloneCueManagedHost | null;
+	/** The installation standing the binding is held to. Default: this process's own read. */
+	standing?: InstallationStandingSource;
+	now?: () => number;
+}): SusFactorScanPolicy {
+	const startedAt = new Date().toISOString();
+	const now = options.now ?? (() => Date.now());
+	return () =>
+		readStandaloneCueCeilingStanding(options.managedHost, now, startedAt, options.standing).enrolled
+			? { requirement: 'required', reason: STANDALONE_CUE_REQUIRED_SCAN_REASON }
+			: { requirement: 'optional' };
+}
+
 export interface StandaloneCueEngineOptions {
 	onLog?: StandaloneCueLog;
 	/**
@@ -827,14 +929,24 @@ export async function createStandaloneCueEngine(
 		{ CueEngine: CueEngineCtor },
 		{ setListenerAuthority },
 		{ setGitExecutionGate },
+		{ setEgressAuthority },
+		{ setCredentialCustodyAuthority },
+		{ setSusFactorScanPolicy },
 		listeners,
 		gitGate,
+		egress,
+		custody,
 	] = await Promise.all([
 		import('../../main/cue/cue-engine'),
 		import('../../main/enterprise/listener-gate'),
 		import('../../main/utils/remote-git'),
+		import('../../main/utils/fetchWithTimeout'),
+		import('../../main/enterprise/credential-custody'),
+		import('../../main/cue/cue-susfactor'),
 		buildStandaloneCueListenerAuthority(standingOptions),
 		buildStandaloneCueGitExecutionGate(standingOptions),
+		buildStandaloneCueEgressAuthority(standingOptions),
+		buildStandaloneCueCredentialAuthority(standingOptions),
 	]);
 	// Installed before the engine exists, so the webhook receiver its first
 	// webhook subscription opens and the status server the command binds next
@@ -843,6 +955,13 @@ export async function createStandaloneCueEngine(
 	// the desktop's.
 	setListenerAuthority(listeners);
 	setGitExecutionGate(gitGate);
+	// Outbound integrations (MCOMP-21-02): every fetch of this process (notify
+	// webhook, SusFactor, Cue stats) is held at the egress chokepoint, the 0DIN
+	// token at the custody ceiling, and a managed engine scans third-party
+	// input as mandatory, never through the standalone fail-open path.
+	setEgressAuthority(egress);
+	setCredentialCustodyAuthority(custody);
+	setSusFactorScanPolicy(buildStandaloneCueSusFactorScanPolicy(standingOptions));
 	return new CueEngineCtor(buildStandaloneCueEngineDeps(options));
 }
 

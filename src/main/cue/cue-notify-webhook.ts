@@ -19,14 +19,23 @@
  * - The body is built from explicitly picked fields (`buildNotifyWebhookBody`):
  *   no prompt of an agent run, no event payload, no run output, no env.
  *
+ * - Held at the egress chokepoint as `user-webhook` (MCOMP-21-02): a URL the
+ *   person configured, so a managed host sends it only to a destination the
+ *   ceiling lists for that class. A refusal opens no socket (nothing of the
+ *   body or the credential leaves) and is reported by its managed code, never
+ *   as a network failure. Standalone, nothing is consulted.
+ *
  * No Electron imports.
  */
 
-import { fetchWithTimeout } from '../utils/fetchWithTimeout';
+import type { EgressClass } from '../enterprise/egress-policy';
+import { fetchWithTimeout, isEgressDeniedError } from '../utils/fetchWithTimeout';
 
 export const WEBHOOK_MAX_IN_FLIGHT = 4;
 export const WEBHOOK_MAX_QUEUED = 100;
 export const WEBHOOK_TIMEOUT_MS = 5_000;
+/** The egress class every notification names: a URL the person configured to be called. */
+export const NOTIFY_WEBHOOK_EGRESS_CLASS: EgressClass = 'user-webhook';
 
 /** What the standalone runner reports. Everything here ends up in the body. */
 export interface CueExternalNotification {
@@ -181,7 +190,8 @@ export function createCueNotifyWebhook(options: {
 						},
 						body: JSON.stringify(body),
 					},
-					timeoutMs
+					timeoutMs,
+					NOTIFY_WEBHOOK_EGRESS_CLASS
 				);
 			} catch (err) {
 				request = Promise.reject(err);
@@ -193,6 +203,12 @@ export function createCueNotifyWebhook(options: {
 						else problem(`HTTP ${response.status}`);
 					},
 					(err: unknown) => {
+						// A managed refusal names its code and the origin it held, never
+						// the path or query, and is not a transport failure.
+						if (isEgressDeniedError(err)) {
+							problem(`held by the managed egress ceiling: ${err.message}`);
+							return;
+						}
 						// Name the failure kind only: a fetch error message can quote the URL.
 						const name = err instanceof Error ? err.name : 'Error';
 						problem(

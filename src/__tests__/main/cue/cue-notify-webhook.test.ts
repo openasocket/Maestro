@@ -14,6 +14,11 @@ import {
 	WEBHOOK_MAX_QUEUED,
 	type CueExternalNotification,
 } from '../../../main/cue/cue-notify-webhook';
+import {
+	fetchWithTimeout,
+	setEgressAuthority,
+	type EgressAuthority,
+} from '../../../main/utils/fetchWithTimeout';
 
 const notification: CueExternalNotification = {
 	type: 'cue.notify',
@@ -219,5 +224,60 @@ describe('createCueNotifyWebhook', () => {
 		expect(done).toBe(false);
 		await vi.advanceTimersByTimeAsync(1);
 		expect(done).toBe(true);
+	});
+
+	/** The egress chokepoint (MCOMP-21-02): every notification is a `user-webhook` request. */
+	describe('managed egress (MCOMP-21-02)', () => {
+		afterEach(() => setEgressAuthority(null));
+
+		it('names the user-webhook egress class on every POST', async () => {
+			const fetchImpl = vi.fn(async () => new Response(null, { status: 204 }));
+			const webhook = createCueNotifyWebhook({
+				target: parseNotifyWebhookUrl(SECRET_URL),
+				onLog,
+				fetchImpl,
+			});
+			webhook.send(notification);
+			await webhook.flush(1000);
+			expect(fetchImpl.mock.calls[0]?.[3 as never]).toBe('user-webhook');
+		});
+
+		it('a refused destination opens no socket and is reported by its managed code, not as a network failure', async () => {
+			const network = vi.spyOn(globalThis, 'fetch');
+			const evaluateEgress = vi.fn<EgressAuthority['evaluateEgress']>((request) => ({
+				allowed: false,
+				code: 'destination-denied',
+				message: `the egress ceiling does not list https://hooks.example.com for ${request.class} requests`,
+				managed: {
+					policyRevision: 3,
+					class: request.class,
+					actor: 'operator',
+					origin: 'https://hooks.example.com',
+					outcome: 'destination-denied',
+				},
+			}));
+			setEgressAuthority({ evaluateEgress });
+			const webhook = createCueNotifyWebhook({
+				target: parseNotifyWebhookUrl(SECRET_URL),
+				onLog,
+				fetchImpl: fetchWithTimeout,
+			});
+			webhook.send(notification);
+			webhook.send(notification);
+			await webhook.flush(1000);
+			expect(network).not.toHaveBeenCalled();
+			expect(evaluateEgress).toHaveBeenCalledWith(
+				expect.objectContaining({ class: 'user-webhook' })
+			);
+			// One line for the burst, by code; no request-failed wording, no secret.
+			expect(onLog).toHaveBeenCalledTimes(1);
+			expect(logged()).toContain(
+				'held by the managed egress ceiling: [managed-destination-denied] the egress ceiling does not list https://hooks.example.com for user-webhook requests'
+			);
+			expect(logged()).not.toContain('request failed');
+			expect(logged()).not.toContain('s3cr3t-token');
+			expect(logged()).not.toContain('hook-pass');
+			network.mockRestore();
+		});
 	});
 });
