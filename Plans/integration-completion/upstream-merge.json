@@ -1442,6 +1442,35 @@
 			"state": "merge started, 97 files unmerged; resolution groups MCOMP-33-00R01..R40 open",
 			"updatedBy": "MCOMP-33-00"
 		},
-		"progress": {}
+		"progress": {
+			"MCOMP-33-00R01": {
+				"resolvedAt": "2026-11-09",
+				"resolvedBy": "Maestro-Claude",
+				"files": [
+					"docs/agent-guides/CLI-UI-PARITY.md",
+					"docs/agent-guides/CANONICAL-UTILITIES.md",
+					"CLAUDE.md"
+				],
+				"method": "Most of the 345 conflict lines were prettier table padding: both sides added rows to the Covered table and prettier re-padded every row. Each file was re-merged from its three index stages with table cells unpadded (git merge-file --diff3), the six real conflicts left were resolved by hand, and prettier re-padded the result at staging. Check: every line either side added against the base is present (tables compared without padding) and no line either side deleted survives, apart from the renumbered parity item and the combined host entry below.",
+				"hunks": {
+					"docs/agent-guides/CLI-UI-PARITY.md": [
+						"Covered table (the bulk of the conflict lines): padding only; the rows both sides added are all kept once.",
+						"Open gaps item 4: both sides added an item 4 (integration: pause and resume a managed run in the pane, MCOMP-29-03B; upstream: `cue pipeline` beside a headless host). Both kept, the integration item stays 4 and upstream becomes 5, followed by upstream new Federation: CLI first, desktop pending section and its table."
+					],
+					"docs/agent-guides/CANONICAL-UTILITIES.md": [
+						"Spawning group: both sides appended an entry after the same line; the integration entry (Qualifying an SSH remote as a managed endpoint) then upstream entry (Whether a prompt fits on the command line) kept.",
+						"groomContext and unusableCwdReason entries: the integration side edited only the groomContext entry (utility turn admitted at the sink, lineage, actor and dispatch ticket) and upstream only the cwd entry (unusableDirectoryReason(), the maestro-lib launch/cwd.ts re-export); each takes its one changed side.",
+						"Serving a runtime entry and the managed entries after it: the integration side added the listener hold and host managed standing text plus the 26 managed entries (admission, effects, lease gate, ceilings, repository gate); upstream changed only the cli-server.json clause to add `cueLockToken` (cueEngineLockOwnerToken(), isCueEngineLockOwnedBy()). The integration lines kept with the upstream clause applied to the host entry (asserted to be the one replacement upstream made)."
+					],
+					"CLAUDE.md": [
+						"Main process group: upstream new index line (Context and grouping on Sentry events) then the integration Sealing line with sealProtectionProblem().",
+						"Spawning group: the integration index line (Qualifying an SSH remote as a managed endpoint) then upstream line (Whether a prompt fits on the command line)."
+					]
+				},
+				"verification": "merge-tool stage refused no markers, prettier clean, 94 files left unmerged; node scripts/verify-docs-paths.mjs in the worktree: 1556 asserted paths, 464 index entries against 464 full entries, 0 findings.",
+				"semanticConflicts": "none",
+				"tool": ".maestro/playbooks/Working/mcomp-33-00r01/ (norm-merge.mjs, resolve.mjs, check.mjs)"
+			}
+		}
 	}
 }
