@@ -273,7 +273,7 @@ import {
 import { stopSessionCleanup } from './group-chat/group-chat-moderator';
 import { initializePrompts, getPrompt, savePrompt } from './prompt-manager';
 import { restoreManagedPromptPins } from './ipc/handlers/prompts';
-import { restoreManagedSyncPath } from './ipc/handlers/system';
+import { getInstallDir, restoreManagedSyncPath } from './ipc/handlers/system';
 import { restoreManagedRemoteAccess } from './ipc/handlers/web';
 import {
 	captureException,
@@ -1267,7 +1267,8 @@ app
 					const sync = restoreManagedSyncPath(
 						bootstrapStore,
 						app.getPath('userData'),
-						settingsPolicy.pins()
+						settingsPolicy.pins(),
+						getInstallDir(app)
 					);
 					for (const line of sync ? [...ended, sync] : ended) logger.info(line, 'Settings');
 				},
