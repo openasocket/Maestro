@@ -27,6 +27,8 @@ import { WatcherLeases } from '../../utils/watcher-leases';
 import {
 	callingLocalEffectActor,
 	holdDeleteEffect,
+	holdReplacementEffect,
+	replacedLocalPaths,
 	type LocalEffectActor,
 	type LocalEffectAuthority,
 } from '../../enterprise/local-effects-policy';
@@ -439,6 +441,9 @@ export function registerAutorunHandlers(
 	const localEffects = deps.localEffects ?? (() => null);
 	const holdDelete = (paths: readonly string[], actor: LocalEffectActor) =>
 		holdDeleteEffect(localEffects(), paths, actor, LOG_CONTEXT);
+	// A local write over an existing backup or working copy replaces it: held the same way, first.
+	const holdReplacement = (paths: readonly string[], actor: LocalEffectActor) =>
+		holdReplacementEffect(localEffects(), paths, actor, LOG_CONTEXT);
 
 	// List markdown files in a directory for Auto Run (with recursive subfolder support)
 	// Supports SSH remote execution via optional sshRemoteId parameter
@@ -1168,6 +1173,7 @@ export function registerAutorunHandlers(
 		createIpcHandler(
 			handlerOpts('createBackup'),
 			async (folderPath: string, filename: string, sshRemoteId?: string) => {
+				const actor = callingLocalEffectActor();
 				// Reject obvious traversal attempts
 				if (filename.includes('..')) {
 					throw new Error('Invalid filename');
@@ -1228,7 +1234,8 @@ export function registerAutorunHandlers(
 					throw new Error('Source file not found');
 				}
 
-				// Copy the file to backup
+				// Copy the file to backup (a backup already there is replaced: held first)
+				await holdReplacement([backupPath], actor);
 				await fs.copyFile(sourcePath, backupPath);
 
 				logger.info(`Created Auto Run backup: ${backupFilename}`, LOG_CONTEXT);
@@ -1318,8 +1325,10 @@ export function registerAutorunHandlers(
 					throw new Error('Backup file not found');
 				}
 
-				// A restore consumes its backup: held before the copy so a refusal changes nothing.
-				await holdDelete([backupPath], actor);
+				// A restore consumes its backup and replaces the document: one hold for
+				// both, before the copy, so a refusal changes nothing.
+				const replaced = localEffects() ? await replacedLocalPaths([targetPath]) : [];
+				await holdDelete([backupPath, ...replaced], actor);
 
 				// Copy backup back to original
 				await fs.copyFile(backupPath, targetPath);
@@ -1341,6 +1350,7 @@ export function registerAutorunHandlers(
 		createIpcHandler(
 			handlerOpts('createWorkingCopy'),
 			async (folderPath: string, filename: string, loopNumber: number, sshRemoteId?: string) => {
+				const actor = callingLocalEffectActor();
 				// Reject obvious traversal attempts
 				if (filename.includes('..')) {
 					throw new Error('Invalid filename');
@@ -1422,18 +1432,22 @@ export function registerAutorunHandlers(
 					throw new Error('Source file not found');
 				}
 
-				// Create Runs directory (with subdirectory if needed)
 				const runsDir = subDir
 					? path.join(folderPath, 'runs', subDir)
 					: path.join(folderPath, 'runs');
-				await fs.mkdir(runsDir, { recursive: true });
-
 				const workingCopyPath = path.join(runsDir, workingCopyName);
 
-				// Validate working copy path is within folder
+				// Validate working copy path is within folder before anything is created
 				if (!validatePathWithinFolder(workingCopyPath, folderPath)) {
 					throw new Error('Invalid working copy path');
 				}
+
+				// A working copy already at that name is replaced: held before the
+				// Runs directory is created, so a refusal leaves no folder behind.
+				await holdReplacement([workingCopyPath], actor);
+
+				// Create Runs directory (with subdirectory if needed)
+				await fs.mkdir(runsDir, { recursive: true });
 
 				// Copy the source to working copy
 				await fs.copyFile(sourcePath, workingCopyPath);

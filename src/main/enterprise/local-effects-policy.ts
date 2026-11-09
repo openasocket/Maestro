@@ -12,8 +12,10 @@
  * refuses every effect `unavailable` by name.
  */
 
+import * as fs from 'fs';
 import type { ManagedPolicyStatus } from '../../shared/maestro-lib/managed/host-adapter';
 import { logger } from '../utils/logger';
+import { realpathThroughAncestor } from '../utils/real-path-containment';
 import { getActingTransport, transportSpawnActor } from '../web-server/auth/transport-actor';
 import {
 	browserActorLabel,
@@ -410,4 +412,64 @@ export async function holdDeleteEffect(
 		{ code: decision.code, receipt: decision.managed }
 	);
 	throw new LocalEffectRefusedError(decision);
+}
+
+/** Error codes that mean nothing is at a path, so a write there replaces nothing. */
+const NOTHING_THERE = new Set(['ENOENT', 'ENOTDIR']);
+
+/**
+ * The paths among `targetPaths` a write would REPLACE (MCOMP-19-03): an entry
+ * already there (a file, a folder or a symlink itself, by `lstat`), each named
+ * by where it really lands once symlinks resolve. `source` is the path a move
+ * starts from: a target that is the same entry (a case-only rename) replaces
+ * nothing. A path that cannot be examined is counted as replaced, so an
+ * unreadable target is held rather than overwritten unheld. Reads only.
+ */
+export async function replacedLocalPaths(
+	targetPaths: readonly string[],
+	options: { source?: string } = {}
+): Promise<string[]> {
+	const lstat = async (p: string): Promise<fs.BigIntStats | null | 'unknown'> => {
+		try {
+			return await fs.promises.lstat(p, { bigint: true });
+		} catch (error) {
+			return NOTHING_THERE.has((error as NodeJS.ErrnoException).code ?? '') ? null : 'unknown';
+		}
+	};
+	const source = options.source === undefined ? null : await lstat(options.source);
+	const replaced: string[] = [];
+	for (const target of targetPaths) {
+		const existing = await lstat(target);
+		if (existing === null) continue;
+		if (
+			existing !== 'unknown' &&
+			source !== null &&
+			source !== 'unknown' &&
+			source.dev === existing.dev &&
+			source.ino === existing.ino
+		)
+			continue;
+		replaced.push(realpathThroughAncestor(target));
+	}
+	return replaced;
+}
+
+/**
+ * Hold a local write that would replace what is already there (an import with
+ * overwrite, a rename onto a taken name, a download over a chosen file, an Auto
+ * Run backup or working copy over an existing one) as the destructive `delete`
+ * of what it replaces, ONCE with its count, before anything is created, copied
+ * or moved. A write onto a free name holds nothing: creating is not deleting.
+ * A refusal is `holdDeleteEffect`'s: logged with its receipt, thrown by code.
+ */
+export async function holdReplacementEffect(
+	authority: LocalEffectAuthority | null | undefined,
+	targetPaths: readonly string[],
+	actor: LocalEffectActor,
+	logContext: string,
+	options: { source?: string } = {}
+): Promise<void> {
+	if (!authority) return;
+	const replaced = await replacedLocalPaths(targetPaths, options);
+	if (replaced.length > 0) await holdDeleteEffect(authority, replaced, actor, logContext);
 }

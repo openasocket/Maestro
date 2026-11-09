@@ -66,6 +66,7 @@ import { getHostDirectoryInfo } from '../../utils/host-directory';
 import {
 	callingLocalEffectActor,
 	holdDeleteEffect,
+	holdReplacementEffect,
 	type LocalEffectActor,
 	type LocalEffectAuthority,
 } from '../../enterprise/local-effects-policy';
@@ -551,9 +552,14 @@ export function registerFilesystemHandlers(deps: FilesystemHandlerDependencies =
 	ipcMain.handle(
 		'fs:downloadRemoteFile',
 		async (_, remotePath: string, sshRemoteId: string, localDestPath?: string) => {
+			const actor = callingLocalEffectActor();
 			const sshConfig = getSshRemoteById(sshRemoteId);
 			if (!sshConfig) {
 				throw new Error(`SSH remote not found: ${sshRemoteId}`);
+			}
+			// A download over a file the user chose replaces it: held before the remote read.
+			if (localDestPath) {
+				await holdReplacementEffect(localEffects(), [localDestPath], actor, 'FS');
 			}
 
 			const result = await readBinaryFileRemoteAsBase64(remotePath, sshConfig);
@@ -870,6 +876,13 @@ export function registerFilesystemHandlers(deps: FilesystemHandlerDependencies =
 
 	// Rename a file or folder (supports SSH remote)
 	ipcMain.handle('fs:rename', async (_, oldPath: string, newPath: string, sshRemoteId?: string) => {
+		// A local rename onto a taken name replaces it; held outside the try so a
+		// refusal is not wrapped as a failed rename (a remote write is held by remote-fs).
+		if (!sshRemoteId) {
+			await holdReplacementEffect(localEffects(), [newPath], callingLocalEffectActor(), 'FS', {
+				source: oldPath,
+			});
+		}
 		try {
 			// SSH remote: dispatch to remote fs operations
 			if (sshRemoteId) {
@@ -905,6 +918,11 @@ export function registerFilesystemHandlers(deps: FilesystemHandlerDependencies =
 			destPath: string,
 			options?: { overwrite?: boolean; sshRemoteId?: string }
 		) => {
+			// An overwriting local import replaces what is at the destination: held
+			// before the copy, outside the try so a refusal is not wrapped as a failed copy.
+			if (options?.overwrite && !options.sshRemoteId) {
+				await holdReplacementEffect(localEffects(), [destPath], callingLocalEffectActor(), 'FS');
+			}
 			try {
 				const overwrite = options?.overwrite ?? false;
 				const sshRemoteId = options?.sshRemoteId;
