@@ -232,6 +232,17 @@ export function buildAgentArgs(
 	// empty string (e.g. a Cue template variable that resolved to nothing).
 	const inBatchMode = Boolean(options.prompt) || options.forceBatchMode === true;
 
+	// Standard mode, when it is asked for by name or held to a ceiling, runs a
+	// batch turn with the provider's qualified bounded combination
+	// (`standardModeArgs`) instead of the full-access flags its batch args
+	// carry. A legacy launch that names no mode keeps its batch args as they
+	// were: the UI never offers standard to a provider without the capability.
+	const isStandard = !isFullAccess && !isReadOnly;
+	const standardArgs =
+		isStandard && inBatchMode && (options.permissionMode === 'standard' || options.managedCeiling)
+			? agent.standardModeArgs
+			: undefined;
+
 	if (agent.batchModePrefix && inBatchMode) {
 		finalArgs = [...agent.batchModePrefix, ...finalArgs];
 	}
@@ -246,11 +257,25 @@ export function buildAgentArgs(
 			// remove bypass defaults we introduce here; caller args stay intact
 			// so the launch guard can refuse an explicit widening request.
 			const batchArgs =
-				options.managedCeiling && !isFullAccess
+				(options.managedCeiling && !isFullAccess) || standardArgs
 					? filterYoloArgs(agent.batchModeArgs, {
 							yoloModeArgs: agent.fullAccessArgs ?? agent.yoloModeArgs,
 						})
 					: agent.batchModeArgs;
+			// Under a ceiling, a provider whose unattended turn needs a
+			// full-access flag and has no qualified bounded combination has no
+			// standard mode at all: dropping the flag would launch a turn that
+			// hangs on, or dies at, its first prompt. Refuse it by name.
+			if (options.managedCeiling && isStandard && !standardArgs) {
+				const removed = agent.batchModeArgs.filter((arg) => !batchArgs.includes(arg));
+				if (removed.length > 0) {
+					throw new ManagedPermissionModeError(
+						`${agent.id} has no qualified bounded standard mode: its unattended turn needs ${removed.join(' ')}, which is full access, so standard is unavailable for it`,
+						'standard',
+						options.managedCeiling
+					);
+				}
+			}
 			finalArgs = [...finalArgs, ...batchArgs];
 		}
 	}
@@ -287,8 +312,10 @@ export function buildAgentArgs(
 				{ agentId: agent.id }
 			);
 		}
+	} else if (standardArgs) {
+		finalArgs = [...finalArgs, ...standardArgs];
 	}
-	// standard mode: no bypass args, no read-only args - agent uses its default permission model
+	// Otherwise standard mode adds nothing: the agent uses its default permission model
 
 	if (options.modelId && agent.modelArgs) {
 		finalArgs = [...finalArgs, ...agent.modelArgs(options.modelId)];

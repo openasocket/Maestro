@@ -622,6 +622,7 @@ describe('the launch plan under management', () => {
 		expect(args).toContain('--skip-git-repo-check');
 		expect(args).not.toContain('--dangerously-bypass-approvals-and-sandbox');
 		expect(args).not.toContain('read-only');
+		expect(args.join(' ')).toContain('--sandbox workspace-write');
 		const result = buildAgentLaunchPlan(
 			input({ agent, args, permissionMode: 'standard', managed: { route } })
 		);
@@ -637,9 +638,19 @@ describe('the launch plan under management', () => {
 		expect(
 			buildAgentLaunchPlan(input({ agent, args: explicit, managed: { route } }))
 		).toMatchObject({ ok: false, reason: 'managed-route-refused' });
-		expect(
-			buildAgentArgs(agent, { baseArgs: [], forceBatchMode: true, permissionMode: 'standard' })
-		).toContain('--dangerously-bypass-approvals-and-sandbox');
+		// Standard asked for by name runs the qualified bounded combination
+		// unmanaged too; only a legacy launch that names no mode keeps the
+		// unattended full-access default.
+		const unmanaged = buildAgentArgs(agent, {
+			baseArgs: [],
+			forceBatchMode: true,
+			permissionMode: 'standard',
+		});
+		expect(unmanaged).not.toContain('--dangerously-bypass-approvals-and-sandbox');
+		expect(unmanaged.join(' ')).toContain('--sandbox workspace-write');
+		expect(buildAgentArgs(agent, { baseArgs: [], forceBatchMode: true })).toContain(
+			'--dangerously-bypass-approvals-and-sandbox'
+		);
 	});
 
 	it.each(

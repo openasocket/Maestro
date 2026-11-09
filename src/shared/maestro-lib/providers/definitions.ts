@@ -99,6 +99,20 @@ export interface AgentConfig extends BaseAgentConfig {
 	jsonOutputArgs?: string[]; // Args for JSON output format (e.g., ['--format', 'json'])
 	resumeArgs?: (sessionId: string) => string[]; // Function to build resume args
 	readOnlyArgs?: string[]; // Args for read-only/plan mode (e.g., ['--agent', 'plan'])
+	/**
+	 * The bounded combination a batch turn runs with in STANDARD mode, in place
+	 * of the full-access flags `batchModeArgs` carries for an unattended run.
+	 * Only set where the combination was checked against the exact version in
+	 * `standardModeVerifiedVersion`: the flags exist with these values, and a
+	 * headless turn that meets a tool they do not cover resolves it by policy
+	 * (denied, the turn continues) instead of hanging on a prompt or dying.
+	 * A provider without one has NO qualified standard mode: a managed ceiling
+	 * refuses a standard batch turn for it by name (`buildAgentArgs`), and the
+	 * UI keeps standard unavailable (`supportsStandardPermissionMode`).
+	 */
+	standardModeArgs?: string[];
+	/** The exact provider version `standardModeArgs` was verified against. */
+	standardModeVerifiedVersion?: string;
 	noToolsArgs?: string[]; // Args that disable ALL tool use, forcing a pure text response (e.g., ['--tools', ''] for Claude). Used by tab naming so a task-like first message produces a name instead of triggering a real agentic investigation.
 	modelArgs?: (modelId: string) => string[]; // Function to build model selection args (e.g., ['--model', modelId])
 	workingDirArgs?: (dir: string) => string[]; // Function to build working directory args (e.g., ['-C', dir])
@@ -292,6 +306,13 @@ export const AGENT_DEFINITIONS: AgentDefinition[] = [
 		// non-interactively - `exec` has no approval prompt to bypass).
 		readOnlyArgs: ['--sandbox', 'read-only', '--skip-git-repo-check'],
 		readOnlyCliEnforced: true, // CLI enforces read-only via --sandbox read-only
+		// Standard: the OS sandbox bounds writes to the workspace (and the
+		// writable --add-dir roots) with no network; `exec` has no approval
+		// prompt, so a command outside the sandbox fails back to the model.
+		// Verified on codex-cli 0.167.0 (`codex exec --help`: --sandbox takes
+		// read-only | workspace-write | danger-full-access).
+		standardModeArgs: ['--sandbox', 'workspace-write'],
+		standardModeVerifiedVersion: '0.167.0',
 		// Codex's `--add-dir` is narrower than Claude's: it adds a WRITABLE root to
 		// the sandbox ("Additional directories that should be writable alongside the
 		// primary workspace"). So only write grants map to it. Read-only grants are
@@ -371,6 +392,14 @@ export const AGENT_DEFINITIONS: AgentDefinition[] = [
 		// (tab naming, context grooming) to prevent approval prompts from hanging batch mode.
 		readOnlyArgs: ['-y'],
 		readOnlyCliEnforced: false, // No CLI-level read-only enforcement; prompt-only
+		// Standard: auto-approve edit tools only. Every other tool that would ask
+		// is DENIED in a non-interactive run (the policy engine turns ask_user
+		// into deny when the session is not interactive), so the turn continues
+		// instead of hanging. Verified on gemini-cli 0.67.0 (`--approval-mode`
+		// choices default | auto_edit | yolo | plan, and the bundled policy
+		// engine's non-interactive deny).
+		standardModeArgs: ['--approval-mode', 'auto_edit'],
+		standardModeVerifiedVersion: '0.67.0',
 		yoloModeArgs: ['-y'],
 		workingDirArgs: (dir: string) => ['--include-directories', dir],
 		imageArgs: undefined,
@@ -900,6 +929,13 @@ export const AGENT_DEFINITIONS: AgentDefinition[] = [
 		// turn that always survives (verified live on grok 1.0.5).
 		readOnlyArgs: ['--permission-mode', 'plan', '--deny', 'Bash(*)'],
 		readOnlyCliEnforced: true, // CLI enforces read-only via --permission-mode plan + --deny
+		// Standard: edits are accepted, shell is denied by RULE so it never
+		// prompts (a cancelled headless prompt kills the turn, see above).
+		// Exclusive with readOnlyArgs, so --permission-mode is never repeated.
+		// Verified on grok 1.0.77 (`--permission-mode` values include
+		// acceptEdits; `--deny <RULE>`).
+		standardModeArgs: ['--permission-mode', 'acceptEdits', '--deny', 'Bash(*)'],
+		standardModeVerifiedVersion: '1.0.77',
 		// No noToolsArgs (tab naming falls back to the same graceful path as
 		// Codex/Copilot: batch mode + readOnlyArgs). Verified live on v0.2.93:
 		// grok has no reliable "disable ALL tools" switch. `--tools ""` is
