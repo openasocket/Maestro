@@ -6,15 +6,15 @@
 	"agreementDigest": null,
 	"enforceabilityDigest": null,
 	"documentDigestRule": "sha256 of the raw bytes of each named Mega-Maestro design document; null if none",
-	"repositoryRevision": "0b91ebd226f194b4b0804eb01508979189a385dd",
+	"repositoryRevision": "96a02c74814d8387f34b77aa9ce13cd78fbbd918",
 	"repository": {
 		"branch": "feature/mega-maestro-v1.1.0-rc",
 		"baseRevision": "6400a6da0cfbae97bd90c4b361eea163fc3a1223",
-		"headCommittedAt": "2026-11-09T13:07:34-05:00",
+		"headCommittedAt": "2026-11-09T13:11:07-05:00",
 		"includedTreeDirty": false,
 		"dirtyIncludedFiles": 0
 	},
-	"sourceTreeDigest": "d851734f054224da40a6b90d8d6404c50d26b755c18e49b1b2b6f7f36b1889da",
+	"sourceTreeDigest": "d4015de538dc52b145b1267050ef94875fbcb4332d421a96e4fc115e6ffda562",
 	"sourceTree": {
 		"rules": {
 			"id": "maestro-implementation-tree/1",
@@ -45,7 +45,7 @@
 			"managedContract": "maestro-managed/1",
 			"appVersion": "1.1.1-RC",
 			"status": "ready",
-			"sourceRevision": "a65506424781d4930bd2993d1eff7bb3ee7a6a4f",
+			"sourceRevision": "e72a91a039bc1cb0b477fdc927f5a4182e68a6e0",
 			"sourceDirty": false,
 			"inputSha256": "594b78b81e3b2e3f32df92b6654661e28ae4403a3ef73b177a88c1a77259bc7a",
 			"entry": {
@@ -63,12 +63,12 @@
 		"pinCommitted": true,
 		"artifactId": "MAESTRO-M0-RUNTIME",
 		"archive": {
-			"file": "dist/mega-maestro-runtime/0.37.0/d30187bed69af949f901aed091f5b669088994027649e14f858caa2ab82ed8aa/runtime.tgz",
-			"sha256": "d30187bed69af949f901aed091f5b669088994027649e14f858caa2ab82ed8aa",
-			"sha512": "a8cfb6fcbeefe0f10af0e7b313c39f94f779df1dccdd24060b33a73e93441e4c40d24a804c7a3b84045a15b23d05e72da3ff2b20ebea00e89885a6da0990a006",
-			"bytes": 2796773
+			"file": "dist/mega-maestro-runtime/0.37.0/137b8b16fff351a8e428bd7bb8243279fee91e5839536a1ccdd39ea34d909e55/runtime.tgz",
+			"sha256": "137b8b16fff351a8e428bd7bb8243279fee91e5839536a1ccdd39ea34d909e55",
+			"sha512": "4bd400afecfb836f6085f6e6719b0f617309c55608f405186e2b29e440a8de13ee1e6fa63214e5b3a059d56a2d8791f6bf1eb8fc69bb65aeb2f7d9767116026a",
+			"bytes": 2796791
 		},
-		"payloadDigest": "8dcf522461aec7b87f11aab59f9e7c808aa4d26d019121dc27de95c3804abd0b",
+		"payloadDigest": "a7dbfada1aeb1f37ef601d402bd1ff8bf8ed0d4f07d0ac1d7c1eb67a1828a374",
 		"versions": {
 			"app": "1.1.1-RC",
 			"library": "0.37.0",
@@ -76,12 +76,12 @@
 			"endpointProtocol": 1
 		},
 		"implementation": {
-			"digest": "d851734f054224da40a6b90d8d6404c50d26b755c18e49b1b2b6f7f36b1889da",
-			"commit": "a65506424781d4930bd2993d1eff7bb3ee7a6a4f",
+			"digest": "d4015de538dc52b145b1267050ef94875fbcb4332d421a96e4fc115e6ffda562",
+			"commit": "e72a91a039bc1cb0b477fdc927f5a4182e68a6e0",
 			"current": true
 		},
 		"library": {
-			"sourceRevision": "a65506424781d4930bd2993d1eff7bb3ee7a6a4f",
+			"sourceRevision": "e72a91a039bc1cb0b477fdc927f5a4182e68a6e0",
 			"inputSha256": "594b78b81e3b2e3f32df92b6654661e28ae4403a3ef73b177a88c1a77259bc7a",
 			"inputFiles": 353,
 			"entrySha256": "0da112ad1128d9342edc41317a33017ec9e8bed0cadf47d56a943ce4fb3445c2"
@@ -166,7 +166,7 @@
 			"step": "build the library",
 			"command": "npm run build:maestro-lib",
 			"exit": 0,
-			"result": "maestro-lib 0.37.0 from a65506424781d4930bd2993d1eff7bb3ee7a6a4f (ready against HEAD)"
+			"result": "maestro-lib 0.37.0 from e72a91a039bc1cb0b477fdc927f5a4182e68a6e0 (ready against HEAD)"
 		},
 		{
 			"step": "pair check",
