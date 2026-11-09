@@ -2566,6 +2566,36 @@
 				},
 				"typeCheckNote": "Each config run by hand with node node_modules/typescript/bin/tsc -p <config> --noEmit in the worktree. All 35 / 45 / 42 errors the 00C second pass left were the missing dependencies, as 00C classified them: no merge defect surfaced, so no source change and no continuation.",
 				"sourceChanges": []
+			},
+			"MCOMP-33-00E": {
+				"completedAt": "2026-11-09",
+				"completedBy": "Maestro-Claude",
+				"worktreeCommit": "347654584",
+				"worktreeParent": "f5367a7f7",
+				"settled": {
+					"00R09": {
+						"change": "restoreManagedSyncPath(bootstrapStore, defaultPath, policy, installDir) refuses a pinned folder inside the install directory (isInsideInstallDir, the check sync:setCustomPath runs) and keeps the current folder; getInstallDir exported and passed from src/main/index.ts.",
+						"files": [
+							"src/main/ipc/handlers/system.ts",
+							"src/main/index.ts",
+							"src/__tests__/main/ipc/handlers/system.managed.test.ts"
+						],
+						"test": "system.managed.test.ts \"keeps the folder under a pin inside the install directory, which an update removes\"; fails with the guard disabled (Working/mcomp-33-00e/mutate.mjs: 1 failed / 10 passed), passes with it (11/11).",
+						"alsoFixed": "The suite app double answered /data for getPath(exe), so upstream install-dir check read / as the install directory and refused the standalone move case (failing on f5367a7f7 before this change); the double now answers the bundle executable path."
+					}
+				},
+				"typeCheck": {
+					"tsconfig.main.json": {
+						"exit": 0,
+						"errors": 0
+					}
+				},
+				"continuations": {
+					"MCOMP-33-00F": "00R12/00R15 bind the native launch fields into buildSpawnRequestSnapshot and lift the two fail-closed refusals only with digest cases",
+					"MCOMP-33-00G": "00R23 queue release start (pianola-queue-routing, WebServer.startQueueHandoffFromMain) forwards the actor",
+					"MCOMP-33-00H": "00R27 Pianola memory backfill (memory-transport.ts execFileNoThrow) is admitted"
+				},
+				"reason": "The limit is 1-3 authored files; carry 1 used three, so carries 2-4 each got one bounded continuation ahead of MCOMP-33-00S, in order."
 			}
 		}
 	}
