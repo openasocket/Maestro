@@ -1683,6 +1683,40 @@
 				],
 				"notes": "No guard dropped; no hunk took one whole side.",
 				"unmergedAfter": 74
+			},
+			"MCOMP-33-00R12": {
+				"resolvedAt": "2026-11-09",
+				"resolvedBy": "Maestro-Claude",
+				"files": [
+					"src/main/process-manager/ProcessManager.ts",
+					"src/main/process-manager/spawners/ChildProcessSpawner.ts",
+					"src/__tests__/main/process-manager/utils/envBuilder.test.ts"
+				],
+				"method": "Nine hunks (3 + 2 + 4) resolved by a shape-asserting script (Working/mcomp-33-00r12/resolve.mjs, both sides read in full, hunks back-to-front); staged through merge-tool.mjs stage (prettier exit 0 unchanged, 71 unmerged left). TypeScript transpile: 0 syntax diagnostics in all three. Every export of HEAD and MERGE_HEAD present in each result. git diff HEAD: ProcessManager +157 -10, ChildProcessSpawner +179 -59 (upstream changes outside the hunks), envBuilder.test +5 -0; git diff MERGE_HEAD: ChildProcessSpawner +139 -1 (the single-name startTurn import, replaced by the combined import). Seam counts at least HEAD's: withLease 3/3, admitSpawn 4/4, spawnAdmitted 1/1, spawnAuthority effects 2/2, callerCredentials.set 1/1, managedChildRefusal 3/3. The ProcessManager, ChildProcessSpawner and envBuilder suites cannot load yet: they reach src/shared/maestro-lib/launch/env.ts and agent-args.ts, still unmerged (00R21).",
+				"hunks": {
+					"src/main/process-manager/ProcessManager.ts": [
+						"OpenCode server spawner construction: upstream's fallback this.fallbackToCli(config) (forgets the session's harness control before the CLI fallback) plus HEAD's live effect-authority option { effects: () => this.spawnAuthority()?.effects ?? null }.",
+						"Codex app-server spawner construction: upstream's fallbackToCli plus HEAD's options object with both clientVersion and the live effects authority.",
+						"Spawn routing at the sink: upstream's native harness routing (Hermes API, Claude SDK, Copilot SDK, Antigravity SDK, ACP, RPC, else child) and the Codex app-server / PTY / child routes, now run inside HEAD's this.withLease(config, lease, ...) on HEAD's stamped configToSpawn (handshake, caller credential, steering token, run admission) instead of upstream's configWithCoworkingSession; on success upstream's registerHarnessControl(config) runs first, then HEAD's steering record and caller-credential binding, then emitSpawn. Added ahead of it: a managed lease never reaches harnessControlMode 'native' (released spawn-failed, agent-error permission_denied, managed unavailable/capability-unsupported, nothing started), because buildSpawnRequestSnapshot does not bind the native launch arguments."
+					],
+					"src/main/process-manager/spawners/ChildProcessSpawner.ts": [
+						"Imports: HEAD's start-turn import (DispatchRefusedError, startTurn, DispatchAdmission) replaces upstream's single-name startTurn import; upstream's termination import (INTERACTIVE_STOP_GRACE_MS, stopProcess), agent-process supervisor, ParsedEvent and headless timeouts follow; then HEAD's managed imports (dispatchSnapshotDigest, DispatchAttribution, ManagedDenialCode, providerRouteSupport, ManagedRoute, AgentError) and HEAD's managedChildRefusal() verbatim.",
+						"spawn() catch: upstream had nothing; HEAD's DispatchRefusedError branch (refuseManaged, no process, nothing written) kept ahead of the generic failure report."
+					],
+					"src/__tests__/main/process-manager/utils/envBuilder.test.ts": [
+						"Saved-key list: both MANAGED_DELEGATION_ENV_VAR (HEAD) and CALLER_RUN_PROOF_FILE_ENV_VAR (upstream).",
+						"beforeEach inherited values: both the stale delegation record and the launcher proof path set.",
+						"Agent-spawn strip case: both expected undefined.",
+						"PTY terminal strip case: both expected undefined."
+					]
+				},
+				"semanticConflictsForC": [
+					"Native harness routes are refused under a managed lease (fail closed, added in this resolution). To lift it, buildSpawnRequestSnapshot must bind the native launch fields that change what runs (nativeAcpArgs, nativeRpcProtocol, nativeRpcArgs, appendSystemPrompt, permissionMode, harnessControlMode, modelId, effort, sessionAdditionalDirectories) and the native spawners (AcpServerSpawner, RpcServerSpawner, HermesApiSpawner, ClaudeSdkSpawner, CopilotSdkSpawner, AntigravitySdkSpawner) must take the live effects authority and a managedChildRefusal-equivalent route check (providerRouteSupport has no native-transport rows).",
+					"upstream's fallbackToCli now feeds AcpServerSpawner, RpcServerSpawner and the SDK spawners too; their CLI fallback runs inside the same withLease call, so a lease bound by a fallback child is the lease of the native request; 00C should confirm that remains true once native routes are admitted.",
+					"OpencodeServerSpawner and CodexAppServerSpawner constructors keep the integration options parameter (effects) beside upstream fallbackToCli; their files resolve in 00R13, which must keep the options parameter."
+				],
+				"notes": "No guard dropped; no hunk took one whole side.",
+				"unmergedAfter": 71
 			}
 		}
 	}
