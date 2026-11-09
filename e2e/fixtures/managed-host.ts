@@ -20,7 +20,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import type { Locator, Page } from '@playwright/test';
+import { _electron as electron, type Locator, type Page } from '@playwright/test';
 import { test as base, expect } from './electron-app';
 
 export type ManagedMode = 'fixture' | 'endpoint';
@@ -350,4 +350,24 @@ export async function dismissErrorDialog(page: Page) {
 		await page.keyboard.press('Escape');
 		await expect(dialog).toBeHidden();
 	}
+}
+
+/** Launch the built app again over the same data directory, as the fixture launches it. */
+export async function relaunch(appPath: string, env: Record<string, string>, dataDir: string) {
+	const app = await electron.launch({
+		args: [appPath],
+		env: {
+			...process.env,
+			MAESTRO_DEMO_DIR: dataDir,
+			MAESTRO_DATA_DIR: dataDir,
+			ELECTRON_DISABLE_GPU: '1',
+			NODE_ENV: 'test',
+			MAESTRO_E2E_TEST: 'true',
+			...env,
+		} as Record<string, string>,
+		timeout: 30_000,
+	});
+	const page = await app.firstWindow();
+	await page.waitForLoadState('domcontentloaded');
+	return { app, page };
 }

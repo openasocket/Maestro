@@ -83,7 +83,11 @@ type RefreshAnswer = Awaited<ReturnType<CommandServiceDeps['policy']['refresh']>
 /** A doubled, mutable standing over a real local authority; the ledger in memory unless a file is named. */
 function harness(
 	over: Partial<ManagedStandingInput> = {},
-	opts: { file?: string; prompt?: CommandServiceDeps['prompt'] } = {}
+	opts: {
+		file?: string;
+		prompt?: CommandServiceDeps['prompt'];
+		cooperativePause?: boolean;
+	} = {}
 ) {
 	const state: ManagedStandingInput = { ...REGISTERED_STANDING, ...over };
 	const standing = () => registeredStatus(state);
@@ -523,5 +527,100 @@ describe('the desktop command service', () => {
 			detail: expect.stringContaining(REVOKED),
 		});
 		expect(h.service.ledger.list()).toHaveLength(recorded);
+	});
+});
+
+/** A typed run command of `kind` on run-1, under its own id, nonce and key. */
+const onRun1 = (id: string, kind: 'pause-run' | 'resume-run' | 'cancel-run') =>
+	another(id, {
+		action: { kind },
+		preconditions: { ...PRECONDITIONS, requiredCapability: `command-${kind.replace('-', '_')}` },
+	});
+
+describe('command journeys over the durable ledger (MCOMP-29-04)', () => {
+	it('offline, pause, duplicate, foreign actor, boundary, resume, refresh, then a restart with a pause in flight', async () => {
+		const file = path.join(tempDir(), MANAGED_COMMAND_LEDGER_FILE_NAME);
+		const first = harness({}, { file, cooperativePause: true });
+		expect(await first.service.load()).toMatchObject({ ok: true, commands: 0 });
+		const control = first.service.runControl!;
+		const run = control.track('run-1');
+
+		// Offline: a new command finds no authority and is not recorded; the endpoint redelivers it.
+		const OFFLINE = 'The endpoint socket is unreachable.';
+		Object.assign(first.state, { authority: 'none', reason: OFFLINE });
+		expect(await receive(first, onRun1('p1', 'pause-run'))).toEqual({
+			status: 'unavailable',
+			commandId: 'p1',
+			detail: OFFLINE,
+		});
+		expect(first.service.ledger.get('p1')).toBeNull();
+		expect(control.state('run-1')).toBe('running');
+
+		// Back online, the same delivery executes once, labeled cooperative.
+		Object.assign(first.state, REGISTERED_STANDING);
+		expect(await receive(first, onRun1('p1', 'pause-run'))).toMatchObject({
+			status: 'accepted',
+			duplicate: false,
+			facts: { runId: 'run-1', osSuspension: false },
+		});
+		expect(await receive(first, onRun1('p1', 'pause-run'))).toMatchObject({ duplicate: true });
+
+		// The run belongs to this actor and process: another actor or epoch cannot resume it.
+		const foreign = onRun1('r0', 'resume-run');
+		await expectDenied(
+			first,
+			{ ...foreign, recipient: { ...foreign.recipient, actorId: 'actor-2' } },
+			'unauthenticated'
+		);
+		await expectDenied(
+			first,
+			{ ...foreign, recipient: { ...foreign.recipient, processEpoch: 'epoch-0' } },
+			'stale-run',
+			'another process epoch'
+		);
+		expect(first.service.ledger.get('r0')).toBeNull();
+
+		// The task in flight finishes; the run parks at its next boundary and the pause completes.
+		let verdict: string | null = null;
+		const parked = run.atBoundary().then((v) => (verdict = v));
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(verdict).toBeNull();
+		expect(first.service.ledger.get('p1')).toMatchObject({ state: 'completed' });
+		expect(await receive(first, onRun1('r1', 'resume-run'))).toMatchObject({
+			status: 'completed',
+		});
+		await parked;
+		expect(verdict).toBe('continue');
+
+		expect(
+			await receive(first, onRuntime('f1', { kind: 'refresh-policy', desiredRevision: 3 }))
+		).toMatchObject({ status: 'completed' });
+
+		// A second pause is still waiting for its boundary when the process goes away.
+		expect(await receive(first, onRun1('p2', 'pause-run'))).toMatchObject({ status: 'accepted' });
+		const onDisk = JSON.parse(fs.readFileSync(file, 'utf8'));
+		expect(JSON.stringify(onDisk)).toContain('p2');
+
+		const second = harness({}, { file, cooperativePause: true });
+		expect(await second.service.load()).toEqual({ ok: true, commands: 4, recoveredUnknown: 1 });
+		expect(second.service.ledger.get('p2')).toMatchObject({
+			state: 'unknown',
+			detail: 'The host restarted while this command was accepted.',
+		});
+		// The redelivered pause is answered from history, never executed again.
+		expect(await receive(second, onRun1('p2', 'pause-run'))).toMatchObject({
+			status: 'unknown',
+			duplicate: true,
+		});
+		// The new process owns no run-1: a fresh pause or cancel is stale by name.
+		expect(second.service.runControl!.state('run-1')).toBeNull();
+		await expectDenied(second, onRun1('p3', 'pause-run'), 'stale-run');
+		await expectDenied(second, onRun1('c1', 'cancel-run'), 'stale-run', 'knows no run run-1');
+		expect(second.service.ledger.list().map((r) => [r.commandId, r.state])).toEqual([
+			['p1', 'completed'],
+			['r1', 'completed'],
+			['f1', 'completed'],
+			['p2', 'unknown'],
+		]);
 	});
 });

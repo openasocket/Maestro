@@ -19,7 +19,7 @@
  * refusing the next send, and the ledger read back after a restart.
  */
 import fs from 'node:fs';
-import { _electron as electron, type ElectronApplication, type Page } from '@playwright/test';
+import type { ElectronApplication, Page } from '@playwright/test';
 import path from 'node:path';
 import {
 	startFakeEndpoint,
@@ -39,30 +39,11 @@ import {
 	managedTest as test,
 	readRunEndpointInputs,
 	register,
+	relaunch,
 	runOperator,
 	runState,
 	sendTurn,
 } from './fixtures/managed-host';
-
-/** Launch the built app again over the same data directory, as the fixture launches it. */
-async function relaunch(appPath: string, env: Record<string, string>, dataDir: string) {
-	const app = await electron.launch({
-		args: [appPath],
-		env: {
-			...process.env,
-			MAESTRO_DEMO_DIR: dataDir,
-			MAESTRO_DATA_DIR: dataDir,
-			ELECTRON_DISABLE_GPU: '1',
-			NODE_ENV: 'test',
-			MAESTRO_E2E_TEST: 'true',
-			...env,
-		} as Record<string, string>,
-		timeout: 30_000,
-	});
-	const page = await app.firstWindow();
-	await page.waitForLoadState('domcontentloaded');
-	return { app, page };
-}
 
 /** Bring the agent's AI tab into view after a restart. */
 async function openAgent(page: Page, name: string) {
