@@ -27,8 +27,11 @@ import { WatcherLeases } from '../../utils/watcher-leases';
 import {
 	callingLocalEffectActor,
 	holdDeleteEffect,
+	holdDeleteOfHandles,
 	holdReplacementEffect,
+	readLocalPathHandle,
 	replacedLocalPaths,
+	type HandledDeleteTarget,
 	type LocalEffectActor,
 	type LocalEffectAuthority,
 } from '../../enterprise/local-effects-policy';
@@ -999,7 +1002,7 @@ export function registerAutorunHandlers(
 			const canonicalFolder = path.join(projectPath, PLAYBOOKS_DIR);
 			const legacyFolder = path.join(projectPath, LEGACY_PLAYBOOKS_DIR);
 
-			const folders: string[] = [];
+			const folders: HandledDeleteTarget[] = [];
 			for (const autoRunFolder of [canonicalFolder, legacyFolder]) {
 				try {
 					const stat = await fs.stat(autoRunFolder);
@@ -1013,14 +1016,30 @@ export function registerAutorunHandlers(
 				if (!ALLOWED_FOLDER_NAMES.has(folderName)) {
 					throw new Error('Safety check failed: not a playbooks folder');
 				}
-				folders.push(autoRunFolder);
+				// The entry examined here is the one the hold below covers (MCOMP-21-09).
+				folders.push({ path: autoRunFolder, handle: await readLocalPathHandle(autoRunFolder) });
 			}
 
-			// Both folders are one hold (one confirmation, one receipt) before either is removed.
-			if (folders.length > 0) await holdDelete(folders, actor);
-			for (const autoRunFolder of folders) {
+			// Both folders are one hold (one confirmation, one receipt), acquired
+			// now for this removal: an earlier admitted Auto Run action authorizes
+			// nothing here. A confirmation can stay open for minutes, so each
+			// folder is removed only while its path still names the entry examined
+			// above; one swapped meanwhile (a symlink planted, a folder moved in)
+			// is left in place and reported, never deleted.
+			const { current, moved } = await holdDeleteOfHandles(
+				localEffects(),
+				folders,
+				actor,
+				LOG_CONTEXT
+			);
+			for (const autoRunFolder of current) {
 				await fs.rm(autoRunFolder, { recursive: true, force: true });
 				logger.info(`Deleted playbooks folder: ${autoRunFolder}`, LOG_CONTEXT);
+			}
+			if (moved.length > 0) {
+				throw new Error(
+					`Playbooks folder cleanup incomplete: ${moved.join(', ')} changed after it was examined and was left in place${current.length > 0 ? ` (removed: ${current.join(', ')})` : ''}`
+				);
 			}
 
 			return {};

@@ -57,6 +57,8 @@ const { mockBuildSshCommand, mockGetSshRemoteById, mockFs } = vi.hoisted(() => (
 		readdir: vi.fn(),
 		rmdir: vi.fn(),
 		rm: vi.fn(),
+		// A stable entry: a cleanup delete or a checkout re-reads the same handle (MCOMP-21-09).
+		lstat: async () => ({ dev: 1n, ino: 1n }),
 	},
 }));
 

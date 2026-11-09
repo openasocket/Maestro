@@ -3,6 +3,7 @@ import { CreateHandlerOptions } from '../../../utils/ipcHandler';
 import type { BranchSwitchGuardDeps } from '../../../utils/branch-switch-guard';
 import type { ExecResult } from '../../../utils/execFile';
 import { isGitTimeout } from '../../../utils/remote-git';
+import type { LocalEffectAuthority } from '../../../enterprise/local-effects-policy';
 
 export const LOG_CONTEXT = '[Git]';
 
@@ -24,6 +25,11 @@ export interface GitHandlerDependencies {
 	getProcessManager?: BranchSwitchGuardDeps['getProcessManager'];
 	/** Agent name for an agent id, for the refusal message. */
 	getAgentName?: BranchSwitchGuardDeps['getAgentName'];
+	/**
+	 * The local-effects ceiling a worktree cleanup delete is held to right
+	 * before it runs (MCOMP-21-09); absent (tests, a bare host) holds nothing.
+	 */
+	localEffects?: () => LocalEffectAuthority | null;
 }
 
 /** Helper to create handler options with Git context */

@@ -13,6 +13,7 @@
  */
 
 import * as fs from 'fs';
+import fsp from 'fs/promises';
 import type { ManagedPolicyStatus } from '../../shared/maestro-lib/managed/host-adapter';
 import { logger } from '../utils/logger';
 import { realpathThroughAncestor } from '../utils/real-path-containment';
@@ -484,4 +485,71 @@ export async function holdReplacementEffect(
 	if (!authority) return;
 	const replaced = await replacedLocalPaths(targetPaths, options);
 	if (replaced.length > 0) await holdDeleteEffect(authority, replaced, actor, logContext);
+}
+
+/**
+ * What a path names right now (MCOMP-21-09), by `lstat` so a symlink is the
+ * link itself: its device and inode, `absent` when nothing is there, or
+ * `unknown` when it cannot be examined. A delete compares the handle it read
+ * before an await with the one there now, so a path swapped meanwhile (a
+ * symlink planted, a folder moved in) is never what it removes.
+ */
+export type LocalPathHandle = { dev: bigint; ino: bigint } | 'absent' | 'unknown';
+
+export async function readLocalPathHandle(targetPath: string): Promise<LocalPathHandle> {
+	try {
+		const stats = await fsp.lstat(targetPath, { bigint: true });
+		return { dev: stats.dev, ino: stats.ino };
+	} catch (error) {
+		return NOTHING_THERE.has((error as NodeJS.ErrnoException).code ?? '') ? 'absent' : 'unknown';
+	}
+}
+
+/** True only when both handles name the same existing entry; `absent` and `unknown` never match. */
+export function sameLocalPathHandle(a: LocalPathHandle, b: LocalPathHandle): boolean {
+	return typeof a === 'object' && typeof b === 'object' && a.dev === b.dev && a.ino === b.ino;
+}
+
+/** A path a sink is about to delete, with the handle it read when it examined it. */
+export interface HandledDeleteTarget {
+	path: string;
+	handle: LocalPathHandle;
+}
+
+/**
+ * Hold a delete of paths the sink examined earlier (MCOMP-21-09): the
+ * `delete` effect is held ONCE with its count right now, through
+ * `holdDeleteEffect` (a refusal throws and removes nothing), and then every
+ * handle is read again. Answers the paths still naming the entry the sink
+ * examined (`current`, safe to remove at once) and the ones that changed
+ * across the awaits (`moved`: swapped, gone or unreadable), which the sink
+ * must leave in place and report as cleanup it could not finish. Runs the
+ * handle check standalone too: it costs one `lstat` per path.
+ */
+export async function holdDeleteOfHandles(
+	authority: LocalEffectAuthority | null | undefined,
+	targets: readonly HandledDeleteTarget[],
+	actor: LocalEffectActor,
+	logContext: string
+): Promise<{ current: string[]; moved: string[] }> {
+	if (targets.length === 0) return { current: [], moved: [] };
+	await holdDeleteEffect(
+		authority,
+		targets.map((target) => target.path),
+		actor,
+		logContext
+	);
+	const current: string[] = [];
+	const moved: string[] = [];
+	for (const target of targets) {
+		const now = await readLocalPathHandle(target.path);
+		(sameLocalPathHandle(target.handle, now) ? current : moved).push(target.path);
+	}
+	if (moved.length > 0)
+		logger.warn(
+			'Delete held but some paths changed after they were examined; those were left in place',
+			logContext,
+			{ moved }
+		);
+	return { current, moved };
 }

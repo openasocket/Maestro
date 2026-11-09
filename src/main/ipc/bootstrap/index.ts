@@ -155,6 +155,7 @@ export function setupIpcHandlers(deps: IpcBootstrapDependencies): void {
 		getMainWindow: deps.getMainWindow,
 		getProcessManager: deps.getProcessManager,
 		getAgentName,
+		localEffects: deps.getLocalEffectAuthority,
 	});
 
 	// Auto Run operations - extracted to src/main/ipc/handlers/autorun.ts

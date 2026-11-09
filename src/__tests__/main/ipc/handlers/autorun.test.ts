@@ -53,6 +53,8 @@ vi.mock('fs/promises', () => ({
 		unlink: vi.fn(),
 		rm: vi.fn(),
 		copyFile: vi.fn(),
+		// A stable entry: the folder removal re-reads the same handle (MCOMP-21-09).
+		lstat: async () => ({ dev: 1n, ino: 1n }),
 	},
 }));
 

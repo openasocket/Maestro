@@ -74,6 +74,8 @@ vi.mock('fs/promises', () => ({
 		access: vi.fn(),
 		readdir: vi.fn(),
 		rmdir: vi.fn(),
+		// A stable entry: a cleanup delete or a checkout re-reads the same handle (MCOMP-21-09).
+		lstat: async () => ({ dev: 1n, ino: 1n }),
 		// realpath: identity by default so symlink-resolution paths in scanWorktreeDirectory
 		// and the chokidar discovery validator behave like a no-op in tests. Individual
 		// tests can override this via vi.mocked(fs.realpath).mockResolvedValue(...) to

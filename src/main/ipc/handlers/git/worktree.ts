@@ -12,6 +12,7 @@ import {
 import { normalizeWorktreePath } from '../../../../shared/worktreePaths';
 import {
 	execGit,
+	holdGitCommand,
 	isGitRefusal,
 	worktreeInfoRemote,
 	worktreeSetupRemote,
@@ -29,6 +30,58 @@ import {
 	clearWorktreeCreatedByMaestro,
 	markWorktreeCreatedByMaestro,
 } from './worktreeCreationMarks';
+import {
+	callingLocalEffectActor,
+	holdDeleteOfHandles,
+	LocalEffectRefusedError,
+	readLocalPathHandle,
+	sameLocalPathHandle,
+	type HandledDeleteTarget,
+	type LocalEffectActor,
+} from '../../../enterprise/local-effects-policy';
+
+/**
+ * Hold a worktree cleanup delete right before it runs (MCOMP-21-09): the
+ * repository ceiling for `repoArgs` (the git command the delete stands in for,
+ * held at `repoCwd` through the shared executor's own hold) and then the
+ * local-effects `delete` of the one path, both acquired now. The clone,
+ * create or removal that led here authorizes nothing about this later delete.
+ * The delete may run only while the path still names the entry the handler
+ * examined across its awaits; one swapped meanwhile is left in place and
+ * reported as cleanup that could not finish. Answers null to delete, or the
+ * refusal text; standalone (no gate, no ceiling) answers null after the
+ * handle check.
+ */
+async function holdWorktreeCleanupDelete(
+	deps: GitHandlerDependencies,
+	repoArgs: string[],
+	repoCwd: string,
+	target: HandledDeleteTarget,
+	actor: LocalEffectActor
+): Promise<string | null> {
+	const refused = await holdGitCommand(repoArgs, { kind: 'local', cwd: repoCwd });
+	if (refused) return refused.stderr;
+	try {
+		const { moved } = await holdDeleteOfHandles(
+			deps.localEffects?.() ?? null,
+			[target],
+			actor,
+			LOG_CONTEXT
+		);
+		if (moved.length === 0) return null;
+	} catch (error) {
+		if (error instanceof LocalEffectRefusedError) return error.message;
+		throw error;
+	}
+	logger.warn(
+		`${LOG_CONTEXT} Worktree cleanup incomplete: path changed after it was examined`,
+		LOG_CONTEXT,
+		{
+			path: target.path,
+		}
+	);
+	return `Cleanup incomplete: ${target.path} changed after it was examined and was left in place`;
+}
 
 /**
  * Look up the worktree path currently checked out on the given branch
@@ -216,6 +269,7 @@ export function registerWorktreeHandlers(deps: GitHandlerDependencies): void {
 				}
 
 				// Local execution (existing code)
+				const actor = callingLocalEffectActor();
 				logger.debug(
 					`worktreeSetup called with: ${JSON.stringify({ mainRepoCwd, worktreePath, branchName, baseBranch })}`,
 					LOG_CONTEXT
@@ -273,12 +327,25 @@ export function registerWorktreeHandlers(deps: GitHandlerDependencies): void {
 							LOG_CONTEXT
 						);
 						if (worktreeInfoResult.exitCode !== 0) {
-							// Path exists but isn't a git repo - check if it's empty and can be removed
+							// Path exists but isn't a git repo - check if it's empty and can be removed.
+							// The entry examined here is the only one the rmdir below may remove.
+							const examined = await readLocalPathHandle(resolvedWorktree);
 							const dirContents = await fs.readdir(resolvedWorktree);
 							logger.debug(`Directory contents: ${JSON.stringify(dirContents)}`, LOG_CONTEXT);
 							if (dirContents.length === 0) {
 								// Empty directory - remove it so we can create the worktree
 								logger.debug(`Removing empty directory`, LOG_CONTEXT);
+								// The rmdir clears the way for `worktree add`, so it is held as
+								// that command at the main repository, plus the local delete,
+								// both now (MCOMP-21-09); a refusal leaves the folder in place.
+								const refusal = await holdWorktreeCleanupDelete(
+									deps,
+									['worktree', 'add', resolvedWorktree],
+									resolvedMainRepo,
+									{ path: resolvedWorktree, handle: examined },
+									actor
+								);
+								if (refusal) return { success: false, error: refusal };
 								await fs.rmdir(resolvedWorktree);
 								pathExists = false;
 							} else {
@@ -497,6 +564,10 @@ export function registerWorktreeHandlers(deps: GitHandlerDependencies): void {
 				}
 
 				// Local execution (existing code)
+				// The checks below and the checkout must see the same worktree
+				// across their awaits (MCOMP-21-09): one swapped meanwhile is never
+				// checked out on the strength of checks made on another.
+				const examined = await readLocalPathHandle(worktreePath);
 				// Check for uncommitted changes
 				const statusResult = await execFileNoThrow('git', ['status', '--porcelain'], worktreePath);
 				if (statusResult.exitCode !== 0) {
@@ -531,18 +602,23 @@ export function registerWorktreeHandlers(deps: GitHandlerDependencies): void {
 				// execGitRemote. A refusal is an `EMANAGED` result whose stderr
 				// names the reason; the reads above stay direct. Standalone the
 				// executor spawns the same `git` as before.
-				let checkoutResult;
-				if (branchExists) {
-					checkoutResult = await execGit(['checkout', branchName], worktreePath);
-				} else if (createIfMissing) {
-					checkoutResult = await execGit(['checkout', '-b', branchName], worktreePath);
-				} else {
+				if (!branchExists && !createIfMissing) {
 					return {
 						success: false,
 						hasUncommittedChanges: false,
 						error: `Branch '${branchName}' does not exist`,
 					};
 				}
+				if (!sameLocalPathHandle(examined, await readLocalPathHandle(worktreePath))) {
+					return {
+						success: false,
+						hasUncommittedChanges: false,
+						error: `The worktree at ${worktreePath} changed while it was being checked; nothing was checked out`,
+					};
+				}
+				const checkoutResult = branchExists
+					? await execGit(['checkout', branchName], worktreePath)
+					: await execGit(['checkout', '-b', branchName], worktreePath);
 
 				if (checkoutResult.exitCode !== 0) {
 					return {
@@ -709,9 +785,12 @@ export function registerWorktreeHandlers(deps: GitHandlerDependencies): void {
 		withIpcErrorLogging(
 			handlerOpts('removeWorktree'),
 			async (worktreePath: string, force: boolean = false) => {
+				const actor = callingLocalEffectActor();
 				try {
 					// First check if the directory exists
 					await fs.access(worktreePath);
+					// The entry examined here is the only one the fallback below may delete.
+					const examined = await readLocalPathHandle(worktreePath);
 
 					// Try to use git worktree remove first (cleanest approach)
 					const args = force
@@ -750,8 +829,31 @@ export function registerWorktreeHandlers(deps: GitHandlerDependencies): void {
 						}
 					}
 
-					// Fall back to recursive directory removal
-					await fs.rm(worktreePath, { recursive: true, force: true });
+					// Fall back to recursive directory removal. The `worktree remove`
+					// hold above covered that command, not this delete: the repository
+					// ceiling (as `worktree remove --force` of this exact path) and the
+					// local delete are both acquired again now (MCOMP-21-09).
+					const refusal = await holdWorktreeCleanupDelete(
+						deps,
+						['worktree', 'remove', '--force', worktreePath],
+						worktreePath,
+						{ path: worktreePath, handle: examined },
+						actor
+					);
+					if (refusal) return { success: false, error: refusal };
+					try {
+						await fs.rm(worktreePath, { recursive: true, force: true });
+					} catch (rmError) {
+						// A partial recursive delete leaves an unknown remainder: say so.
+						const message = rmError instanceof Error ? rmError.message : String(rmError);
+						logger.warn(
+							`${LOG_CONTEXT} Worktree removal incomplete; some content may remain at ${worktreePath}: ${message}`
+						);
+						return {
+							success: false,
+							error: `Worktree removal incomplete; some content may remain at ${worktreePath}: ${message}`,
+						};
+					}
 					logger.info(`${LOG_CONTEXT} Removed worktree directory: ${worktreePath}`);
 					markStaleForDeletedWorktreeUsingStore(worktreePath);
 					return { success: true };
