@@ -163,6 +163,7 @@ export function EditAgentModal({
 	// (MCOMP-23-04). The host checks the edited record at commit; a refusal saved
 	// nothing, so the draft stays and the reasons are shown by field.
 	const managedChoices = useManagedAgentOptions();
+	const formPolicyRevision = managedChoices.managed ? managedChoices.options.policyRevision : null;
 	const refreshManagedChoices = managedChoices.refresh;
 	const [saveRefusal, setSaveRefusal] = useState<AgentCommitRefusal | null>(null);
 	const canConvertProvider =
@@ -692,6 +693,9 @@ export function EditAgentModal({
 				saveArguments[25] = migrationPlan?.id;
 				saveArguments[26] = true;
 			}
+			// The revision the approved choices on screen came from, so the host can
+			// answer `stale` for an edit built from an older policy (MCOMP-23-04A).
+			saveArguments[27] = { expectedPolicyRevision: formPolicyRevision };
 			const saved = onSave(...saveArguments);
 			if (saved) await saved;
 			onClose();
@@ -743,6 +747,7 @@ export function EditAgentModal({
 		onClose,
 		existingSessions,
 		refreshManagedChoices,
+		formPolicyRevision,
 	]);
 
 	// Refresh available models

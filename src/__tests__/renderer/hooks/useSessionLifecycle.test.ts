@@ -1934,6 +1934,114 @@ describe('useSessionLifecycle', () => {
 	});
 
 	// ======================================================================
+	// The Edit Agent form's policy revision (MCOMP-23-04A)
+	// ======================================================================
+
+	describe('the Edit Agent form policy revision (MCOMP-23-04A)', () => {
+		const APPLIED_REVISION = 5;
+		const commitAgent = () =>
+			(window as any).maestro.sessions.commitAgent as ReturnType<typeof vi.fn>;
+		type Save = ReturnType<typeof useSessionLifecycle>['handleSaveEditAgent'];
+		// Every positional argument up to the trailing policy slot, renaming only.
+		const saveName = (
+			save: Save,
+			name: string,
+			policy?: { expectedPolicyRevision: number | null }
+		) => {
+			const args = new Array(28).fill(undefined) as Parameters<Save>;
+			args[0] = 'session-1';
+			args[1] = name;
+			if (policy) args[27] = policy;
+			return save(...args);
+		};
+
+		beforeEach(() => {
+			// A managed host at revision 5: an edit built from another revision is stale.
+			commitAgent().mockImplementation(
+				async (request: {
+					record: Record<string, unknown>;
+					expectedPolicyRevision?: number | null;
+				}) =>
+					typeof request.expectedPolicyRevision === 'number' &&
+					request.expectedPolicyRevision !== APPLIED_REVISION
+						? {
+								ok: false,
+								code: 'stale',
+								reason: 'The policy changed. Refresh to load the current approved choices.',
+								policyRevision: APPLIED_REVISION,
+								fields: [],
+							}
+						: { ok: true, record: request.record, managed: true, policyRevision: APPLIED_REVISION }
+			);
+			const session = createMockSession({ id: 'session-1', name: 'Before' });
+			useSessionStore.setState({ sessions: [session], activeSessionId: 'session-1' });
+		});
+
+		it('refuses an edit built from an older revision as stale and changes nothing', async () => {
+			const before = useSessionStore.getState().sessions[0];
+			const { result } = renderHook(() => useSessionLifecycle(createDeps()));
+			mockFlushSessionPersistence.mockClear();
+
+			const failure = saveName(result.current.handleSaveEditAgent, 'After', {
+				expectedPolicyRevision: 4,
+			});
+			await expect(failure).rejects.toBeInstanceOf(AgentCommitRefusedError);
+			await expect(failure).rejects.toMatchObject({ refusal: { code: 'stale' } });
+
+			expect(commitAgent().mock.calls[0][0]).toMatchObject({
+				operation: 'edit',
+				expectedPolicyRevision: 4,
+			});
+			expect(useSessionStore.getState().sessions[0]).toBe(before);
+			// The form lists the refusal inline, so no toast doubles it.
+			expect(notifyToast).not.toHaveBeenCalled();
+			vi.runAllTimers();
+			expect(mockFlushSessionPersistence).not.toHaveBeenCalled();
+		});
+
+		it('admits an edit built from the current revision', async () => {
+			const { result } = renderHook(() => useSessionLifecycle(createDeps()));
+			await act(async () => {
+				await saveName(result.current.handleSaveEditAgent, 'After', {
+					expectedPolicyRevision: APPLIED_REVISION,
+				});
+			});
+			expect(commitAgent().mock.calls[0][0].expectedPolicyRevision).toBe(APPLIED_REVISION);
+			expect(useSessionStore.getState().sessions[0].name).toBe('After');
+		});
+
+		it('passes a standalone null revision through', async () => {
+			const { result } = renderHook(() => useSessionLifecycle(createDeps()));
+			await act(async () => {
+				await saveName(result.current.handleSaveEditAgent, 'After', {
+					expectedPolicyRevision: null,
+				});
+			});
+			const request = commitAgent().mock.calls[0][0];
+			expect(request).toHaveProperty('expectedPolicyRevision', null);
+			expect(useSessionStore.getState().sessions[0].name).toBe('After');
+		});
+
+		it('sends no revision for a caller without a policy and keeps its toast', async () => {
+			commitAgent().mockResolvedValueOnce({
+				ok: false,
+				code: 'field',
+				reason: 'This agent configuration is outside the approved choices.',
+				policyRevision: APPLIED_REVISION,
+				fields: [],
+			});
+			const { result } = renderHook(() => useSessionLifecycle(createDeps()));
+			await expect(saveName(result.current.handleSaveEditAgent, 'After')).rejects.toBeInstanceOf(
+				AgentCommitRefusedError
+			);
+			expect(commitAgent().mock.calls[0][0]).not.toHaveProperty('expectedPolicyRevision');
+			expect(notifyToast).toHaveBeenCalledWith(
+				expect.objectContaining({ title: 'Agent settings not saved' })
+			);
+		});
+	});
+
+	// ======================================================================
 	// handleSaveEditAgent edge cases
 	// ======================================================================
 

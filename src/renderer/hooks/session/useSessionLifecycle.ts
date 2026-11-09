@@ -116,7 +116,9 @@ export interface SessionLifecycleReturn {
 		selectedUserResources?: string[],
 		migrationPlanId?: string,
 		/** On a provider change: convert memory and session history (opt-in) or switch plainly. */
-		convertProviderHistory?: boolean
+		convertProviderHistory?: boolean,
+		/** The policy revision the edit form's approved choices were read from (the form passes it). */
+		policy?: { expectedPolicyRevision: number | null }
 	) => void | Promise<void>;
 	/** Rename the currently-selected tab (persists to agent session storage + history) */
 	handleRenameTab: (newName: string) => void;
@@ -214,7 +216,9 @@ export function useSessionLifecycle(deps: SessionLifecycleDeps): SessionLifecycl
 			selectedUserResources?: string[],
 			migrationPlanId?: string,
 			/** On a provider change: convert memory and session history (opt-in) or switch plainly. */
-			convertProviderHistory?: boolean
+			convertProviderHistory?: boolean,
+			/** Present when the caller is the edit form, which shows a refusal inline. */
+			policy?: { expectedPolicyRevision: number | null }
 		) => {
 			const before = useSessionStore.getState().sessions.find((s) => s.id === sessionId);
 			const switchingProvider = !!toolType && !!before && toolType !== before.toolType;
@@ -310,10 +314,23 @@ export function useSessionLifecycle(deps: SessionLifecycleDeps): SessionLifecycl
 				? { ...switchAgentProvider(current, toolType!).agent, providerMigration: undefined }
 				: current;
 			const sent = buildEdited(switched);
-			const outcome = await commitAgentRecord('edit', sent);
+			// The form sends the revision its approved choices came from, so the host
+			// refuses an edit built from an older policy as `stale`; a caller that
+			// passes no policy sends no revision.
+			const outcome = await commitAgentRecord(
+				'edit',
+				sent,
+				policy ? { expectedPolicyRevision: policy.expectedPolicyRevision } : {}
+			);
 			if (!outcome.ok) {
 				const refused = new AgentCommitRefusedError(outcome);
-				notifyToast({ color: 'red', title: 'Agent settings not saved', message: refused.message });
+				// The form lists the refusal inline; only other callers need the toast.
+				if (!policy)
+					notifyToast({
+						color: 'red',
+						title: 'Agent settings not saved',
+						message: refused.message,
+					});
 				throw refused;
 			}
 			if (switchingPlainly) {

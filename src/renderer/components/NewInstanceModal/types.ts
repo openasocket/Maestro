@@ -122,7 +122,9 @@ export interface EditAgentModalProps {
 		selectedUserResources?: string[],
 		migrationPlanId?: string,
 		/** On a provider change: convert memory and session history (opt-in) or switch plainly. */
-		convertProviderHistory?: boolean
+		convertProviderHistory?: boolean,
+		/** The policy revision the approved choices on screen were read from (null: none shown). */
+		policy?: { expectedPolicyRevision: number | null }
 	) => void | Promise<void>;
 	theme: Theme;
 	session: Session | null;
