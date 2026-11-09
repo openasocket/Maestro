@@ -2596,6 +2596,49 @@
 					"MCOMP-33-00H": "00R27 Pianola memory backfill (memory-transport.ts execFileNoThrow) is admitted"
 				},
 				"reason": "The limit is 1-3 authored files; carry 1 used three, so carries 2-4 each got one bounded continuation ahead of MCOMP-33-00S, in order."
+			},
+			"MCOMP-33-00F": {
+				"completedAt": "2026-11-09",
+				"completedBy": "Maestro-Claude",
+				"worktreeCommit": "056f51016",
+				"worktreeParent": "347654584",
+				"settled": {
+					"00R12": {
+						"change": "buildSpawnRequestSnapshot adds nativeLaunchResourceIds(config): for harnessControlMode native only, one resource id native-launch:<sha256 of canonicalJson> over harnessControlMode, nativeAcpArgs, nativeRpcProtocol, nativeRpcArgs, appendSystemPrompt, permissionMode, modelId, effort, agentSessionId, sessionAdditionalDirectories (every launch-shaping field the ACP, RPC, SDK and API spawners read off the config beyond what the snapshot already digests). A non-native spawn digests exactly what it did before. The ProcessManager refusal of a managed lease with harnessControlMode native is lifted: checkAdmissionAtSink digests the same config, so a native launch the lease did not cover is refused there.",
+						"contractNote": "Bound through the existing DispatchSnapshot.resourceIds field (no new snapshot field), so the pinned public contract shape is unchanged.",
+						"files": [
+							"src/main/process-manager/ProcessManager.ts",
+							"src/__tests__/main/process-manager/ProcessManager.nativeSnapshot.managed.test.ts"
+						],
+						"test": "ProcessManager.nativeSnapshot.managed.test.ts: the digest changes when each of the ten fields changes (13/13 pass); with the binding removed (Working/mcomp-33-00e/mutate.mjs) all 10 field cases fail."
+					},
+					"00R15": {
+						"kept": true,
+						"reason": "spawnNativeSdkAgent runs in process with no launch spec, so neither admitCliLaunch nor any dispatch snapshot or lease gate covers it; it never reaches the desktop sink that now binds the native launch. The managed refusal stays; the comment in src/cli/services/agent-spawner.ts now says so.",
+						"files": ["src/cli/services/agent-spawner.ts"]
+					}
+				},
+				"typeCheck": {
+					"tsconfig.main.json": {
+						"exit": 0,
+						"errors": 0
+					},
+					"tsconfig.cli.json": {
+						"exit": 0,
+						"errors": 0
+					},
+					"tsconfig.lint.json": {
+						"exit": 0,
+						"errors": 0
+					}
+				},
+				"suites": {
+					"run": "src/__tests__/main/process-manager, src/__tests__/main/ipc/handlers/process, src/__tests__/cli/services/agent-spawner.test.ts",
+					"result": "40 files passed, 2 failed, 1 skipped; 1199 tests passed, 40 failed, 7 skipped",
+					"preExisting": "All 40 failures are pre-existing at 347654584 (same counts with this change stashed): handle-spawn-native.test.ts 21 failed, handle-spawn.managed.test.ts 19 failed (10s timeouts). Left for MCOMP-33-00S."
+				},
+				"environment": "npm ci --ignore-scripts (00D) left node_modules/electron without its binary, so every suite importing ProcessManager failed to load (\"Electron failed to install correctly\"). The worktree node_modules/electron/dist is now a symlink to the main checkout dist (same electron 41.10.7) with path.txt written; nothing in the main checkout changed. Remove the worktree node_modules before git worktree remove as before.",
+				"unbound": "extraPathDirs and the image payloads (only their count) are not digested on any route, native or not; pre-existing and route-independent, not part of this carry."
 			}
 		}
 	}
