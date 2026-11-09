@@ -2639,6 +2639,39 @@
 				},
 				"environment": "npm ci --ignore-scripts (00D) left node_modules/electron without its binary, so every suite importing ProcessManager failed to load (\"Electron failed to install correctly\"). The worktree node_modules/electron/dist is now a symlink to the main checkout dist (same electron 41.10.7) with path.txt written; nothing in the main checkout changed. Remove the worktree node_modules before git worktree remove as before.",
 				"unbound": "extraPathDirs and the image payloads (only their count) are not digested on any route, native or not; pre-existing and route-independent, not part of this carry."
+			},
+			"MCOMP-33-00G": {
+				"completedAt": "2026-11-09",
+				"completedBy": "Maestro-Claude",
+				"worktreeCommit": "98779678b",
+				"worktreeParent": "056f51016",
+				"settled": {
+					"00R23": {
+						"finding": "Both release starts (startReleasedQueueConsult, and WebServer.startQueueHandoffFromMain through WebSocketMessageHandler and PianolaNewTabDispatch.startQueueHandoff) already spread the cross-agent:send options, actor included, into startCrossAgentRequest. But that actor was currentSpawnActor() read in the owning-window IPC handler, which refuses every WebSocket client, so it was always the in-process caller: a row queued over the CLI, Web Login or a Lite pairing was released as main.",
+						"change": "runQueue() reads currentSpawnActor() synchronously while still inside the sending transport context and records it per dispatch id (noteQueueAdmissionActor, process-local and bounded at 256 like the release closures; dropped on cancelQueueItem). startReleasedQueueConsult() and PianolaNewTabDispatch.startQueueHandoff() pass the options through withQueueAdmissionActor(), which replaces actor with the recorded one and throws DispatchRoutingActorUnavailable when none is recorded (restart, eviction, cancel), so no released branch falls back to main. cross-agent.ts unchanged: its currentSpawnActor() is now overridden at both starts.",
+						"files": [
+							"src/main/pianola/pianola-queue-routing.ts",
+							"src/main/pianola/pianola-new-tab-dispatch.ts",
+							"src/__tests__/main/ipc/handlers/persistence.test.ts"
+						],
+						"test": "persistence.test.ts describe \"queue release actor (MCOMP-33-00G)\", 3 cases over a row enqueued inside runAsClient({ cli: true }): a released consult reaches spawnAdmitted as { peer: host-secret }; a consult whose actor record is gone is refused with no spawn; a queued handoff reaches the admission service with actor host-secret and is refused once the record is gone. Working/mcomp-33-00e/mutate.mjs: dropping the forwarded actor fails 2, dropping the refusal fails 2, dropping the note in runQueue fails all 3; all pass with the repair."
+					}
+				},
+				"typeCheck": {
+					"tsconfig.main.json": {
+						"exit": 0,
+						"errors": 0
+					},
+					"tsconfig.lint.json": {
+						"exit": 0,
+						"errors": 0
+					}
+				},
+				"suites": {
+					"run": "src/__tests__/main/ipc/handlers/persistence.test.ts, src/__tests__/main/ipc/handlers/cross-agent.test.ts, src/__tests__/main/pianola, src/__tests__/main/web-server/handlers",
+					"result": "1606 passed, 290 failed",
+					"preExisting": "All 290 failures are pre-existing at 056f51016 (same failing test names with this change stashed, 1603 passed): the memory-* suites (sqlite-vec environment), pianola-legacy-migration 17, pianola-scope-host 4, persistence 136, messageHandlers 34 and messageHandlers.managed 8 (the 00R33 test-wire carries). Left for MCOMP-33-00S."
+				}
 			}
 		}
 	}
