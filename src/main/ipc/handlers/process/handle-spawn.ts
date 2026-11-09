@@ -981,7 +981,15 @@ async function handleProcessSpawnImpl(
 		sshEnabled: isSshEnabled,
 		hasImages: (config.images?.length ?? 0) > 0,
 	});
-	if (config.permissionMode === 'standard' && !standardApprovalChannel) {
+	// A managed turn the launch plan measured against the policy's lent route
+	// runs Standard as the provider's qualified bounded combination (or was
+	// refused by name above) and never reaches the native approval broker;
+	// only a turn measured against no ceiling needs the approval channel.
+	if (
+		config.permissionMode === 'standard' &&
+		!standardApprovalChannel &&
+		!launchPermission?.ceiling
+	) {
 		reportSpawnRefusal(
 			deps,
 			config.sessionId,

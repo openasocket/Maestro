@@ -19,7 +19,7 @@
  */
 import { parseManagedSpawnRefusal } from '../../../../../shared/processErrors';
 import * as os from 'os';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 vi.mock('electron', () => ({
 	app: { getPath: (): string => os.tmpdir() },
@@ -99,6 +99,22 @@ interface Harness {
 }
 
 /**
+ * Managers a harness built this case, with every session id the case spawned
+ * on. The spawn handler holds the provider session writer of a turn until its
+ * process exits, and the replaced `spawn` never exits, so `afterEach` ends
+ * each turn the way the manager would.
+ */
+const harnessManagers: ProcessManager[] = [];
+
+afterEach(async () => {
+	for (const manager of harnessManagers.splice(0)) {
+		for (const id of [PROCESS, `${AGENT}-terminal-1`]) manager.emit('exit', id, 0);
+	}
+	// The writer is released on a microtask after the exit.
+	await Promise.resolve();
+});
+
+/**
  * The real manager over the port given (none: a bare manager with no
  * authority), its `spawn` replaced at the very end so no process starts and
  * the config the sink was handed can be read back.
@@ -120,6 +136,7 @@ function harness(port: FakeSpawnPort | null, options: { spySpawn?: boolean } = {
 	const processManager = port
 		? new ProcessManager(() => true, { spawnAuthority: () => port })
 		: new ProcessManager();
+	harnessManagers.push(processManager);
 	const errors: Array<[string, string]> = [];
 	processManager.on('agent-error', (sessionId: string, error: { message: string }) => {
 		errors.push([sessionId, error.message]);
@@ -157,6 +174,15 @@ function harness(port: FakeSpawnPort | null, options: { spySpawn?: boolean } = {
 		},
 	};
 	return { deps, processManager, spawn, sent, errors };
+}
+
+/**
+ * End the turn on PROCESS the way the manager does when its process exits,
+ * which releases the provider session writer the handler holds for it.
+ */
+async function endTurn(h: Harness): Promise<void> {
+	h.processManager.emit('exit', PROCESS, 0);
+	await Promise.resolve();
 }
 
 /**
@@ -257,6 +283,7 @@ describe('process:spawn under management: admission and classification', () => {
 		const h = harness(port);
 		const first = await handleProcessSpawn(payload(), h.deps);
 		expect(first.success).toBe(true);
+		await endTurn(h);
 		revision = 2;
 		const second = await handleProcessSpawn(payload(), h.deps);
 		expect(second.success).toBe(true);
@@ -529,6 +556,20 @@ describe("process:spawn under management: the plan's permission decision rides t
 		expect(config.permission).toEqual({ requested: 'standard', ceiling: 'standard' });
 		expect(config.args).toEqual(expect.arrayContaining(['--sandbox', 'workspace-write']));
 		expect(config.args).not.toContain('--dangerously-bypass-approvals-and-sandbox');
+	});
+
+	it('still refuses a standard Codex exec request with no approval channel when the port lends no route', async () => {
+		// The bounded Standard combination is a managed answer only: with no
+		// route the plan names no ceiling, and the native approval channel
+		// Standard mode needs is still required.
+		const port = fakeSpawnPort();
+		const h = harness(port);
+		const result = await handleProcessSpawn(payload({ permissionMode: 'standard' }), h.deps);
+		expect(result).toEqual({ success: false, pid: 0 });
+		expect(h.spawn).not.toHaveBeenCalled();
+		expect(refusalSentToTab(h)).toContain(
+			'Standard permission mode needs a native approval channel'
+		);
 	});
 
 	it('refuses a standard Codex request under a standard ceiling whose own arguments carry the bypass flag, naming the flag', async () => {
