@@ -2025,6 +2025,31 @@
 				],
 				"notes": "No case, field or guard dropped. cross-agent-router.test waits on bridgeHandlers.ts (00R31), cross-agent-router.managed.test on spawnGroupChatAgent.ts, ipc/handlers/cross-agent.test on ipc/handlers/cross-agent.ts.",
 				"unmergedAfter": 45
+			},
+			"MCOMP-33-00R23": {
+				"resolvedAt": "2026-11-09",
+				"resolvedBy": "Maestro-Claude",
+				"files": [
+					"src/main/ipc/handlers/cross-agent.ts",
+					"src/main/group-chat/spawnGroupChatAgent.ts"
+				],
+				"method": "Two hunks resolved by a shape-asserting script (Working/mcomp-33-00r23/resolve.mjs, both sides read in full, every replacement computed before any write); staged through merge-tool.mjs stage (prettier left both unchanged, 43 unmerged left). Working/mcomp-33-00r23/check.mjs: 0 syntax diagnostics, no markers, every seam count at least the larger side. ipc/handlers/cross-agent.test: 15/15.",
+				"hunks": {
+					"src/main/ipc/handlers/cross-agent.ts": [
+						"Hunk 1 (cross-agent:send body before the request): both sides. Upstream first: the DispatchRoutingQueueConsumerRequired refusal and the managedQueue branch (window-owner assert, renderer-context refusal, startQueueHandoffFromMain or startReleasedQueueConsult), so a refused or queue-routed send never spends a dispatch ticket. Then HEAD: claimDispatchTicket for the target, actor from the honored ticket else currentSpawnActor(), dispatchTicket only when honored (MRC-08-01C, MCOMP-17-03AU). Added on the queue branch: actor: currentSpawnActor() in its options (the branch refuses every WS client, so the caller is in-process) and payload.dispatchTicket joins the renderer-supplied context it refuses (DispatchRoutingContextUnavailable)."
+					],
+					"src/main/group-chat/spawnGroupChatAgent.ts": [
+						"Hunk 1 (spawn call): HEAD shape (spawnConfig object with the lineage spread, spawnAdmitted for the named actor returning result.managed, plain spawn for a manager double) with upstream config.beforeSpawn?.() as the final synchronous fence after all asynchronous preparation and BEFORE either sink, so a fence that throws spawns and admits nothing. Closes the R22 semantic note."
+					]
+				},
+				"outsideHunks": [
+					"cross-agent.ts: upstream cross-agent:prepare-queue handler, the startReleasedQueueConsult import, the getWebServer/getWindowForSession deps and the (event, payload) handler wrapper auto-merged with HEAD transport-actor imports and the actor/dispatchTicket fields on startCrossAgentRequest."
+				],
+				"semanticConflictsForC": [
+					"startReleasedQueueConsult options are StartCrossAgentRequestOptions minus nativeAdmission; 00C confirms the release start (Pianola queue routing, R27, and WebServer.startQueueHandoffFromMain, R29) forwards actor to startCrossAgentRequest rather than dropping it."
+				],
+				"notes": "No case, field or guard dropped. spawnGroupChatAgent.test, group-chat agent/router/moderator suites and both cross-agent-router suites cannot load until src/main/web-server/handlers/bridgeHandlers.ts merges (00R31); 00S runs them.",
+				"unmergedAfter": 43
 			}
 		}
 	}
