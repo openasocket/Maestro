@@ -38,7 +38,7 @@ import {
 	requireDependency,
 	CreateHandlerOptions,
 } from '../../utils/ipcHandler';
-import { buildSshCommand, RemoteCommandOptions } from '../../utils/ssh-command-builder';
+import { RemoteCommandOptions } from '../../utils/ssh-command-builder';
 import { stripAnsi } from '../../utils/stripAnsi';
 import {
 	discoverAgentModels,

@@ -258,6 +258,8 @@ export function handleEnqueueCommand(
 			background,
 			held,
 			routingField.routing,
+			undefined,
+			undefined,
 			delegation,
 			dispatchTicket
 		)
