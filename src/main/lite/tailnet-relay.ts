@@ -7,6 +7,8 @@ import { lanDestination, lanOrigin } from './lan';
 import { CONNECT_PATH, ADMISSION_HEADER } from './pairing/protocol';
 import { isLitePairingCredential } from '../../shared/litePairingCredential';
 import { holdListener } from '../enterprise/listener-gate';
+import { holdEgress, isEgressDeniedError } from '../utils/fetchWithTimeout';
+import { LITE_PEER_EGRESS_CLASS } from './pairing/transport';
 
 /** Private browser adapter: localhost remains a secure browser context, upstream binds the verified private interface.
  * Never a general proxy. Only the selected paired host's application subtree and credential are accepted.
@@ -72,6 +74,20 @@ async function openPairedRelay<T extends { hostname: string; port: number; local
 	// `ssh-tunnel` BEFORE the destination read and the bind: a refusal throws
 	// `ListenerDeniedError`, nothing listens and the host is never contacted.
 	holdListener({ kind: 'ssh-tunnel', bind: '127.0.0.1', port: 0 });
+	// The paired origin is held as `lite-peer` egress (MCOMP-21-12B) before the
+	// first destination read, and again on every relayed request and upgrade after
+	// its destination await and right before request() opens the upstream socket:
+	// a revocation between admission and a reconnect or a later WebSocket sends
+	// nothing and closes every tracked socket. Standalone nothing is consulted.
+	const holdPeer = () => holdEgress(origin, LITE_PEER_EGRESS_CLASS);
+	/** The one upstream this relay reaches: the selected paired origin, never an alternate peer route. */
+	const upstreamUrl = (req: IncomingMessage) => {
+		const target = origin + req.url;
+		if (!req.url?.startsWith('/') || new URL(target).origin !== origin)
+			throw new Error('Upstream outside the paired host.');
+		return target;
+	};
+	holdPeer();
 	const initial = await readDestination();
 	let bound = initial,
 		checkedAt = Date.now(),
@@ -154,8 +170,9 @@ async function openPairedRelay<T extends { hostname: string; port: number; local
 				res.destroy();
 				return;
 			}
+			holdPeer();
 			const upstream = request(
-				origin + req.url,
+				upstreamUrl(req),
 				{ ...binding, agent: false, method: req.method, headers: headers(req), signal },
 				(response) => {
 					const output = { ...response.headers };
@@ -184,7 +201,12 @@ async function openPairedRelay<T extends { hostname: string; port: number; local
 			});
 			req.on('aborted', () => upstream.destroy());
 			req.pipe(upstream);
-		} catch {
+		} catch (error) {
+			if (isEgressDeniedError(error)) {
+				res.writeHead(403, { connection: 'close' }).end();
+				void stop();
+				return;
+			}
 			res.writeHead(502).end();
 		}
 	});
@@ -200,7 +222,8 @@ async function openPairedRelay<T extends { hostname: string; port: number; local
 				socket.destroy();
 				return;
 			}
-			const upstream = request(origin + req.url, {
+			holdPeer();
+			const upstream = request(upstreamUrl(req), {
 				...binding,
 				agent: false,
 				headers: headers(req, true),
@@ -233,8 +256,9 @@ async function openPairedRelay<T extends { hostname: string; port: number; local
 			});
 			upstream.on('error', () => socket.destroy());
 			upstream.end();
-		} catch {
+		} catch (error) {
 			socket.destroy();
+			if (isEgressDeniedError(error)) void stop();
 		}
 	});
 	const stop = (): Promise<void> =>
