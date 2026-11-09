@@ -43,7 +43,16 @@ import {
 	worktreeCheckoutRemote,
 	worktreeSetupRemote,
 	getRepoRootRemote,
+	holdGitCommand,
+	holdGitForgeEffect,
+	holdWorktreeSetupScript,
+	isGitRefusal,
+	setGitExecutionGate,
 } from '../../../main/utils/remote-git';
+import type {
+	GitExecutionDecision,
+	GitExecutionGate,
+} from '../../../main/enterprise/repository-policy';
 
 // Typed mock references
 const mockExecFileNoThrow = vi.mocked(execFileNoThrow);
@@ -1679,6 +1688,86 @@ describe('remote-git.ts', () => {
 				cwd: '/repo/subdir',
 				env: undefined,
 			});
+		});
+	});
+
+	// =========================================================================
+	// The managed hold (MCOMP-19-06): settled before any process starts
+	// =========================================================================
+	describe('managed hold before dispatch', () => {
+		const refused: GitExecutionDecision = {
+			allowed: false,
+			operation: null,
+			code: 'remote-denied',
+			message: 'not this remote',
+		};
+		/** A gate double whose answer the test releases, recording what it was asked. */
+		function deferredGate() {
+			const asked: string[] = [];
+			let release: (decision: GitExecutionDecision) => void = () => {};
+			const answer = () =>
+				new Promise<GitExecutionDecision>((resolve) => {
+					release = resolve;
+				});
+			const gate: GitExecutionGate = {
+				hold: (request) => (asked.push(`hold ${request.args.join(' ')}`), answer()),
+				holdForge: (request) => (asked.push(`forge ${request.effect}`), answer()),
+				holdScript: () => (asked.push('script'), answer()),
+			};
+			return { gate, asked, release: (decision: GitExecutionDecision) => release(decision) };
+		}
+		const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+		afterEach(() => setGitExecutionGate(null));
+
+		it('starts no git process while the decision is pending, and runs once it is allowed', async () => {
+			const { gate, asked, release } = deferredGate();
+			setGitExecutionGate(gate);
+			mockExecFileNoThrow.mockResolvedValue(successResult('done'));
+			const running = execGit(['commit', '-m', 'x'], '/repo');
+			await tick();
+			expect(asked).toEqual(['hold commit -m x']);
+			expect(mockExecFileNoThrow).not.toHaveBeenCalled();
+			release({ allowed: true, operation: null });
+			expect(await running).toEqual(successResult('done'));
+			expect(mockExecFileNoThrow).toHaveBeenCalledTimes(1);
+		});
+
+		it('answers a refusal by code and never reaches ssh or git, locally or remotely', async () => {
+			for (const run of [
+				() => execGit(['push', 'origin', 'main'], '/repo'),
+				() => execGitRemote(['push'], { sshRemote: createSshRemote(), remoteCwd: '/srv' }),
+			]) {
+				const { gate, release } = deferredGate();
+				setGitExecutionGate(gate);
+				const pending = run();
+				await tick();
+				release(refused);
+				const result = await pending;
+				expect(isGitRefusal(result)).toBe(true);
+				expect(result.stderr).toBe('[managed-remote-denied] not this remote');
+			}
+			expect(mockBuildSshCommand).not.toHaveBeenCalled();
+			expect(mockExecFileNoThrow).not.toHaveBeenCalled();
+		});
+
+		it('holds forge effects and setup scripts through the same gate, and asks nothing standalone', async () => {
+			const { gate, asked, release } = deferredGate();
+			setGitExecutionGate(gate);
+			const forge = holdGitForgeEffect('pull-request', '/repo');
+			await tick();
+			release(refused);
+			expect(isGitRefusal((await forge)!)).toBe(true);
+			const script = holdWorktreeSetupScript({ kind: 'local', cwd: '/wt' });
+			await tick();
+			release({ allowed: true, operation: null });
+			expect(await script).toBeNull();
+			expect(asked).toEqual(['forge pull-request', 'script']);
+			setGitExecutionGate(null);
+			expect(await holdGitCommand(['push'], { kind: 'local', cwd: '/repo' })).toBeNull();
+			expect(await holdGitForgeEffect('gist', null, 'https://gist.github.com')).toBeNull();
+			expect(asked).toHaveLength(2);
+			expect(mockExecFileNoThrow).not.toHaveBeenCalled();
 		});
 	});
 });
