@@ -1442,8 +1442,12 @@
 		"rules": "the rules of the first selection apply unchanged (no forced reset, checkout loss, history rewrite or signing change; landing only on feature/mega-maestro-v1.1.0-rc by a merge commit; enterprise guards and standalone semantics survive; the desktop host stays Electron)",
 		"tool": ".maestro/playbooks/Working/mcomp-33-00/merge-tool.mjs (the MCOMP-01-03 driver with the second worktree and selection; not in git)",
 		"status": {
-			"state": "landed on the feature branch at 58bad53dc and pushed; MCOMP-33-00L1, 00L2 and 00L3 done (89ffc1280); the re-pin MCOMP-33-00P is next, in the main checkout",
-			"updatedBy": "MCOMP-33-00L3"
+			"state": "pinned: upstream/rc 919d28a66 merged into the integration branch at b01db5c, landed on feature/mega-maestro-v1.1.0-rc at 58bad53dc, the managed holds 00L1-00L3 through 89ffc1280, and MAESTRO-M0-RUNTIME re-pinned at 3dc7755e9 over archive sha256 afb6e60bee6c3080fc7cd21607ff74853085b88d7c11be222dfbdd2035759ad7 (2796799 bytes, library 0.37.0, implementation digest b13e806cf331333f6c0b2a1b2eafbc9a9564990bab3954e95a80e7fa43079ee8 at 89ffc1280f1bb7942b743f0a17f676ed1a34c417), reading ready with drift 0; MCOMP-33-01 packages the runtime of this pin",
+			"updatedAt": "2026-11-09T17:49:26.488Z",
+			"updatedBy": "MCOMP-33-00P",
+			"mergeCommit": "b01db5c",
+			"landingCommit": "58bad53dc",
+			"pinCommit": "3dc7755e9"
 		},
 		"progress": {
 			"MCOMP-33-00R01": {
@@ -3310,6 +3314,38 @@
 					"lint": "eslint 0 errors on the source (suite is eslint-ignored); prettier clean"
 				},
 				"tools": "Working/mcomp-33-00l3: edit.mjs, edit-test.mjs, mutate.mjs (mutate.json), commit.mjs, record.mjs"
+			},
+			"MCOMP-33-00P": {
+				"doneAt": "2026-11-09",
+				"doneBy": "Maestro-Claude",
+				"pinCommit": "3dc7755e9",
+				"library": {
+					"version": "0.37.0",
+					"bump": "none: 0.37.0 was taken at 00R03; the only library change since, setSshForwardAdmission (00L1, client/ssh-forward.ts), is not exported from the public entry",
+					"sourceRevision": "856786a812624fa6b0059cbed64d3a3c4bafa8e0",
+					"inputSha256": "594b78b81e3b2e3f32df92b6654661e28ae4403a3ef73b177a88c1a77259bc7a",
+					"inputFiles": 353,
+					"entrySha256": "0da112ad1128d9342edc41317a33017ec9e8bed0cadf47d56a943ce4fb3445c2"
+				},
+				"archive": {
+					"sha256": "afb6e60bee6c3080fc7cd21607ff74853085b88d7c11be222dfbdd2035759ad7",
+					"bytes": 2796799,
+					"manifestSha256": "3a98ea0360d509be8d61b266807dd3e9dbe75a9c9f611d92886438e88e8c5a17",
+					"payloadDigest": "24035b637b2b1f7d4b309cd32cc64389a3fe46a48775aab39efff9a1266942ad",
+					"payloadFiles": 337,
+					"directory": "dist/mega-maestro-runtime/0.37.0/afb6e60bee6c3080fc7cd21607ff74853085b88d7c11be222dfbdd2035759ad7"
+				},
+				"implementation": {
+					"rules": "maestro-implementation-tree/1",
+					"digest": "b13e806cf331333f6c0b2a1b2eafbc9a9564990bab3954e95a80e7fa43079ee8",
+					"commit": "89ffc1280f1bb7942b743f0a17f676ed1a34c417",
+					"fileCount": 7361
+				},
+				"previousArchive": "81e90819f86b (library 0.36.0, packaged from aa419735e), preserved on disk with 5e31a9f80eca and the earlier ones",
+				"recipe": "steps.MCOMP-01-03T: build-maestro-lib.mjs; package-mega-maestro-runtime.mjs --json; --runtime DIR --write-pin --json; Working/mcomp-09-02/restore-pin-format.mjs (identity lines only); --runtime DIR --json (Working/mcomp-33-00p/repin.mjs)",
+				"verify": "package-mega-maestro-runtime.mjs --runtime DIR --json: status ready, drift 0, no reasons, no problems",
+				"suites": "package-mega-maestro-runtime, mega-maestro-handoff, managed contracts, standalone, built-entry: 5 files, 69 passed (contracts pin case, failing since 00R03, now passes)",
+				"closes": "MCOMP-33-00 (the second upstream/rc refresh)"
 			}
 		}
 	}
