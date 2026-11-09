@@ -8,12 +8,12 @@
 		"archiveFormatVersion": 2,
 		"archive": {
 			"file": "runtime.tgz",
-			"sha256": "55d02328bd6f879e8538456832e886a19a41bf9bb6202f8a9333fe9e2a0abacc",
-			"sha512": "f995d54ba3246aae5f7326038683f80c7973661569d079dd048181a4b283b9f1df098e05994fc0dd12142f8cc6e3f3b24a05c67167031ccf4eae0bd71a29c0fd",
-			"bytes": 2796765
+			"sha256": "d30187bed69af949f901aed091f5b669088994027649e14f858caa2ab82ed8aa",
+			"sha512": "a8cfb6fcbeefe0f10af0e7b313c39f94f779df1dccdd24060b33a73e93441e4c40d24a804c7a3b84045a15b23d05e72da3ff2b20ebea00e89885a6da0990a006",
+			"bytes": 2796773
 		},
-		"manifestSha256": "ac0f50b2fecd0903fb2380c74ffbc32d07a48d25a362eee33479a1d43d9d4167",
-		"payloadDigest": "ed169bcfeeaab0e1aa2815ec7bac359fc957bc9556afefb6d5fd45337bbdea8a",
+		"manifestSha256": "965a80ef3b12ec1db3266f85c0ca37954964c780cf25d39e74d65b1a0f86bdd8",
+		"payloadDigest": "8dcf522461aec7b87f11aab59f9e7c808aa4d26d019121dc27de95c3804abd0b",
 		"payloadFiles": 337,
 		"versions": {
 			"app": "1.1.1-RC",
@@ -23,18 +23,18 @@
 		},
 		"implementation": {
 			"rules": "maestro-implementation-tree/1",
-			"digest": "adde773f62c5302692c051147c3e15d29c141ceb58e364e9550c7a425bfdf620",
-			"commit": "a45414969f0c429e76c3ec064610271507a15060",
+			"digest": "d851734f054224da40a6b90d8d6404c50d26b755c18e49b1b2b6f7f36b1889da",
+			"commit": "a65506424781d4930bd2993d1eff7bb3ee7a6a4f",
 			"fileCount": 7361
 		},
 		"library": {
-			"sourceRevision": "a45414969f0c429e76c3ec064610271507a15060",
+			"sourceRevision": "a65506424781d4930bd2993d1eff7bb3ee7a6a4f",
 			"inputSha256": "594b78b81e3b2e3f32df92b6654661e28ae4403a3ef73b177a88c1a77259bc7a",
 			"inputFiles": 353,
 			"entrySha256": "0da112ad1128d9342edc41317a33017ec9e8bed0cadf47d56a943ce4fb3445c2"
 		},
 		"location": {
-			"directory": "dist/mega-maestro-runtime/0.37.0/55d02328bd6f879e8538456832e886a19a41bf9bb6202f8a9333fe9e2a0abacc",
+			"directory": "dist/mega-maestro-runtime/0.37.0/d30187bed69af949f901aed091f5b669088994027649e14f858caa2ab82ed8aa",
 			"rule": "obtain the archive by archive.sha256 and verify the sidecar and sha512; the directory is where the packager lands it"
 		},
 		"receipts": {
