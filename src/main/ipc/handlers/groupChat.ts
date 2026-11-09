@@ -1345,6 +1345,14 @@ Respond with ONLY the summary text, no additional commentary.`;
 	 * Emit an Auto Run trigger event to the renderer.
 	 * Called when the moderator issues !autorun @AgentName so the renderer can
 	 * start a proper batch run through useBatchProcessor for full UI feedback.
+	 *
+	 * Nothing in the renderer subscribes to this event today: the App.tsx listener
+	 * that registered the run and called startBatchRun was not carried into
+	 * useAppRemoteEventListeners. So a desktop room !autorun starts no Auto Run, and
+	 * the router closes the participant out through its response timeout. A listener
+	 * that brings it back must launch the batch under the room's lineage, the way the
+	 * shared runtime's launchNested does, never as an unparented run.
+	 * desktop-room-autorun-lineage.test.ts fails on a client that subscribes.
 	 */
 	groupChatEmitters.emitAutoRunTriggered = (
 		groupChatId: string,
