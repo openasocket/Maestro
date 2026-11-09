@@ -27,8 +27,17 @@ vi.mock('../../../../cli/services/storage', async (importOriginal) => ({
 	dataDirHasManagedBinding: vi.fn(() => false),
 }));
 vi.mock('../../../../cli/services/maestro-client', () => ({ withMaestroClient: vi.fn() }));
+// The bulk session writes: images are not relocated and no backup is taken in this suite.
+vi.mock('../../../../main/storage/session-image-store', () => ({
+	relocateSessionImages: vi.fn(async (sessions: unknown[]) => ({ sessions, relocated: 0 })),
+	resolveToDataUrl: vi.fn(),
+}));
+vi.mock('../../../../main/stores/sessions-backup', () => ({
+	backupSessionsBeforeWipe: vi.fn(async () => undefined),
+}));
 
 import {
+	SESSION_LIFECYCLE_SYNC_CHANNEL,
 	registerPersistenceHandlers,
 	type PersistenceHandlerDependencies,
 } from '../../../../main/ipc/handlers/persistence';
@@ -275,5 +284,142 @@ describe('the settings lock on every global-settings write sink (MRC2-06-08)', (
 		} finally {
 			vi.restoreAllMocks();
 		}
+	});
+});
+
+describe('renderer bulk session writes against the per-provider locks (MCOMP-21-08)', () => {
+	let handlers: Map<string, (...args: never[]) => unknown>;
+	let stored: Record<string, unknown>[];
+	let sender: { isDestroyed: () => boolean; send: ReturnType<typeof vi.fn> };
+	const STORED = {
+		id: 'agent-1',
+		name: 'Agent',
+		toolType: 'claude-code',
+		cwd: '/repo',
+		customPath: '/usr/bin/claude',
+		customModel: 'opus',
+	};
+	/** A renderer edit of every locked field (path, args, env, model, effort) plus an unlocked one. */
+	const EDITED = {
+		...STORED,
+		name: 'Renamed',
+		customPath: '/tmp/evil',
+		customArgs: '--dangerously-skip-permissions',
+		customEnvVars: { ANTHROPIC_BASE_URL: 'http://x' },
+		customModel: 'haiku',
+		customEffort: 'high',
+	};
+	const lockEveryField = () =>
+		installManagedSettingsPolicy([
+			{ key: 'agentConfig.customPath' },
+			{ key: 'agentConfig.customArgs' },
+			{ key: 'agentConfig.customEnvVars' },
+			{ key: 'agentConfig.model' },
+			{ key: 'agentConfig.reasoningEffort' },
+		]);
+	const writeVia = (channel: 'sessions:setMany' | 'sessions:setAll', edited: unknown) =>
+		channel === 'sessions:setMany'
+			? handlers.get(channel)!({ sender } as never, [edited] as never, [] as never)
+			: handlers.get(channel)!({ sender } as never, [edited] as never);
+	const syncCalls = () =>
+		sender.send.mock.calls.filter(([channel]) => channel === SESSION_LIFECYCLE_SYNC_CHANNEL);
+
+	beforeEach(() => {
+		vi.clearAllMocks();
+		handlers = new Map();
+		vi.mocked(ipcMain.handle).mockImplementation((channel, handler) => {
+			handlers.set(channel, handler as never);
+		});
+		stored = [{ ...STORED }];
+		sender = { isDestroyed: () => false, send: vi.fn() };
+		registerPersistenceHandlers({
+			settingsStore: fakeStore({}) as never,
+			sessionsStore: {
+				get: () => stored,
+				set: (_key: string, value: Record<string, unknown>[]) => void (stored = value),
+				path: '/mock/sessions.json',
+			} as never,
+			groupsStore: { get: () => [], set: vi.fn() } as never,
+			getWebServer: () => null,
+			flushSessionWrites: async () => {},
+		} as PersistenceHandlerDependencies);
+	});
+
+	afterEach(() => setSettingsWriteAuthority(null));
+
+	for (const channel of ['sessions:setMany', 'sessions:setAll'] as const) {
+		it(`${channel} puts every locked field back, keeps the rest, and corrects the renderer`, async () => {
+			lockEveryField();
+			expect(await writeVia(channel, EDITED)).toBe(true);
+			expect(stored).toHaveLength(1);
+			const persisted = stored[0];
+			expect(persisted).toMatchObject({
+				id: 'agent-1',
+				name: 'Renamed',
+				customPath: '/usr/bin/claude',
+				customModel: 'opus',
+			});
+			for (const field of ['customArgs', 'customEnvVars', 'customEffort'])
+				expect(persisted).not.toHaveProperty(field);
+			expect(vi.mocked(logger.warn).mock.calls.map((call) => call[0])).toEqual([
+				'Agent record field held by the managed policy: agentConfig.customPath',
+				'Agent record field held by the managed policy: agentConfig.customArgs',
+				'Agent record field held by the managed policy: agentConfig.customEnvVars',
+				'Agent record field held by the managed policy: agentConfig.model',
+				'Agent record field held by the managed policy: agentConfig.reasoningEffort',
+			]);
+			// The writer is told what was kept instead, against what it sent.
+			expect(syncCalls()).toEqual([
+				[
+					SESSION_LIFECYCLE_SYNC_CHANNEL,
+					{
+						added: [],
+						removedIds: [],
+						updated: [persisted],
+						baselines: [expect.objectContaining({ customModel: 'haiku', customPath: '/tmp/evil' })],
+					},
+				],
+			]);
+		});
+
+		it(`${channel} passes a field the policy does not lock, and everything standalone`, async () => {
+			installManagedSettingsPolicy([{ key: 'agentConfig.model' }]);
+			expect(
+				await writeVia(channel, { ...STORED, customPath: '/opt/claude', customModel: 'haiku' })
+			).toBe(true);
+			expect(stored[0]).toMatchObject({ customPath: '/opt/claude', customModel: 'opus' });
+			expect(syncCalls()).toHaveLength(1);
+			// An unlocked write alone sends no correction.
+			sender.send.mockClear();
+			expect(await writeVia(channel, { ...stored[0], customPath: '/opt/other' })).toBe(true);
+			expect(stored[0]).toMatchObject({ customPath: '/opt/other', customModel: 'opus' });
+			expect(syncCalls()).toEqual([]);
+			setSettingsWriteAuthority(null);
+			expect(await writeVia(channel, { ...EDITED })).toBe(true);
+			expect(stored[0]).toMatchObject({
+				customPath: '/tmp/evil',
+				customArgs: '--dangerously-skip-permissions',
+				customEnvVars: { ANTHROPIC_BASE_URL: 'http://x' },
+				customModel: 'haiku',
+				customEffort: 'high',
+			});
+			expect(syncCalls()).toEqual([]);
+		});
+	}
+
+	it('a new record created with a locked field is written without it', async () => {
+		lockEveryField();
+		const created = {
+			id: 'agent-2',
+			name: 'New',
+			toolType: 'codex',
+			cwd: '/r',
+			customModel: 'gpt-x',
+		};
+		expect(await writeVia('sessions:setMany', created)).toBe(true);
+		const persisted = stored.find((session) => session.id === 'agent-2')!;
+		expect(persisted).toMatchObject({ name: 'New', toolType: 'codex' });
+		expect(persisted).not.toHaveProperty('customModel');
+		expect(stored.find((session) => session.id === 'agent-1')).toMatchObject(STORED);
 	});
 });
