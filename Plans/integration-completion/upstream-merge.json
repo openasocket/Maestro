@@ -1509,6 +1509,27 @@
 				"semanticConflictsForC": [],
 				"notes": "contracts.test.ts (the committed runtime pin names this source) fails on the library version until the MCOMP-33-00P re-pin, as after every bump; docs-examples.test.ts cannot load while src/shared/maestro-lib/launch/agent-args.ts is unmerged (MCOMP-33-00R21).",
 				"unmergedAfter": 88
+			},
+			"MCOMP-33-00R04": {
+				"resolvedAt": "2026-11-09",
+				"resolvedBy": "Maestro-Claude",
+				"files": ["src/main/plugins/plugin-host-handlers.ts"],
+				"method": "Six hunks resolved by a shape-asserting script (Working/mcomp-33-00r04/resolve.mjs, both sides read in full); staged through merge-tool.mjs stage (prettier exit 0). 305 lines added, 70 removed against the integration side.",
+				"hunks": {
+					"src/main/plugins/plugin-host-handlers.ts": [
+						"Imports: both names kept (integration PLUGIN_EGRESS_CLASS, upstream MediaError).",
+						"HostHandlerDeps: upstream's `sendAgent?: HeadlessAgentRunner` import shape taken over the integration's inline signature; the integration's `dispatch(agentId, prompt, binding?)` and the binding notes on dispatch, sendAgent and nameTab kept.",
+						"agents.send body: upstream's invoke/execute/authorize restructure (original-audio attachment lease, Relay conversation transport) taken; the integration's seams re-applied on it: invoke sets the runner's trailing slot `args[10] = bound` when the broker consulted the ceiling (both the direct and the Relay conversation path run through invoke; a standalone call is handed no extra argument), the post-run grant check in invoke is `receiptStillHeld(bound, assertBrokerAllowed(...))`, and the Relay conversation `authorize` checks the receipt too. The integration's separate `origin` const dropped (upstream computes it inline, same value).",
+						"Late-abort return and the call tail: upstream (`if (hasConversation) authorize();`).",
+						"Post-run block: upstream's original-ownership commit; the integration's post-run checks (receipt, unattended consent, trusted act verb, Relay identity, provider-session remember, recordRelayTurn) already live in upstream's invoke and were not duplicated.",
+						"File tail: the integration's plugin effect sinks (PluginEffectSinkDeps, requirePluginBinding, createPluginEffectSinks) kept and closed, then upstream's new isOpaqueId helper."
+					]
+				},
+				"semanticConflictsForC": [
+					"HeadlessAgentRunner (src/main/plugins/plugin-manager-singleton.ts, MCOMP-33-00R07): the integration put `binding?: PluginActBinding` at index 8, upstream put `writerLeaseHeld?: boolean` at 8 and `turn?: HeadlessTurnSettings` at 9. plugin-host-handlers now writes the binding at index 10, so R07 must declare the runner as upstream's ten parameters plus a trailing `binding?: PluginActBinding`, and the desktop runner (src/main/plugins/plugin-headless-agent-runner.ts, R06) and its wiring in src/main/index.ts (R09) must read the binding from the eleventh argument. Until then `args[10] = bound` does not type-check; 00C confirms."
+				],
+				"notes": "Upstream's new Relay conversation verbs agents.restoreConversation and agents.completeConversation start no provider turn and launch nothing, so they carry no binding; they still consult the broker. The full type-check stops at the syntax phase while other files hold markers, so this file's types are checked by MCOMP-33-00C; the plugin host handlers suite is MCOMP-33-00R05.",
+				"unmergedAfter": 87
 			}
 		}
 	}
