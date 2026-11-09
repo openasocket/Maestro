@@ -337,6 +337,21 @@ export async function seedAll(
 	}
 }
 
+/**
+ * Seed the self-test plugin into a data dir another harness launches (the
+ * managed acceptance case): the plugins flag, its enabled state and the
+ * fixture files, signed with `seeded.signingKeys` and that key trusted. No
+ * throwaway launch and no seeded session: the caller's app owns both, so call
+ * it while that app is closed.
+ */
+export function seedPluginInto(seeded: SeededEnv): void {
+	enablePluginsFlag(seeded.demoDir);
+	seedPluginEnabledState(seeded.demoDir, true);
+	installFixturePlugin(seeded);
+	const pub = signInstalledPlugin(pluginDestDir(seeded.demoDir), seeded.signingKeys);
+	seedTrustedKey(seeded.demoDir, pub);
+}
+
 export function cleanup(seeded: SeededEnv): void {
 	// Best-effort: drop this demo instance's keyring anchor so e2e runs never
 	// accumulate entries in the OS credential store.

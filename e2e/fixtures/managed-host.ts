@@ -69,6 +69,14 @@ export interface ManagedRunEndpointInputs {
 	inScopeRepository?: string;
 	outOfScopeRepository?: string;
 	/**
+	 * The secondary-effects case only: argv that installs a plugin ceiling for the
+	 * seeded self-test plugin admitting what it was consented (its act verbs
+	 * included), with `<pluginId> <pluginDir> <signerKey>` appended; and a page
+	 * the browser ceiling admits for a relay navigation.
+	 */
+	admitPlugin?: string[];
+	inScopeBrowserUrl?: string;
+	/**
 	 * The commands and notices case only: argv that publishes a notice to this
 	 * installation and prints `{"messageId","body"}`, and argv that takes the
 	 * messageId and prints the endpoint's receipt custody `[{"state","idempotencyKey"}]`.

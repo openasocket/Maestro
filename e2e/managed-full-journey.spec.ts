@@ -19,15 +19,20 @@
  * restart, isolation and keyboard, and the credential route (MCOMP-33-02D),
  * Auto Run lineage, Cue prompt/shell/CLI and the delegated consult
  * (MCOMP-33-02E), and secondary effects, fleet evidence and commands and
- * notices (MCOMP-33-02F); the plugin and browser relay halves of the
- * secondary-effects case are MCOMP-33-02G.
+ * notices (MCOMP-33-02F), with the plugin and browser relay halves of the
+ * secondary-effects case (MCOMP-33-02G).
  */
 import { execFile, execFileSync } from 'node:child_process';
 import fs from 'node:fs';
+import http from 'node:http';
+import type { AddressInfo } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import type { ElectronApplication, Locator, Page } from '@playwright/test';
+import WebSocket from 'ws';
+import { readCliServerInfoFrom } from '../src/shared/maestro-lib/client/discovery';
+import { CLI_SECRET_HEADER } from '../src/shared/webLogin';
 import { ENTERPRISE_IDENTITY_FILE_NAME } from '../src/main/enterprise/identity-store';
 import {
 	MANAGED_INBOX_RECEIPTS_FILE_NAME,
@@ -99,6 +104,16 @@ import {
 	type ManagedRunEndpointInputs,
 	type StubProvider,
 } from './fixtures/managed-host';
+import {
+	PLUGIN_ID,
+	SPAWN_BINARY,
+	approveConsent,
+	deleteAnchor,
+	parseSelfTestSummary,
+	seedPluginInto,
+	type SeededEnv,
+} from './fixtures/plugin-harness';
+import { makeSigningKeys } from './fixtures/plugin-signing';
 
 interface CaseContext {
 	app: ElectronApplication;
@@ -108,8 +123,11 @@ interface CaseContext {
 	stub: StubProvider;
 	/** The contract-fixture endpoint, started on first use and closed after the case. */
 	fixtureEndpoint: () => Promise<FakeEndpoint>;
-	/** Close the app and launch it again over the same data dir; `app` and `page` follow. */
-	restart: () => Promise<void>;
+	/**
+	 * Close the app and launch it again over the same data dir; `app` and `page`
+	 * follow. `beforeLaunch` runs between the two, while nothing holds the data dir.
+	 */
+	restart: (beforeLaunch?: () => void) => Promise<void>;
 	observe: (kind: AcceptanceObserver, observation: AcceptanceObservation) => void;
 }
 
@@ -153,8 +171,9 @@ function acceptance(id: string, body: (ctx: CaseContext) => Promise<void>) {
 								}),
 							},
 						})),
-					restart: async () => {
+					restart: async (beforeLaunch) => {
 						await ctx!.app.close();
+						beforeLaunch?.();
 						const again = await relaunch(appPath, electronLaunchEnv, testDataDir);
 						relaunched = ctx!.app = again.app;
 						ctx!.page = again.page;
@@ -527,6 +546,133 @@ function gitFacts(dir: string) {
 		staged: read('diff', '--cached', '--name-only').split('\n').filter(Boolean),
 	};
 }
+
+type SelfTestRun = {
+	invoked: { ok: boolean; error?: string };
+	summary: Record<string, string> | null;
+	/** Everything the plugin and the broker logged while this run was in flight. */
+	lines: string;
+};
+
+/**
+ * The seeded self-test plugin (`e2e/fixtures/plugin-harness.ts`) installed,
+ * signed and trusted in this data dir across a restart, then consented with
+ * both act verbs while the host is still standalone. Its main-process output
+ * is captured from the relaunch on: the plugin's own probe lines and the
+ * broker's audit of every refusal land there. `selfTest(until)` re-runs the
+ * plugin's probes until its SUMMARY satisfies `until` (or the call fails).
+ */
+async function seedSelfTestPlugin(ctx: CaseContext) {
+	const seeded: SeededEnv = {
+		demoDir: ctx.dataDir,
+		scopeDir: fs.mkdtempSync(path.join(os.tmpdir(), 'maestro-e2e-scope-')),
+		runId: `r${generateUUID().slice(0, 8)}`,
+		env: {},
+		signingKeys: makeSigningKeys(),
+	};
+	// The one binary the registry blesses for the plugin's spawn, read at launch.
+	process.env.MAESTRO_E2E_SPAWN_BINARY = SPAWN_BINARY;
+	try {
+		await ctx.restart(() => seedPluginInto(seeded));
+	} finally {
+		delete process.env.MAESTRO_E2E_SPAWN_BINARY;
+	}
+	let output = '';
+	const proc = ctx.app.process();
+	proc.stdout?.on('data', (d: Buffer) => (output += d.toString()));
+	proc.stderr?.on('data', (d: Buffer) => (output += d.toString()));
+	await approveConsent(
+		{ app: ctx.app, window: ctx.page, output: () => output },
+		{ highRisk: ['agents:dispatch', 'process:spawn'] }
+	);
+	const selfTest = async (until: (s: Record<string, string>) => boolean): Promise<SelfTestRun> => {
+		// Assigned inside the poll: declared wide so the flow check does not narrow it to null.
+		let run = null as SelfTestRun | null;
+		await expect
+			.poll(
+				async () => {
+					const from = output.length;
+					const invoked = await ctx.page.evaluate(
+						(id) =>
+							window.maestro.plugins.invokeCommand(`${id}/selftest`).then(
+								() => ({ ok: true }),
+								(error: Error) => ({ ok: false, error: error.message })
+							),
+						PLUGIN_ID
+					);
+					// The SUMMARY line reaches stdout just after the command answers.
+					await new Promise((resolve) => setTimeout(resolve, 1000));
+					const lines = output.slice(from);
+					run = { invoked, summary: parseSelfTestSummary(lines, seeded.runId), lines };
+					return !invoked.ok || (run.summary !== null && until(run.summary));
+				},
+				{ timeout: 90_000, intervals: [1000, 2000, 3000, 5000] }
+			)
+			.toBe(true);
+		return run!;
+	};
+	return { seeded, selfTest };
+}
+
+/**
+ * One `bridge.invoke` over the CLI's own authenticated bridge (the discovery
+ * file in the data dir and its per-boot secret), the way a remote client
+ * reaches a relay channel: its answer, or the error the host raised.
+ */
+async function bridgeInvoke(dataDir: string, channel: string, args: unknown[]) {
+	const info = readCliServerInfoFrom(dataDir);
+	if (!info) throw new Error(`No bridge discovery file in ${dataDir}.`);
+	const ws = new WebSocket(`ws://127.0.0.1:${info.port}/${info.token}/ws`, {
+		headers: info.cliSecret ? { [CLI_SECRET_HEADER]: info.cliSecret } : {},
+	});
+	const requestId = generateUUID();
+	try {
+		return await new Promise<{ ok: boolean; result?: unknown; error?: string }>(
+			(resolve, reject) => {
+				const timer = setTimeout(() => reject(new Error(`${channel}: no bridge answer`)), 30_000);
+				ws.once('error', reject);
+				ws.once('close', (code) => reject(new Error(`${channel}: bridge closed (${code})`)));
+				ws.once('open', () =>
+					ws.send(JSON.stringify({ type: 'bridge.invoke', requestId, channel, args }))
+				);
+				ws.on('message', (data) => {
+					const message = JSON.parse(String(data));
+					if (message.type !== 'bridge.response' || message.requestId !== requestId) return;
+					clearTimeout(timer);
+					resolve(message);
+				});
+			}
+		);
+	} finally {
+		ws.close();
+	}
+}
+
+/** A local page that counts every request it serves: zero hits means no page loaded. */
+async function countingPage() {
+	const hits: string[] = [];
+	const server = http.createServer((request, response) => {
+		hits.push(request.url ?? '');
+		response.end('<title>relay acceptance</title>');
+	});
+	await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+	const { port } = server.address() as AddressInfo;
+	return {
+		url: `http://127.0.0.1:${port}/out-of-scope`,
+		hits,
+		close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+	};
+}
+
+/** The URLs of an agent's browser tabs, as the host persisted them. */
+const browserTabUrls = (page: Page, agentId: string) =>
+	page.evaluate(async (id) => {
+		const all = await window.maestro.sessions.getAll();
+		const record = all.find((r: { id: string }) => r.id === id) as
+			| { browserTabs?: Array<{ url?: string }> }
+			| undefined;
+		return (record?.browserTabs ?? []).map((t) => t.url ?? '');
+	}, agentId);
 
 const NOTICE = {
 	campaignId: '33333333-3333-4333-8333-333333333333',
@@ -1316,11 +1462,68 @@ test.describe(`Electron acceptance cases (${MANAGED_MODE} mode)`, () => {
 	});
 
 	acceptance('electron.secondary-effects', async (ctx) => {
-		const { page } = ctx;
 		const inputs =
 			MANAGED_MODE === 'endpoint'
-				? requireInputs(readRunEndpointInputs(), ['inScopeRepository', 'outOfScopeRepository'])
+				? requireInputs(readRunEndpointInputs(), [
+						'inScopeRepository',
+						'outOfScopeRepository',
+						'admitPlugin',
+						'inScopeBrowserUrl',
+					])
 				: null;
+		// Plugin effects: the seeded self-test plugin, consented while standalone (a restart).
+		const plugin = await seedSelfTestPlugin(ctx);
+		const { page } = ctx;
+		const pageServer = await countingPage();
+		try {
+			const standalone = await plugin.selfTest((s) => s['process:spawn'] === 'PASS');
+			// Browser relay effects reach a tab of this agent, created while standalone.
+			if (!inputs) await expectStubProvider(page, ctx.stub);
+			const agent = await createAgent(
+				page,
+				inputs?.approvedProvider ?? FIXTURE_PROVIDER,
+				'E2E Accept Effects',
+				ctx.projectDir
+			);
+			if (inputs) {
+				const records = await page.evaluate(() => window.maestro.plugins.list());
+				const record = records.plugins.find((r) => r.id === PLUGIN_ID);
+				runOperator(inputs.admitPlugin, [
+					PLUGIN_ID,
+					record?.source ?? '',
+					record?.signature?.signerKey ?? '',
+				]);
+			}
+			const repository = await repositoryHalf(ctx, inputs);
+			const managed = await plugin.selfTest((s) =>
+				inputs ? s['process:spawn'] === 'PASS' : typeof s['process:spawn'] === 'string'
+			);
+			const pluginHalf = pluginChecks(standalone, managed, inputs !== null);
+			const browser = await browserHalf(ctx, agent.id, pageServer, inputs);
+			const effect = observeOnDisk(
+				{
+					repository: repository.detail,
+					plugin: {
+						standalone: standalone.summary,
+						managed: managed.summary,
+						...pluginHalf.detail,
+					},
+					browser: browser.detail,
+				},
+				{ ...repository.checks, ...pluginHalf.checks, ...browser.checks }
+			);
+			ctx.observe('effect', effect);
+			expect(effect.problems).toEqual([]);
+		} finally {
+			await pageServer.close();
+			deleteAnchor(plugin.seeded);
+			fs.rmSync(plugin.seeded.scopeDir, { recursive: true, force: true });
+		}
+	});
+
+	/** The repository half: one origin the ceiling names and one it does not, through the shared git executor. */
+	async function repositoryHalf(ctx: CaseContext, inputs: ManagedRunEndpointInputs | null) {
+		const { page } = ctx;
 		// Repository effects through the shared git executor: one origin the ceiling names, one it does not.
 		const inScope = gitRepo(
 			ctx.projectDir,
@@ -1361,14 +1564,87 @@ test.describe(`Electron acceptance cases (${MANAGED_MODE} mode)`, () => {
 							inFacts.commits === 0 && inFacts.staged.length === 0,
 					}),
 		};
-		// The plugin and browser relay halves of this case are MCOMP-33-02G.
-		const effect = observeOnDisk(
-			{ inResult, outResult, repositories: { inScope: inFacts, outOfScope: outFacts } },
-			checks
-		);
-		ctx.observe('effect', effect);
-		expect(effect.problems).toEqual([]);
-	});
+		return {
+			detail: { inResult, outResult, repositories: { inScope: inFacts, outOfScope: outFacts } },
+			checks,
+		};
+	}
+
+	/**
+	 * The plugin half, read from the plugin's own probe lines and the broker's
+	 * audit: the spawn ran standalone; under management the act verbs are held
+	 * by the plugin ceiling (`PermissionBroker.holds()` / `ceilingVerdict`).
+	 */
+	function pluginChecks(standalone: SelfTestRun, managed: SelfTestRun, endpoint: boolean) {
+		const heldByCeiling = (cap: string) =>
+			managed.summary?.[cap] === 'DENY' &&
+			new RegExp(`PROBE-ERR ${cap}: permission denied: ${cap}[^\\n]*managed plugin ceiling`).test(
+				managed.lines
+			);
+		const spawned = managed.lines.includes(`process.spawn by "${PLUGIN_ID}"`);
+		const audited = managed.lines
+			.split('\n')
+			.some((l) => l.includes('[Plugins] denied') && l.includes(`"${PLUGIN_ID}"`));
+		const checks: Record<string, boolean> = {
+			'the plugin spawn ran while standalone': standalone.summary?.['process:spawn'] === 'PASS',
+			'the plugin was still loaded under management': managed.invoked.ok,
+			...(endpoint
+				? {
+						'the in-scope plugin spawn was admitted and ran':
+							managed.summary?.['process:spawn'] === 'PASS' && spawned,
+						'the out-of-scope plugin spawn was refused': managed.lines.includes(
+							'ACT-OFFSCOPE process:spawn: DENY'
+						),
+					}
+				: {
+						// No ceiling is installed on the fixture: an enrolled host holds every act verb.
+						'the plugin spawn was refused by the managed plugin ceiling':
+							heldByCeiling('process:spawn'),
+						'the plugin dispatch was refused by the managed plugin ceiling':
+							heldByCeiling('agents:dispatch'),
+						'the broker audited the refusal': audited,
+						'nothing was spawned under management': !spawned,
+					}),
+		};
+		return { detail: { invoked: managed.invoked, spawned, audited }, checks };
+	}
+
+	/**
+	 * The browser relay half, from an authenticated bridge client (the CLI's own
+	 * bridge): a navigation the ceiling names and one to a local page it does
+	 * not, held by `browserEffectVerdict` before the host renderer is asked.
+	 */
+	async function browserHalf(
+		ctx: CaseContext,
+		agentId: string,
+		outOfScopePage: Awaited<ReturnType<typeof countingPage>>,
+		inputs: ManagedRunEndpointInputs | null
+	) {
+		const inUrl = inputs?.inScopeBrowserUrl ?? 'https://example.com/e2e-in-scope';
+		const createTab = (url: string) =>
+			bridgeInvoke(ctx.dataDir, 'browser:createTab', [agentId, { url, ephemeral: true }]);
+		const inResult = await createTab(inUrl);
+		const outResult = await createTab(outOfScopePage.url);
+		const refusedByName = (r: { ok: boolean; error?: string }) =>
+			!r.ok && /Browser relay refused: \[managed-[a-z-]+\]/.test(r.error ?? '');
+		if (inputs) {
+			await expect.poll(() => browserTabUrls(ctx.page, agentId)).toContain(inUrl);
+		}
+		const urls = await browserTabUrls(ctx.page, agentId);
+		const checks: Record<string, boolean> = {
+			'the out-of-scope navigation was refused by name': refusedByName(outResult),
+			'no out-of-scope page loaded': outOfScopePage.hits.length === 0,
+			'no browser tab holds the out-of-scope page': !urls.includes(outOfScopePage.url),
+			...(inputs
+				? { 'the in-scope navigation opened its tab': inResult.ok && urls.includes(inUrl) }
+				: {
+						'the navigation the fixture names no ceiling for was refused by name':
+							refusedByName(inResult),
+						'no browser tab was opened': !urls.includes(inUrl),
+					}),
+		};
+		return { detail: { inResult, outResult, hits: outOfScopePage.hits, tabs: urls }, checks };
+	}
 
 	acceptance('electron.fleet-evidence', async (ctx) => {
 		const { page } = ctx;
