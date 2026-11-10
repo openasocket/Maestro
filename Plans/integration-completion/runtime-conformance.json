@@ -8,12 +8,12 @@
 		"archiveFormatVersion": 2,
 		"archive": {
 			"file": "runtime.tgz",
-			"sha256": "137b8b16fff351a8e428bd7bb8243279fee91e5839536a1ccdd39ea34d909e55",
-			"sha512": "4bd400afecfb836f6085f6e6719b0f617309c55608f405186e2b29e440a8de13ee1e6fa63214e5b3a059d56a2d8791f6bf1eb8fc69bb65aeb2f7d9767116026a",
-			"bytes": 2796791
+			"sha256": "3d037e4320c588dfc705d51dfbdd22ca502f465f6150588f0f327e98302c138c",
+			"sha512": "c2ce8c30146e00c361cc6a5cf0c1f1fc1be9861296319bb5a37c01e570fcc68268c8546c72d0a6137f2dd69e5af842ee97999a83c5f5e8decf7c6e9cf52e26c6",
+			"bytes": 2796847
 		},
-		"manifestSha256": "66a3e1cde65148c3650f789fc2197630f9632add4792e1b90ae7e496b50a8a55",
-		"payloadDigest": "a7dbfada1aeb1f37ef601d402bd1ff8bf8ed0d4f07d0ac1d7c1eb67a1828a374",
+		"manifestSha256": "4559cba2344ad7c2565d7b7ad29e3876955fa9f25f4d0f3d1dfa0b19acb8012b",
+		"payloadDigest": "4ac9b9269cb581f5e45c7ad3704a01945900bce3995985d8bcca6e7afcf08213",
 		"payloadFiles": 337,
 		"versions": {
 			"app": "1.1.1-RC",
@@ -23,18 +23,18 @@
 		},
 		"implementation": {
 			"rules": "maestro-implementation-tree/1",
-			"digest": "d4015de538dc52b145b1267050ef94875fbcb4332d421a96e4fc115e6ffda562",
-			"commit": "e72a91a039bc1cb0b477fdc927f5a4182e68a6e0",
-			"fileCount": 7361
+			"digest": "316cc98c949ee1c778d28abad3e188fd8c657446ee61b111bcbb8c668316d7ec",
+			"commit": "6e2232a4cb2010993166b708297bb2482bea27aa",
+			"fileCount": 7362
 		},
 		"library": {
-			"sourceRevision": "e72a91a039bc1cb0b477fdc927f5a4182e68a6e0",
+			"sourceRevision": "cf5ae462155c1c140438548d63119275be077585",
 			"inputSha256": "594b78b81e3b2e3f32df92b6654661e28ae4403a3ef73b177a88c1a77259bc7a",
 			"inputFiles": 353,
 			"entrySha256": "0da112ad1128d9342edc41317a33017ec9e8bed0cadf47d56a943ce4fb3445c2"
 		},
 		"location": {
-			"directory": "dist/mega-maestro-runtime/0.37.0/137b8b16fff351a8e428bd7bb8243279fee91e5839536a1ccdd39ea34d909e55",
+			"directory": "dist/mega-maestro-runtime/0.37.0/3d037e4320c588dfc705d51dfbdd22ca502f465f6150588f0f327e98302c138c",
 			"rule": "obtain the archive by archive.sha256 and verify the sidecar and sha512; the directory is where the packager lands it"
 		},
 		"receipts": {
@@ -63,7 +63,12 @@
 			},
 			"consumer": {
 				"negotiate": "negotiate(offer) takes no context: { supportedVersions, required, optional? }",
-				"operations": ["submit", "inspect", "cancel", "interrupt"],
+				"operations": [
+					"submit",
+					"inspect",
+					"cancel",
+					"interrupt"
+				],
 				"envelope": "{ context, input }; the HOST stamps peer after admitting the caller, a caller never names it",
 				"context": "ManagedOperationContext: contractVersion, installation, origin, actor, delegation, identity, policyRevision, workflow, traceId, requestedCapabilities",
 				"validate": "managedContextProblems(context) is the structural check a consumer can run itself; whether the attribution is true is the host verifier's decision"
@@ -88,18 +93,25 @@
 				"runtimeId": "runtime-conformance",
 				"processEpoch": "epoch-1"
 			},
-			"actor": { "kind": "service", "id": "adapter-conformance" },
+			"actor": {
+				"kind": "service",
+				"id": "adapter-conformance"
+			},
 			"policyRevision": 1,
 			"agents": [
 				{
 					"agentId": "agent-1",
 					"name": "Conformance agent",
 					"providerId": "claude-code",
-					"tabIds": ["tab-1"],
+					"tabIds": [
+						"tab-1"
+					],
 					"activeTabId": "tab-1"
 				}
 			],
-			"approvedResourceIds": ["res-approved"],
+			"approvedResourceIds": [
+				"res-approved"
+			],
 			"content": {
 				"pong": {
 					"text": "Reply with the single word: pong.",
@@ -126,41 +138,78 @@
 				{
 					"id": "activate-negotiate",
 					"offer": {
-						"supportedVersions": ["maestro-managed/1"],
-						"required": ["capabilities.negotiate"],
-						"optional": ["runs.submit", "runs.inspect", "runs.cancel"]
+						"supportedVersions": [
+							"maestro-managed/1"
+						],
+						"required": [
+							"capabilities.negotiate"
+						],
+						"optional": [
+							"runs.submit",
+							"runs.inspect",
+							"runs.cancel"
+						]
 					},
 					"expect": {
 						"outcome": "activated",
 						"contractVersion": "maestro-managed/1",
-						"capabilities": ["capabilities.negotiate"]
+						"capabilities": [
+							"capabilities.negotiate"
+						]
 					}
 				},
 				{
 					"id": "deny-required-implemented",
 					"offer": {
-						"supportedVersions": ["maestro-managed/1"],
-						"required": ["capabilities.negotiate", "runs.submit"]
+						"supportedVersions": [
+							"maestro-managed/1"
+						],
+						"required": [
+							"capabilities.negotiate",
+							"runs.submit"
+						]
 					},
-					"expect": { "outcome": "denied", "reason": "missing-required-capability" },
-					"missingNames": ["runs.submit"]
+					"expect": {
+						"outcome": "denied",
+						"reason": "missing-required-capability"
+					},
+					"missingNames": [
+						"runs.submit"
+					]
 				},
 				{
 					"id": "deny-unsupported-version",
 					"offer": {
-						"supportedVersions": ["maestro-managed/2"],
-						"required": ["capabilities.negotiate"]
+						"supportedVersions": [
+							"maestro-managed/2"
+						],
+						"required": [
+							"capabilities.negotiate"
+						]
 					},
-					"expect": { "outcome": "denied", "reason": "unsupported-version" }
+					"expect": {
+						"outcome": "denied",
+						"reason": "unsupported-version"
+					}
 				},
 				{
 					"id": "deny-unknown-capability",
 					"offer": {
-						"supportedVersions": ["maestro-managed/1"],
-						"required": ["capabilities.negotiate", "runs.teleport"]
+						"supportedVersions": [
+							"maestro-managed/1"
+						],
+						"required": [
+							"capabilities.negotiate",
+							"runs.teleport"
+						]
 					},
-					"expect": { "outcome": "denied", "reason": "unknown-capability" },
-					"missingNames": ["runs.teleport"]
+					"expect": {
+						"outcome": "denied",
+						"reason": "unknown-capability"
+					},
+					"missingNames": [
+						"runs.teleport"
+					]
 				}
 			]
 		},
@@ -171,9 +220,18 @@
 				{
 					"id": "submit-accepted",
 					"op": "submit",
-					"identity": { "idempotencyKey": "idem-a", "runId": "run-a" },
-					"input": { "resourceIds": ["res-approved"] },
-					"sink": { "send": "queued" },
+					"identity": {
+						"idempotencyKey": "idem-a",
+						"runId": "run-a"
+					},
+					"input": {
+						"resourceIds": [
+							"res-approved"
+						]
+					},
+					"sink": {
+						"send": "queued"
+					},
 					"expect": {
 						"status": "ok",
 						"value": {
@@ -190,138 +248,271 @@
 				{
 					"id": "inspect-queued",
 					"op": "inspect",
-					"input": { "runId": "run-a" },
+					"input": {
+						"runId": "run-a"
+					},
 					"expect": {
 						"status": "ok",
-						"value": { "runId": "run-a", "attemptId": "att:submit-accepted", "state": "queued" }
+						"value": {
+							"runId": "run-a",
+							"attemptId": "att:submit-accepted",
+							"state": "queued"
+						}
 					}
 				},
 				{
 					"id": "submit-replayed",
 					"op": "submit",
-					"identity": { "idempotencyKey": "idem-a" },
+					"identity": {
+						"idempotencyKey": "idem-a"
+					},
 					"expect": {
 						"status": "ok",
 						"value": {
 							"disposition": "replayed",
-							"run": { "runId": "run-a", "attemptId": "att:submit-accepted" }
+							"run": {
+								"runId": "run-a",
+								"attemptId": "att:submit-accepted"
+							}
 						}
 					}
 				},
 				{
 					"id": "submit-conflict-content",
 					"op": "submit",
-					"identity": { "idempotencyKey": "idem-a" },
-					"input": { "content": "ping" },
-					"expect": { "status": "denied", "code": "idempotency-conflict" }
+					"identity": {
+						"idempotencyKey": "idem-a"
+					},
+					"input": {
+						"content": "ping"
+					},
+					"expect": {
+						"status": "denied",
+						"code": "idempotency-conflict"
+					}
 				},
 				{
 					"id": "cancel-requested",
 					"op": "cancel",
-					"input": { "runId": "run-a" },
-					"sink": { "cancel": "dequeued" },
-					"expect": { "status": "ok", "value": { "runId": "run-a", "outcome": "requested" } }
+					"input": {
+						"runId": "run-a"
+					},
+					"sink": {
+						"cancel": "dequeued"
+					},
+					"expect": {
+						"status": "ok",
+						"value": {
+							"runId": "run-a",
+							"outcome": "requested"
+						}
+					}
 				},
 				{
 					"id": "submit-completed",
 					"op": "submit",
-					"identity": { "runId": "run-c" },
-					"sink": { "send": "started", "then": ["markDispatched", "markTerminal:completed"] },
+					"identity": {
+						"runId": "run-c"
+					},
+					"sink": {
+						"send": "started",
+						"then": [
+							"markDispatched",
+							"markTerminal:completed"
+						]
+					},
 					"expect": {
 						"status": "ok",
 						"value": {
 							"disposition": "accepted",
-							"run": { "runId": "run-c", "state": "completed" }
+							"run": {
+								"runId": "run-c",
+								"state": "completed"
+							}
 						}
 					}
 				},
 				{
 					"id": "cancel-already-terminal",
 					"op": "cancel",
-					"input": { "runId": "run-c" },
-					"expect": { "status": "ok", "value": { "runId": "run-c", "outcome": "already-terminal" } }
+					"input": {
+						"runId": "run-c"
+					},
+					"expect": {
+						"status": "ok",
+						"value": {
+							"runId": "run-c",
+							"outcome": "already-terminal"
+						}
+					}
 				},
 				{
 					"id": "submit-unknown-fate",
 					"op": "submit",
-					"identity": { "idempotencyKey": "idem-d", "runId": "run-d" },
-					"sink": { "send": "started", "then": ["markDispatched", "markUnknown"] },
+					"identity": {
+						"idempotencyKey": "idem-d",
+						"runId": "run-d"
+					},
+					"sink": {
+						"send": "started",
+						"then": [
+							"markDispatched",
+							"markUnknown"
+						]
+					},
 					"expect": {
 						"status": "ok",
-						"value": { "disposition": "accepted", "run": { "runId": "run-d", "state": "unknown" } }
+						"value": {
+							"disposition": "accepted",
+							"run": {
+								"runId": "run-d",
+								"state": "unknown"
+							}
+						}
 					}
 				},
 				{
 					"id": "cancel-unknown-run",
 					"op": "cancel",
-					"input": { "runId": "run-d" },
-					"expect": { "status": "ok", "value": { "runId": "run-d", "outcome": "unknown" } }
+					"input": {
+						"runId": "run-d"
+					},
+					"expect": {
+						"status": "ok",
+						"value": {
+							"runId": "run-d",
+							"outcome": "unknown"
+						}
+					}
 				},
 				{
 					"id": "submit-replay-of-unknown",
 					"op": "submit",
-					"identity": { "idempotencyKey": "idem-d" },
-					"expect": { "status": "unknown", "code": "outcome-unknown" }
+					"identity": {
+						"idempotencyKey": "idem-d"
+					},
+					"expect": {
+						"status": "unknown",
+						"code": "outcome-unknown"
+					}
 				},
 				{
 					"id": "inspect-not-found",
 					"op": "inspect",
-					"input": { "runId": "run-missing" },
-					"expect": { "status": "denied", "code": "not-found" }
+					"input": {
+						"runId": "run-missing"
+					},
+					"expect": {
+						"status": "denied",
+						"code": "not-found"
+					}
 				},
 				{
 					"id": "submit-provider-mismatch",
 					"op": "submit",
-					"input": { "providerId": "codex" },
-					"expect": { "status": "denied", "code": "context-mismatch" }
+					"input": {
+						"providerId": "codex"
+					},
+					"expect": {
+						"status": "denied",
+						"code": "context-mismatch"
+					}
 				},
 				{
 					"id": "submit-digest-mismatch",
 					"op": "submit",
-					"input": { "content": { "text": "pong", "sha256": "ping" } },
-					"expect": { "status": "denied", "code": "invalid-input" }
+					"input": {
+						"content": {
+							"text": "pong",
+							"sha256": "ping"
+						}
+					},
+					"expect": {
+						"status": "denied",
+						"code": "invalid-input"
+					}
 				},
 				{
 					"id": "submit-capability-not-requested",
 					"op": "submit",
-					"caps": ["runs.inspect"],
-					"expect": { "status": "denied", "code": "capability-unsupported" }
+					"caps": [
+						"runs.inspect"
+					],
+					"expect": {
+						"status": "denied",
+						"code": "capability-unsupported"
+					}
 				},
 				{
 					"id": "submit-foreign-installation",
 					"op": "submit",
-					"installation": { "installationId": "inst-other" },
-					"expect": { "status": "denied", "code": "unauthenticated" }
+					"installation": {
+						"installationId": "inst-other"
+					},
+					"expect": {
+						"status": "denied",
+						"code": "unauthenticated"
+					}
 				},
 				{
 					"id": "submit-unverified-transport",
 					"op": "submit",
 					"peer": "os-peer",
-					"expect": { "status": "denied", "code": "unauthenticated" }
+					"expect": {
+						"status": "denied",
+						"code": "unauthenticated"
+					}
 				},
 				{
 					"id": "submit-malformed-context",
 					"op": "submit",
-					"identity": { "requestId": "" },
-					"expect": { "status": "denied", "code": "invalid-input", "requestId": "" }
+					"identity": {
+						"requestId": ""
+					},
+					"expect": {
+						"status": "denied",
+						"code": "invalid-input",
+						"requestId": ""
+					}
 				},
 				{
 					"id": "sink-denied",
 					"op": "submit",
-					"sink": { "send": { "refused": "managed-denied" } },
-					"expect": { "status": "denied", "code": "policy-denied" }
+					"sink": {
+						"send": {
+							"refused": "managed-denied"
+						}
+					},
+					"expect": {
+						"status": "denied",
+						"code": "policy-denied"
+					}
 				},
 				{
 					"id": "sink-unavailable",
 					"op": "submit",
-					"sink": { "send": { "refused": "managed-unavailable" } },
-					"expect": { "status": "unavailable", "code": "runtime-unavailable" }
+					"sink": {
+						"send": {
+							"refused": "managed-unavailable"
+						}
+					},
+					"expect": {
+						"status": "unavailable",
+						"code": "runtime-unavailable"
+					}
 				},
 				{
 					"id": "sink-unknown",
 					"op": "submit",
-					"sink": { "send": { "refused": "managed-unknown" } },
-					"expect": { "status": "unknown", "code": "outcome-unknown" }
+					"sink": {
+						"send": {
+							"refused": "managed-unknown"
+						}
+					},
+					"expect": {
+						"status": "unknown",
+						"code": "outcome-unknown"
+					}
 				}
 			]
 		}
