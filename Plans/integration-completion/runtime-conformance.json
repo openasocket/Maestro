@@ -63,12 +63,7 @@
 			},
 			"consumer": {
 				"negotiate": "negotiate(offer) takes no context: { supportedVersions, required, optional? }",
-				"operations": [
-					"submit",
-					"inspect",
-					"cancel",
-					"interrupt"
-				],
+				"operations": ["submit", "inspect", "cancel", "interrupt"],
 				"envelope": "{ context, input }; the HOST stamps peer after admitting the caller, a caller never names it",
 				"context": "ManagedOperationContext: contractVersion, installation, origin, actor, delegation, identity, policyRevision, workflow, traceId, requestedCapabilities",
 				"validate": "managedContextProblems(context) is the structural check a consumer can run itself; whether the attribution is true is the host verifier's decision"
@@ -103,15 +98,11 @@
 					"agentId": "agent-1",
 					"name": "Conformance agent",
 					"providerId": "claude-code",
-					"tabIds": [
-						"tab-1"
-					],
+					"tabIds": ["tab-1"],
 					"activeTabId": "tab-1"
 				}
 			],
-			"approvedResourceIds": [
-				"res-approved"
-			],
+			"approvedResourceIds": ["res-approved"],
 			"content": {
 				"pong": {
 					"text": "Reply with the single word: pong.",
@@ -138,54 +129,33 @@
 				{
 					"id": "activate-negotiate",
 					"offer": {
-						"supportedVersions": [
-							"maestro-managed/1"
-						],
-						"required": [
-							"capabilities.negotiate"
-						],
-						"optional": [
-							"runs.submit",
-							"runs.inspect",
-							"runs.cancel"
-						]
+						"supportedVersions": ["maestro-managed/1"],
+						"required": ["capabilities.negotiate"],
+						"optional": ["runs.submit", "runs.inspect", "runs.cancel"]
 					},
 					"expect": {
 						"outcome": "activated",
 						"contractVersion": "maestro-managed/1",
-						"capabilities": [
-							"capabilities.negotiate"
-						]
+						"capabilities": ["capabilities.negotiate"]
 					}
 				},
 				{
 					"id": "deny-required-implemented",
 					"offer": {
-						"supportedVersions": [
-							"maestro-managed/1"
-						],
-						"required": [
-							"capabilities.negotiate",
-							"runs.submit"
-						]
+						"supportedVersions": ["maestro-managed/1"],
+						"required": ["capabilities.negotiate", "runs.submit"]
 					},
 					"expect": {
 						"outcome": "denied",
 						"reason": "missing-required-capability"
 					},
-					"missingNames": [
-						"runs.submit"
-					]
+					"missingNames": ["runs.submit"]
 				},
 				{
 					"id": "deny-unsupported-version",
 					"offer": {
-						"supportedVersions": [
-							"maestro-managed/2"
-						],
-						"required": [
-							"capabilities.negotiate"
-						]
+						"supportedVersions": ["maestro-managed/2"],
+						"required": ["capabilities.negotiate"]
 					},
 					"expect": {
 						"outcome": "denied",
@@ -195,21 +165,14 @@
 				{
 					"id": "deny-unknown-capability",
 					"offer": {
-						"supportedVersions": [
-							"maestro-managed/1"
-						],
-						"required": [
-							"capabilities.negotiate",
-							"runs.teleport"
-						]
+						"supportedVersions": ["maestro-managed/1"],
+						"required": ["capabilities.negotiate", "runs.teleport"]
 					},
 					"expect": {
 						"outcome": "denied",
 						"reason": "unknown-capability"
 					},
-					"missingNames": [
-						"runs.teleport"
-					]
+					"missingNames": ["runs.teleport"]
 				}
 			]
 		},
@@ -225,9 +188,7 @@
 						"runId": "run-a"
 					},
 					"input": {
-						"resourceIds": [
-							"res-approved"
-						]
+						"resourceIds": ["res-approved"]
 					},
 					"sink": {
 						"send": "queued"
@@ -316,10 +277,7 @@
 					},
 					"sink": {
 						"send": "started",
-						"then": [
-							"markDispatched",
-							"markTerminal:completed"
-						]
+						"then": ["markDispatched", "markTerminal:completed"]
 					},
 					"expect": {
 						"status": "ok",
@@ -355,10 +313,7 @@
 					},
 					"sink": {
 						"send": "started",
-						"then": [
-							"markDispatched",
-							"markUnknown"
-						]
+						"then": ["markDispatched", "markUnknown"]
 					},
 					"expect": {
 						"status": "ok",
@@ -435,9 +390,7 @@
 				{
 					"id": "submit-capability-not-requested",
 					"op": "submit",
-					"caps": [
-						"runs.inspect"
-					],
+					"caps": ["runs.inspect"],
 					"expect": {
 						"status": "denied",
 						"code": "capability-unsupported"
