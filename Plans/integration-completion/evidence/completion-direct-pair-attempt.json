@@ -286,6 +286,70 @@
 			"validation": "Verified current manifest, coverage and present receipt hashes; compared required receipt inventory, extension statuses and sibling evidence inventory with run 7, all unchanged. No application source changed or application/qualification test was run.",
 			"taskCompleted": false,
 			"imagesAnalyzed": 0
+		},
+		{
+			"run": 13,
+			"recordedAt": "2026-11-10T03:42:44.249Z",
+			"observedRevision": "c57b69acd9c1f97b1db1b0c79db5da35038e6c97",
+			"command": "node .maestro/playbooks/Working/mcomp-14-01/readiness.mjs",
+			"exitCode": 2,
+			"status": "blocked",
+			"evidence": {
+				"path": ".maestro/playbooks/Working/mcomp-14-01/readiness-MCOMP-14-01-2026-11-10T03-42-44-249Z.json",
+				"sha256": "6b94dfc15dd966c4ddbd26ccfcc2789b01ffc45ee9910190daa7eef56b8d6ae7"
+			},
+			"missingInputs": [],
+			"nowPresent": {
+				"MEGA-ACTOR-POLICY-BUILD": {
+					"path": "../mega-maestro/docs/evidence/integration-completion/g02-build.json",
+					"task": "GCOMP-03-09",
+					"recordedAt": "2026-11-09",
+					"sha256": "5f0cb2f796fbc7bec12a1d27b551d2753976971b9c762a6a135a69896840df18",
+					"publishedFeatures": [
+						"registration-use-v2",
+						"delegation-references-v2",
+						"workflow-lifecycle-v2",
+						"command-correlation-v2",
+						"desktop-authoring-projection-v1"
+					]
+				},
+				"MEGA-RUNTIME-ADAPTER-BUILD": {
+					"path": "../mega-maestro/docs/evidence/integration-completion/g03-build.json",
+					"task": "GCOMP-04-08",
+					"recordedAt": "2026-11-09",
+					"sha256": "283c5a83707302dba8f5a028571aa322853097e6515f9a24d17b21902f40bc6d",
+					"publishedFeatures": [
+						"registration-use-v2",
+						"delegation-references-v2",
+						"workflow-lifecycle-v2",
+						"command-correlation-v2",
+						"desktop-authoring-projection-v1"
+					]
+				},
+				"MEGA-PREPARED-EXECUTION-BUILD": {
+					"path": "../mega-maestro/docs/evidence/integration-completion/g06-build.json",
+					"task": "GCOMP-08-09",
+					"recordedAt": "2026-11-09",
+					"sha256": "75e2aad551121cbee8f1c445fdb6566fbdd296f516fe3ec80d6770ce9e14195e",
+					"publishedFeatures": [
+						"registration-use-v2",
+						"delegation-references-v2",
+						"workflow-lifecycle-v2",
+						"command-correlation-v2",
+						"desktop-authoring-projection-v1"
+					]
+				}
+			},
+			"pendingExtensions": [
+				"REGISTRATION-HTTP/2",
+				"PREPARED/1",
+				"EFFECT/1",
+				"HEADLESS-CUSTODY/1"
+			],
+			"observations": "All four required BUILD inputs are now published (g02, g03, g06 recorded 2026-11-09; MAESTRO-EFFECT-CONSUMERS-BUILD already present). The remaining blocker is the wire-extension obligation: none of the three receipts publishes a schema for REGISTRATION-HTTP/2, PREPARED/1, EFFECT/1 or HEADLESS-CUSTODY/1 (contractSchemas.features list only registration-use-v2, delegation-references-v2, workflow-lifecycle-v2, command-correlation-v2, desktop-authoring-projection-v1), so the adapter may not be enabled. The g06 receipt itself states the protected Linux backend reports unverified / managedExecution false, egress is only denied with no mediated gateway route, and mega-maestro-pair.mjs run would currently end refused_before_effect. No pair command was run.",
+			"validation": "Verified artifactId and published status of the three new sibling receipts and recorded their SHA-256. No application source changed; no qualification test was run.",
+			"taskCompleted": false,
+			"imagesAnalyzed": 0
 		}
 	]
 }
