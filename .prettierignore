@@ -43,3 +43,6 @@ Plans/mega-maestro-rc/execution-plan-p2.json
 Plans/mega-maestro-rc/execution-plan-p3.json
 Plans/mega-maestro-rc/PHASE2-GAPS.md
 Plans/mega-maestro-rc/PHASE3-PLAN.md
+# Installed copy of the sibling integration-completion bundle (commit 262209c39). Every MCOMP
+# task reads this README and the installer copies it byte for byte, so it is not reformatted.
+Plans/integration-completion/README.md
