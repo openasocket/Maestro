@@ -45,7 +45,11 @@ function browserPort() {
 			expect(url.pathname).toBe('/api/enrollment/runtime-registrations/approve');
 			expect(init.method).toBe('POST');
 			const body = JSON.parse(String(init.body));
-			expect(wire.runtimeApprovalInput.safeParse(body).success).toBe(true);
+			expect(
+				(body.version === 2 ? wire.runtimeApprovalInputV2 : wire.runtimeApprovalInput).safeParse(
+					body
+				).success
+			).toBe(true);
 			const status =
 				!state.authenticated || state.expiresAt <= Date.now()
 					? 401
@@ -135,7 +139,7 @@ describe('owned actor approval bridge (local contract evidence only)', () => {
 	});
 
 	it.each(['runtime_use', 'fleet_management'] as const)(
-		'refuses valid public v2 %s approval without stripping its purpose',
+		'approves a valid public v2 %s challenge and keeps its purpose and version in the body',
 		async (purpose) => {
 			const { browser } = browserPort();
 			const bridge = await createActorApprovalBridge({ browser, origin });
@@ -143,9 +147,9 @@ describe('owned actor approval bridge (local contract evidence only)', () => {
 			const v2 = { ...body, version: 2, purpose };
 			expect(wire.runtimeApprovalInputV2.safeParse(v2).success).toBe(true);
 			expect(wire.runtimeApprovalInput.safeParse(v2).success).toBe(false);
-			expect(await bridge.approve({ ...v2, expiresAt })).toEqual({ outcome: 'denied' });
-			expect(await bridge.approve({ ...body, expiresAt })).toEqual({ outcome: 'denied' });
-			expect(browser.fetch).not.toHaveBeenCalled();
+			expect(await bridge.approve({ ...v2, expiresAt })).toEqual({ outcome: 'approved' });
+			const [, init] = browser.fetch.mock.calls[browser.fetch.mock.calls.length - 1];
+			expect(JSON.parse(String(init.body))).toEqual({ ...body, version: 2, purpose });
 		}
 	);
 
@@ -217,8 +221,9 @@ describe('owned actor approval bridge (local contract evidence only)', () => {
 
 	it.each([
 		{ actorId: 'forged' },
-		{ version: 2, purpose: 'runtime_use' },
 		{ purpose: 'fleet_management' },
+		{ version: 2 },
+		{ version: 2, purpose: 'bogus' },
 		{ nonce: 'bad' },
 		{ expiresAt: '2000-01-01T00:00:00Z' },
 	])('rejects incompatible or forged challenge fields %j', async (patch) => {
