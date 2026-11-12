@@ -122,7 +122,7 @@ function makeArtifact(dir: string, mutate?: (parts: ArtifactParts) => void, foun
 		payload,
 		pkg: {
 			name: '@mega-maestro/contracts',
-			version: '0.1.0',
+			version: '0.2.0',
 			private: true,
 			type: 'module',
 			files: ['dist', 'provenance.json'],
@@ -139,7 +139,7 @@ function makeArtifact(dir: string, mutate?: (parts: ArtifactParts) => void, foun
 		provenance: {
 			formatVersion: 1,
 			name: '@mega-maestro/contracts',
-			version: '0.1.0',
+			version: '0.2.0',
 			sourceRevision: 'a'.repeat(40),
 			sourceDirty: false,
 			inputSha256: { 'package.json': sha256('workspace') },
@@ -333,7 +333,7 @@ describe('import-mega-maestro verifyArtifact', () => {
 		});
 		expect(record).toMatchObject({
 			name: '@mega-maestro/contracts',
-			version: '0.1.0',
+			version: '0.2.0',
 			sha256: artifact.sha256,
 			sourceDirty: false,
 			endpointProtocols: [1],
@@ -416,10 +416,16 @@ describe('import-mega-maestro verifyArtifact', () => {
 
 	it('refuses package versions, names and formats Maestro was not written against', () => {
 		const versionOut = fixture((p) => {
-			p.provenance.version = '0.2.0';
-			p.pkg.version = '0.2.0';
+			p.provenance.version = '0.3.0';
+			p.pkg.version = '0.3.0';
 		});
 		expect(refusal(versionOut)).toBe('manifest-version');
+		// Pre-release contract: only the version this pin names is accepted, so the prior 0.1.0 is refused too.
+		const priorVersion = fixture((p) => {
+			p.provenance.version = '0.1.0';
+			p.pkg.version = '0.1.0';
+		});
+		expect(refusal(priorVersion)).toBe('manifest-version');
 		expect(refusal(fixture((p) => (p.provenance.name = '@other/contracts')))).toBe('manifest-name');
 		expect(refusal(fixture((p) => (p.provenance.formatVersion = 2)))).toBe('manifest-format');
 		expect(refusal(fixture((p) => (p.provenance.sourceRevision = 'HEAD')))).toBe(
