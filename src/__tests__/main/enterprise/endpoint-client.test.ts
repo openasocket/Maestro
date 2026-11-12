@@ -172,6 +172,13 @@ describe('local endpoint client', () => {
 			expect(challenge.payload.nonce).toHaveLength(43);
 			expect(challenge.payload.challengeDigest).toMatch(/^[a-f0-9]{64}$/);
 		}
+		// Purpose-bound v2 only: the challenge body carries version and purpose, never the v1 shape.
+		expect(fake.calls.find((c) => c.path === '/v1/registration/challenge')?.body).toEqual({
+			runtimeId: 'desktop-100',
+			processEpoch: 'epoch-1',
+			version: 2,
+			purpose: 'runtime_use',
+		});
 		expect(port.state().registration).toBe('challenged');
 		expect(await port.registration.redeem()).toEqual({
 			status: 'ok',

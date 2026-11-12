@@ -133,11 +133,10 @@ export async function createActorApprovalBridge({ browser, origin, timeoutMs = 3
 		import(pathToFileURL(path.join(contractsDir, 'dist/local-endpoint.js')).href),
 		import(pathToFileURL(path.join(contractsDir, 'dist/http-operations.js')).href),
 	]);
-	// Two versions, never mixed: v1 (runtimeApprovalInput) and v2 (runtimeApprovalInputV2, which
-	// carries version 2 and purpose). A v2 challenge must keep both fields; never reinterpret it as v1.
+	// Pre-release contract: only the purpose-bound v2 registration (runtimeApprovalInputV2, with
+	// version 2 and purpose). There is no v1 fallback and no backward compatibility.
 	const expiresAt = wire.runtimeChallengeView.shape.expiresAt;
-	const challengeSchemaV1 = wire.runtimeApprovalInput.extend({ expiresAt });
-	const challengeSchemaV2 = wire.runtimeApprovalInputV2.extend({ expiresAt });
+	const challengeSchema = wire.runtimeApprovalInputV2.extend({ expiresAt });
 	let used = false;
 	return {
 		input: Object.freeze({
@@ -151,8 +150,7 @@ export async function createActorApprovalBridge({ browser, origin, timeoutMs = 3
 		async approve(value, { signal: parentSignal } = {}) {
 			if (used) return { outcome: 'denied' };
 			used = true;
-			const v2 = value && typeof value === 'object' && ('version' in value || 'purpose' in value);
-			const parsed = (v2 ? challengeSchemaV2 : challengeSchemaV1).safeParse(value);
+			const parsed = challengeSchema.safeParse(value);
 			if (!parsed.success || Date.parse(parsed.data.expiresAt) <= Date.now())
 				return { outcome: 'denied' };
 			const challenge = parsed.data;
@@ -214,11 +212,12 @@ export async function createActorApprovalBridge({ browser, origin, timeoutMs = 3
 					)
 						return { outcome: 'denied' };
 					// Forward the registration purpose and version exactly as the challenge carries them.
-					const body = (v2 ? wire.runtimeApprovalInputV2 : wire.runtimeApprovalInput).parse({
+					const body = wire.runtimeApprovalInputV2.parse({
 						challengeId: challenge.challengeId,
 						nonce: challenge.nonce,
 						challengeDigest: challenge.challengeDigest,
-						...(v2 ? { version: challenge.version, purpose: challenge.purpose } : {}),
+						version: challenge.version,
+						purpose: challenge.purpose,
 					});
 					const approved = await client.request('approve_runtime_registration', { body, signal });
 					signal.throwIfAborted();

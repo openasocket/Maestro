@@ -27,6 +27,9 @@ export const LOCAL_ENDPOINT_SCHEMA_VERSION = 1 as const;
 export const LOCAL_ENDPOINT_INVOKE_PATH = '/v1/invoke';
 export const LOCAL_ENDPOINT_REGISTRATION_CHALLENGE_PATH = '/v1/registration/challenge';
 export const LOCAL_ENDPOINT_REGISTRATION_REDEEM_PATH = '/v1/registration/redeem';
+/** Pre-release contract: registration is purpose-bound v2 only, with no v1 fallback. */
+export const LOCAL_ENDPOINT_REGISTRATION_VERSION = 2 as const;
+export const LOCAL_ENDPOINT_REGISTRATION_PURPOSE = 'runtime_use' as const;
 export const LOCAL_ENDPOINT_MAX_REQUEST_BYTES = 1024 * 1024;
 export const LOCAL_ENDPOINT_MAX_RESPONSE_BYTES = 64 * 1024;
 export const LOCAL_ENDPOINT_MAX_REGISTRATION_BYTES = 4096;

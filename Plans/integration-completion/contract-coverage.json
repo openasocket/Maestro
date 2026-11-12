@@ -330,14 +330,14 @@
 			"operations": "Existing approve_runtime_registration HTTP body remains v1. Propose a negotiated v2 mapping; no new route is sent.",
 			"missing": "The counterpart published runtimeApprovalInputV2 (version 2, purpose runtime_use | fleet_management) in its g02/g07 contracts archives, but the v2 HTTP mapping is not negotiated and the vendored pin (@mega-maestro/contracts 0.1.0) still carries only the v1 http-operations body. Live qualification against a Mega service is absent. No public session identifier is exposed for consumer-side session correlation; session binding remains server-owned. Never drop purpose/version to fit v1.",
 			"consumerImplementation": {
-				"state": "implemented-negotiation-pending",
-				"commit": "d8e3e572f",
+				"state": "implemented-v2-only-negotiation-pending",
+				"commit": "pending",
 				"recordedAt": "2026-11-11",
 				"surface": "createActorApprovalBridge in scripts/mega-maestro-pair.mjs",
-				"behavior": "A challenge carrying version or purpose is validated as runtimeApprovalInputV2 and the approval body forwards version and purpose unchanged; a v1 challenge keeps the v1 schema and body; mixed or unknown v2 fields are refused.",
-				"tests": "src/__tests__/integration/mega-maestro/approval-bridge.test.ts (37 passed, against the fake approval service only)",
+				"behavior": "Pre-release, no v1 fallback. The runtime challenge (endpoint-client.ts registration.challenge) always sends {runtimeId, processEpoch, version: 2, purpose: runtime_use} (constants in endpoint-port.ts). The approval bridge (scripts/mega-maestro-pair.mjs createActorApprovalBridge) accepts only the v2 challenge and forwards challengeId, nonce, challengeDigest, version and purpose unchanged. v1-shaped or incomplete challenges are refused.",
+				"tests": "endpoint-client.test.ts (challenge body asserted), approval-bridge.test.ts (v2 runtime_use and fleet_management approved; v1 and incomplete shapes refused). 766 tests across src/__tests__/integration/mega-maestro and src/__tests__/main/enterprise pass, against the fake endpoint and fake approval service only.",
 				"advertised": false,
-				"note": "Consumer-side only. The capability is not advertised and the readiness probes keep REGISTRATION-HTTP/2 pending until consumer negotiation and live qualification (MCOMP-14-01) succeed."
+				"note": "Consumer-side only. Still not advertised. Pin remains vendored contracts 0.1.0 (c34e6cd0) until the g07 re-pin is agreed. The runtime archive that carries this change is not yet rebuilt or re-pinned. Status stays proposed-not-negotiated until the Mega-side journey and live qualification succeed."
 			},
 			"implementationTasks": ["MCOMP-07-01", "MCOMP-13-01"],
 			"pairedVerification": ["MCOMP-14-01"]

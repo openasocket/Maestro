@@ -10,10 +10,12 @@ import {
 const origin = 'https://approval.invalid';
 const csrf = 'isolated-csrf-canary';
 let wire: typeof import('../../../../vendor/mega-maestro/contracts/dist/local-endpoint.js');
-const challenge = () => ({
+const challenge = (purpose: 'runtime_use' | 'fleet_management' = 'runtime_use') => ({
 	challengeId: '11111111-1111-4111-8111-111111111111',
 	nonce: 'N'.repeat(43),
 	challengeDigest: 'a'.repeat(64),
+	version: 2 as const,
+	purpose,
 	expiresAt: new Date(Date.now() + 60_000).toISOString(),
 });
 
@@ -45,11 +47,7 @@ function browserPort() {
 			expect(url.pathname).toBe('/api/enrollment/runtime-registrations/approve');
 			expect(init.method).toBe('POST');
 			const body = JSON.parse(String(init.body));
-			expect(
-				(body.version === 2 ? wire.runtimeApprovalInputV2 : wire.runtimeApprovalInput).safeParse(
-					body
-				).success
-			).toBe(true);
+			expect(wire.runtimeApprovalInputV2.safeParse(body).success).toBe(true);
 			const status =
 				!state.authenticated || state.expiresAt <= Date.now()
 					? 401
@@ -95,6 +93,8 @@ describe('owned actor approval bridge (local contract evidence only)', () => {
 			challengeId: input.challengeId,
 			nonce: input.nonce,
 			challengeDigest: input.challengeDigest,
+			version: 2,
+			purpose: 'runtime_use',
 		});
 		expect(JSON.stringify(bridge.input)).not.toContain(input.nonce);
 	});
@@ -139,15 +139,14 @@ describe('owned actor approval bridge (local contract evidence only)', () => {
 	});
 
 	it.each(['runtime_use', 'fleet_management'] as const)(
-		'approves a valid public v2 %s challenge and keeps its purpose and version in the body',
+		'approves a v2 %s challenge and keeps its purpose and version in the body',
 		async (purpose) => {
 			const { browser } = browserPort();
 			const bridge = await createActorApprovalBridge({ browser, origin });
-			const { expiresAt, ...body } = challenge();
-			const v2 = { ...body, version: 2, purpose };
-			expect(wire.runtimeApprovalInputV2.safeParse(v2).success).toBe(true);
-			expect(wire.runtimeApprovalInput.safeParse(v2).success).toBe(false);
-			expect(await bridge.approve({ ...v2, expiresAt })).toEqual({ outcome: 'approved' });
+			const input = challenge(purpose);
+			const { expiresAt, ...body } = input;
+			expect(wire.runtimeApprovalInputV2.safeParse(body).success).toBe(true);
+			expect(await bridge.approve(input)).toEqual({ outcome: 'approved' });
 			const [, init] = browser.fetch.mock.calls[browser.fetch.mock.calls.length - 1];
 			expect(JSON.parse(String(init.body))).toEqual({ ...body, version: 2, purpose });
 		}
@@ -221,12 +220,13 @@ describe('owned actor approval bridge (local contract evidence only)', () => {
 
 	it.each([
 		{ actorId: 'forged' },
-		{ purpose: 'fleet_management' },
-		{ version: 2 },
+		{ version: 1 },
 		{ version: 2, purpose: 'bogus' },
+		{ purpose: undefined },
+		{ version: undefined },
 		{ nonce: 'bad' },
 		{ expiresAt: '2000-01-01T00:00:00Z' },
-	])('rejects incompatible or forged challenge fields %j', async (patch) => {
+	])('rejects v1-shaped, incomplete or forged challenge fields %j', async (patch) => {
 		const { browser } = browserPort();
 		const bridge = await createActorApprovalBridge({ browser, origin });
 		expect(await bridge.approve({ ...challenge(), ...patch })).toEqual({ outcome: 'denied' });

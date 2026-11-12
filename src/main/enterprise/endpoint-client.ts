@@ -50,7 +50,9 @@ import {
 	LOCAL_ENDPOINT_MAX_RESPONSE_BYTES,
 	LOCAL_ENDPOINT_PROTOCOL,
 	LOCAL_ENDPOINT_REGISTRATION_CHALLENGE_PATH,
+	LOCAL_ENDPOINT_REGISTRATION_PURPOSE,
 	LOCAL_ENDPOINT_REGISTRATION_REDEEM_PATH,
+	LOCAL_ENDPOINT_REGISTRATION_VERSION,
 	LOCAL_ENDPOINT_TIMEOUT_MS,
 	endpointAttachmentRequestProblems,
 	endpointAddressProblem,
@@ -458,7 +460,12 @@ export function createLocalEndpointClient(deps: LocalEndpointClientDeps): Endpoi
 					}
 					const outcome = await registrationCall(
 						LOCAL_ENDPOINT_REGISTRATION_CHALLENGE_PATH,
-						JSON.stringify({ runtimeId: input.runtimeId, processEpoch: input.processEpoch })
+						JSON.stringify({
+							runtimeId: input.runtimeId,
+							processEpoch: input.processEpoch,
+							version: LOCAL_ENDPOINT_REGISTRATION_VERSION,
+							purpose: LOCAL_ENDPOINT_REGISTRATION_PURPOSE,
+						})
 					);
 					if (outcome.status !== 'ok') {
 						// The daemon drops any handshake on this socket when a challenge fails.
