@@ -52,6 +52,10 @@ describe('write-consumer-build-receipt', () => {
 		expect(args.tests).toEqual([...DEFAULT_FOCUSED_TESTS]);
 		expect(args.artifactId).toBe('MAESTRO-CONTRACT-INPUTS-BUILD');
 		expect(parse(['--name', 'x', ...base, '--test', 'a.test.ts']).tests).toEqual(['a.test.ts']);
+		expect(parse(['--name', 'x', ...base, '--out', 'Plans/r/exact.json']).output).toBe(
+			path.join(REPO_ROOT, 'Plans/r/exact.json')
+		);
+		expect(() => parse(['--name', 'x', ...base, '--out', 'exact.txt'])).toThrow('.json');
 	});
 
 	it('exits 2 on bad arguments and never rewrites an existing receipt (exit 1, bytes kept, nothing run)', async () => {

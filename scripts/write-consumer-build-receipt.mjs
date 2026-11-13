@@ -18,10 +18,11 @@
  *
  *   node scripts/write-consumer-build-receipt.mjs --name <name> --manifest <artifact.json>
  *     --archive <contracts.tgz> --sha256 <hex> [--producer-receipt <file>]
- *     [--artifact-id ID] [--task ID] [--test <file>]... [--out-dir DIR] [--work-dir DIR]
+ *     [--artifact-id ID] [--task ID] [--test <file>]... [--out-dir DIR | --out FILE.json]
+ *     [--work-dir DIR]
  *
  * It writes `<out-dir>/<name>-build.json` (default out-dir
- * `Plans/integration-completion/evidence`) only when every check ran and exited 0,
+ * `Plans/integration-completion/evidence`), or exactly `--out`, only when every check ran and exited 0,
  * and every field in it comes from a check that ran or a file it hashed. A field the
  * build cannot observe (the runtime's accepted endpoint protocols on live traffic,
  * grant and chain digests, workflow owner identity, negotiated workflow execution)
@@ -549,6 +550,7 @@ export function parse(argv) {
 			task: { type: 'string' },
 			test: { type: 'string', multiple: true },
 			'out-dir': { type: 'string', default: DEFAULT_EVIDENCE_DIR },
+			out: { type: 'string' },
 			'work-dir': { type: 'string' },
 		},
 		strict: true,
@@ -557,6 +559,7 @@ export function parse(argv) {
 		if (!values[key]) throw new Error(`--${key} is required`);
 	if (!/^[a-z0-9][a-z0-9.-]{0,79}$/.test(values.name))
 		throw new Error('--name is lowercase letters, digits, dots and dashes');
+	if (values.out && !values.out.endsWith('.json')) throw new Error('--out names a .json file');
 	if (!/^[a-f0-9]{64}$/.test(values.sha256))
 		throw new Error('--sha256 is 64 lowercase hex characters');
 	return {
@@ -570,7 +573,9 @@ export function parse(argv) {
 		artifactId: values['artifact-id'],
 		task: values.task,
 		tests: values.test?.length ? values.test : [...DEFAULT_FOCUSED_TESTS],
-		output: path.resolve(REPO_ROOT, values['out-dir'], `${values.name}-build.json`),
+		output: values.out
+			? path.resolve(REPO_ROOT, values.out)
+			: path.resolve(REPO_ROOT, values['out-dir'], `${values.name}-build.json`),
 		workDir: path.resolve(
 			REPO_ROOT,
 			values['work-dir'] ?? `.maestro/playbooks/Working/receipts/${values.name}`
