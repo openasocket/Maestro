@@ -5,7 +5,14 @@
 		"sourceRevision": "d5143a63931dc87a5f90b3fdb7b58fa3726913b1",
 		"recordedOn": "2026-10-26",
 		"runtimePortSource": "packages/runtime-adapter/src/port.ts",
-		"localEndpointSource": "packages/contracts/src/local-endpoint.ts"
+		"localEndpointSource": "packages/contracts/src/local-endpoint.ts",
+		"localEndpointRecordedFrom": {
+			"package": "@mega-maestro/contracts",
+			"version": "0.2.0",
+			"sourceRevision": "71746e237f15e7db18e3ffc8a291d01bca16abe2",
+			"recordedOn": "2026-11-13",
+			"note": "0.2.0 adds desktopPolicy to the local-endpoint operations; every other localEndpoint fact is unchanged from the sourceRevision above"
+		}
 	},
 	"runtimePort": {
 		"contractVersion": "mega-maestro-runtime-port/0.1",
@@ -46,7 +53,8 @@
 			"workflow",
 			"budget",
 			"compatibility",
-			"model"
+			"model",
+			"desktopPolicy"
 		],
 		"denialReasons": [
 			"unsupported_version",

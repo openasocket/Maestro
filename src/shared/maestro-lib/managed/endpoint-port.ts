@@ -69,6 +69,10 @@ export const LOCAL_ENDPOINT_OPERATIONS = [
 	'budget',
 	'compatibility',
 	'model',
+	// Contracts 0.2.0 local-endpoint.js lists it (the actor-bound desktop settings
+	// projection). No v1 caller sends it and it is not effectful; it is known here so
+	// an envelope that names it is read against the pinned contract.
+	'desktopPolicy',
 ] as const;
 export type LocalEndpointOperation = (typeof LOCAL_ENDPOINT_OPERATIONS)[number];
 
