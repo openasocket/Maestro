@@ -133,6 +133,32 @@ export function endpointWorkflowOwnerPort(
 	return { claim: (request) => endpoint.invoke('workflow', request) };
 }
 
+/**
+ * What a record holds before the registry has issued an epoch (a first claim
+ * that was fenced, or a lifecycle claim awaiting its answer). Not an epoch: it
+ * never reaches a fence, and the v1 wire offers 0 for it.
+ */
+export const UNISSUED_OWNER_EPOCH = 'unissued';
+
+// ---------------------------------------------------------------------------
+// The v1 wire boundary (local-endpoint protocol 1, frozen until parity)
+//
+// The contract's owner epoch is an opaque string the registry issues; Maestro
+// never counts it or converts it from a number. The v1 `workflow` operation
+// alone carries it as a count, so the two conversions live here and nowhere
+// else: the held string offered back on a v1 request, and the registry's
+// issued count stored from a v1 receipt.
+// ---------------------------------------------------------------------------
+
+const V1_EPOCH = /^(0|[1-9][0-9]*)$/;
+
+/** The count a v1 request offers for a held epoch: the registry's own count back, else 0 (a fresh proposal). */
+function v1WireEpoch(held: string | undefined): number {
+	return held !== undefined && V1_EPOCH.test(held) && Number.isSafeInteger(Number(held))
+		? Number(held)
+		: 0;
+}
+
 // ---------------------------------------------------------------------------
 // What is held
 // ---------------------------------------------------------------------------
@@ -147,7 +173,13 @@ export interface HeldWorkflowOwnership {
 	version: string;
 	triggerEventId: string;
 	ownerId: string;
-	ownerEpoch: number | string;
+	/**
+	 * The epoch the registry issued, as the opaque string the contract defines.
+	 * Never counted or derived here; `UNISSUED_OWNER_EPOCH` until the registry
+	 * has answered. A v1 receipt's count becomes this string only at the v1
+	 * boundary (`v1HeldEpoch`).
+	 */
+	ownerEpoch: string;
 	lifecycleVersion?: 1;
 	expiresAt?: string;
 	pending?: 'claim' | 'renew' | 'release';
@@ -273,16 +305,24 @@ const DECIDED: Readonly<Partial<Record<LocalEndpointDenialReason, ManagedDenialC
 
 const HELD_IDS = ['workflowId', 'endpointWorkflowId', 'ownerId', 'fencingToken', 'authorityId'];
 
+/**
+ * A record written while the held epoch was the v1 count. Refused on load and
+ * not repaired: it is dropped, so the workflow reads as never claimed and the
+ * next claim is issued a fresh opaque epoch by the registry.
+ */
+function isLegacyNumericEpochRecord(value: unknown): boolean {
+	return isRecord(value) && typeof value.ownerEpoch === 'number';
+}
+
 function heldProblem(value: unknown): string | null {
 	if (!isRecord(value)) return 'a record is not an object';
 	for (const key of HELD_IDS) {
 		if (typeof value[key] !== 'string' || value[key] === '') return `${key} is not an id`;
 	}
-	if (
-		!isEpoch(value.ownerEpoch) &&
-		!(value.lifecycleVersion === 1 && isEndpointIdentifier(value.ownerEpoch))
-	)
-		return 'ownerEpoch is not a count';
+	if (typeof value.ownerEpoch !== 'string' || value.ownerEpoch === '')
+		return 'ownerEpoch is not an opaque epoch';
+	if (value.lifecycleVersion === 1 && !isEndpointIdentifier(value.ownerEpoch))
+		return 'ownerEpoch is not an identifier';
 	if (!['held', 'fenced', 'unknown', 'released'].includes(value.state as string))
 		return 'state is unknown';
 	return null;
@@ -309,6 +349,7 @@ export function createWorkflowOwnership(deps: WorkflowOwnershipDeps): WorkflowOw
 			const read = await readStoreDocument<WorkflowOwnershipDocument>(deps.file, (value) => {
 				if (!Array.isArray(value.workflows)) return 'workflows is not an array';
 				for (const entry of value.workflows) {
+					if (isLegacyNumericEpochRecord(entry)) continue;
 					const problem = heldProblem(entry);
 					if (problem) return problem;
 				}
@@ -317,7 +358,10 @@ export function createWorkflowOwnership(deps: WorkflowOwnershipDeps): WorkflowOw
 			if (read.status === 'corrupt' || read.status === 'unreadable') {
 				return { ok: false, reason: read.status, file: deps.file, message: read.reason };
 			}
-			if (read.status === 'ok') doc = read.data;
+			if (read.status === 'ok') {
+				doc = read.data;
+				doc.workflows = doc.workflows.filter((entry) => !isLegacyNumericEpochRecord(entry));
+			}
 			loaded = true;
 			return { ok: true, held: doc.workflows.filter((w) => w.state === 'held').length };
 		})();
@@ -394,7 +438,7 @@ export function createWorkflowOwnership(deps: WorkflowOwnershipDeps): WorkflowOw
 			version: input.workflow.version,
 			triggerEventId: input.workflow.triggerEventId,
 			ownerId: owner.ownerId,
-			ownerEpoch: prior?.ownerEpoch ?? 0,
+			ownerEpoch: prior?.ownerEpoch ?? UNISSUED_OWNER_EPOCH,
 			fencingToken: prior?.fencingToken ?? workflowEndpointId(newId()),
 			authorityId: owner.authorityId,
 			policyRevision: owner.policyRevision,
@@ -621,13 +665,14 @@ export function createWorkflowOwnership(deps: WorkflowOwnershipDeps): WorkflowOw
 			runId: workflowEndpointId(input.runId),
 			attemptId: workflowEndpointId(input.attemptId),
 			ownerId: owner.ownerId,
-			ownerEpoch: typeof prior?.ownerEpoch === 'number' ? prior.ownerEpoch : 0,
+			// v1 wire: the held opaque epoch is offered back as the count it was issued as.
+			ownerEpoch: v1WireEpoch(prior?.ownerEpoch),
 			fencingToken: prior?.fencingToken ?? workflowEndpointId(newId()),
 			offlineEnabled: input.offlineEnabled ?? false,
 			policyRevision: owner.policyRevision,
 		};
 		const held = (
-			receipt: Pick<WorkflowOwnerReceipt, 'ownerEpoch' | 'fencingToken'>,
+			fence: Pick<HeldWorkflowOwnership, 'ownerEpoch' | 'fencingToken'>,
 			state: HeldWorkflowState,
 			detail: string | null
 		): HeldWorkflowOwnership => ({
@@ -636,8 +681,8 @@ export function createWorkflowOwnership(deps: WorkflowOwnershipDeps): WorkflowOw
 			version: workflow.version,
 			triggerEventId: workflow.triggerEventId,
 			ownerId: owner.ownerId,
-			ownerEpoch: receipt.ownerEpoch,
-			fencingToken: receipt.fencingToken,
+			ownerEpoch: fence.ownerEpoch,
+			fencingToken: fence.fencingToken,
 			authorityId: owner.authorityId,
 			policyRevision: owner.policyRevision as number,
 			offlineEnabled: request.offlineEnabled,
@@ -684,7 +729,14 @@ export function createWorkflowOwnership(deps: WorkflowOwnershipDeps): WorkflowOw
 				if (outcome.reason === 'owner_unfenced') {
 					await upsert(
 						existing,
-						held(request, 'fenced', 'The registry holds another owner, epoch or token.')
+						held(
+							{
+								ownerEpoch: prior?.ownerEpoch ?? UNISSUED_OWNER_EPOCH,
+								fencingToken: request.fencingToken,
+							},
+							'fenced',
+							'The registry holds another owner, epoch or token.'
+						)
 					);
 					return fencedBy(
 						`Workflow "${workflow.workflowId}" is fenced: the registry holds another owner, epoch or token, and this host is not its owner.`
@@ -722,10 +774,13 @@ export function createWorkflowOwnership(deps: WorkflowOwnershipDeps): WorkflowOw
 			};
 		}
 		const receipt = outcome.payload as WorkflowOwnerReceipt;
+		// v1 wire, the single number-to-opaque conversion: the registry issued this
+		// count, and it is held from here on as the opaque string the contract defines.
+		const issued = { ownerEpoch: String(receipt.ownerEpoch), fencingToken: receipt.fencingToken };
 		if (receipt.ownerId !== owner.ownerId) {
 			await upsert(
 				existing,
-				held(receipt, 'fenced', `The registry holds owner ${receipt.ownerId}.`)
+				held(issued, 'fenced', `The registry holds owner ${receipt.ownerId}.`)
 			);
 			return fencedBy(
 				`Workflow "${workflow.workflowId}" is owned by ${receipt.ownerId}, not this installation.`
@@ -733,9 +788,9 @@ export function createWorkflowOwnership(deps: WorkflowOwnershipDeps): WorkflowOw
 		}
 		const confirmed =
 			prior?.state === 'held' &&
-			prior.ownerEpoch === receipt.ownerEpoch &&
-			prior.fencingToken === receipt.fencingToken;
-		const kept = await upsert(existing, held(receipt, 'held', null));
+			prior.ownerEpoch === issued.ownerEpoch &&
+			prior.fencingToken === issued.fencingToken;
+		const kept = await upsert(existing, held(issued, 'held', null));
 		return {
 			state: 'owned',
 			fence: fenceOf(kept),
@@ -773,15 +828,13 @@ export function createWorkflowOwnership(deps: WorkflowOwnershipDeps): WorkflowOw
 	};
 }
 
-/** The contract's fence of a held record: the registry's epoch, as the string the workflow reference carries. */
+/** The contract's fence of a held record: the registry's opaque epoch, unchanged. */
 function fenceOf(
 	record: Pick<HeldWorkflowOwnership, 'ownerId' | 'ownerEpoch' | 'fencingToken'>
 ): AutoRunOwnerFence {
-	// KNOWN CONFLICT (see report): the held record's epoch is the v1 numeric counter.
-	// String() produces an epoch the endpoint never issued as an opaque string.
 	return {
 		ownerId: record.ownerId,
-		ownerEpoch: String(record.ownerEpoch),
+		ownerEpoch: record.ownerEpoch,
 		fencingToken: record.fencingToken,
 	};
 }

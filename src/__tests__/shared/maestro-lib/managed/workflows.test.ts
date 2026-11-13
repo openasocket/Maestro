@@ -16,6 +16,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EndpointInvokeOutcome } from '../../../../shared/maestro-lib/managed/endpoint-port';
 import {
 	MANAGED_WORKFLOWS_FILE_NAME,
+	UNISSUED_OWNER_EPOCH,
 	createWorkflowOwnership,
 	endpointWorkflowOwnerPort,
 	isWorkflowFenceRefusal,
@@ -567,7 +568,7 @@ describe('workflow ownership', () => {
 		expect(store.fence(WORKFLOW)).toBeNull();
 		expect(store.held()[0]).toMatchObject({
 			state: 'fenced',
-			ownerEpoch: 4,
+			ownerEpoch: '4',
 			fencingToken: 'token-A',
 		});
 		expect(workflowFenceOf(fenced)).toMatchObject({
@@ -745,7 +746,7 @@ describe('workflow ownership', () => {
 		// A fresh proposal, not the other authority's values.
 		expect(port.requests[1]).toMatchObject({ ownerEpoch: 0, fencingToken: 'proposed-nonce' });
 		expect(moved.held()).toHaveLength(1);
-		expect(moved.held()[0]).toMatchObject({ authorityId: 'endpoint-b', ownerEpoch: 9 });
+		expect(moved.held()[0]).toMatchObject({ authorityId: 'endpoint-b', ownerEpoch: '9' });
 	});
 
 	it('concurrent claims on one workflow are serialized: the second confirms what the first was issued', async () => {
@@ -758,6 +759,48 @@ describe('workflow ownership', () => {
 		expect(first).toMatchObject({ state: 'owned', disposition: 'claimed' });
 		expect(second).toMatchObject({ state: 'owned', disposition: 'confirmed' });
 		expect(port.requests[1]).toMatchObject({ ownerEpoch: 4, fencingToken: 'token-A' });
+	});
+
+	it('a held record with a numeric legacy epoch is ignored, and the next claim is issued a fresh opaque epoch', async () => {
+		const legacy = {
+			workflowId: WORKFLOW.workflowId,
+			endpointWorkflowId: workflowEndpointId(WORKFLOW.workflowId),
+			version: WORKFLOW.version,
+			triggerEventId: WORKFLOW.triggerEventId,
+			ownerId: 'inst-1',
+			ownerEpoch: 4,
+			fencingToken: 'token-A',
+			authorityId: 'endpoint-a',
+			policyRevision: 7,
+			offlineEnabled: true,
+			state: 'held',
+			claimedAt: '2026-10-20T12:00:00.000Z',
+			confirmedAt: '2026-10-20T12:00:00.000Z',
+			lastRunId: 'run-0',
+			lastAttemptId: 'attempt-1',
+			detail: null,
+		};
+		fs.writeFileSync(file, JSON.stringify({ maestroSchemaVersion: 1, workflows: [legacy] }));
+		const port = fakePort(owned(5, 'token-B'));
+		const store = ownership(port);
+		expect(await store.load()).toEqual({ ok: true, held: 0 });
+		// Not repaired into a string: the record is absent, so no fence and nothing offered back.
+		expect(store.held()).toHaveLength(0);
+		expect(store.fence(WORKFLOW)).toBeNull();
+
+		const outcome = await store.claim({ workflow: WORKFLOW, ...RUN });
+		expect(port.requests[0]).toMatchObject({ ownerEpoch: 0, fencingToken: 'proposed-nonce' });
+		expect(outcome).toMatchObject({
+			state: 'owned',
+			disposition: 'claimed',
+			fence: { ownerEpoch: '5', fencingToken: 'token-B' },
+		});
+		expect(store.held()).toHaveLength(1);
+		expect(store.held()[0]).toMatchObject({ ownerEpoch: '5', state: 'held' });
+		const onDisk = JSON.parse(fs.readFileSync(file, 'utf8')).workflows;
+		expect(onDisk).toHaveLength(1);
+		expect(typeof onDisk[0].ownerEpoch).toBe('string');
+		expect(onDisk[0].ownerEpoch).toBe('5');
 	});
 
 	it('a store that cannot be read refuses every claim rather than starting over', async () => {
@@ -864,7 +907,7 @@ describe('workflow ownership', () => {
 			await host('inst-1', reg.port).claim(RUN);
 			expect(
 				JSON.parse(fs.readFileSync(path.join(dir, 'inst-1.json'), 'utf8')).workflows[0]
-			).toMatchObject({ ownerEpoch: 1, fencingToken: 'inst-1-nonce', state: 'held' });
+			).toMatchObject({ ownerEpoch: '1', fencingToken: 'inst-1-nonce', state: 'held' });
 
 			// A new instance over the same file: nothing in memory, the claim loads the record itself.
 			const restarted = host('inst-1', reg.port);
@@ -913,7 +956,10 @@ describe('workflow ownership', () => {
 				fencingToken: 'inst-1-nonce',
 			});
 			expect(second.store.fence(WORKFLOW)).toBeNull();
-			expect(second.store.held()[0]).toMatchObject({ state: 'fenced', ownerEpoch: 0 });
+			expect(second.store.held()[0]).toMatchObject({
+				state: 'fenced',
+				ownerEpoch: UNISSUED_OWNER_EPOCH,
+			});
 
 			// The registry evicts the first (lapsed); the second's retry is issued the
 			// next epoch, and the first's retry with the values it held is fenced.
@@ -931,7 +977,7 @@ describe('workflow ownership', () => {
 			});
 			expect(first.store.held()[0]).toMatchObject({
 				state: 'fenced',
-				ownerEpoch: 1,
+				ownerEpoch: '1',
 				fencingToken: 'inst-1-nonce',
 			});
 			// A restart of the fenced first host reads no fence and re-offers the fenced
@@ -1022,7 +1068,7 @@ describe('workflow ownership', () => {
 
 			const restarted = ownership(port);
 			await restarted.load();
-			expect(restarted.held()[0]).toMatchObject({ state: 'unknown', ownerEpoch: 4 });
+			expect(restarted.held()[0]).toMatchObject({ state: 'unknown', ownerEpoch: '4' });
 			expect(restarted.fence(WORKFLOW)).toBeNull();
 			port.answer = owned(4, 'token-A');
 			const confirmed = await restarted.claim({
