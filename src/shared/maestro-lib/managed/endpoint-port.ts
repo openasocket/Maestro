@@ -21,6 +21,19 @@
  */
 
 import type { AdmissionOutcome, AdmissionRequest, HostAuthority } from './authority';
+import type {
+	DesktopAuthoringOperation,
+	DesktopChoiceKind,
+	DesktopPolicyBinding,
+	DesktopPolicyResult,
+} from './desktop-contract';
+import type {
+	EndpointInboxReceipt,
+	EndpointInboxRequest,
+	EndpointNoticeListRequest,
+	EndpointNoticeListResult,
+	EndpointTelemetryEvent,
+} from './host-adapter';
 
 export const LOCAL_ENDPOINT_PROTOCOL = 1 as const;
 export const LOCAL_ENDPOINT_SCHEMA_VERSION = 1 as const;
@@ -377,6 +390,252 @@ export interface EndpointWorkflowV2Exchange {
 		request: EndpointWorkflowReleaseRequestV2;
 		reply: EndpointWorkflowReleaseReplyV2;
 	};
+}
+
+// ---------------------------------------------------------------------------
+// The v2 operation clients (contracts 0.2.0 protocol.js), field for field
+// ---------------------------------------------------------------------------
+//
+// `localEndpointContractsV2` spreads the v1 `localEndpointContracts` and
+// replaces only `attachment`, `compatibility`, `execution`, `command` and the
+// workflow rows. Every operation below is therefore carried on `/v2/invoke`
+// under its v1 name with the v1 domain schema unchanged (local-endpoint.js and
+// desktop-policy.js); no shape here is pending a later Mega batch. Schema
+// presence is not support: an operation is sent only when the v2 attachment on
+// the current connection negotiated it.
+
+/** The v2 operations Maestro has a client for, by their wire names. */
+export const LOCAL_ENDPOINT_OPERATION_V2_CLIENTS = [
+	'noticeList',
+	'inbox',
+	'telemetry',
+	'budget',
+	'offline',
+	'desktopPolicy',
+	'model',
+] as const;
+export type EndpointOperationV2Client = (typeof LOCAL_ENDPOINT_OPERATION_V2_CLIENTS)[number];
+
+/** `noticeListRequest`: offset 0..7, limit 1..8; each page is freshly authorized. */
+export type EndpointNoticeListRequestV2 = EndpointNoticeListRequest;
+/** `noticeListResult` or `denied`. */
+export type EndpointNoticeListReplyV2 = EndpointNoticeListResult | EndpointDenied;
+
+/**
+ * `inboxRequest`. The v2 request is the v1 request field for field; the
+ * `idempotencyKey` a receipt ledger minted for the v1 path is the one the v2
+ * path sends, so a resend across the two paths stays one receipt.
+ */
+export type EndpointInboxRequestV2 = EndpointInboxRequest;
+/** `inboxReceipt` or `denied`. */
+export type EndpointInboxReplyV2 = EndpointInboxReceipt | EndpointDenied;
+
+/** The v1 inbox request as the v2 path sends it: every field copied, `idempotencyKey` unchanged. */
+export function inboxRequestV2(request: EndpointInboxRequest): EndpointInboxRequestV2 {
+	return {
+		campaignId: request.campaignId,
+		messageId: request.messageId,
+		idempotencyKey: request.idempotencyKey,
+		action: request.action,
+	};
+}
+
+/** `incomingMetadataEvent`, as this host sends it (the runtime-report subset). */
+export type EndpointTelemetryRequestV2 = EndpointTelemetryEvent;
+/** The contract's `durableReceipt`. */
+export interface EndpointDurableReceiptV2 {
+	outcome: 'durably_accepted';
+	eventId: string;
+	receivedAt: string;
+	duplicate: boolean;
+}
+export type EndpointTelemetryReplyV2 = EndpointDurableReceiptV2 | EndpointDenied;
+
+/** The contract's `budgetRequest`. */
+export interface EndpointBudgetRequestV2 {
+	reservationId: string;
+	requestId: string;
+	runId: string;
+	destinationId: string;
+	policyRevision: number;
+	/** 1 to 8192 characters, or null. */
+	signedOfflineAllowance: string | null;
+	estimatedUnits: number;
+	actualUnits: number | null;
+	usageProvenance: 'gateway_metered' | 'provider_reported' | 'estimated' | 'unavailable';
+	priceRevision: string | null;
+}
+/** The contract's `budgetReceipt`. */
+export interface EndpointBudgetReceiptV2 {
+	outcome: 'reserved';
+	reservationId: string;
+	destinationId: string;
+	attributedOrgId: string;
+	maximumUnits: number;
+	expiresAt: string;
+}
+export type EndpointBudgetReplyV2 = EndpointBudgetReceiptV2 | EndpointDenied;
+
+/** The contract's `offlineRequest`. */
+export interface EndpointOfflineRequestV2 {
+	policyRevision: number;
+	verifiedPolicyDigest: string;
+	exceptionExpiresAt: string | null;
+	allowanceId: string;
+	allowanceExpiresAt: string;
+	signedAllowance: string;
+	clockState: 'trusted' | 'uncertain' | 'rollback_detected';
+}
+/** The contract's `offlineResult`. */
+export interface EndpointOfflineResultV2 {
+	outcome: 'offline_active';
+	policyRevision: number;
+	allowanceId: string;
+	validUntil: string;
+	remainingUnits: number;
+}
+export type EndpointOfflineReplyV2 = EndpointOfflineResultV2 | EndpointDenied;
+
+/** The contract's `desktopAuthoringRequest` (desktop-policy.js). */
+export interface EndpointDesktopAuthoringRequestV2 {
+	subject: 'agent' | 'tab';
+	operation: DesktopAuthoringOperation;
+	items: number;
+	resultingCount: number;
+	selections: Record<string, readonly string[]>;
+	managedSettingKeys: readonly string[];
+	personalSettingKeys: readonly string[];
+}
+/** The contract's `desktopSettingsRequest`: a projection, or a decision on one exact authoring request. */
+export type EndpointDesktopPolicyRequestV2 =
+	| { kind: 'projection' }
+	| { kind: 'authorize'; projectionDigest: string; request: EndpointDesktopAuthoringRequestV2 };
+/** The contract's `desktopDecisionReceipt`: metadata only, never a grant. */
+export interface EndpointDesktopDecisionReceiptV2 {
+	receiptId: string;
+	decidedAt: string;
+	binding: DesktopPolicyBinding;
+	expectedProjectionDigest: string;
+	projectionDigest: string;
+	requestDigest: string;
+	outcome: 'allow' | 'deny';
+	reasons: readonly {
+		code:
+			| 'not_allowed'
+			| 'unknown_field'
+			| 'unsupported_capability'
+			| 'constraint_failed'
+			| 'invalid_policy';
+		field: string | null;
+		message: string;
+	}[];
+	selections: Partial<Record<DesktopChoiceKind, readonly string[]>>;
+	personalSettingKeys: readonly string[];
+	receiptDigest: string;
+}
+/** The contract's `desktopSettingsResult` (it already includes `denied`). */
+export type EndpointDesktopPolicyReplyV2 =
+	| { outcome: 'projection'; result: DesktopPolicyResult; projectionDigest: string | null }
+	| { outcome: 'decision'; receipt: EndpointDesktopDecisionReceiptV2 }
+	| EndpointDenied;
+
+/** The contract's `modelInvocationRequest`. */
+export interface EndpointModelRequestV2 {
+	runId: string;
+	sessionId: string;
+	model: string;
+	policyRevision: number;
+	routeId: string;
+	allowFallback: boolean;
+	/** 1 to 65536 characters. */
+	prompt: string;
+}
+/** The contract's `modelInvocationResult`. */
+export interface EndpointModelResultV2 {
+	outcome: 'model_completed';
+	requestId: string;
+	source: 'development-mock' | 'development-loopback';
+	text: string;
+	usage: {
+		inputTokens: number;
+		outputTokens: number;
+		totalTokens: number;
+		source: 'observed';
+	} | null;
+}
+export type EndpointModelReplyV2 = EndpointModelResultV2 | EndpointDenied;
+
+/** Each v2 operation client's request and reply, keyed by its wire name. */
+export interface EndpointOperationV2Exchange {
+	noticeList: { request: EndpointNoticeListRequestV2; reply: EndpointNoticeListReplyV2 };
+	inbox: { request: EndpointInboxRequestV2; reply: EndpointInboxReplyV2 };
+	telemetry: { request: EndpointTelemetryRequestV2; reply: EndpointTelemetryReplyV2 };
+	budget: { request: EndpointBudgetRequestV2; reply: EndpointBudgetReplyV2 };
+	offline: { request: EndpointOfflineRequestV2; reply: EndpointOfflineReplyV2 };
+	desktopPolicy: { request: EndpointDesktopPolicyRequestV2; reply: EndpointDesktopPolicyReplyV2 };
+	model: { request: EndpointModelRequestV2; reply: EndpointModelReplyV2 };
+}
+
+/**
+ * The v2 operations an existing v1 caller is moved onto. EMPTY until Mega's
+ * parity matrix shows an operation served on `/v2/invoke`; an operation is
+ * added here only with that evidence. `src/main/enterprise/endpoint-ops-v2.ts`
+ * re-exports it; this is its one home so the shared callers can read it.
+ */
+export const V2_OPERATIONS_SELECTED: readonly string[] = [];
+
+/** Whether the v2 attachment behind `clientState` negotiated `operation`. False with no v2 attachment. */
+export function v2OperationNegotiated(
+	clientState: Pick<EndpointConnectionState, 'negotiated'>,
+	operation: string
+): boolean {
+	return clientState.negotiated?.capabilities.includes(operation) ?? false;
+}
+
+/** The ports a v1 caller selects a path over: `invoke` always, the v2 side when the port has one. */
+export type EndpointOperationSelectable = Pick<EndpointPort, 'invoke'> &
+	Partial<Pick<EndpointPort, 'v2' | 'state'>>;
+
+/**
+ * Which path an existing v1 caller sends `operation` on. `v2` only when the
+ * operation is in `selected` (default `V2_OPERATIONS_SELECTED`) AND the v2
+ * attachment on the current connection negotiated it; `v1` otherwise. With
+ * the selection empty the connection state is not even read.
+ */
+export function selectEndpointOperationPath(
+	endpoint: EndpointOperationSelectable,
+	operation: EndpointOperationV2Client,
+	selected: readonly string[] = V2_OPERATIONS_SELECTED
+): 'v1' | 'v2' {
+	if (!selected.includes(operation)) return 'v1';
+	if (!endpoint.v2 || !endpoint.state) return 'v1';
+	return v2OperationNegotiated(endpoint.state(), operation) ? 'v2' : 'v1';
+}
+
+/**
+ * Send one operation for an existing v1 caller on the path
+ * `selectEndpointOperationPath` picks, decided per call. The v1 path sends
+ * `payload` through `invoke` exactly as before; the v2 path sends
+ * `v2Payload(payload)` through `v2.invoke` under the same operation name.
+ * Only operations that have a v1 caller qualify (`desktopPolicy` has none).
+ */
+export function invokeSelectedEndpointOperation<
+	O extends EndpointOperationV2Client & LocalEndpointOperation,
+>(
+	endpoint: EndpointOperationSelectable,
+	operation: O,
+	payload: EndpointOperationV2Exchange[O]['request'],
+	options: {
+		selected?: readonly string[];
+		v2Payload?: (
+			payload: EndpointOperationV2Exchange[O]['request']
+		) => EndpointOperationV2Exchange[O]['request'];
+	} = {}
+): Promise<EndpointInvokeOutcome<unknown>> {
+	if (selectEndpointOperationPath(endpoint, operation, options.selected) === 'v2' && endpoint.v2) {
+		return endpoint.v2.invoke(operation, options.v2Payload ? options.v2Payload(payload) : payload);
+	}
+	return endpoint.invoke(operation, payload);
 }
 
 export interface LocalEndpointEnvelope {

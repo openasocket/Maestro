@@ -61,8 +61,11 @@ import {
 	type PolicySourceSet,
 } from './authority';
 import {
+	inboxRequestV2,
+	invokeSelectedEndpointOperation,
 	isEndpointIdentifier,
 	type EndpointInvokeOutcome,
+	type EndpointOperationSelectable,
 	type EndpointPort,
 	type EndpointStatus,
 	type PreparedExecutionPort,
@@ -440,11 +443,24 @@ export interface InboxPort {
 	act(request: EndpointInboxRequest): Promise<EndpointInvokeOutcome<unknown>>;
 }
 
-/** The port over an attached endpoint socket. `inbox` is effectful (a lost answer is unknown); `noticeList` is not. */
-export function endpointInboxPort(endpoint: Pick<EndpointPort, 'invoke'>): InboxPort {
+/**
+ * The port over an attached endpoint socket. `inbox` is effectful (a lost answer is unknown); `noticeList` is not.
+ * Each call goes through the v1/v2 selection: v1 unless the operation is in
+ * `selected` (default `V2_OPERATIONS_SELECTED`, empty) and negotiated. The
+ * v2 inbox request carries the v1 `idempotencyKey` unchanged.
+ */
+export function endpointInboxPort(
+	endpoint: EndpointOperationSelectable,
+	selected?: readonly string[]
+): InboxPort {
 	return {
-		list: (request) => endpoint.invoke('noticeList', request),
-		act: (request) => endpoint.invoke('inbox', request),
+		list: (request) =>
+			invokeSelectedEndpointOperation(endpoint, 'noticeList', request, { selected }),
+		act: (request) =>
+			invokeSelectedEndpointOperation(endpoint, 'inbox', request, {
+				selected,
+				v2Payload: inboxRequestV2,
+			}),
 	};
 }
 
@@ -516,9 +532,18 @@ export interface TelemetryPort {
 	report(event: EndpointTelemetryEvent): Promise<EndpointInvokeOutcome<unknown>>;
 }
 
-/** The port over an attached endpoint socket. The client decides unavailable vs unknown. */
-export function endpointTelemetryPort(endpoint: Pick<EndpointPort, 'invoke'>): TelemetryPort {
-	return { report: (event) => endpoint.invoke('telemetry', event) };
+/**
+ * The port over an attached endpoint socket. The client decides unavailable vs unknown.
+ * Each report goes through the v1/v2 selection: v1 unless `telemetry` is in
+ * `selected` (default `V2_OPERATIONS_SELECTED`, empty) and negotiated.
+ */
+export function endpointTelemetryPort(
+	endpoint: EndpointOperationSelectable,
+	selected?: readonly string[]
+): TelemetryPort {
+	return {
+		report: (event) => invokeSelectedEndpointOperation(endpoint, 'telemetry', event, { selected }),
+	};
 }
 
 /** What every report this host sends is bound to; read per pass, never cached across a standing change. */
