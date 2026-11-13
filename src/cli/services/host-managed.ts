@@ -62,7 +62,10 @@ import {
 	type InboxClient,
 } from '../../main/enterprise/inbox';
 import { createPolicyStatusService } from '../../main/enterprise/policy-status';
-import { ENTERPRISE_SUPPORTED_CAPABILITIES } from '../../main/enterprise/service';
+import {
+	ENTERPRISE_SUPPORTED_CAPABILITIES,
+	ENTERPRISE_SUPPORTED_CAPABILITIES_V2,
+} from '../../main/enterprise/service';
 import {
 	anchorAccountForDirectory,
 	createKeyringAnchor,
@@ -583,6 +586,8 @@ export function composeHostManaged(deps: HostManagedDeps): HostManagedCompositio
 				{ id: 'maestro-lib', kind: 'runtime', version: MAESTRO_LIB_VERSION },
 			],
 			capabilities: { supported: ENTERPRISE_SUPPORTED_CAPABILITIES, required: [] },
+			// The v2 connection is opened with the raw factory so `port` stays the v1 one.
+			v2: { openPort, supported: ENTERPRISE_SUPPORTED_CAPABILITIES_V2 },
 			now,
 			// As on the desktop: every accepted attachment lists the notices again. The inbox
 			// standing refuses the listing unless this process holds a live registration.

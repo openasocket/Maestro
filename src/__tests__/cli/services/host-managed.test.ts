@@ -865,7 +865,8 @@ describe('composeHostManaged', () => {
 		await enrolled.lifecycle.attach();
 		const status = enrolled.status();
 		expect(status?.connection).toMatchObject({ attached: true });
-		expect(native.verified).toEqual([fake.socketPath]);
+		// Each connection verifies the server: the v2 attachment's own, then the v1 one.
+		expect(native.verified).toEqual([fake.socketPath, fake.socketPath]);
 		expect(status?.endpoint).not.toBeNull();
 		// The fake's registration gate is off, but authority is still this process's own registration.
 		expect(status?.authority).toBe('none');

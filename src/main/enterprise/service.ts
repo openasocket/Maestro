@@ -203,6 +203,23 @@ export const ENTERPRISE_SUPPORTED_CAPABILITIES: readonly string[] = [
 ];
 
 /**
+ * What this host offers on the v2 attachment (its own connection; see
+ * `EnrollmentLifecycleDeps.v2`). `registration_use` and the four workflow
+ * custody verbs, nothing required: an endpoint that offers a subset still
+ * attaches, and an operation it did not select is never sent. Offering them
+ * moves no caller onto v2; `V2_OPERATIONS_SELECTED` does that, and it is empty.
+ */
+export const ENTERPRISE_SUPPORTED_CAPABILITIES_V2: readonly string[] = [
+	'attachment',
+	'compatibility',
+	'registration_use',
+	'workflow_claim',
+	'workflow_renew',
+	'workflow_settle',
+	'workflow_release',
+];
+
+/**
  * What the egress, update and listener ceilings refused, as the status
  * projection lists them. The desktop reads the real ledgers (the default);
  * a test or a headless composition names its own.
@@ -835,6 +852,8 @@ export function createEnterpriseService(deps: EnterpriseServiceDeps): Enterprise
 		installation,
 		components,
 		capabilities: { supported: ENTERPRISE_SUPPORTED_CAPABILITIES, required: [] },
+		// The v2 connection is opened with the raw factory so `port` stays the v1 one.
+		v2: { openPort, supported: ENTERPRISE_SUPPORTED_CAPABILITIES_V2 },
 		now,
 		// Every accepted attachment lists the notices again (below): what the endpoint
 		// holds for this actor is held here without a click, and the listing is the

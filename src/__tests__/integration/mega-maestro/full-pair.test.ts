@@ -1404,8 +1404,12 @@ describe('full pair: fleet evidence, usage, VIBES, TRACE, governance, commands a
 		const secrets = [process.execPath, dir, 'setInterval', 'synthetic', 'CANARY', 'run-a', 'run-c'];
 		for (const secret of secrets) expect(facts).not.toContain(secret);
 
-		// refresh_policy: one more attachment on the wire, the registration kept.
-		const attachments = operations('attachment').length;
+		// refresh_policy: one more v1 attachment on the wire, the registration kept. The
+		// lifecycle's v2 attachment runs on its own connection first, so /v2/invoke sees one too.
+		const attachmentsOn = (target: string) =>
+			operations('attachment').filter((call) => call.path === target).length;
+		const attachments = attachmentsOn('/v1/invoke');
+		const attachmentsV2 = attachmentsOn('/v2/invoke');
 		const refresh = command({
 			action: { kind: 'refresh-policy', desiredRevision: PAIR_POLICY_REVISION },
 			recipient: { runId: null },
@@ -1414,7 +1418,8 @@ describe('full pair: fleet evidence, usage, VIBES, TRACE, governance, commands a
 			status: 'completed',
 			commandId: 'cmd-refresh-policy',
 		});
-		expect(operations('attachment')).toHaveLength(attachments + 1);
+		expect(attachmentsOn('/v1/invoke')).toBe(attachments + 1);
+		expect(attachmentsOn('/v2/invoke')).toBe(attachmentsV2 + 1);
 		expect(service.lifecycle.status().authority).toBe('registered');
 		for (const kind of ['pause-run', 'resume-run'] as const) {
 			expect(await harness.receive(command({ action: { kind } }))).toMatchObject({

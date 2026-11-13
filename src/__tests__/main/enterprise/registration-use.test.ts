@@ -2,8 +2,8 @@
  * The registration bootstrap over the real client, the fake daemon and an
  * identity store with injected custody. What is defended: the registration
  * record carries the approval's challenge digest, not the challenge id; the
- * v2 `registration_use` lookup sends nothing unless the v2 attachment
- * negotiated it; a projected reference writes `enrollmentId` and
+ * v2 `registration_use` lookup sends nothing unless the v2 attachment the
+ * lifecycle made on its own connection negotiated it; a projected reference writes `enrollmentId` and
  * `processBirthDigest` and keeps the rest of the registration; a denied or
  * malformed reply writes nothing; and a `processBirthDigest` that is not 64
  * lowercase hex is refused.
@@ -27,10 +27,10 @@ import {
 	createEnterpriseIdentityStore,
 	type EnterpriseIdentityStore,
 } from '../../../main/enterprise/identity-store';
+import { ENTERPRISE_SUPPORTED_CAPABILITIES_V2 } from '../../../main/enterprise/service';
 import {
 	LOCAL_ENDPOINT_INVOKE_V2_PATH,
 	endpointRegistrationUseReplyProblems,
-	type EndpointAttachmentRequestV2,
 	type EndpointPort,
 } from '../../../shared/maestro-lib/managed/endpoint-port';
 import type { Anchor } from '../../../main/utils/keyring-anchor';
@@ -53,15 +53,6 @@ const ENROLL_INPUT = {
 	collectionProfile: 'metadata' as const,
 	trustRootDigest: 'a'.repeat(64),
 	keyPossessionProof: 'proof-from-endpoint-tooling',
-};
-const ATTACH_V2: EndpointAttachmentRequestV2 = {
-	installationId: INSTALLATION.installationId,
-	runtimeId: INSTALLATION.runtimeId,
-	processEpoch: INSTALLATION.processEpoch,
-	components: [{ id: 'maestro', kind: 'maestro', version: '1.1.0-RC' }],
-	supportedProtocols: [2],
-	supportedCapabilities: ['attachment', 'compatibility', 'registration_use'],
-	requiredCapabilities: [],
 };
 const ENROLLMENT_ID = '7f1c2a4e-5b6d-4e8f-9a0b-1c2d3e4f5a6b';
 const BIRTH_DIGEST = 'b'.repeat(64);
@@ -96,11 +87,13 @@ describe('registration bootstrap', () => {
 	const open: FakeEndpoint[] = [];
 	const lifecycles: EnrollmentLifecycle[] = [];
 	let ports: EndpointPort[];
+	let v2Ports: EndpointPort[];
 
 	beforeEach(() => {
 		dir = fs.mkdtempSync(path.join(os.tmpdir(), 'registration-use-'));
 		holder = { value: null };
 		ports = [];
+		v2Ports = [];
 		identity = createEnterpriseIdentityStore({
 			file: path.join(dir, 'enterprise-identity.bin'),
 			seal: fakeSeal(),
@@ -130,6 +123,14 @@ describe('registration bootstrap', () => {
 			installation: INSTALLATION,
 			components: [{ id: 'maestro', kind: 'maestro', version: '1.1.0-RC' }],
 			capabilities: { supported: ['attachment', 'compatibility', 'enrollment'], required: [] },
+			v2: {
+				openPort: (socketPath) => {
+					const port = createLocalEndpointClient({ socketPath, timeoutMs: 1_000 });
+					v2Ports.push(port);
+					return port;
+				},
+				supported: ENTERPRISE_SUPPORTED_CAPABILITIES_V2,
+			},
 		});
 		lifecycles.push(created);
 		return created;
@@ -148,7 +149,9 @@ describe('registration bootstrap', () => {
 		expect(begun.status).toBe('ok');
 		expect((await life.completeRegistration()).status).toBe('ok');
 		expect(ports).toHaveLength(1);
-		return { life, port: ports[0] };
+		// One v2 connection, reused by both attachments (the enrollment's and the registration's).
+		expect(v2Ports).toHaveLength(1);
+		return { life, port: ports[0], v2Port: v2Ports[0] };
 	}
 
 	function record() {
@@ -192,20 +195,19 @@ describe('registration bootstrap', () => {
 
 	it('returns not-negotiated and sends nothing when the v2 attachment did not negotiate registration_use', async () => {
 		const fake = await endpoint({ ...SERVES_ENROLLMENT, v2Capabilities: [] });
-		const { life, port } = await enrolledAndRegistered(fake);
+		const { life, port, v2Port } = await enrolledAndRegistered(fake);
 		const before = record();
 
-		// No v2 attachment at all on this connection.
+		// No v2 attachment at all on the v1 connection.
 		const direct = await port.v2!.registration.use();
 		expect(direct).toMatchObject({ status: 'unavailable', reason: 'not-negotiated' });
-		expect(v2Calls(fake)).toEqual([]);
+		expect(v2Calls(fake)).toEqual(['attachment', 'attachment']);
 
-		// A v2 attachment that did not select it.
-		expect((await port.v2!.attach(ATTACH_V2)).status).toBe('ok');
-		expect(port.v2!.negotiated('registration_use')).toBe(false);
+		// The lifecycle's v2 attachment, which the endpoint answered without selecting it.
+		expect(v2Port.v2!.negotiated('registration_use')).toBe(false);
 		const outcome = await life.useRegistration();
 		expect(outcome).toMatchObject({ status: 'unavailable', reason: 'not-negotiated' });
-		expect(v2Calls(fake)).toEqual(['attachment']);
+		expect(v2Calls(fake)).toEqual(['attachment', 'attachment']);
 		expect(record()).toEqual(before);
 	});
 
@@ -221,9 +223,8 @@ describe('registration bootstrap', () => {
 				},
 			},
 		});
-		const { life, port } = await enrolledAndRegistered(fake);
+		const { life } = await enrolledAndRegistered(fake);
 		const before = record();
-		expect((await port.v2!.attach(ATTACH_V2)).status).toBe('ok');
 
 		const outcome = await life.useRegistration();
 		expect(outcome).toEqual({
@@ -236,7 +237,7 @@ describe('registration bootstrap', () => {
 			},
 		});
 		expect(received).toEqual({});
-		expect(v2Calls(fake)).toEqual(['attachment', 'registration_use']);
+		expect(v2Calls(fake)).toEqual(['attachment', 'attachment', 'registration_use']);
 
 		const after = record();
 		expect(after.enrollmentId).toBe(ENROLLMENT_ID);
@@ -256,9 +257,8 @@ describe('registration bootstrap', () => {
 				registration_use: () => ({ outcome: 'denied', reason: 'registration_not_found' }),
 			},
 		});
-		const { life, port } = await enrolledAndRegistered(fake);
+		const { life } = await enrolledAndRegistered(fake);
 		const before = record();
-		expect((await port.v2!.attach(ATTACH_V2)).status).toBe('ok');
 
 		const outcome = await life.useRegistration();
 		expect(outcome).toEqual({
@@ -274,9 +274,8 @@ describe('registration bootstrap', () => {
 			v2Capabilities: ['registration_use'],
 			operations: { registration_use: () => ({ outcome: 'projected', reference: null }) },
 		});
-		const { life, port } = await enrolledAndRegistered(fake);
+		const { life } = await enrolledAndRegistered(fake);
 		const before = record();
-		expect((await port.v2!.attach(ATTACH_V2)).status).toBe('ok');
 
 		const outcome = await life.useRegistration();
 		expect(outcome).toMatchObject({ status: 'unavailable', reason: 'malformed' });
@@ -291,9 +290,8 @@ describe('registration bootstrap', () => {
 				registration_use: () => projected({ processBirthDigest: 'B'.repeat(64) }),
 			},
 		});
-		const { life, port } = await enrolledAndRegistered(fake);
+		const { life } = await enrolledAndRegistered(fake);
 		const before = record();
-		expect((await port.v2!.attach(ATTACH_V2)).status).toBe('ok');
 
 		const outcome = await life.useRegistration();
 		expect(outcome).toMatchObject({ status: 'unavailable', reason: 'malformed' });

@@ -115,7 +115,7 @@ describe('enterprise service', () => {
 		'holds prepared and effect inputs until desktop recovery: recovered=%s',
 		async (recovered) => {
 			let service: EnterpriseService;
-			let currentPort: EndpointPort;
+			let currentPort: EndpointPort | undefined;
 			let leaseNumber = 0;
 			// Declared local producer only. No wire negotiation or native confinement is claimed.
 			const producer: ManagedEffectProducer = {
@@ -140,7 +140,11 @@ describe('enterprise service', () => {
 			service = compose(undefined, {
 				effectProducer,
 				openPort: (socketPath) => {
-					currentPort = createLocalEndpointClient({ socketPath, timeoutMs: 1_000 });
+					// The first port is the v1 one the host reads; the v2 attachment opens its
+					// own connection after it, which is never the host's port.
+					const opened = createLocalEndpointClient({ socketPath, timeoutMs: 1_000 });
+					currentPort ??= opened;
+					if (opened !== currentPort) return opened;
 					const prepared = createLocalHostAuthority({
 						authorityId: service.host.authority.authorityId,
 						now: () => NOW,
@@ -1123,7 +1127,8 @@ describe('enterprise service', () => {
 			endpointNative: native,
 		});
 		await verifiedMac.lifecycle.connect();
-		expect(verified).toEqual([fake.socketPath]);
+		// Each connection verifies the server: the v2 attachment's own, then the v1 one.
+		expect(verified).toEqual([fake.socketPath, fake.socketPath]);
 		expect(fake.calls.length).toBeGreaterThan(0);
 		await verifiedMac.close();
 

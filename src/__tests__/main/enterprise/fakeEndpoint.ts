@@ -51,6 +51,12 @@ export interface FakeEndpointOptions {
 	/** The v2 offer beyond attachment and compatibility. Default: none (no live v2 producer). */
 	v2Capabilities?: readonly string[];
 	/**
+	 * When false, `/v2/invoke` is served but its offer holds no protocol 2, so
+	 * every v2 negotiation answers `unsupported_version` (the daemon's
+	 * `negotiation.protocol !== 2` branch). Default: offered.
+	 */
+	v2Offered?: boolean;
+	/**
 	 * Rewrites every v2 answer envelope before it is sent (a daemon that answers
 	 * someone else's correlationId, say). Never applied on `/v1/invoke`.
 	 */
@@ -385,7 +391,7 @@ export async function startFakeEndpoint(options: FakeEndpointOptions = {}): Prom
 				const supported = list(payload.supportedCapabilities);
 				const required = list(payload.requiredCapabilities);
 				if (!Array.isArray(protocols) || !supported || !required) return deny('invalid_request');
-				if (!protocols.includes(2)) return deny('unsupported_version');
+				if (!protocols.includes(2) || live.v2Offered === false) return deny('unsupported_version');
 				const selected = capabilitiesV2().filter((c) => supported.includes(c));
 				if (required.some((c) => !selected.includes(c))) return deny('unsupported_capability');
 				return { outcome: 'negotiated', protocol: 2, capabilities: selected };

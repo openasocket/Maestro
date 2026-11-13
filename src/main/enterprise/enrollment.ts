@@ -35,7 +35,9 @@
 
 import {
 	LOCAL_ENDPOINT_PROTOCOL,
+	LOCAL_ENDPOINT_PROTOCOL_V2,
 	type EndpointAttachmentRequest,
+	type EndpointAttachmentRequestV2,
 	type EndpointComponent,
 	type EndpointEnrollmentRequest,
 	type EndpointEnrollmentResult,
@@ -67,6 +69,21 @@ export interface EnrollmentLifecycleDeps {
 	 * composer uses it to start work that follows an attach (MRC-11-05).
 	 */
 	onAttached?(status: EndpointStatus): void;
+	/**
+	 * The protocol 2 attachment, tried before every v1 attachment. The endpoint
+	 * holds ONE negotiated protocol per socket session (a v2 attachment drops the
+	 * socket's v1 session and the reverse), and every operation this host sends
+	 * today goes over v1 (`V2_OPERATIONS_SELECTED` is empty). So the v2 attachment
+	 * runs on its own connection, opened with `openPort` here, never on the v1
+	 * one: the v1 attachment and every v1 operation are exactly what they were.
+	 * Absent, nothing is sent on `/v2/invoke`.
+	 */
+	v2?: {
+		/** Opens the v2 connection. It must not replace the port the host's v1 callers read. */
+		openPort(socketPath: string): EndpointPort;
+		/** What this host offers on the v2 attachment; nothing is required. */
+		supported: readonly string[];
+	};
 }
 
 export interface EnrollmentRequestInput extends EndpointEnrollmentRequest {
@@ -145,6 +162,8 @@ export function createEnrollmentLifecycle(deps: EnrollmentLifecycleDeps): Enroll
 	const now = deps.now ?? (() => Date.now());
 	let port: EndpointPort | null = null;
 	let endpoint: EndpointStatus | null = null;
+	/** The v2 connection, kept only while its attachment negotiated protocol 2. */
+	let v2Port: EndpointPort | null = null;
 	/**
 	 * The open challenge: its id, the digest the actor approves, and when it lapses.
 	 * The digest is kept for the registration record only; `status()` projects the
@@ -212,8 +231,53 @@ export function createEnrollmentLifecycle(deps: EnrollmentLifecycleDeps): Enroll
 		return port;
 	}
 
+	function attachmentRequestV2(supported: readonly string[]): EndpointAttachmentRequestV2 {
+		return {
+			installationId: deps.installation.installationId,
+			runtimeId: deps.installation.runtimeId,
+			processEpoch: deps.installation.processEpoch,
+			components: deps.components,
+			supportedProtocols: [LOCAL_ENDPOINT_PROTOCOL_V2],
+			supportedCapabilities: supported,
+			requiredCapabilities: [],
+		};
+	}
+
+	async function dropV2(): Promise<void> {
+		const open = v2Port;
+		v2Port = null;
+		if (open) await open.close();
+	}
+
+	/**
+	 * The v2 attachment on its own connection to `socketPath`. Kept when the
+	 * endpoint negotiated protocol 2 (any subset of the offer); dropped on any
+	 * other answer. An endpoint without protocol 2 (`unsupported_version`, no
+	 * `/v2/invoke` path) leaves the host on v1 alone, which is what it was. A
+	 * refused v2 attachment is never resent on `/v1/invoke`: the v1 attachment
+	 * that follows is the host's own, sent with the same bytes whatever v2 said.
+	 */
+	async function attachV2(socketPath: string): Promise<void> {
+		if (!deps.v2) return;
+		if (v2Port && (v2Port.socketPath !== socketPath || v2Port.state().closed)) await dropV2();
+		let p: EndpointPort;
+		try {
+			p = v2Port ?? deps.v2.openPort(socketPath);
+		} catch {
+			return;
+		}
+		v2Port = p;
+		if (!p.v2) {
+			await dropV2();
+			return;
+		}
+		const outcome = await p.v2.attach(attachmentRequestV2(deps.v2.supported));
+		if (outcome.status !== 'ok') await dropV2();
+	}
+
 	/** Attach on `p` and fold what the endpoint said into the record, when there is one. */
 	async function attach(p: EndpointPort): Promise<LifecycleOutcome<EndpointStatus>> {
+		await attachV2(p.socketPath);
 		const outcome = relay('attachment', await p.attach(attachmentRequest()));
 		if (outcome.status !== 'ok') {
 			endpoint = null;
@@ -444,14 +508,14 @@ export function createEnrollmentLifecycle(deps: EnrollmentLifecycleDeps): Enroll
 				if (!current.record.registration) {
 					return refuse('no-challenge', 'This installation holds no completed registration.');
 				}
-				if (!port?.v2) {
+				if (!v2Port?.v2) {
 					return {
 						status: 'unavailable',
 						reason: 'not-negotiated',
 						message: 'registration_use: no v2 connection is open; nothing was sent.',
 					};
 				}
-				const outcome = relay('registration_use', await port.v2.registration.use());
+				const outcome = relay('registration_use', await v2Port.v2.registration.use());
 				if (outcome.status !== 'ok') return outcome;
 				const reply = outcome.value;
 				if (reply.outcome === 'denied') {
@@ -508,6 +572,7 @@ export function createEnrollmentLifecycle(deps: EnrollmentLifecycleDeps): Enroll
 				const open = port;
 				port = null;
 				if (open) await open.close();
+				await dropV2();
 			}),
 	};
 
