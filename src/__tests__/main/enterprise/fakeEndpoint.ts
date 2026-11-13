@@ -50,6 +50,16 @@ export interface FakeEndpointOptions {
 	v2?: boolean;
 	/** The v2 offer beyond attachment and compatibility. Default: none (no live v2 producer). */
 	v2Capabilities?: readonly string[];
+	/**
+	 * Rewrites every v2 answer envelope before it is sent (a daemon that answers
+	 * someone else's correlationId, say). Never applied on `/v1/invoke`.
+	 */
+	v2Envelope?: (envelope: {
+		schemaVersion: 2;
+		correlationId: unknown;
+		operation: unknown;
+		payload: unknown;
+	}) => unknown;
 }
 
 export interface FakeEndpoint {
@@ -340,13 +350,15 @@ export async function startFakeEndpoint(options: FakeEndpointOptions = {}): Prom
 				reply(400, deny('invalid_request'), true);
 				return;
 			}
-			const answer = (payload: unknown) =>
-				reply(200, {
-					schemaVersion: 2,
+			const answer = (payload: unknown) => {
+				const envelope = {
+					schemaVersion: 2 as const,
 					correlationId: env.correlationId,
 					operation: env.operation,
 					payload,
-				});
+				};
+				reply(200, live.v2Envelope ? live.v2Envelope(envelope) : envelope);
+			};
 			let ids = seen.get(socket);
 			if (!ids) {
 				ids = new Set();

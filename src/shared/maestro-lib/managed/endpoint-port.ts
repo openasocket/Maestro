@@ -241,6 +241,144 @@ export type EndpointRegistrationUseReply =
 	| { outcome: 'projected'; reference: EndpointRuntimeUseReference; expiresAt: string }
 	| { outcome: 'denied'; reason: string };
 
+// ---------------------------------------------------------------------------
+// The v2 workflow lifecycle (contracts 0.2.0 protocol.js), field for field
+// ---------------------------------------------------------------------------
+
+/** The four lifecycle operations `/v2/invoke` serves, by their wire names. */
+export const LOCAL_ENDPOINT_WORKFLOW_V2_OPERATIONS = [
+	'workflow_claim',
+	'workflow_renew',
+	'workflow_settle',
+	'workflow_release',
+] as const;
+export type EndpointWorkflowV2Operation = (typeof LOCAL_ENDPOINT_WORKFLOW_V2_OPERATIONS)[number];
+
+/**
+ * The contract's `workflowOwnerReference`. `ownerEpoch` is an opaque
+ * identifier string in v2, never v1's numeric epoch. A claim never sends one;
+ * the producer returns it, and renew, settle and release echo it.
+ */
+export interface EndpointWorkflowOwnerV2 {
+	ownerId: string;
+	ownerEpoch: string;
+	fencingToken: string;
+}
+
+/** The contract's `grantReference`: a grant UUID and the digest of its record. */
+export interface EndpointGrantReferenceV2 {
+	grantId: string;
+	digest: string;
+}
+
+/** The contract's `delegationReference`: the presented grant and its root-first chain ending in it. */
+export interface EndpointDelegationReferenceV2 {
+	grant: EndpointGrantReferenceV2;
+	chain: readonly EndpointGrantReferenceV2[];
+}
+
+/**
+ * The contract's `workflowContextV2` (`operationAuthorityReferences` plus the
+ * workflow lineage). References only: nothing here is an actor or authority.
+ */
+export interface EndpointWorkflowContextV2 {
+	registration: EndpointRuntimeUseReference;
+	delegation: EndpointDelegationReferenceV2 | null;
+	/** At most 32, unique by `grantId`. */
+	grants: readonly EndpointGrantReferenceV2[];
+	workflowId: string;
+	workflowVersion: string;
+	triggerId: string;
+	runId: string;
+	attemptId: string;
+	idempotencyKey: string;
+	policyRevision: number;
+	rootRunId: string;
+	parentRunId: string | null;
+}
+
+/** The contract's `workflowMaximumLeaseMs`: a lease lasts 1 ms to 5 minutes. */
+export const ENDPOINT_WORKFLOW_MAXIMUM_LEASE_MS = 300_000;
+
+/** `workflowClaimRequest`: the context and a requested lease. No owner: the producer returns one. */
+export interface EndpointWorkflowClaimRequestV2 extends EndpointWorkflowContextV2 {
+	/** An integer from 1 to `ENDPOINT_WORKFLOW_MAXIMUM_LEASE_MS`. */
+	requestedLeaseMs: number;
+}
+
+/** `workflowRenewRequest`: a claim that echoes the owner it holds. */
+export interface EndpointWorkflowRenewRequestV2 extends EndpointWorkflowClaimRequestV2 {
+	owner: EndpointWorkflowOwnerV2;
+}
+
+/** The contract's `commandExecutionEffect`: settled with evidence, or uncertain with a reason. */
+export type EndpointWorkflowEffectV2 =
+	| {
+			state: 'settled';
+			outcome: 'completed' | 'failed' | 'no_effect';
+			/** Lowercase SHA-256 hex. */
+			evidenceDigest: string;
+	  }
+	| {
+			state: 'uncertain';
+			reason: 'owner_lost' | 'transport_lost' | 'deadline_elapsed' | 'recovery_required';
+	  };
+
+/** `workflowSettleRequest`: the context, the echoed owner and the effect being settled. */
+export interface EndpointWorkflowSettleRequestV2 extends EndpointWorkflowContextV2 {
+	owner: EndpointWorkflowOwnerV2;
+	effect: EndpointWorkflowEffectV2;
+}
+
+/** `workflowReleaseRequest`: custody surrendered only once every effect settled or none began. */
+export interface EndpointWorkflowReleaseRequestV2 extends EndpointWorkflowContextV2 {
+	owner: EndpointWorkflowOwnerV2;
+	disposition: 'effects_settled' | 'no_effect_started';
+}
+
+/** `workflowLease`: the context echoed with the owner and a bounded positive lifetime. */
+export interface EndpointWorkflowLeaseV2 extends EndpointWorkflowContextV2 {
+	owner: EndpointWorkflowOwnerV2;
+	/** A timestamp; `expiresAt` follows it by at most `ENDPOINT_WORKFLOW_MAXIMUM_LEASE_MS`. */
+	acquiredAt: string;
+	expiresAt: string;
+}
+
+/** `workflowSettlementReceipt`: the settle request echoed, recorded. */
+export interface EndpointWorkflowSettlementReceiptV2 extends EndpointWorkflowSettleRequestV2 {
+	outcome: 'recorded';
+	recordedAt: string;
+}
+
+/** `workflowReleaseReceipt`: the release request echoed, released. */
+export interface EndpointWorkflowReleaseReceiptV2 extends EndpointWorkflowReleaseRequestV2 {
+	outcome: 'released';
+	releasedAt: string;
+}
+
+export type EndpointWorkflowClaimReplyV2 =
+	| { outcome: 'owned'; lease: EndpointWorkflowLeaseV2 }
+	| EndpointDenied;
+export type EndpointWorkflowRenewReplyV2 =
+	| { outcome: 'renewed'; lease: EndpointWorkflowLeaseV2 }
+	| EndpointDenied;
+export type EndpointWorkflowSettleReplyV2 = EndpointWorkflowSettlementReceiptV2 | EndpointDenied;
+export type EndpointWorkflowReleaseReplyV2 = EndpointWorkflowReleaseReceiptV2 | EndpointDenied;
+
+/** Each lifecycle operation's request and reply, keyed by its wire name. */
+export interface EndpointWorkflowV2Exchange {
+	workflow_claim: { request: EndpointWorkflowClaimRequestV2; reply: EndpointWorkflowClaimReplyV2 };
+	workflow_renew: { request: EndpointWorkflowRenewRequestV2; reply: EndpointWorkflowRenewReplyV2 };
+	workflow_settle: {
+		request: EndpointWorkflowSettleRequestV2;
+		reply: EndpointWorkflowSettleReplyV2;
+	};
+	workflow_release: {
+		request: EndpointWorkflowReleaseRequestV2;
+		reply: EndpointWorkflowReleaseReplyV2;
+	};
+}
+
 export interface LocalEndpointEnvelope {
 	schemaVersion: typeof LOCAL_ENDPOINT_SCHEMA_VERSION;
 	correlationId: string;

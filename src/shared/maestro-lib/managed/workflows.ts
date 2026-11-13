@@ -210,7 +210,14 @@ export type WorkflowClaimOutcome =
 			/** `claimed`: newly issued; `confirmed`: the held values stand; `offline`: kept while the producer is unreachable. */
 			disposition: 'claimed' | 'confirmed' | 'offline';
 	  }
-	| { state: 'denied'; code: ManagedDenialCode; message: string; fenced: boolean }
+	| {
+			state: 'denied';
+			code: ManagedDenialCode;
+			message: string;
+			fenced: boolean;
+			/** The producer's own denial reason, passed through unchanged when it answered one. */
+			reason?: LocalEndpointDenialReason;
+	  }
 	| {
 			state: 'unavailable';
 			code: 'runtime-unavailable' | 'capability-unsupported';
@@ -516,6 +523,22 @@ export function createWorkflowOwnership(deps: WorkflowOwnershipDeps): WorkflowOw
 						code: 'policy-denied',
 						message: 'The producer fenced this workflow owner.',
 						fenced: true,
+						reason: outcome.reason,
+					};
+				}
+				if (outcome.status === 'denied') {
+					// A decided refusal: nothing was claimed, renewed or released, so what
+					// was held before this operation is what stays held.
+					doc.workflows = prior
+						? doc.workflows.map((w) => (w.workflowId === key ? { ...prior } : w))
+						: doc.workflows.filter((w) => w.workflowId !== key);
+					await persist();
+					return {
+						state: 'denied',
+						code: DECIDED[outcome.reason] ?? 'policy-denied',
+						message: `The producer refused to ${action} workflow "${key}": ${outcome.reason}.`,
+						fenced: false,
+						reason: outcome.reason,
 					};
 				}
 				return {
