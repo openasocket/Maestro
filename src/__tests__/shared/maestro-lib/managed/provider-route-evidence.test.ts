@@ -10,7 +10,7 @@ import path from 'node:path';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { readPin } from '../../../../../scripts/import-mega-maestro.mjs';
 import { inspectContractsDir } from '../../../../../scripts/check-mega-contract-vectors.mjs';
-import receipt from '../../../../../Plans/integration-completion/evidence/contract-inputs-build.json';
+import receipt from '../../../../../Plans/integration-completion/evidence/contract-inputs-build-0.2.0.json';
 import {
 	approveProviderRoute,
 	PROVIDER_ROUTE_ALLOW_CASES,

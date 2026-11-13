@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { readPin } from '../../../../../scripts/import-mega-maestro.mjs';
 import { inspectContractsDir } from '../../../../../scripts/check-mega-contract-vectors.mjs';
-import receipt from '../../../../../Plans/integration-completion/evidence/contract-inputs-build.json';
+import receipt from '../../../../../Plans/integration-completion/evidence/contract-inputs-build-0.2.0.json';
 import { mapDesktopPolicy } from '../../../../shared/maestro-lib/index';
 import type {
 	DesktopPolicyBinding,
