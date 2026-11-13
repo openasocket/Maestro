@@ -25,6 +25,13 @@ import type { AdmissionOutcome, AdmissionRequest, HostAuthority } from './author
 export const LOCAL_ENDPOINT_PROTOCOL = 1 as const;
 export const LOCAL_ENDPOINT_SCHEMA_VERSION = 1 as const;
 export const LOCAL_ENDPOINT_INVOKE_PATH = '/v1/invoke';
+/**
+ * Protocol 2 (contracts 0.2.0): a separately negotiated connection on its own
+ * path. A request refused on /v2/invoke is never retried on /v1/invoke, and v1
+ * stays the default path until a v2 attachment negotiates protocol 2.
+ */
+export const LOCAL_ENDPOINT_PROTOCOL_V2 = 2 as const;
+export const LOCAL_ENDPOINT_INVOKE_V2_PATH = '/v2/invoke';
 export const LOCAL_ENDPOINT_REGISTRATION_CHALLENGE_PATH = '/v1/registration/challenge';
 export const LOCAL_ENDPOINT_REGISTRATION_REDEEM_PATH = '/v1/registration/redeem';
 /** Pre-release contract: registration is purpose-bound v2 only, with no v1 fallback. */
@@ -127,6 +134,31 @@ export interface EndpointStatus {
 	collectionProfile: EndpointCollectionProfile;
 }
 
+/**
+ * The protocol 2 attachment (contracts 0.2.0 `attachmentRequestV2`): the v1
+ * request with `supportedProtocols` fixed at [2]. Every required capability
+ * must also be supported, and neither list may repeat an entry.
+ */
+export interface EndpointAttachmentRequestV2 extends Omit<
+	EndpointAttachmentRequest,
+	'supportedProtocols'
+> {
+	supportedProtocols: readonly [typeof LOCAL_ENDPOINT_PROTOCOL_V2];
+}
+
+/** The endpoint's answer to a v2 attachment: the v1 status at protocol 2, with the negotiated capabilities. */
+export interface EndpointStatusV2 extends Omit<EndpointStatus, 'protocol'> {
+	protocol: typeof LOCAL_ENDPOINT_PROTOCOL_V2;
+}
+
+/** What a v2 attachment negotiated on the current connection. */
+export interface EndpointNegotiation {
+	protocol: typeof LOCAL_ENDPOINT_PROTOCOL_V2;
+	/** The capabilities the endpoint selected; an operation is negotiated only when it is listed here. */
+	capabilities: readonly string[];
+	status: EndpointStatusV2;
+}
+
 export interface EndpointCompatibilityRequest {
 	protocol: typeof LOCAL_ENDPOINT_PROTOCOL;
 	components: readonly EndpointComponent[];
@@ -175,6 +207,19 @@ export interface LocalEndpointEnvelope {
 	schemaVersion: typeof LOCAL_ENDPOINT_SCHEMA_VERSION;
 	correlationId: string;
 	operation: LocalEndpointOperation;
+	payload: unknown;
+}
+
+/**
+ * The protocol 2 envelope, both ways on `POST /v2/invoke`: the contract's
+ * `localRequestEnvelopeV2` / `localResponseEnvelopeV2`. `operation` is a
+ * plain string because the v2 operation set is the endpoint's, negotiated per
+ * connection; the client checks it against what the attachment returned.
+ */
+export interface LocalEndpointEnvelopeV2 {
+	schemaVersion: typeof LOCAL_ENDPOINT_PROTOCOL_V2;
+	correlationId: string;
+	operation: string;
 	payload: unknown;
 }
 
@@ -231,6 +276,32 @@ export function endpointComponentProblems(value: unknown, at: string): string[] 
 
 /** Problems with a request this host is about to send; a client refuses to send one it cannot describe. */
 export function endpointAttachmentRequestProblems(value: unknown): string[] {
+	return attachmentRequestProblems(value, LOCAL_ENDPOINT_PROTOCOL);
+}
+
+/** `endpointAttachmentRequestProblems` for protocol 2: [2], unique lists, required within supported. */
+export function endpointAttachmentRequestV2Problems(value: unknown): string[] {
+	const problems = attachmentRequestProblems(value, LOCAL_ENDPOINT_PROTOCOL_V2);
+	if (!isRecord(value)) return problems;
+	const supported = value.supportedCapabilities;
+	const required = value.requiredCapabilities;
+	if (isStringList(supported, 128) && !isUniqueList(supported))
+		problems.push('supportedCapabilities repeats an entry');
+	if (isStringList(required, 128) && !isUniqueList(required))
+		problems.push('requiredCapabilities repeats an entry');
+	if (
+		isStringList(supported, 128) &&
+		isStringList(required, 128) &&
+		!required.every((item) => supported.includes(item))
+	) {
+		problems.push('requiredCapabilities names a capability that is not supported');
+	}
+	return problems;
+}
+
+const isUniqueList = (values: readonly string[]): boolean => new Set(values).size === values.length;
+
+function attachmentRequestProblems(value: unknown, protocol: 1 | 2): string[] {
 	if (!isRecord(value)) return ['request is not an object'];
 	const problems: string[] = [];
 	for (const key of ['installationId', 'runtimeId', 'processEpoch'] as const) {
@@ -247,8 +318,12 @@ export function endpointAttachmentRequestProblems(value: unknown): string[] {
 			problems.push(...endpointComponentProblems(c, `components[${i}]`))
 		);
 	}
-	if (!Array.isArray(value.supportedProtocols) || value.supportedProtocols.join() !== '1') {
-		problems.push('supportedProtocols is not [1]');
+	if (
+		!Array.isArray(value.supportedProtocols) ||
+		value.supportedProtocols.length !== 1 ||
+		value.supportedProtocols[0] !== protocol
+	) {
+		problems.push(`supportedProtocols is not [${protocol}]`);
 	}
 	if (!isStringList(value.supportedCapabilities, 128))
 		problems.push('supportedCapabilities is not a capability list');
@@ -258,10 +333,22 @@ export function endpointAttachmentRequestProblems(value: unknown): string[] {
 }
 
 export function endpointStatusProblems(value: unknown): string[] {
+	return statusProblems(value, LOCAL_ENDPOINT_PROTOCOL);
+}
+
+/** `endpointStatusProblems` for a v2 attachment answer: protocol 2, unique negotiated capabilities. */
+export function endpointStatusV2Problems(value: unknown): string[] {
+	const problems = statusProblems(value, LOCAL_ENDPOINT_PROTOCOL_V2);
+	if (isRecord(value) && isStringList(value.capabilities, 128) && !isUniqueList(value.capabilities))
+		problems.push('capabilities repeats an entry');
+	return problems;
+}
+
+function statusProblems(value: unknown, protocol: 1 | 2): string[] {
 	if (!isRecord(value)) return ['status is not an object'];
 	const problems: string[] = [];
 	if (value.outcome !== 'attached') problems.push('outcome is not attached');
-	if (value.protocol !== LOCAL_ENDPOINT_PROTOCOL) problems.push('protocol is not 1');
+	if (value.protocol !== protocol) problems.push(`protocol is not ${protocol}`);
 	if (!isStringList(value.capabilities, 128))
 		problems.push('capabilities is not a capability list');
 	if (!['unenrolled', 'enrolling', 'managed', 'suspended'].includes(value.management as string)) {
@@ -324,8 +411,36 @@ export function parseLocalEndpointResponse(
 	raw: unknown,
 	expected: { correlationId: string; operation: LocalEndpointOperation }
 ): { ok: true; payload: unknown } | { ok: false; problem: string } {
+	return parseEnvelopeAnswer(raw, LOCAL_ENDPOINT_SCHEMA_VERSION, expected);
+}
+
+/** Frame a protocol 2 request for `POST /v2/invoke`; never a v1 envelope. */
+export function frameLocalEndpointRequestV2(
+	operation: string,
+	payload: unknown,
+	correlationId: string
+): LocalEndpointEnvelopeV2 {
+	if (!isEndpointIdentifier(correlationId))
+		throw new Error('correlationId is not an endpoint identifier');
+	if (!isEndpointIdentifier(operation)) throw new Error('operation is not an endpoint identifier');
+	return { schemaVersion: LOCAL_ENDPOINT_PROTOCOL_V2, correlationId, operation, payload };
+}
+
+/** `parseLocalEndpointResponse` for protocol 2: schemaVersion 2, same correlation and operation rule. */
+export function parseLocalEndpointResponseV2(
+	raw: unknown,
+	expected: { correlationId: string; operation: string }
+): { ok: true; payload: unknown } | { ok: false; problem: string } {
+	return parseEnvelopeAnswer(raw, LOCAL_ENDPOINT_PROTOCOL_V2, expected);
+}
+
+function parseEnvelopeAnswer(
+	raw: unknown,
+	schemaVersion: number,
+	expected: { correlationId: string; operation: string }
+): { ok: true; payload: unknown } | { ok: false; problem: string } {
 	if (!isRecord(raw)) return { ok: false, problem: 'response is not an object' };
-	if (raw.schemaVersion !== LOCAL_ENDPOINT_SCHEMA_VERSION) {
+	if (raw.schemaVersion !== schemaVersion) {
 		return { ok: false, problem: `response schemaVersion is ${String(raw.schemaVersion)}` };
 	}
 	if (raw.correlationId !== expected.correlationId) {
@@ -379,6 +494,12 @@ export interface EndpointConnectionState {
 	closed: boolean;
 	/** The endpoint process the native port verified for the CURRENT connection; absent when no native port is installed. */
 	server?: EndpointServerIdentity | null;
+	/**
+	 * What a v2 attachment negotiated on the CURRENT connection; absent until
+	 * one succeeds. The endpoint holds one protocol per socket session, so a
+	 * v1 attachment, a failed attachment or a new connection drops it.
+	 */
+	negotiated?: EndpointNegotiation;
 }
 
 // NATIVE-ENDPOINT/1, a local consumer seam. The contract says how the endpoint
@@ -542,6 +663,8 @@ export interface EndpointPort {
 		operation: LocalEndpointOperation,
 		payload: unknown
 	): Promise<EndpointInvokeOutcome<unknown>>;
+	/** Protocol 2 on its own path; absent on a port that speaks v1 only. v1 stays the default. */
+	readonly v2?: EndpointPortV2;
 	registration: {
 		challenge(input: {
 			runtimeId: string;
@@ -553,6 +676,24 @@ export interface EndpointPort {
 	redial(): void;
 	/** Drop the connection; the endpoint's session for it ends with it. */
 	close(): Promise<void>;
+}
+
+/**
+ * The protocol 2 side of an `EndpointPort`. Every call goes to
+ * `/v2/invoke` only: a v2 refusal (`unsupported_version` included) is
+ * returned as the refusal and is never retried on `/v1/invoke`.
+ */
+export interface EndpointPortV2 {
+	/**
+	 * The v2 attachment on `/v2/invoke`: `supportedProtocols` [2], validated
+	 * before a byte leaves. `attached` at protocol 2 records the negotiation on
+	 * the connection state; any other answer leaves none.
+	 */
+	attach(req: EndpointAttachmentRequestV2): Promise<EndpointInvokeOutcome<EndpointStatusV2>>;
+	/** Whether the current connection's v2 attachment negotiated `operation`. */
+	negotiated(operation: string): boolean;
+	/** One v2 envelope out, one answer read against it. `attachment` goes through `attach()`. */
+	invoke(operation: string, payload: unknown): Promise<EndpointInvokeOutcome<unknown>>;
 }
 
 /** The serializable identity record a host's custody holds (`src/main/enterprise/identity-store.ts` is the sealed home). */
