@@ -183,12 +183,18 @@ import {
 import { readManagedSettingLocks } from './settings-policy';
 import type { UpdateHold } from './update-policy';
 
-/** What this host can do over the endpoint socket. Execution is the one it cannot run managed without. */
+/**
+ * What this host offers the endpoint on a v1 attachment: the operations the
+ * endpoint serves today. Execution is off the list until the endpoint serves
+ * it (GCOMP-15-07). Enrollment and workflow stay on it because the enrollment
+ * request and the workflow fence claim invoke them over v1, and the endpoint
+ * refuses an operation the attachment did not negotiate (see MMV2-02 Notes).
+ * The MMV2 phase adds the v2 operations back as each one is served.
+ */
 export const ENTERPRISE_SUPPORTED_CAPABILITIES: readonly string[] = [
 	'attachment',
 	'compatibility',
 	'enrollment',
-	'execution',
 	'telemetry',
 	'noticeList',
 	'inbox',

@@ -268,7 +268,8 @@ describe('enterprise handlers', () => {
 			listeners: { held: [] },
 			localRelease: { allowed: false, reason: 'required' },
 		});
-		expect(view.capabilities.supported).toContain('execution');
+		expect(view.capabilities.supported).toContain('telemetry');
+		expect(view.capabilities.supported).not.toContain('execution');
 		expect(view.capabilities.missing).toEqual(view.capabilities.supported);
 		const text = JSON.stringify(view);
 		expect(text).not.toContain('/run/endpoint.sock');
