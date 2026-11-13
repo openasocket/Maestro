@@ -203,6 +203,44 @@ export interface EndpointRegistrationReceipt {
 	outcome: 'registered';
 }
 
+/**
+ * The v2 `registration_use` operation: the enrollment reference this process's
+ * runtime_use registration resolves to. Sent only when the v2 attachment
+ * negotiated it; the 0.2.0 pinned contract does not list it, so until Mega
+ * serves it the client treats it as not negotiated and sends nothing.
+ */
+export const LOCAL_ENDPOINT_REGISTRATION_USE_OPERATION = 'registration_use' as const;
+
+/** The `registration_use` request: an empty object, no extra keys (the endpoint parses it strictly). */
+export type EndpointRegistrationUseRequest = Record<string, never>;
+
+/**
+ * The contract's `runtimeUseReferenceV2` (vendored contracts 0.2.0,
+ * local-primitives.js): `runtimeChallengeScopeV2` plus `challengeId` and
+ * `challengeDigest`, field for field. An actor-free lookup reference, not an
+ * assertion that the registration was consumed.
+ */
+export interface EndpointRuntimeUseReference {
+	version: typeof LOCAL_ENDPOINT_REGISTRATION_VERSION;
+	purpose: typeof LOCAL_ENDPOINT_REGISTRATION_PURPOSE;
+	tenantId: string;
+	orgId: string;
+	/** A UUID string. */
+	enrollmentId: string;
+	installationId: string;
+	runtimeId: string;
+	processEpoch: string;
+	bindingDigest: string;
+	/** Lowercase SHA-256 hex. */
+	processBirthDigest: string;
+	challengeId: string;
+	challengeDigest: string;
+}
+
+export type EndpointRegistrationUseReply =
+	| { outcome: 'projected'; reference: EndpointRuntimeUseReference; expiresAt: string }
+	| { outcome: 'denied'; reason: string };
+
 export interface LocalEndpointEnvelope {
 	schemaVersion: typeof LOCAL_ENDPOINT_SCHEMA_VERSION;
 	correlationId: string;
@@ -392,6 +430,46 @@ export function endpointRegistrationApprovalProblems(value: unknown): string[] {
 	return problems;
 }
 
+/**
+ * Why a `registration_use` answer is not one this client will act on, or [].
+ * The `processBirthDigest` must be 64 lowercase hex and the `enrollmentId` a
+ * non-empty string; every other field is checked against the contract's shape.
+ */
+export function endpointRegistrationUseReplyProblems(value: unknown): string[] {
+	if (!isRecord(value)) return ['reply is not an object'];
+	if (value.outcome === 'denied') {
+		return typeof value.reason === 'string' && value.reason.length > 0
+			? []
+			: ['reason is not a reason'];
+	}
+	if (value.outcome !== 'projected') return ['outcome is not projected or denied'];
+	const problems: string[] = [];
+	if (typeof value.expiresAt !== 'string' || !Number.isFinite(Date.parse(value.expiresAt))) {
+		problems.push('expiresAt is not a timestamp');
+	}
+	const ref = value.reference;
+	if (!isRecord(ref)) return [...problems, 'reference is not an object'];
+	if (typeof ref.enrollmentId !== 'string' || ref.enrollmentId.length === 0) {
+		problems.push('enrollmentId is not an id');
+	}
+	if (!isEndpointDigest(ref.processBirthDigest))
+		problems.push('processBirthDigest is not a digest');
+	if (!isEndpointDigest(ref.bindingDigest)) problems.push('bindingDigest is not a digest');
+	if (!isEndpointDigest(ref.challengeDigest)) problems.push('challengeDigest is not a digest');
+	if (ref.version !== LOCAL_ENDPOINT_REGISTRATION_VERSION) problems.push('version is not 2');
+	if (ref.purpose !== LOCAL_ENDPOINT_REGISTRATION_PURPOSE)
+		problems.push('purpose is not runtime_use');
+	for (const key of ['tenantId', 'orgId', 'challengeId'] as const) {
+		if (typeof ref[key] !== 'string' || (ref[key] as string).length === 0) {
+			problems.push(`${key} is not an id`);
+		}
+	}
+	for (const key of ['installationId', 'runtimeId', 'processEpoch'] as const) {
+		if (!isEndpointIdentifier(ref[key])) problems.push(`${key} is not an identifier`);
+	}
+	return problems;
+}
+
 export function frameLocalEndpointRequest(
 	operation: LocalEndpointOperation,
 	payload: unknown,
@@ -467,7 +545,9 @@ export type EndpointUnavailableReason =
 	| 'closed'
 	| 'http-status'
 	/** The native port could not name, or refused, the process serving a new connection. */
-	| 'peer-unverified';
+	| 'peer-unverified'
+	/** The v2 attachment on the current connection did not negotiate the operation; nothing was sent. */
+	| 'not-negotiated';
 
 /**
  * How one call ended. `denied` is the endpoint's own refusal (its reason),
@@ -694,6 +774,16 @@ export interface EndpointPortV2 {
 	negotiated(operation: string): boolean;
 	/** One v2 envelope out, one answer read against it. `attachment` goes through `attach()`. */
 	invoke(operation: string, payload: unknown): Promise<EndpointInvokeOutcome<unknown>>;
+	registration: {
+		/**
+		 * The `registration_use` lookup: `unavailable` / `not-negotiated` with
+		 * nothing sent unless the current v2 attachment negotiated it, otherwise
+		 * `{}` on `/v2/invoke` and the reply validated by
+		 * `endpointRegistrationUseReplyProblems` (`unavailable` / `malformed`
+		 * when it fails). A projected or denied reply is `ok`.
+		 */
+		use(): Promise<EndpointInvokeOutcome<EndpointRegistrationUseReply>>;
+	};
 }
 
 /** The serializable identity record a host's custody holds (`src/main/enterprise/identity-store.ts` is the sealed home). */

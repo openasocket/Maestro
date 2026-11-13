@@ -42,6 +42,7 @@ import {
 	type EndpointInvokeOutcome,
 	type EndpointPort,
 	type EndpointRegistrationApproval,
+	type EndpointUnavailableReason,
 	type EndpointStatus,
 	type LocalEndpointDenialReason,
 	type ManagedEnrollmentStatus,
@@ -91,8 +92,17 @@ export type LifecycleOutcome<T> =
 	| { status: 'refused'; reason: LifecycleRefusal; message: string }
 	| { status: 'unsupported'; message: string; owner: 'mega-maestro' }
 	| { status: 'denied'; reason: LocalEndpointDenialReason; operation: string }
-	| { status: 'unavailable'; message: string }
+	/** `reason` is the port's, when the port said why (`not-negotiated`, `malformed`, ...). */
+	| { status: 'unavailable'; message: string; reason?: EndpointUnavailableReason }
 	| { status: 'unknown'; message: string };
+
+/**
+ * What `useRegistration` did: the reference it wrote, or the endpoint's own
+ * `registration_use` denial (nothing written).
+ */
+export type RegistrationUseResult =
+	| { outcome: 'projected'; enrollmentId: string; processBirthDigest: string; expiresAt: string }
+	| { outcome: 'denied'; reason: string };
 
 /** What the caller shows the actor: the approval they type into the console, and when it lapses. */
 export interface RegistrationApprovalHandoff {
@@ -111,6 +121,13 @@ export interface EnrollmentLifecycle {
 	connect(): Promise<LifecycleOutcome<EndpointStatus>>;
 	beginRegistration(): Promise<LifecycleOutcome<RegistrationApprovalHandoff>>;
 	completeRegistration(): Promise<LifecycleOutcome<EndpointStatus>>;
+	/**
+	 * The v2 `registration_use` bootstrap: asks the endpoint for this process's
+	 * enrollment reference and, on `projected`, writes `enrollmentId` onto the
+	 * record and `processBirthDigest` onto its registration, keeping every
+	 * other field. Sends nothing unless the v2 attachment negotiated it.
+	 */
+	useRegistration(): Promise<LifecycleOutcome<RegistrationUseResult>>;
 	requestRotation(): Promise<LifecycleOutcome<never>>;
 	requestRevocation(): Promise<LifecycleOutcome<never>>;
 	requestRetirement(): Promise<LifecycleOutcome<never>>;
@@ -128,7 +145,13 @@ export function createEnrollmentLifecycle(deps: EnrollmentLifecycleDeps): Enroll
 	const now = deps.now ?? (() => Date.now());
 	let port: EndpointPort | null = null;
 	let endpoint: EndpointStatus | null = null;
-	let pendingApproval: { challengeId: string; expiresAt: string } | null = null;
+	/**
+	 * The open challenge: its id, the digest the actor approves, and when it lapses.
+	 * The digest is kept for the registration record only; `status()` projects the
+	 * id and expiry, never the digest.
+	 */
+	let pendingApproval: { challengeId: string; challengeDigest: string; expiresAt: string } | null =
+		null;
 	let lastDenial: ManagedEnrollmentStatus['lastDenial'] = null;
 	let chain: Promise<unknown> = Promise.resolve();
 
@@ -156,7 +179,11 @@ export function createEnrollmentLifecycle(deps: EnrollmentLifecycleDeps): Enroll
 				lastDenial = { at: new Date(now()).toISOString(), operation, reason: outcome.reason };
 				return { status: 'denied', reason: outcome.reason, operation };
 			case 'unavailable':
-				return { status: 'unavailable', message: `${operation}: ${outcome.message}` };
+				return {
+					status: 'unavailable',
+					message: `${operation}: ${outcome.message}`,
+					reason: outcome.reason,
+				};
 			case 'unknown':
 				return { status: 'unknown', message: `${operation}: ${outcome.message}` };
 		}
@@ -238,7 +265,9 @@ export function createEnrollmentLifecycle(deps: EnrollmentLifecycleDeps): Enroll
 				endpoint,
 				authority: reason === null ? 'registered' : 'none',
 				reason,
-				pendingApproval,
+				pendingApproval: pendingApproval
+					? { challengeId: pendingApproval.challengeId, expiresAt: pendingApproval.expiresAt }
+					: null,
 				lastDenial,
 			};
 		},
@@ -361,7 +390,11 @@ export function createEnrollmentLifecycle(deps: EnrollmentLifecycleDeps): Enroll
 					return outcome;
 				}
 				const approval: EndpointRegistrationApproval = outcome.value;
-				pendingApproval = { challengeId: approval.challengeId, expiresAt: approval.expiresAt };
+				pendingApproval = {
+					challengeId: approval.challengeId,
+					challengeDigest: approval.challengeDigest,
+					expiresAt: approval.expiresAt,
+				};
 				return { status: 'ok', value: { ...approval } };
 			}),
 
@@ -393,12 +426,60 @@ export function createEnrollmentLifecycle(deps: EnrollmentLifecycleDeps): Enroll
 						processEpoch: deps.installation.processEpoch,
 						bindingDigest: current.record.endpoint.bindingDigest,
 						processBirthDigest: null,
-						challengeDigest: challenge.challengeId,
+						challengeDigest: challenge.challengeDigest,
 						expiresAt: challenge.expiresAt,
 						registeredAt: at,
 					},
 				});
 				return attach(port);
+			}),
+
+		useRegistration: () =>
+			serialized(async (): Promise<LifecycleOutcome<RegistrationUseResult>> => {
+				const custody = custodyRefusal<RegistrationUseResult>();
+				if (custody) return custody;
+				const current = deps.identity.read();
+				if (current.status !== 'ok')
+					return refuse('not-enrolled', 'This installation holds no enrollment.');
+				if (!current.record.registration) {
+					return refuse('no-challenge', 'This installation holds no completed registration.');
+				}
+				if (!port?.v2) {
+					return {
+						status: 'unavailable',
+						reason: 'not-negotiated',
+						message: 'registration_use: no v2 connection is open; nothing was sent.',
+					};
+				}
+				const outcome = relay('registration_use', await port.v2.registration.use());
+				if (outcome.status !== 'ok') return outcome;
+				const reply = outcome.value;
+				if (reply.outcome === 'denied') {
+					return { status: 'ok', value: { outcome: 'denied', reason: reply.reason } };
+				}
+				const { enrollmentId, processBirthDigest } = reply.reference;
+				// Re-read inside the step: the write keeps whatever the record holds now.
+				const latest = deps.identity.read();
+				if (latest.status !== 'ok' || !latest.record.registration) {
+					return refuse(
+						'not-enrolled',
+						'The record changed before the reference could be written.'
+					);
+				}
+				await deps.identity.write({
+					...latest.record,
+					enrollmentId,
+					registration: { ...latest.record.registration, processBirthDigest },
+				});
+				return {
+					status: 'ok',
+					value: {
+						outcome: 'projected',
+						enrollmentId,
+						processBirthDigest,
+						expiresAt: reply.expiresAt,
+					},
+				};
 			}),
 
 		requestRotation: async () => ({

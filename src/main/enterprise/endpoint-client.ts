@@ -54,6 +54,7 @@ import {
 	LOCAL_ENDPOINT_REGISTRATION_CHALLENGE_PATH,
 	LOCAL_ENDPOINT_REGISTRATION_PURPOSE,
 	LOCAL_ENDPOINT_REGISTRATION_REDEEM_PATH,
+	LOCAL_ENDPOINT_REGISTRATION_USE_OPERATION,
 	LOCAL_ENDPOINT_REGISTRATION_VERSION,
 	LOCAL_ENDPOINT_TIMEOUT_MS,
 	endpointAttachmentRequestProblems,
@@ -63,6 +64,7 @@ import {
 	endpointNativePortProblem,
 	endpointServerVerificationProblems,
 	endpointRegistrationApprovalProblems,
+	endpointRegistrationUseReplyProblems,
 	endpointStatusProblems,
 	endpointStatusV2Problems,
 	frameLocalEndpointRequest,
@@ -83,6 +85,8 @@ import {
 	type EndpointRegistrationApproval,
 	type EndpointRegistrationPhase,
 	type EndpointRegistrationReceipt,
+	type EndpointRegistrationUseReply,
+	type EndpointRegistrationUseRequest,
 	type EndpointServerIdentity,
 	type EndpointStatus,
 	type EndpointStatusV2,
@@ -484,6 +488,24 @@ export function createLocalEndpointClient(deps: LocalEndpointClientDeps): Endpoi
 				}
 				return invokeOnV2(operation, payload);
 			}),
+		registration: {
+			use: () =>
+				serialized(async (): Promise<EndpointInvokeOutcome<EndpointRegistrationUseReply>> => {
+					const operation = LOCAL_ENDPOINT_REGISTRATION_USE_OPERATION;
+					if (!negotiated?.capabilities.includes(operation)) {
+						return unavailable(
+							'not-negotiated',
+							`The v2 attachment on this connection did not negotiate ${operation}; nothing was sent.`
+						);
+					}
+					const request: EndpointRegistrationUseRequest = {};
+					const outcome = await invokeOnV2(operation, request);
+					if (outcome.status !== 'ok') return outcome;
+					const problems = endpointRegistrationUseReplyProblems(outcome.payload);
+					if (problems.length > 0) return unavailable('malformed', problems.join('; '));
+					return { status: 'ok', payload: outcome.payload as EndpointRegistrationUseReply };
+				}),
+		},
 	};
 
 	async function registrationCall(

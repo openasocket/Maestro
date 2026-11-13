@@ -91,7 +91,7 @@ const OPERATIONS = [
 	'compatibility',
 	'model',
 ];
-/** The v2 operation names: the v1 set without `workflow`, plus desktopPolicy and the workflow custody verbs. */
+/** The v2 operation names: the v1 set without `workflow`, plus desktopPolicy, the workflow custody verbs and registration_use. */
 const OPERATIONS_V2 = [
 	...OPERATIONS.filter((operation) => operation !== 'workflow'),
 	'desktopPolicy',
@@ -99,6 +99,7 @@ const OPERATIONS_V2 = [
 	'workflow_renew',
 	'workflow_settle',
 	'workflow_release',
+	'registration_use',
 ];
 
 export async function startFakeEndpoint(options: FakeEndpointOptions = {}): Promise<FakeEndpoint> {
