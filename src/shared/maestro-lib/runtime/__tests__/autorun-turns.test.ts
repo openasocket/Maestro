@@ -51,6 +51,7 @@ import {
 	type AutoRunTurnRunnerOptions,
 } from '../autorun-turns';
 import { createProcessRegistry } from '../processes';
+import { delegationOfGrant } from '../../../../__tests__/helpers/managedGrants';
 
 const BUNDLED_PROMPTS = path.resolve(__dirname, '../../../../prompts');
 
@@ -200,7 +201,16 @@ describe('Auto Run turns: a refused effort, and the fence claimed per attempt', 
 			runId: 'run-1',
 		};
 
-		const FENCE: AutoRunOwnerFence = { ownerEpoch: '2', fencingToken: 'fence-2' };
+		const FENCE: AutoRunOwnerFence = {
+			ownerId: 'owner-1',
+			ownerEpoch: '2',
+			fencingToken: 'fence-2',
+		};
+		const FENCE_OWNER = {
+			ownerId: FENCE.ownerId,
+			ownerEpoch: FENCE.ownerEpoch,
+			fencingToken: FENCE.fencingToken,
+		};
 		const ALLOW: PolicyDecision = { decision: 'allow', policyRevision: 1 };
 
 		/**
@@ -273,11 +283,15 @@ describe('Auto Run turns: a refused effort, and the fence claimed per attempt', 
 							? null
 							: {
 									workflowId: workflow.workflowId,
-									version: workflow.version,
-									triggerEventId: workflow.triggerEventId,
-									...FENCE,
+									workflowVersion: workflow.version,
+									triggerId: workflow.triggerEventId,
+									owner: FENCE_OWNER,
 								},
-					delegation: { chain: [{ kind: 'human', id: 'source-human' }], grantRef: 'source-grant' },
+					delegation: {
+						principals: [{ kind: 'human', id: 'source-human' }],
+						delegation: delegationOfGrant('source-grant'),
+						grants: [],
+					},
 				});
 				if (!bound.ok) throw new Error(bound.problems.join('; '));
 				const parent = createContextVerifier({
@@ -344,7 +358,7 @@ describe('Auto Run turns: a refused effort, and the fence claimed per attempt', 
 							writable: true,
 							context: {
 								workflow: parent.context.workflow,
-								delegation: { grantRef: 'source-grant' },
+								delegation: { delegation: delegationOfGrant('source-grant'), grants: [] },
 							},
 						});
 						expect(source.sourceCustody('missing')).toBeNull();
@@ -365,7 +379,8 @@ describe('Auto Run turns: a refused effort, and the fence claimed per attempt', 
 								problems: ['withdrawn'],
 							});
 						if (change === 'mutated context') context.identity.attemptId = 'mutated';
-						if (change === 'parent') parent.context.delegation!.grantRef = 'withdrawn-grant';
+						if (change === 'parent')
+							parent.context.delegation!.delegation = delegationOfGrant('withdrawn-grant');
 						if (change === 'fence') lifetime.current.mockReturnValue(false);
 						if (change === 'unreadable')
 							vi.spyOn(port, 'policy').mockImplementation(() => {
@@ -408,7 +423,7 @@ describe('Auto Run turns: a refused effort, and the fence claimed per attempt', 
 								context: {
 									identity: { parentRunId: context.identity.runId },
 									workflow: context.workflow,
-									delegation: { grantRef: 'source-grant' },
+									delegation: { delegation: delegationOfGrant('source-grant'), grants: [] },
 								},
 							});
 						} else expect(observed).toBeNull();
@@ -655,7 +670,7 @@ describe('Auto Run turns: a refused effort, and the fence claimed per attempt', 
 							context.run(b, () => source.sourceCustody(ids[0]))?.context.identity.parentRunId
 						).toBe('cue-run');
 						expect(source.sourceCustody(ids[1])?.context.identity.parentRunId).toBe('other-source');
-						a.context.delegation!.grantRef = 'withdrawn';
+						a.context.delegation!.delegation = delegationOfGrant('withdrawn');
 						expect(source.sourceCustody(ids[0])).toBeNull();
 						expect(source.sourceCustody(ids[1])).not.toBeNull();
 					} finally {
@@ -747,11 +762,12 @@ describe('Auto Run turns: a refused effort, and the fence claimed per attempt', 
 						);
 						expect(context.workflow).toEqual(parent.context.workflow);
 						expect(context.delegation).toEqual({
-							chain: [
+							principals: [
 								{ kind: 'human', id: 'source-human' },
 								{ kind: 'agent', id: 'source-agent' },
 							],
-							grantRef: 'source-grant',
+							delegation: delegationOfGrant('source-grant'),
+							grants: [],
 						});
 						expect(context.actor).toEqual({ kind: 'human', id: 'operator' });
 					}
@@ -777,11 +793,11 @@ describe('Auto Run turns: a refused effort, and the fence claimed per attempt', 
 				const decide = vi.fn(() => ALLOW);
 				const { port } = await managedPort(decide);
 				const parent = parentOf(port);
-				if (change === 'workflow') parent.context.workflow!.version = 'different-version';
-				if (change === 'fence') parent.context.workflow!.fencingToken = 'stale-fence';
+				if (change === 'workflow') parent.context.workflow!.workflowVersion = 'different-version';
+				if (change === 'fence') parent.context.workflow!.owner.fencingToken = 'stale-fence';
 				if (change === 'standalone') port.standing = () => 'standalone';
 				if (change === 'depth')
-					parent.context.delegation.chain = Array.from(
+					parent.context.delegation.principals = Array.from(
 						{ length: MAX_DELEGATION_DEPTH },
 						(_, i) => ({
 							kind: 'agent',
@@ -831,18 +847,19 @@ describe('Auto Run turns: a refused effort, and the fence claimed per attempt', 
 					for (const [index, { context }] of requests.entries()) {
 						expect(context.workflow).toEqual({
 							workflowId: workflow.workflowId,
-							version: workflow.version,
-							triggerEventId: workflow.triggerEventId,
-							...FENCE,
+							workflowVersion: workflow.version,
+							triggerId: workflow.triggerEventId,
+							owner: FENCE_OWNER,
 						});
 						expect(context.identity.rootRunId).toBe('pipeline-root');
 						expect(context.identity.parentRunId).toBe('cue-run');
 						expect(context.delegation).toEqual({
-							chain: [
+							principals: [
 								{ kind: 'human', id: 'source-human' },
 								{ kind: 'agent', id: 'source-agent' },
 							],
-							grantRef: 'source-grant',
+							delegation: delegationOfGrant('source-grant'),
+							grants: [],
 						});
 						const env = JSON.parse(
 							fs.readFileSync(path.join(dir, `env-${index + 1}.json`), 'utf8')
@@ -876,7 +893,7 @@ describe('Auto Run turns: a refused effort, and the fence claimed per attempt', 
 						const { port } = await managedPort(decide);
 						const parent = parentOf(port, 'nothing');
 						if (change === 'depth')
-							parent.context.delegation.chain = Array.from(
+							parent.context.delegation.principals = Array.from(
 								{ length: MAX_DELEGATION_DEPTH },
 								(_, i) => ({ kind: 'agent', id: `prior-${i}` })
 							);
@@ -892,7 +909,7 @@ describe('Auto Run turns: a refused effort, and the fence claimed per attempt', 
 										return { ok: false, code: 'unauthenticated', problems: ['parent revoked'] };
 									if (change === 'grant drift' && reads > 1) {
 										const next = parentOf(port, 'nothing');
-										next.context.delegation.grantRef = 'changed-grant';
+										next.context.delegation.delegation = delegationOfGrant('changed-grant');
 										return next;
 									}
 									return parent;
@@ -947,7 +964,8 @@ describe('Auto Run turns: a refused effort, and the fence claimed per attempt', 
 											if (change === 'withdrawn')
 												return { ok: false, code: 'unauthenticated', problems: ['parent revoked'] };
 											const next = parentOf(port);
-											if (change === 'grant') next.context.delegation.grantRef = 'changed-grant';
+											if (change === 'grant')
+												next.context.delegation.delegation = delegationOfGrant('changed-grant');
 											else next.context.actor.id = 'replacement-source';
 											return next;
 										},
@@ -1498,14 +1516,19 @@ describe('Auto Run turns: a refused effort, and the fence claimed per attempt', 
 					context({
 						...input,
 						delegation: {
-							chain: [
+							principals: [
 								{ kind: 'human', id: 'source-actor' },
 								{ kind: 'agent', id: 'a1' },
 							],
-							grantRef: 'authenticated-grant',
+							delegation: delegationOfGrant('authenticated-grant'),
+							grants: [],
 						},
 					});
-				const fence = { ownerEpoch: 'opaque-epoch', fencingToken: 'opaque-fence' };
+				const fence = {
+					ownerId: 'owner-1',
+					ownerEpoch: 'opaque-epoch',
+					fencingToken: 'opaque-fence',
+				};
 				const turns = runner(
 					['answer', 'answer'],
 					{
@@ -1531,9 +1554,9 @@ describe('Auto Run turns: a refused effort, and the fence claimed per attempt', 
 					expect(request.context.actor).toEqual({ kind: 'human', id: 'operator' });
 					expect(request.context.workflow).toEqual({
 						workflowId: workflow.workflowId,
-						version: workflow.version,
-						triggerEventId: workflow.triggerEventId,
-						...fence,
+						workflowVersion: workflow.version,
+						triggerId: workflow.triggerEventId,
+						owner: fence,
 					});
 					expect(env.MAESTRO_QUERY_SOURCE).toBe('auto');
 				}
@@ -1555,6 +1578,7 @@ describe('Auto Run turns: a refused effort, and the fence claimed per attempt', 
 				managed: {
 					port,
 					fence: async () => ({
+						ownerId: 'owner-1',
 						ownerEpoch: `epoch-${++revision}`,
 						fencingToken: `fence-${revision}`,
 					}),
@@ -1570,8 +1594,7 @@ describe('Auto Run turns: a refused effort, and the fence claimed per attempt', 
 				});
 				expect(request.context.policyRevision).toBe(index + 1);
 				expect(request.context.workflow).toMatchObject({
-					ownerEpoch: `epoch-${index + 1}`,
-					fencingToken: `fence-${index + 1}`,
+					owner: { ownerEpoch: `epoch-${index + 1}`, fencingToken: `fence-${index + 1}` },
 				});
 			}
 			expect(requests[0].context.identity.requestId).toBe(requests[1].context.identity.requestId);
@@ -2056,18 +2079,21 @@ describe('Auto Run turns: a refused effort, and the fence claimed per attempt', 
 				}).run(task);
 				expect(forgedTrigger).toMatchObject({
 					success: false,
-					error: expect.stringContaining('workflow.triggerEventId is not an id'),
+					error: expect.stringContaining('workflow.triggerId is not an id'),
 					managed: { state: 'denied', code: 'invalid-input' },
 				});
 
 				// A fence no registry issued: a token that is not one.
 				const forgedFence = await runner(['answer'], {
 					workflow,
-					managed: { port, fence: () => ({ ownerEpoch: '3', fencingToken: '' }) },
+					managed: {
+						port,
+						fence: () => ({ ownerId: 'owner-1', ownerEpoch: '3', fencingToken: '' }),
+					},
 				}).run(task);
 				expect(forgedFence).toMatchObject({
 					success: false,
-					error: expect.stringContaining('workflow.fencingToken is not an id'),
+					error: expect.stringContaining('workflow.owner.fencingToken is not an id'),
 					managed: { state: 'denied', code: 'invalid-input' },
 				});
 

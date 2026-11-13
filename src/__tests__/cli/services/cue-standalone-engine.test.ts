@@ -791,11 +791,12 @@ describe('managed admission (MRC-07-02A)', () => {
 		expect(await promptRun(deps, 'run-owned')).toMatchObject({ status: 'completed' });
 		expect(executeCuePrompt).toHaveBeenCalledTimes(1);
 		const admission = executeCuePrompt.mock.calls[0][0].admission;
+		// The owner id is the registry-issued identity for this installation; assert it is present, not its value.
 		expect(admission.context.workflow).toMatchObject({
 			workflowId: 'cue:ask',
-			ownerEpoch: '3',
-			fencingToken: 'fence-3',
+			owner: { ownerEpoch: '3', fencingToken: 'fence-3' },
 		});
+		expect(admission.context.workflow.owner.ownerId).toMatch(/^[0-9a-f]+$|^inst-/);
 		// A first claim offers epoch 0 and a nonce for this run and attempt; the owner is the
 		// installation, named as an identifier, under the binding's policy generation.
 		expect(requests).toHaveLength(1);
@@ -840,7 +841,11 @@ describe('managed admission (MRC-07-02A)', () => {
 	it("claims through a hosting runtime's own fence when one is handed in, so the host and the engine share one record", async () => {
 		await enroll();
 		const { port, requests } = ownerPort(owned);
-		const workflowFence = vi.fn(async () => ({ ownerEpoch: '5', fencingToken: 'fence-5' }));
+		const workflowFence = vi.fn(async () => ({
+			ownerId: 'inst-test',
+			ownerEpoch: '5',
+			fencingToken: 'fence-5',
+		}));
 		const deps = buildStandaloneCueEngineDeps({
 			onLog: vi.fn(),
 			managedHost: attachedHost('endpoint-test', port),
@@ -854,8 +859,7 @@ describe('managed admission (MRC-07-02A)', () => {
 		});
 		expect(requests).toEqual([]);
 		expect(executeCuePrompt.mock.calls[0][0].admission.context.workflow).toMatchObject({
-			ownerEpoch: '5',
-			fencingToken: 'fence-5',
+			owner: { ownerId: 'inst-test', ownerEpoch: '5', fencingToken: 'fence-5' },
 		});
 	});
 

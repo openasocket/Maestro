@@ -2145,7 +2145,11 @@ describe('WebSocketMessageHandler', () => {
 				},
 				traceId: 'cue:run-root:req-cue-1:att-cue-1',
 				workflow: null,
-				delegation: { chain: [{ kind: 'agent', id: 'owner-agent' }], grantRef: null },
+				delegation: {
+					principals: [{ kind: 'agent', id: 'owner-agent' }],
+					delegation: null,
+					grants: [],
+				},
 				policyRevision: null,
 			});
 		const malformed = () => ({ ...initiator(), extra: 'field' });

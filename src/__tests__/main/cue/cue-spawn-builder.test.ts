@@ -118,6 +118,7 @@ import {
 } from '../../../main/plugins/plugin-tool-run-identity';
 import { embedSystemPromptInPrompt } from '../../../shared/embeddedSystemPrompt';
 import * as platformDetection from '../../../shared/platformDetection';
+import { delegationOfGrant } from '../../helpers/managedGrants';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -214,18 +215,17 @@ describe('cue-spawn-builder', () => {
 				},
 				workflow: {
 					workflowId: 'cue-pipeline:nightly',
-					version: 'v1',
-					taskId: 'review',
-					triggerEventId: 'file.changed:evt-1',
-					ownerEpoch: 'epoch-1',
-					fencingToken: 'opaque-fence',
+					workflowVersion: 'v1',
+					triggerId: 'file.changed:evt-1',
+					owner: { ownerId: 'owner-1', ownerEpoch: 'epoch-1', fencingToken: 'opaque-fence' },
 				},
 				delegation: {
-					chain: [
+					principals: [
 						{ kind: 'service' as const, id: 'cue-subscription:nightly' },
 						{ kind: 'agent' as const, id: 'session-1' },
 					],
-					grantRef: 'test-grant',
+					delegation: delegationOfGrant('test-grant'),
+					grants: [],
 				},
 				traceId: 'cue:chain-root:cue-run:attempt-1',
 				policyRevision: 7,

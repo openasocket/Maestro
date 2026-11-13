@@ -754,7 +754,7 @@ describe('managed admission at the spawn', () => {
 			installation: { installationId: 'i', runtimeId: 'r', processEpoch: 'e' },
 			origin: 'cli',
 			actor: { kind: 'service', id: 'fleet' },
-			delegation: { chain: [], grantRef: null },
+			delegation: { principals: [], delegation: null, grants: [] },
 			identity: {
 				requestId: 'q',
 				idempotencyKey: 'k',

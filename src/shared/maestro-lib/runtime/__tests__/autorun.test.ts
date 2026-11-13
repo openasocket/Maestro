@@ -59,6 +59,7 @@ import {
 	type RuntimeDeps,
 } from '../index';
 import type { WatchDirectory } from '../settings-watch';
+import { delegationOfGrant } from '../../../../__tests__/helpers/managedGrants';
 
 const T0 = Date.parse('2026-10-04T12:00:00Z');
 const BUNDLED_PROMPTS = path.resolve(__dirname, '../../../../prompts');
@@ -911,7 +912,12 @@ describe('runtime Auto Run', () => {
 					current: vi.fn(() => true),
 					finish: vi.fn<WorkflowFenceLifetime['finish']>().mockResolvedValue(undefined),
 				};
-				const claim = vi.fn(() => ({ ownerEpoch: 'epoch-1', fencingToken: 'fence-1', lifetime }));
+				const claim = vi.fn(() => ({
+					ownerId: 'owner-1',
+					ownerEpoch: 'epoch-1',
+					fencingToken: 'fence-1',
+					lifetime,
+				}));
 				const runtime =
 					kind === 'standalone' ? await start() : await startEnrolled(authority, claim);
 				const run = watchRun(runtime);
@@ -1162,7 +1168,11 @@ describe('runtime Auto Run', () => {
 						},
 						workflow: owned ? structuredClone(context.workflow) : null,
 						actor: { kind: 'agent', id: 'room-participant' },
-						delegation: { chain: [{ kind: 'human', id: 'room-human' }], grantRef: 'room-grant' },
+						delegation: {
+							principals: [{ kind: 'human', id: 'room-human' }],
+							delegation: delegationOfGrant('room-grant'),
+							grants: [],
+						},
 					});
 					if (!parent.ok) throw new Error(parent.problems.join('; '));
 					return parent;
@@ -1194,16 +1204,16 @@ describe('runtime Auto Run', () => {
 					expect(context.identity.parentRunId).toBe('room-run');
 					expect(context.identity.rootRunId).toBe('room-root');
 					expect(context.delegation).toEqual({
-						chain: [
+						principals: [
 							{ kind: 'human', id: 'room-human' },
 							{ kind: 'agent', id: 'room-participant' },
 						],
-						grantRef: 'room-grant',
+						delegation: delegationOfGrant('room-grant'),
+						grants: [],
 					});
 					expect(context.workflow).toMatchObject({
 						workflowId: expect.stringContaining(`runtime-${agentId}-`),
-						ownerEpoch: 'epoch-1',
-						fencingToken: 'fence-1',
+						owner: { ownerId: 'owner-1', ownerEpoch: 'epoch-1', fencingToken: 'fence-1' },
 					});
 					expect(claim).toHaveBeenCalledTimes(2);
 					// Read at launch, then by the runner on its attempt and again before dispatch.
@@ -1350,6 +1360,7 @@ describe('runtime Auto Run', () => {
 					expect(service.sourceCustody('a1', processId)).toBeNull();
 				});
 				const runtime = await startEnrolled(authority, () => ({
+					ownerId: 'owner-1',
 					ownerEpoch: 'epoch-1',
 					fencingToken: 'fence-1',
 					lifetime: { signal: new AbortController().signal, current: () => true, finish },
@@ -1396,6 +1407,7 @@ describe('runtime Auto Run', () => {
 							.fn<NonNullable<NonNullable<MaestroRuntimeOptions['managed']>['workflowFence']>>()
 							.mockImplementationOnce(() => pendingClaim.promise)
 							.mockImplementation(() => ({
+								ownerId: 'owner-1',
 								ownerEpoch: 'epoch-2',
 								fencingToken: 'fence-2',
 								lifetime: {
@@ -1415,6 +1427,7 @@ describe('runtime Auto Run', () => {
 						const closing = change === 'shutdown' ? runtime.connection.close() : undefined;
 						if (change === 'revoked') owner.abort();
 						pendingClaim.resolve({
+							ownerId: 'owner-1',
 							ownerEpoch: 'epoch-1',
 							fencingToken: 'fence-1',
 							lifetime: {
@@ -1483,6 +1496,7 @@ describe('runtime Auto Run', () => {
 					const finish = vi.fn<WorkflowFenceLifetime['finish']>(async () => owner.abort());
 					finishes.push(finish);
 					return {
+						ownerId: 'owner-1',
 						ownerEpoch: 'epoch-1',
 						fencingToken: 'fence-1',
 						lifetime: { signal: owner.signal, current: () => !owner.signal.aborted, finish },
@@ -1506,6 +1520,7 @@ describe('runtime Auto Run', () => {
 						.mockRejectedValueOnce(new Error('release acknowledgement lost'))
 						.mockResolvedValue(undefined);
 					const claim = vi.fn(() => ({
+						ownerId: 'owner-1',
 						ownerEpoch: 'epoch-1',
 						fencingToken: 'fence-1',
 						lifetime: { signal: new AbortController().signal, current: () => true, finish },
@@ -1553,6 +1568,7 @@ describe('runtime Auto Run', () => {
 						return Promise.reject('release failed');
 					});
 					const runtime = await startEnrolled(authority, () => ({
+						ownerId: 'owner-1',
 						ownerEpoch: 'epoch-1',
 						fencingToken: 'fence-1',
 						lifetime: { signal: new AbortController().signal, current: () => true, finish },
@@ -1583,6 +1599,7 @@ describe('runtime Auto Run', () => {
 					success ? Promise.resolve() : Promise.reject('release failed')
 				);
 				const runtime = await startEnrolled(authority, () => ({
+					ownerId: 'owner-1',
 					ownerEpoch: 'epoch-1',
 					fencingToken: 'fence-1',
 					lifetime: { signal: new AbortController().signal, current: () => true, finish },
@@ -1613,6 +1630,7 @@ describe('runtime Auto Run', () => {
 				const { authority } = fleetAuthority();
 				const finish = vi.fn<WorkflowFenceLifetime['finish']>().mockResolvedValue(undefined);
 				const runtime = await startEnrolled(authority, () => ({
+					ownerId: 'owner-1',
 					ownerEpoch: 'epoch-1',
 					fencingToken: 'fence-1',
 					lifetime: { signal: new AbortController().signal, current: () => true, finish },
@@ -1635,6 +1653,7 @@ describe('runtime Auto Run', () => {
 				const owner = new AbortController();
 				const finish = vi.fn<WorkflowFenceLifetime['finish']>().mockResolvedValue(undefined);
 				const runtime = await startEnrolled(authority, () => ({
+					ownerId: 'owner-1',
 					ownerEpoch: 'epoch-1',
 					fencingToken: 'fence-1',
 					lifetime: { signal: owner.signal, current: () => !owner.signal.aborted, finish },
@@ -1660,6 +1679,7 @@ describe('runtime Auto Run', () => {
 					const removed = vi.spyOn(owner.signal, 'removeEventListener');
 					const finish = vi.fn<WorkflowFenceLifetime['finish']>(() => pending.promise);
 					const runtime = await startEnrolled(authority, () => ({
+						ownerId: 'owner-1',
 						ownerEpoch: 'epoch-1',
 						fencingToken: 'fence-1',
 						lifetime: { signal: owner.signal, current: () => !owner.signal.aborted, finish },
@@ -1738,7 +1758,7 @@ describe('runtime Auto Run', () => {
 			const claims: Array<{ workflowId: string; runId: string; attemptId: string }> = [];
 			const runtime = await startEnrolled(authority, (workflow, run) => {
 				claims.push({ workflowId: workflow.workflowId, ...run });
-				return { ownerEpoch: 'epoch-1', fencingToken: 'fence-1' };
+				return { ownerId: 'owner-1', ownerEpoch: 'epoch-1', fencingToken: 'fence-1' };
 			});
 			const run = watchRun(runtime);
 
@@ -1768,13 +1788,12 @@ describe('runtime Auto Run', () => {
 					origin: 'headless',
 					// No actor is registered for this process, so the installation's operator is the principal.
 					actor: { kind: 'human', id: `operator:${runtime.installation.installationId}` },
-					delegation: { chain: [], grantRef: null },
+					delegation: { principals: [], delegation: null, grants: [] },
 					workflow: {
 						workflowId: expect.stringMatching(/^runtime-a1-/),
-						version: autoRunWorkflowVersion(['tasks']),
-						triggerEventId: `cli:autoRun.launch:a1:${startedAt}`,
-						ownerEpoch: 'epoch-1',
-						fencingToken: 'fence-1',
+						workflowVersion: autoRunWorkflowVersion(['tasks']),
+						triggerId: `cli:autoRun.launch:a1:${startedAt}`,
+						owner: { ownerId: 'owner-1', ownerEpoch: 'epoch-1', fencingToken: 'fence-1' },
 					},
 					identity: { rootRunId: runId, parentRunId: runId },
 					policyRevision: 1,

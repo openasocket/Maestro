@@ -345,7 +345,7 @@ describe('Quick Chat under management: the two spawns of a send are admitted for
 		expect(result.success).toBe(true);
 		expect(port.asked).toHaveLength(1);
 		expect(port.asked[0].snapshot).toMatchObject({ purpose: 'conversation', origin: 'cli' });
-		expect(port.asked[0].context.delegation.chain).toEqual([]);
+		expect(port.asked[0].context.delegation.principals).toEqual([]);
 		const admitted = h.admitted();
 		expect(admitted.origin).toBe('cli');
 		expect('dispatchTicket' in admitted).toBe(false);
@@ -386,7 +386,7 @@ describe('Quick Chat under management: the two spawns of a send are admitted for
 		);
 		expect(result.success).toBe(true);
 		expect(table.asked).toHaveLength(1);
-		expect(table.asked[0].context.delegation.chain).toEqual([
+		expect(table.asked[0].context.delegation.principals).toEqual([
 			{ kind: 'human', id: 'web-login:ada' },
 		]);
 		expect(table.asked[0].context.verification.peer).toBe('web-login');
@@ -425,7 +425,7 @@ describe('Quick Chat under management: a web actor the host cannot resolve is re
 			h.deps
 		);
 		expect(result.success).toBe(true);
-		expect(table.asked[0].context.delegation.chain).toEqual([
+		expect(table.asked[0].context.delegation.principals).toEqual([
 			{ kind: 'service', id: 'lite-device:dev-7' },
 		]);
 		expect(table.asked[0].context.actor).toEqual({ kind: 'human', id: 'actor-registered' });

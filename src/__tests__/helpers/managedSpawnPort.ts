@@ -87,11 +87,12 @@ export function fakeSpawnPort(options: FakeSpawnPortOptions = {}): FakeSpawnPort
 				origin: 'desktop',
 				actor: { kind: 'human', id: 'ada' },
 				delegation: input.delegation ?? {
-					chain:
+					principals:
 						input.actor.peer === 'web-login'
 							? [{ kind: 'human', id: `web-login:${input.actor.username}` }]
 							: [],
-					grantRef: null,
+					delegation: null,
+					grants: [],
 				},
 				identity: input.identity,
 				policyRevision: input.policyRevision,

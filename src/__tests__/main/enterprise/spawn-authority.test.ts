@@ -46,10 +46,9 @@ describe('createProcessSpawnAuthority verify', () => {
 	it('passes an Auto Run workflow reference through to the verified context', () => {
 		const workflow: ManagedWorkflowRef = {
 			workflowId: 'playbook:/work/.maestro/playbooks/release',
-			version: 'docs-2-0badf00d',
-			triggerEventId: 'operator:1700000000000',
-			ownerEpoch: 'epoch-1',
-			fencingToken: 'fence-1',
+			workflowVersion: 'docs-2-0badf00d',
+			triggerId: 'operator:1700000000000',
+			owner: { ownerId: 'owner-1', ownerEpoch: 'epoch-1', fencingToken: 'fence-1' },
 		};
 		const verified = authority().verify({
 			actor: { peer: 'in-process' },
@@ -79,7 +78,9 @@ describe('createProcessSpawnAuthority verify', () => {
 		expect(verified.ok).toBe(true);
 		if (!verified.ok) return;
 		expect(verified.context.workflow).toBeNull();
-		expect(verified.context.delegation.chain).toEqual([{ kind: 'human', id: 'web-login:ada' }]);
+		expect(verified.context.delegation.principals).toEqual([
+			{ kind: 'human', id: 'web-login:ada' },
+		]);
 		expect(verified.context.verification.peer).toBe('web-login');
 	});
 
@@ -91,15 +92,14 @@ describe('createProcessSpawnAuthority verify', () => {
 			policyRevision: 3,
 			workflow: {
 				workflowId: 'playbook:release',
-				version: 'docs-2-0badf00d',
-				triggerEventId: 'operator:1',
-				ownerEpoch: '',
-				fencingToken: 'fence-1',
+				workflowVersion: 'docs-2-0badf00d',
+				triggerId: 'operator:1',
+				owner: { ownerId: 'owner-1', ownerEpoch: '', fencingToken: 'fence-1' },
 			},
 		});
 		expect(verified.ok).toBe(false);
 		if (verified.ok) return;
-		expect(verified.problems.join('; ')).toContain('workflow.ownerEpoch');
+		expect(verified.problems.join('; ')).toContain('workflow.owner.ownerEpoch');
 	});
 });
 
@@ -128,8 +128,9 @@ describe('createProcessSpawnAuthority transport peers', () => {
 		expect(verified.context.verification.peer).toBe('host-secret');
 		expect(verified.context.verification.verifierId).toBe('desktop-cli-secret:desktop-1');
 		expect(verified.context.delegation).toEqual({
-			chain: [{ kind: 'service', id: 'maestro-cli' }],
-			grantRef: null,
+			principals: [{ kind: 'service', id: 'maestro-cli' }],
+			delegation: null,
+			grants: [],
 		});
 		// The CLI is attribution: the principal is still the registered actor.
 		expect(verified.context.actor).toEqual({ kind: 'human', id: 'actor-registered' });
@@ -144,7 +145,7 @@ describe('createProcessSpawnAuthority transport peers', () => {
 		if (!verified.ok) return;
 		expect(verified.context.verification.peer).toBe('device-pairing');
 		expect(verified.context.verification.verifierId).toBe('desktop-device-pairing:desktop-1');
-		expect(verified.context.delegation.chain).toEqual([
+		expect(verified.context.delegation.principals).toEqual([
 			{ kind: 'service', id: 'lite-device:dev-7' },
 		]);
 		expect(verified.context.actor).toEqual({ kind: 'human', id: 'actor-registered' });
@@ -167,7 +168,7 @@ describe('createProcessSpawnAuthority transport peers', () => {
 			actors.map(() => ({ kind: 'human', id: 'actor-registered' }))
 		);
 		expect(bound.map((c) => c.verification.peer)).toEqual(actors.map((a) => a.peer));
-		expect(bound.map((c) => c.delegation.chain)).toEqual([
+		expect(bound.map((c) => c.delegation.principals)).toEqual([
 			[],
 			[{ kind: 'human', id: 'web-login:ada' }],
 			[{ kind: 'service', id: 'maestro-cli' }],
@@ -190,11 +191,11 @@ describe('createProcessSpawnAuthority transport peers', () => {
 		const carried = other.verify({
 			actor: { peer: 'host-secret' },
 			...turn,
-			delegation: { chain: [{ kind: 'agent', id: 'agent-9' }], grantRef: null },
+			delegation: { principals: [{ kind: 'agent', id: 'agent-9' }], delegation: null, grants: [] },
 		});
 		expect(carried.ok).toBe(true);
 		if (!carried.ok) return;
-		expect(carried.context.delegation.chain).toEqual([{ kind: 'agent', id: 'agent-9' }]);
+		expect(carried.context.delegation.principals).toEqual([{ kind: 'agent', id: 'agent-9' }]);
 		expect(carried.context.verification.peer).toBe('host-secret');
 	});
 });
@@ -266,7 +267,7 @@ describe('createProcessSpawnAuthority paired device without a registered actor',
 		expect(verified.ok).toBe(true);
 		if (!verified.ok) return;
 		expect(verified.context.actor).toEqual({ kind: 'human', id: 'actor-registered' });
-		expect(verified.context.delegation.chain).toEqual([
+		expect(verified.context.delegation.principals).toEqual([
 			{ kind: 'service', id: 'lite-device:dev-7' },
 		]);
 	});
@@ -303,12 +304,16 @@ describe('createProcessSpawnAuthority workflowFence', () => {
 	};
 
 	it('hands the workflow owner claim through, with the workflow and the attempt it is asked for', async () => {
-		const workflowFence = vi.fn(async () => ({ ownerEpoch: '2', fencingToken: 'fence-2' }));
+		const workflowFence = vi.fn(async () => ({
+			ownerId: 'owner-1',
+			ownerEpoch: '2',
+			fencingToken: 'fence-2',
+		}));
 		const port = authority({ status: 'none' }, { workflowFence });
 		expect(port.workflowFence).toBe(workflowFence);
 		await expect(
 			port.workflowFence?.(WORKFLOW, { runId: 'req-1', attemptId: 'att-1' })
-		).resolves.toEqual({ ownerEpoch: '2', fencingToken: 'fence-2' });
+		).resolves.toEqual({ ownerId: 'owner-1', ownerEpoch: '2', fencingToken: 'fence-2' });
 		expect(workflowFence).toHaveBeenCalledWith(WORKFLOW, { runId: 'req-1', attemptId: 'att-1' });
 	});
 
@@ -341,17 +346,17 @@ describe('createCueSpawnAuthority', () => {
 	const port = fakeSpawnPort();
 	const CUE_WORKFLOW: ManagedWorkflowRef = {
 		workflowId: 'cue-pipeline:Nightly QA',
-		version: 'a'.repeat(64),
-		triggerEventId: 'time.scheduled:evt-1',
-		ownerEpoch: 'epoch-3',
-		fencingToken: 'fence-3',
+		workflowVersion: 'a'.repeat(64),
+		triggerId: 'time.scheduled:evt-1',
+		owner: { ownerId: 'owner-1', ownerEpoch: 'epoch-3', fencingToken: 'fence-3' },
 	};
 	const DELEGATION = {
-		chain: [
+		principals: [
 			{ kind: 'service' as const, id: 'cue-subscription:nightly' },
 			{ kind: 'agent' as const, id: 'agent-1' },
 		],
-		grantRef: null,
+		delegation: null,
+		grants: [],
 	};
 
 	function cueAuthority(read: IdentityRead = { status: 'none' }) {
@@ -407,7 +412,7 @@ describe('createCueSpawnAuthority', () => {
 		if (!verified.ok) return;
 		// The registered actor is the principal once one exists; a direct action has no chain.
 		expect(verified.context.actor).toEqual({ kind: 'human', id: 'actor-registered' });
-		expect(verified.context.delegation).toEqual({ chain: [], grantRef: null });
+		expect(verified.context.delegation).toEqual({ principals: [], delegation: null, grants: [] });
 		expect(verified.context.workflow).toBeNull();
 	});
 
@@ -416,11 +421,11 @@ describe('createCueSpawnAuthority', () => {
 			identity: IDENTITY,
 			traceId: 'cue:root-1:run-9:att-1',
 			policyRevision: 3,
-			workflow: { ...CUE_WORKFLOW, fencingToken: '' },
+			workflow: { ...CUE_WORKFLOW, owner: { ...CUE_WORKFLOW.owner, fencingToken: '' } },
 		});
 		expect(verified.ok).toBe(false);
 		if (verified.ok) return;
-		expect(verified.problems.join('; ')).toContain('workflow.fencingToken');
+		expect(verified.problems.join('; ')).toContain('workflow.owner.fencingToken');
 	});
 });
 

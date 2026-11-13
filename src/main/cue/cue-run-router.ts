@@ -299,11 +299,12 @@ export function cueRunLineage(input: {
 			parentRunId: input.parentEventId ?? null,
 		},
 		delegation: {
-			chain: [
+			principals: [
 				{ kind: 'service', id: `cue-subscription:${input.subscriptionName}` },
 				{ kind: 'agent', id: input.ownerAgentId },
 			],
-			grantRef: null,
+			delegation: null,
+			grants: [],
 		},
 		traceId: `cue:${rootRunId}:${input.runId}:${input.attemptId}`,
 		ownerAgentId: input.ownerAgentId,
@@ -317,7 +318,16 @@ export function cueWorkflowRef(
 	fence: AutoRunOwnerFence | null
 ): ManagedWorkflowRef | null {
 	if (!fence) return null;
-	return { ...workflow, ownerEpoch: fence.ownerEpoch, fencingToken: fence.fencingToken };
+	return {
+		workflowId: workflow.workflowId,
+		workflowVersion: workflow.version,
+		triggerId: workflow.triggerEventId,
+		owner: {
+			ownerId: fence.ownerId,
+			ownerEpoch: fence.ownerEpoch,
+			fencingToken: fence.fencingToken,
+		},
+	};
 }
 
 type CueManagedBinding =

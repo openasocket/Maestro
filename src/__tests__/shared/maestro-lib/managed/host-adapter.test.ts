@@ -71,6 +71,7 @@ import {
 	type ManagedEffectProducer,
 	type ManagedEffectBinding,
 } from '../../../../shared/maestro-lib/managed/effects';
+import { delegationOfGrant } from '../../../helpers/managedGrants';
 
 const T0 = Date.parse('2026-10-21T12:00:00Z');
 const INSTALLATION = {
@@ -137,7 +138,7 @@ function standing(
 
 function admission(
 	snapshotArgs: string[] = ['--print'],
-	delegation: ManagedDelegationRef = { chain: [], grantRef: null },
+	delegation: ManagedDelegationRef = { principals: [], delegation: null, grants: [] },
 	workflow: ManagedWorkflowRef | null = null
 ): AdmissionRequest {
 	const verifier = createContextVerifier({
@@ -542,17 +543,22 @@ describe('managed host adapter', () => {
 		// described with the chain stripped off; neither is a grant reference.
 		const chained = await adapter.authority.admit(
 			admission(['--print'], {
-				chain: [
+				principals: [
 					{ kind: 'agent', id: 'owner-agent' },
 					{ kind: 'agent', id: 'target-agent' },
 				],
-				grantRef: null,
+				delegation: null,
+				grants: [],
 			})
 		);
 		expect(chained).toMatchObject({ state: 'unavailable' });
 		expect((chained as { message: string }).message).toContain('delegation authority');
 		const granted = await adapter.authority.admit(
-			admission(['--print'], { chain: [], grantRef: 'grant-1' })
+			admission(['--print'], {
+				principals: [],
+				delegation: delegationOfGrant('grant-1'),
+				grants: [],
+			})
 		);
 		expect(granted).toMatchObject({ state: 'unavailable' });
 		expect((granted as { message: string }).message).toContain('delegation authority');
@@ -669,22 +675,25 @@ describe('managed host adapter', () => {
 		});
 		const workflow = {
 			workflowId: 'workflow-1',
-			version: 'version-1',
-			triggerEventId: 'trigger-1',
-			ownerEpoch: 'opaque-epoch',
-			fencingToken: 'opaque-fence',
+			workflowVersion: 'version-1',
+			triggerId: 'trigger-1',
+			owner: { ownerId: 'owner-1', ownerEpoch: 'opaque-epoch', fencingToken: 'opaque-fence' },
 		};
 		const request = admission(
 			[],
 			{
-				chain:
+				principals:
 					change === 'workflow-only' || change === 'grant-only'
 						? []
 						: [
 								{ kind: 'human', id: 'initiator' },
 								{ kind: 'agent', id: 'parent' },
 							],
-				grantRef: change === 'workflow-only' || change === 'chain-only' ? null : 'opaque-grant',
+				delegation:
+					change === 'workflow-only' || change === 'chain-only'
+						? null
+						: delegationOfGrant('opaque-grant'),
+				grants: [],
 			},
 			change === 'chain-only' || change === 'grant-only' ? null : workflow
 		);
@@ -734,8 +743,9 @@ describe('managed host adapter', () => {
 			expect(decide).toHaveBeenCalledWith(request);
 			expect(result.lease).toBe(producer.live()[0]);
 			if (change === 'withdraw-before-sink') negotiated = null;
-			if (change === 'grant-before-sink') request.context.delegation.grantRef = 'replaced';
-			if (change === 'fence-before-sink') request.context.workflow!.fencingToken = 'replaced';
+			if (change === 'grant-before-sink')
+				request.context.delegation.delegation = delegationOfGrant('replaced');
+			if (change === 'fence-before-sink') request.context.workflow!.owner.fencingToken = 'replaced';
 			const revoked = change.endsWith('before-sink');
 			expect(
 				adapter.authority.check(result.lease, dispatchSnapshotDigest(request.snapshot)).ok
@@ -829,8 +839,9 @@ describe('managed host adapter', () => {
 		).toMatchObject({ state: 'unavailable' });
 		expect(asked).toBe(unasked);
 		const request = admission(['--print', 'exact'], {
-			chain: [{ kind: 'agent', id: 'caller' }],
-			grantRef: 'grant-1',
+			principals: [{ kind: 'agent', id: 'caller' }],
+			delegation: delegationOfGrant('grant-1'),
+			grants: [],
 		});
 		request.snapshot = buildDispatchSnapshot(
 			{
@@ -1279,7 +1290,7 @@ describe('runtime with a host adapter', () => {
 			context: inProcessContext({
 				installation: runtime.installation,
 				actor: { kind: 'human' as const, id: 'ada' },
-				delegation: { chain: [], grantRef: null },
+				delegation: { principals: [], delegation: null, grants: [] },
 				identity: {
 					requestId: 'req-p',
 					idempotencyKey: 'key-p',
@@ -1366,7 +1377,11 @@ describe('runtime with a host adapter', () => {
 			expect(runtime.managedHost!.workflows).not.toBeNull();
 			expect(
 				await runtime.claimWorkflowFence(WORKFLOW, { runId: 'req-1', attemptId: 'att-1' })
-			).toEqual({ ownerEpoch: '4', fencingToken: 'fence-4' });
+			).toEqual({
+				ownerId: runtime.installation.installationId,
+				ownerEpoch: '4',
+				fencingToken: 'fence-4',
+			});
 			// A first claim: epoch 0 and a nonce, as the installation, under the record's policy
 			// generation; the held fence is kept offline because an installed policy is on record.
 			expect(requests).toHaveLength(1);
@@ -1382,7 +1397,11 @@ describe('runtime with a host adapter', () => {
 			// The next attempt re-claims with what the registry issued.
 			expect(
 				await runtime.claimWorkflowFence(WORKFLOW, { runId: 'req-1', attemptId: 'att-2' })
-			).toEqual({ ownerEpoch: '4', fencingToken: 'fence-4' });
+			).toEqual({
+				ownerId: runtime.installation.installationId,
+				ownerEpoch: '4',
+				fencingToken: 'fence-4',
+			});
 			expect(requests[1]).toMatchObject({
 				attemptId: 'att-2',
 				ownerEpoch: 4,
@@ -1420,7 +1439,7 @@ describe('runtime with a host adapter', () => {
 			context: inProcessContext({
 				installation: runtime.installation,
 				actor: { kind: 'human' as const, id: 'ada' },
-				delegation: { chain: [], grantRef: null },
+				delegation: { principals: [], delegation: null, grants: [] },
 				identity: {
 					requestId: 'req-e',
 					idempotencyKey: 'key-e',

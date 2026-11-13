@@ -1743,7 +1743,7 @@ describe('cue-executor', () => {
 				installation: { installationId: 'inst-1', runtimeId: 'cue-1', processEpoch: 'e1' },
 				origin: 'cue',
 				actor: { kind: 'human', id: 'operator:inst-1' },
-				delegation: { chain: [], grantRef: null },
+				delegation: { principals: [], delegation: null, grants: [] },
 				identity: {
 					requestId: 'run-1',
 					idempotencyKey: 'run-1',

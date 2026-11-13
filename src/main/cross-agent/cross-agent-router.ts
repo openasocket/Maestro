@@ -327,8 +327,9 @@ export function resolveConsultInitiator(
 			traceId: originId,
 			workflow: null,
 			delegation: {
-				chain: source ? [{ kind: 'agent', id: source }] : [],
-				grantRef: null,
+				principals: source ? [{ kind: 'agent', id: source }] : [],
+				delegation: null,
+				grants: [],
 			},
 			policyRevision: null,
 		}),

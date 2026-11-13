@@ -23,6 +23,7 @@ import {
 import { pluginActBinding } from '../../../main/plugins/plugin-host-handlers';
 import { fakeSpawnPort } from '../../helpers/managedSpawnPort';
 import type { HeadlessSpawnAuthority } from '../../../shared/maestro-lib/managed/host-adapter';
+import { delegationOfGrant } from '../../helpers/managedGrants';
 
 const agent = {
 	id: 'agent-a',
@@ -1076,8 +1077,9 @@ describe('managed admission through the host authority (MRC-09-02)', () => {
 		if (!verified.ok) return;
 		expect(verified.context.origin).toBe('desktop');
 		expect(verified.context.delegation).toEqual({
-			chain: [{ kind: 'service', id: 'plugin:sh.maestro.relay' }],
-			grantRef: null,
+			principals: [{ kind: 'service', id: 'plugin:sh.maestro.relay' }],
+			delegation: null,
+			grants: [],
 		});
 		expect(verified.context.identity).toEqual(identity);
 		expect(verified.context.workflow).toBeNull();
@@ -1093,16 +1095,25 @@ describe('managed admission through the host authority (MRC-09-02)', () => {
 		const run = createPluginHeadlessAgentRunner({ ...baseDeps(spawn), managed: () => port });
 		await run('agent-a', 'hello', undefined, undefined, 'auto');
 		const direct = managed!.context({ identity, traceId: 't', policyRevision: 1 });
-		expect(direct.ok && direct.context.delegation).toEqual({ chain: [], grantRef: null });
+		expect(direct.ok && direct.context.delegation).toEqual({
+			principals: [],
+			delegation: null,
+			grants: [],
+		});
 		const carried = pluginHeadlessAuthority(port, pluginHeadlessChain('relay')).context({
 			identity,
 			traceId: 't',
 			policyRevision: 1,
-			delegation: { chain: [{ kind: 'agent', id: 'initiator' }], grantRef: 'g-1' },
+			delegation: {
+				principals: [{ kind: 'agent', id: 'initiator' }],
+				delegation: delegationOfGrant('g-1'),
+				grants: [],
+			},
 		});
 		expect(carried.ok && carried.context.delegation).toEqual({
-			chain: [{ kind: 'agent', id: 'initiator' }],
-			grantRef: 'g-1',
+			principals: [{ kind: 'agent', id: 'initiator' }],
+			delegation: delegationOfGrant('g-1'),
+			grants: [],
 		});
 		expect(pluginHeadlessChain('relay')).toEqual([
 			{ kind: 'service', id: 'plugin:sh.maestro.relay' },
@@ -1144,7 +1155,7 @@ describe('managed admission through the host authority (MRC-09-02)', () => {
 		};
 		const binding = () => pluginActBinding('p', { allowed: true, managed: receipt })!;
 
-		it("is admitted as the plugin's child: chain one deeper, parented under its request, consent as the grant, this host's revision", async () => {
+		it("is admitted as the plugin's child: principal chain one deeper, parented under its request, no wire grant (consent is local), this host's revision", async () => {
 			const port = fakeSpawnPort();
 			let managed: HeadlessSpawnAuthority | undefined;
 			let querySource: string | undefined;
@@ -1178,11 +1189,12 @@ describe('managed admission through the host authority (MRC-09-02)', () => {
 			if (!verified.ok) return;
 			const root = bound.delegation.identity.requestId;
 			expect(verified.context.delegation).toEqual({
-				chain: [
+				principals: [
 					{ kind: 'service', id: 'plugin:p' },
 					{ kind: 'agent', id: 'agent-a' },
 				],
-				grantRef: 'plugin-consent:p:sha256:abc:7',
+				delegation: null,
+				grants: [],
 			});
 			expect(verified.context.identity).toEqual({
 				requestId: 'req-1',
@@ -1219,7 +1231,7 @@ describe('managed admission through the host authority (MRC-09-02)', () => {
 				binding()
 			);
 			const verified = managed!.context({ identity, traceId: 't', policyRevision: 1 });
-			expect(verified.ok && verified.context.delegation.chain).toEqual([
+			expect(verified.ok && verified.context.delegation.principals).toEqual([
 				{ kind: 'service', id: 'plugin:p' },
 				{ kind: 'agent', id: 'agent-a' },
 			]);
@@ -1255,7 +1267,11 @@ describe('managed admission through the host authority (MRC-09-02)', () => {
 				identity,
 				traceId: 't',
 				policyRevision: 1,
-				delegation: { chain: [{ kind: 'agent', id: 'initiator' }], grantRef: 'g-1' },
+				delegation: {
+					principals: [{ kind: 'agent', id: 'initiator' }],
+					delegation: delegationOfGrant('g-1'),
+					grants: [],
+				},
 			});
 			expect(!chained.ok && chained.problems).toEqual([
 				"a plugin-bound turn is the plugin's child and carries no chain of its own",

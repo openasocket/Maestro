@@ -270,7 +270,7 @@ describe('Codex skill probe under admission', () => {
 				traceId: `codex-skill-probe:${cwd}`,
 				policyRevision: 1,
 				workflow: null,
-				delegation: { chain: [], grantRef: null },
+				delegation: { principals: [], delegation: null, grants: [] },
 			});
 			// Its own request, one attempt, no run above it.
 			const { identity } = port.asked[0].context;
@@ -330,7 +330,7 @@ describe('Codex skill probe under admission', () => {
 				{ port, actor: { peer: 'web-login', username: 'ada' } }
 			);
 			expect(port.asked[0].snapshot.origin).toBe('desktop');
-			expect(port.asked[0].context.delegation.chain).toEqual([
+			expect(port.asked[0].context.delegation.principals).toEqual([
 				{ kind: 'human', id: 'web-login:ada' },
 			]);
 			expect(calls[0].options.admission?.attribution.origin).toBe('desktop');

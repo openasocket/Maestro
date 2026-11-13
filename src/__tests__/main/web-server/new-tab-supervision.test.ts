@@ -554,7 +554,7 @@ describe('existing-tab production dispatch admission', () => {
 			},
 			traceId: 'cue:run-root:req-s6:att-s6',
 			workflow: null,
-			delegation: { chain: [{ kind: 'agent', id: 'manager' }], grantRef: null },
+			delegation: { principals: [{ kind: 'agent', id: 'manager' }], delegation: null, grants: [] },
 			policyRevision: null,
 		});
 		f.send.mockClear();

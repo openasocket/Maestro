@@ -514,9 +514,12 @@ export function pluginDelegationContext(input: {
 		},
 		traceId: `plugin:${input.pluginId}:${requestId}:${attemptId}`,
 		workflow: null,
+		// The consent reference is a local string, not a grant the contract names, so it is
+		// not presented on the wire. The plugin is attributed as its principal.
 		delegation: {
-			chain: [pluginPrincipal(input.pluginId)],
-			grantRef: pluginConsentGrantRef(input.pluginId, input.receipt),
+			principals: [pluginPrincipal(input.pluginId)],
+			delegation: null,
+			grants: [],
 		},
 		policyRevision: input.receipt.policyRevision,
 	};

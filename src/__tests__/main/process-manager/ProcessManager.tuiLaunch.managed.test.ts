@@ -880,7 +880,7 @@ describe('the caller credential of a managed desktop Auto Run attempt (MCOMP-17-
 		triggerEventId: 'operator:1700000000000',
 		runId: 'run-root',
 	};
-	const FENCE = { ownerEpoch: 'epoch-1', fencingToken: 'fence-1' };
+	const FENCE = { ownerId: 'owner-1', ownerEpoch: 'epoch-1', fencingToken: 'fence-1' };
 	let ids = 0;
 	const newId = () => `id-${++ids}`;
 	let stamp = 1_700_000_000_000;
@@ -978,12 +978,15 @@ describe('the caller credential of a managed desktop Auto Run attempt (MCOMP-17-
 			expect(lineage!.traceId).toBe(autoRunTraceId(attribution));
 			expect(lineage!.workflow).toEqual({
 				workflowId: WORKFLOW.workflowId,
-				version: WORKFLOW.version,
-				triggerEventId: WORKFLOW.triggerEventId,
-				ownerEpoch: FENCE.ownerEpoch,
-				fencingToken: FENCE.fencingToken,
+				workflowVersion: WORKFLOW.version,
+				triggerId: WORKFLOW.triggerEventId,
+				owner: {
+					ownerId: FENCE.ownerId,
+					ownerEpoch: FENCE.ownerEpoch,
+					fencingToken: FENCE.fencingToken,
+				},
 			});
-			expect(Array.isArray(lineage!.delegation.chain)).toBe(true);
+			expect(Array.isArray(lineage!.delegation.principals)).toBe(true);
 		});
 
 		it('hands out a fresh copy each read, so a caller cannot rewrite the held record', async () => {
@@ -991,13 +994,13 @@ describe('the caller credential of a managed desktop Auto Run attempt (MCOMP-17-
 			await admitAndSpawn(manager, attemptTurn());
 			const credential = envOf(captured.child[0])[CALLER_CREDENTIAL_ENV_VAR];
 			const first = manager.autoRunCallerLineageOf(credential)!;
-			first.workflow!.fencingToken = 'forged';
+			first.workflow!.owner.fencingToken = 'forged';
 			first.identity.runId = 'forged';
-			first.delegation.chain.push({ kind: 'agent', id: 'forged' });
+			first.delegation.principals.push({ kind: 'agent', id: 'forged' });
 			const second = manager.autoRunCallerLineageOf(credential)!;
-			expect(second.workflow!.fencingToken).toBe(FENCE.fencingToken);
+			expect(second.workflow!.owner.fencingToken).toBe(FENCE.fencingToken);
 			expect(second.identity.runId).not.toBe('forged');
-			expect(second.delegation.chain).not.toContainEqual({ kind: 'agent', id: 'forged' });
+			expect(second.delegation.principals).not.toContainEqual({ kind: 'agent', id: 'forged' });
 		});
 
 		it('a retry answers its own attempt, and the ended attempt answers nothing', async () => {
@@ -1143,7 +1146,7 @@ describe('the caller credential of a managed desktop room participant turn (MCOM
 				args: HOST_ARGS,
 				sessionId: `agent-1-batch-${++stamp}`,
 				querySource: 'auto',
-				autoRun: { attribution, fence: { ownerEpoch: 'e', fencingToken: 'f' } },
+				autoRun: { attribution, fence: { ownerId: 'owner-1', ownerEpoch: 'e', fencingToken: 'f' } },
 			})
 		);
 		const attempt = envOf(captured.child[2])[CALLER_CREDENTIAL_ENV_VAR];
@@ -1200,8 +1203,8 @@ describe('the caller credential of a managed desktop room participant turn (MCOM
 				expect(lineage!.identity.parentRunId).toBe(room);
 				expect(lineage!.traceId).toBe(admitted.traceId);
 				expect(lineage!.workflow).toBeNull();
-				expect(lineage!.delegation.chain).toEqual(admitted.delegation.chain);
-				expect(lineage!.delegation.chain[0]).toEqual({ kind: 'service', id: room });
+				expect(lineage!.delegation.principals).toEqual(admitted.delegation.principals);
+				expect(lineage!.delegation.principals[0]).toEqual({ kind: 'service', id: room });
 			}
 			expect(manager.groupChatCallerLineageOf(first)!.identity.requestId).not.toBe(
 				manager.groupChatCallerLineageOf(second)!.identity.requestId
@@ -1214,10 +1217,10 @@ describe('the caller credential of a managed desktop room participant turn (MCOM
 			const credential = envOf(captured.child[0])[CALLER_CREDENTIAL_ENV_VAR];
 			const first = manager.groupChatCallerLineageOf(credential)!;
 			first.identity.rootRunId = 'forged';
-			first.delegation.chain.push({ kind: 'agent', id: 'forged' });
+			first.delegation.principals.push({ kind: 'agent', id: 'forged' });
 			const second = manager.groupChatCallerLineageOf(credential)!;
 			expect(second.identity.rootRunId).toBe(groupChatRoomRunId(CHAT));
-			expect(second.delegation.chain).not.toContainEqual({ kind: 'agent', id: 'forged' });
+			expect(second.delegation.principals).not.toContainEqual({ kind: 'agent', id: 'forged' });
 		});
 
 		it('never answers for a chat or Auto Run credential, nor lends the room record to the Auto Run lookup', async () => {
@@ -1240,7 +1243,10 @@ describe('the caller credential of a managed desktop room participant turn (MCOM
 					args: HOST_ARGS,
 					sessionId: `agent-1-batch-${++stamp}`,
 					querySource: 'auto',
-					autoRun: { attribution, fence: { ownerEpoch: 'e', fencingToken: 'f' } },
+					autoRun: {
+						attribution,
+						fence: { ownerId: 'owner-1', ownerEpoch: 'e', fencingToken: 'f' },
+					},
 				})
 			);
 			const room = envOf(captured.child[0])[CALLER_CREDENTIAL_ENV_VAR];
@@ -1308,7 +1314,7 @@ describe('the caller credential of a managed desktop room participant turn (MCOM
 		expect(groupChatParticipantSourceOf({ ...base, delegation: child })).toBeNull();
 		expect(groupChatParticipantSourceOf({ ...base, delegation: undefined })).toBeNull();
 		const twoLinks = groupChatRoomContext(CHAT);
-		twoLinks.delegation.chain.push({ kind: 'agent', id: 'agent-1' });
+		twoLinks.delegation.principals.push({ kind: 'agent', id: 'agent-1' });
 		expect(groupChatParticipantSourceOf({ ...base, delegation: twoLinks })).toBeNull();
 		// Ids the spawn handler did not mint as this process.
 		expect(groupChatParticipantSourceOf({ ...base, dispatchedAs: undefined })).toBeNull();

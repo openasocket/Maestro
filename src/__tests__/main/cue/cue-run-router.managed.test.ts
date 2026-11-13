@@ -141,7 +141,7 @@ function params(overrides: Partial<OnCueRunParams> = {}): OnCueRunParams {
 	};
 }
 
-const FENCE = { ownerEpoch: 'epoch-3', fencingToken: 'fence-3' };
+const FENCE = { ownerId: 'owner-1', ownerEpoch: 'epoch-3', fencingToken: 'fence-3' };
 
 describe('Cue run lineage', () => {
 	it('names the pipeline as the workflow, the event as the trigger, and an edit as a new version', () => {
@@ -157,7 +157,16 @@ describe('Cue run lineage', () => {
 		expect(b.workflowId).toBe('cue:nightly');
 		expect(a.version).not.toBe(b.version);
 		expect(cueWorkflowRef(a, null)).toBeNull();
-		expect(cueWorkflowRef(a, FENCE)).toEqual({ ...a, ...FENCE });
+		expect(cueWorkflowRef(a, FENCE)).toEqual({
+			workflowId: a.workflowId,
+			workflowVersion: a.version,
+			triggerId: a.triggerEventId,
+			owner: {
+				ownerId: FENCE.ownerId,
+				ownerEpoch: FENCE.ownerEpoch,
+				fencingToken: FENCE.fencingToken,
+			},
+		});
 	});
 
 	it('is one request per firing under the chain root, delegated through the subscription to its owner', () => {
@@ -179,7 +188,7 @@ describe('Cue run lineage', () => {
 			rootRunId: 'root-1',
 			parentRunId: 'run-8',
 		});
-		expect(lineage.delegation.chain).toEqual([
+		expect(lineage.delegation.principals).toEqual([
 			{ kind: 'service', id: 'cue-subscription:nightly' },
 			{ kind: 'agent', id: 'agent-1' },
 		]);
@@ -275,15 +284,14 @@ describe('executeCueRunAction under management', () => {
 			rootRunId: 'root-1',
 			parentRunId: 'run-8',
 		});
-		expect(context.delegation.chain).toEqual([
+		expect(context.delegation.principals).toEqual([
 			{ kind: 'service', id: 'cue-subscription:nightly' },
 			{ kind: 'agent', id: 'agent-1' },
 		]);
 		expect(context.workflow).toMatchObject({
 			workflowId: 'cue-pipeline:Nightly QA',
-			triggerEventId: 'time.scheduled:evt-1',
-			ownerEpoch: 'epoch-3',
-			fencingToken: 'fence-3',
+			triggerId: 'time.scheduled:evt-1',
+			owner: { ownerId: 'owner-1', ownerEpoch: 'epoch-3', fencingToken: 'fence-3' },
 		});
 		expect(context.policyRevision).toBe(7);
 		expect(context.traceId).toBe('cue:root-1:run-9:attempt-7');
@@ -369,7 +377,7 @@ describe('a shell action under management (MRC-07-03)', () => {
 				event: EVENT,
 			}).version
 		);
-		expect(events[0].lineage.delegation.chain).toEqual([
+		expect(events[0].lineage.delegation.principals).toEqual([
 			{ kind: 'service', id: 'cue-subscription:nightly' },
 			{ kind: 'agent', id: 'agent-1' },
 		]);
@@ -405,8 +413,7 @@ describe('a shell action under management (MRC-07-03)', () => {
 		});
 		expect(admission.context.workflow).toMatchObject({
 			workflowId: 'cue-pipeline:Nightly QA',
-			ownerEpoch: 'epoch-3',
-			fencingToken: 'fence-3',
+			owner: { ownerId: 'owner-1', ownerEpoch: 'epoch-3', fencingToken: 'fence-3' },
 		});
 	});
 });
@@ -449,11 +456,12 @@ describe('a maestro-cli action under management (MRC-07-04)', () => {
 			workflow: null,
 			policyRevision: null,
 			delegation: {
-				chain: [
+				principals: [
 					{ kind: 'service', id: 'cue-subscription:nightly' },
 					{ kind: 'agent', id: 'agent-1' },
 				],
-				grantRef: null,
+				delegation: null,
+				grants: [],
 			},
 		});
 	});
@@ -509,7 +517,10 @@ describe('a maestro-cli action under management (MRC-07-04)', () => {
 		expect(config.delegation).toEqual(delegationContextOf(admission.context));
 		expect(config.delegation).toMatchObject({
 			identity: { requestId: 'run-9', attemptId: 'attempt-c', rootRunId: 'root-1' },
-			workflow: { workflowId: 'cue-pipeline:Nightly QA', ownerEpoch: 'epoch-3' },
+			workflow: {
+				workflowId: 'cue-pipeline:Nightly QA',
+				owner: { ownerId: 'owner-1', ownerEpoch: 'epoch-3', fencingToken: 'fence-3' },
+			},
 			policyRevision: 7,
 		});
 	});
@@ -638,7 +649,11 @@ describe('the owner fence claimed per firing (MRC-07-06)', () => {
 		let attempt = 0;
 		const workflowFence = vi.fn(async () => {
 			offered = current;
-			return { ownerEpoch: `epoch-${attempt}`, fencingToken: `fence-${attempt}` };
+			return {
+				ownerId: 'owner-1',
+				ownerEpoch: `epoch-${attempt}`,
+				fencingToken: `fence-${attempt}`,
+			};
 		});
 		const deps = makeDeps({
 			port: () => offered,
@@ -659,10 +674,13 @@ describe('the owner fence claimed per firing (MRC-07-06)', () => {
 					parentRunId: 'run-8',
 				},
 				workflow: {
-					...FENCE,
-					ownerEpoch: `epoch-${attempt}`,
-					fencingToken: `fence-${attempt}`,
-					triggerEventId: 'time.scheduled:evt-1',
+					workflowId: 'cue-pipeline:Nightly QA',
+					triggerId: 'time.scheduled:evt-1',
+					owner: {
+						ownerId: 'owner-1',
+						ownerEpoch: `epoch-${attempt}`,
+						fencingToken: `fence-${attempt}`,
+					},
 				},
 			});
 			expect(workflowFence).toHaveBeenLastCalledWith(expect.anything(), {
@@ -717,7 +735,7 @@ describe('the owner fence claimed per firing (MRC-07-06)', () => {
 			workflowFence: async (workflow, run) => {
 				asked.push([workflow, run]);
 				await new Promise((resolve) => setTimeout(resolve, 1));
-				return { ownerEpoch: '5', fencingToken: 'token-5' };
+				return { ownerId: 'owner-1', ownerEpoch: '5', fencingToken: 'token-5' };
 			},
 			newId: () => 'attempt-w',
 		});
@@ -738,8 +756,7 @@ describe('the owner fence claimed per firing (MRC-07-06)', () => {
 		const config = deps.executeCuePrompt.mock.calls[0][0];
 		expect(config.admission?.context.workflow).toMatchObject({
 			workflowId: 'cue-pipeline:Nightly QA',
-			ownerEpoch: '5',
-			fencingToken: 'token-5',
+			owner: { ownerId: 'owner-1', ownerEpoch: '5', fencingToken: 'token-5' },
 		});
 	});
 
@@ -1088,15 +1105,16 @@ describe('Cue workflow fence lifetime', () => {
 				},
 				workflow: {
 					workflowId: 'cue-pipeline:Nightly QA',
-					triggerEventId: 'time.scheduled:evt-1',
-					...FENCE,
+					triggerId: 'time.scheduled:evt-1',
+					owner: FENCE,
 				},
 				delegation: {
-					chain: [
+					principals: [
 						{ kind: 'service', id: 'cue-subscription:nightly' },
 						{ kind: 'agent', id: 'agent-1' },
 					],
-					grantRef: null,
+					delegation: null,
+					grants: [],
 				},
 			});
 			expect(deps.onAutoRun).not.toHaveBeenCalled();

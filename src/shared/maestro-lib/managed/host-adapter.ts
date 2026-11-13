@@ -81,6 +81,7 @@ import {
 	type ManagedPrincipalRef,
 	type ManagedRunIdentity,
 	type ManagedWorkflowRef,
+	directDelegationRef,
 } from './types';
 import { endpointWorkflowOwnerPort, type WorkflowOwnerPort } from './workflows';
 import {
@@ -235,7 +236,7 @@ export function createHeadlessSpawnAuthority(
 				installation: deps.installation,
 				origin: deps.origin,
 				actor: deps.actor,
-				delegation: input.delegation ?? { chain: [], grantRef: null },
+				delegation: input.delegation ?? directDelegationRef(),
 				identity: input.identity,
 				policyRevision: input.policyRevision,
 				workflow: input.workflow ?? null,
@@ -712,7 +713,7 @@ export function createManagedHostAdapter(deps: ManagedHostAdapterDeps): ManagedH
 	let invalidation = 0;
 	function workflowNegotiationKey(request: AdmissionRequest, port: PreparedExecutionPort) {
 		const { delegation, workflow } = request.context;
-		const delegated = delegation.chain.length > 0 || delegation.grantRef !== null;
+		const delegated = delegation.principals.length > 0 || delegation.delegation !== null;
 		if (!delegated && workflow === null) return 'direct';
 		const identity = deps.identity.read();
 		const standing = deps.status();
@@ -1415,7 +1416,7 @@ export async function admitSupervisorChild(
 		traceId: request.traceId,
 		policyRevision: policy.policyRevision,
 		workflow: null,
-		delegation: { chain: [service], grantRef: null },
+		delegation: { principals: [service], delegation: null, grants: [] },
 	});
 	if (!verified.ok) {
 		return {

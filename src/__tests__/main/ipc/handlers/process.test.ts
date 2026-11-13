@@ -1504,7 +1504,11 @@ describe('process IPC handlers', () => {
 					},
 					traceId: 'cue:run-root:req-cue-1:att-cue-1',
 					workflow: null,
-					delegation: { chain: [{ kind: 'agent', id: 'owner-agent' }], grantRef: null },
+					delegation: {
+						principals: [{ kind: 'agent', id: 'owner-agent' }],
+						delegation: null,
+						grants: [],
+					},
 					policyRevision: null,
 				});
 
@@ -1543,11 +1547,12 @@ describe('process IPC handlers', () => {
 					},
 					traceId: `delegated:run-root:${spawned.dispatchedAs.requestId}:${spawned.dispatchedAs.attemptId}`,
 					delegation: {
-						chain: [
+						principals: [
 							{ kind: 'agent', id: 'owner-agent' },
 							{ kind: 'agent', id: 'agent-x' },
 						],
-						grantRef: null,
+						delegation: null,
+						grants: [],
 					},
 					workflow: null,
 					policyRevision: null,

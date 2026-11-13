@@ -335,7 +335,7 @@ describe('usage capture: unknown usage, replays, surfaces and canaries (MRC-10-0
 		},
 		traceId: 'trace-1',
 		workflow: null,
-		delegation: { chain: [], grantRef: null },
+		delegation: { principals: [], delegation: null, grants: [] },
 	};
 
 	it('settles what nothing can price as estimated tokens with no cost: a stream that named no model and a settle that names none', () => {

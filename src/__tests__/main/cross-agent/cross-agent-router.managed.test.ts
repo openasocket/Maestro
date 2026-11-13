@@ -123,7 +123,11 @@ const managedInitiator = (): ManagedDelegationContext => ({
 	},
 	traceId: 'cue-run-1',
 	workflow: null,
-	delegation: { chain: [{ kind: 'service', id: 'cue:pipeline' }], grantRef: null },
+	delegation: {
+		principals: [{ kind: 'service', id: 'cue:pipeline' }],
+		delegation: null,
+		grants: [],
+	},
 	policyRevision: 7,
 });
 
@@ -199,11 +203,11 @@ describe('consult lineage: the asking operation and its child', () => {
 		const initiator = resolveConsultInitiator(request());
 		expect(initiator.writable).toBeNull();
 		expect(initiator.delegation.policyRevision).toBeNull();
-		expect(initiator.delegation.delegation.chain).toEqual([{ kind: 'agent', id: 'src' }]);
+		expect(initiator.delegation.delegation.principals).toEqual([{ kind: 'agent', id: 'src' }]);
 		expect(initiator.delegation.identity.requestId).toBe('ask:src:r1');
 		// A `maestro-cli ask` that named no asking agent has an empty chain.
 		const unattributed = resolveConsultInitiator(request({ sourceSessionId: 'cli-ask' }));
-		expect(unattributed.delegation.delegation.chain).toEqual([]);
+		expect(unattributed.delegation.delegation.principals).toEqual([]);
 	});
 
 	it('derives the child as the sink derives a dispatched turn: the chain one link deeper, this request as its run', () => {
@@ -232,9 +236,9 @@ describe('consult lineage: the asking operation and its child', () => {
 		expect(spawned).toHaveLength(1);
 		const config = spawned[0];
 		expect(config.dispatchedAs).toEqual({ requestId: 'r1', attemptId: 'r1' });
-		expect(config.delegation?.delegation.chain).toEqual([{ kind: 'agent', id: 'src' }]);
+		expect(config.delegation?.delegation.principals).toEqual([{ kind: 'agent', id: 'src' }]);
 		const stamped = stampedOn(config);
-		expect(stamped.delegation.chain).toEqual([
+		expect(stamped.delegation.principals).toEqual([
 			{ kind: 'agent', id: 'src' },
 			{ kind: 'agent', id: 'cross-agent-r1' },
 		]);
@@ -246,7 +250,7 @@ describe('consult lineage: the asking operation and its child', () => {
 		expect(live).toHaveLength(1);
 		expect(config.admission?.leaseId).toBe(live[0].leaseId);
 		expect(port.asked).toHaveLength(1);
-		expect(port.asked[0].context.delegation.chain).toEqual(stamped.delegation.chain);
+		expect(port.asked[0].context.delegation.principals).toEqual(stamped.delegation.principals);
 		expect(port.asked[0].context.identity.requestId).toBe('r1');
 		expect(port.asked[0].snapshot).toMatchObject({ provider: 'claude-code', origin: 'desktop' });
 	});
@@ -276,7 +280,7 @@ describe('initiator scope: the asking run meets the standing of this host', () =
 		expect(spawned).toHaveLength(1);
 		expect(spawned[0].admission?.policyRevision).toBe(1);
 		expect(stampedOn(spawned[0]).identity.parentRunId).toBe('cue-run-1');
-		expect(port.asked[0].context.delegation.chain).toEqual([
+		expect(port.asked[0].context.delegation.principals).toEqual([
 			{ kind: 'service', id: 'cue:pipeline' },
 			{ kind: 'agent', id: 'cross-agent-r1' },
 		]);
@@ -312,7 +316,7 @@ describe('access: a consult never widens what its initiator may do', () => {
 		);
 		expect(spawned).toHaveLength(2);
 		const second = spawned[1];
-		expect(stampedOn(second).delegation.chain).toEqual([
+		expect(stampedOn(second).delegation.principals).toEqual([
 			{ kind: 'agent', id: 'src' },
 			{ kind: 'agent', id: 'cross-agent-r1' },
 			{ kind: 'agent', id: 'cross-agent-r2' },
@@ -369,7 +373,7 @@ describe('a web actor the host cannot resolve is refused at the sink', () => {
 		expect(table.asked[0].context.verification.peer).toBe('device-pairing');
 		expect(table.asked[0].context.actor).toEqual({ kind: 'human', id: 'actor-registered' });
 		// A dispatched turn is bound on its initiator's chain as it is.
-		expect(table.asked[0].context.delegation.chain).toEqual([
+		expect(table.asked[0].context.delegation.principals).toEqual([
 			{ kind: 'agent', id: 'src' },
 			{ kind: 'agent', id: 'cross-agent-r1' },
 		]);
@@ -500,12 +504,11 @@ describe('binding the asking run to its ask ticket (MCOMP-17-03BF)', () => {
 		traceId: 'trace-run-root',
 		workflow: {
 			workflowId: 'playbook:/work/.maestro/playbooks/release',
-			version: 'docs-2-0badf00d',
-			triggerEventId: 'operator:1700000000000',
-			ownerEpoch: 'epoch-1',
-			fencingToken: 'fence-1',
+			workflowVersion: 'docs-2-0badf00d',
+			triggerId: 'operator:1700000000000',
+			owner: { ownerId: 'owner-1', ownerEpoch: 'epoch-1', fencingToken: 'fence-1' },
 		},
-		delegation: { chain: [{ kind: 'agent', id: 'src' }], grantRef: null },
+		delegation: { principals: [{ kind: 'agent', id: 'src' }], delegation: null, grants: [] },
 		policyRevision: 1,
 	});
 
@@ -529,7 +532,7 @@ describe('binding the asking run to its ask ticket (MCOMP-17-03BF)', () => {
 		expect(stamped.identity.rootRunId).toBe('run-root');
 		expect(stamped.workflow).toEqual(autoRunLineage().workflow);
 		expect(port.asked[0].context.workflow).toEqual(autoRunLineage().workflow);
-		expect(port.asked[0].context.delegation.chain).toEqual(stamped.delegation.chain);
+		expect(port.asked[0].context.delegation.principals).toEqual(stamped.delegation.principals);
 	});
 
 	it('uses a binding once: a replay of the ticket falls back to the plain ask lineage', async () => {
@@ -557,12 +560,12 @@ describe('binding the asking run to its ask ticket (MCOMP-17-03BF)', () => {
 		const { spawned, dispatch } = harness(fakeSpawnPort());
 		const record = autoRunLineage();
 		bindCrossAgentConsultInitiator('ticket-bf5', record);
-		record.workflow!.fencingToken = 'forged';
-		record.delegation.chain.push({ kind: 'agent', id: 'intruder' });
+		record.workflow!.owner.fencingToken = 'forged';
+		record.delegation.principals.push({ kind: 'agent', id: 'intruder' });
 		await dispatch({ requestId: 'r-bf5' }, { dispatchTicket: 'ticket-bf5' });
 		const stamped = stampedOn(spawned[0]);
-		expect(stamped.workflow!.fencingToken).toBe('fence-1');
-		expect(stamped.delegation.chain).toEqual([
+		expect(stamped.workflow!.owner.fencingToken).toBe('fence-1');
+		expect(stamped.delegation.principals).toEqual([
 			{ kind: 'agent', id: 'src' },
 			{ kind: 'agent', id: 'cross-agent-r-bf5' },
 		]);

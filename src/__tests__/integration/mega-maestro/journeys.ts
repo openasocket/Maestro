@@ -383,7 +383,7 @@ export async function runPairJourneys(deps: JourneyDeps): Promise<JourneyRun> {
 				installation,
 				origin,
 				actor,
-				delegation: { chain: [], grantRef: null },
+				delegation: { principals: [], delegation: null, grants: [] },
 				identity: ids(),
 				policyRevision,
 				workflow: null,

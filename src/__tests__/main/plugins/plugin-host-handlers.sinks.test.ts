@@ -341,7 +341,9 @@ describe('createPluginEffectSinks: managed', () => {
 			provider: 'plugin-process',
 			resourceIds: ['binary:node-marker', 'plugin:p'],
 		});
-		expect(port.asked[0].context.delegation.chain).toEqual([{ kind: 'service', id: 'plugin:p' }]);
+		expect(port.asked[0].context.delegation.principals).toEqual([
+			{ kind: 'service', id: 'plugin:p' },
+		]);
 	});
 
 	it('process.spawn refused by the policy starts nothing', async () => {

@@ -116,7 +116,7 @@ function admission(requestId = 'req-1', attemptId = 'att-1'): AdmissionRequest {
 		inProcessContext({
 			installation: INSTALLATION,
 			actor: { kind: 'human', id: 'ada' },
-			delegation: { chain: [], grantRef: null },
+			delegation: { principals: [], delegation: null, grants: [] },
 			identity: {
 				requestId,
 				idempotencyKey: `key-${requestId}`,

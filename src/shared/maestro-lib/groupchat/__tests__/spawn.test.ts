@@ -99,7 +99,11 @@ describe('the room lineage a turn is admitted under (MRC-07-05)', () => {
 			},
 			traceId: `group-chat:${CHAT}`,
 			workflow: null,
-			delegation: { chain: [{ kind: 'service', id: `group-chat:${CHAT}` }], grantRef: null },
+			delegation: {
+				principals: [{ kind: 'service', id: `group-chat:${CHAT}` }],
+				delegation: null,
+				grants: [],
+			},
 			policyRevision: null,
 		});
 		expect(delegationContextProblems(room)).toEqual([]);
@@ -120,11 +124,12 @@ describe('the room lineage a turn is admitted under (MRC-07-05)', () => {
 				traceId: `delegated:group-chat:${CHAT}:${processId}:${processId}`,
 				workflow: null,
 				delegation: {
-					chain: [
+					principals: [
 						{ kind: 'service', id: `group-chat:${CHAT}` },
 						{ kind: 'agent', id: processId },
 					],
-					grantRef: null,
+					delegation: null,
+					grants: [],
 				},
 				policyRevision: null,
 			});

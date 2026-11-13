@@ -34,6 +34,7 @@ import {
 	type LifecycleLineage,
 } from '../../../shared/maestro-lib/managed/events';
 import { MANAGED_CONTRACT_VERSION } from '../../../shared/maestro-lib/managed/types';
+import { delegationOfGrant } from '../../helpers/managedGrants';
 
 // Terminal states inlined as a static lookup so the fake store's "active run"
 // resolution mirrors the real store without importing the impl's own helper.
@@ -598,7 +599,7 @@ describe('AgentRunCaptureService lifecycle projection (MRC-10-01)', () => {
 			},
 			traceId: 'req-1',
 			workflow: null,
-			delegation: { chain: [], grantRef: null },
+			delegation: { principals: [], delegation: null, grants: [] },
 			actor: { kind: 'human', id: 'alice' },
 			policyRevision: 4,
 		};
@@ -683,7 +684,10 @@ describe('AgentRunCaptureService lifecycle projection (MRC-10-01)', () => {
 		it('reads an Auto Run attempt off its attribution, with the fence as the workflow', () => {
 			const lineage = spawnLifecycleLineage({
 				sessionId: 'agent-1-ai-t',
-				autoRun: { attribution, fence: { ownerEpoch: 'e1', fencingToken: 'f1' } },
+				autoRun: {
+					attribution,
+					fence: { ownerId: 'owner-1', ownerEpoch: 'e1', fencingToken: 'f1' },
+				},
 				admission: ADMISSION,
 			});
 			expect(lineage).toEqual({
@@ -698,12 +702,11 @@ describe('AgentRunCaptureService lifecycle projection (MRC-10-01)', () => {
 				traceId: 'autorun:ar-1:task-req:1',
 				workflow: {
 					workflowId: 'wf-1',
-					version: 'v1',
-					triggerEventId: 'operator:1',
-					ownerEpoch: 'e1',
-					fencingToken: 'f1',
+					workflowVersion: 'v1',
+					triggerId: 'operator:1',
+					owner: { ownerId: 'owner-1', ownerEpoch: 'e1', fencingToken: 'f1' },
 				},
-				delegation: { chain: [], grantRef: null },
+				delegation: { principals: [], delegation: null, grants: [] },
 				actor: { kind: 'human', id: 'alice' },
 				policyRevision: 4,
 			});
@@ -731,7 +734,11 @@ describe('AgentRunCaptureService lifecycle projection (MRC-10-01)', () => {
 					},
 					traceId: 'cue:trace',
 					workflow: null,
-					delegation: { chain: [{ kind: 'service', id: 'cue' }], grantRef: 'g1' },
+					delegation: {
+						principals: [{ kind: 'service', id: 'cue' }],
+						delegation: delegationOfGrant('g1'),
+						grants: [],
+					},
 					policyRevision: 2,
 				},
 				dispatchedAs: { requestId: 'child-req', attemptId: 'child-attempt' },
@@ -746,11 +753,12 @@ describe('AgentRunCaptureService lifecycle projection (MRC-10-01)', () => {
 				},
 				traceId: 'delegated:cue-root:child-req:child-attempt',
 				delegation: {
-					chain: [
+					principals: [
 						{ kind: 'service', id: 'cue' },
 						{ kind: 'agent', id: 'agent-9' },
 					],
-					grantRef: 'g1',
+					delegation: delegationOfGrant('g1'),
+					grants: [],
 				},
 			});
 			// A delegation with no minted ids and no admission is not guessed at.
@@ -769,7 +777,7 @@ describe('AgentRunCaptureService lifecycle projection (MRC-10-01)', () => {
 						},
 						traceId: 'cue:trace',
 						workflow: null,
-						delegation: { chain: [], grantRef: null },
+						delegation: { principals: [], delegation: null, grants: [] },
 						policyRevision: null,
 					},
 				})
@@ -788,7 +796,7 @@ describe('AgentRunCaptureService lifecycle projection (MRC-10-01)', () => {
 				},
 				traceId: 'req-1',
 				workflow: null,
-				delegation: { chain: [], grantRef: null },
+				delegation: { principals: [], delegation: null, grants: [] },
 				actor: { kind: 'human', id: 'alice' },
 				policyRevision: 4,
 			});

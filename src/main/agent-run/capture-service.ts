@@ -54,7 +54,7 @@ import {
 	type LifecycleRecord,
 	type LifecycleSurface,
 } from '../../shared/maestro-lib/managed/events';
-import type { ManagedRunState } from '../../shared/maestro-lib/managed/types';
+import { directDelegationRef, type ManagedRunState } from '../../shared/maestro-lib/managed/types';
 import { resolveOwningMaestroSessionId } from '../coworking/coworking-session-id';
 import type {
 	ProcessConfig,
@@ -178,7 +178,7 @@ export function spawnLifecycleLineage(
 			identity: autoRunRunIdentity(attribution),
 			traceId: autoRunTraceId(attribution),
 			workflow: autoRunWorkflowRef(attribution.workflow, fence),
-			delegation: { chain: [], grantRef: null },
+			delegation: directDelegationRef(),
 			...bound,
 		};
 	}
@@ -210,7 +210,7 @@ export function spawnLifecycleLineage(
 			},
 			traceId: admission.requestId,
 			workflow: null,
-			delegation: { chain: [], grantRef: null },
+			delegation: directDelegationRef(),
 			...bound,
 		};
 	}

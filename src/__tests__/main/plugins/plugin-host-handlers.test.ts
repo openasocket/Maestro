@@ -68,6 +68,7 @@ import { MAESTRO_PUBLISHER_KEYS } from '../../../shared/plugins/publisher-keys';
 import { RELAY_PUBLISHER_KEY } from '../../../shared/plugins/relay-identity';
 import relayRelease from '../../shared/plugins/fixtures/relay-release-question.json';
 import type { AgentSendProgressEvent } from '../../../shared/plugins/rpc-protocol';
+import { delegationOfGrant } from '../../helpers/managedGrants';
 
 let kvBase: string;
 let kv: PluginKvStore;
@@ -3140,8 +3141,9 @@ describe('managed act bindings (MRC-09-02)', () => {
 		expect(binding.receipt).toEqual(receipt);
 		expect(delegationContextProblems(binding.delegation)).toEqual([]);
 		expect(binding.delegation.delegation).toEqual({
-			chain: [{ kind: 'service', id: 'plugin:p' }],
-			grantRef: 'plugin-consent:p:sha256:abc:7',
+			principals: [{ kind: 'service', id: 'plugin:p' }],
+			delegation: null,
+			grants: [],
 		});
 		expect(binding.delegation.policyRevision).toBe(3);
 		expect(binding.delegation.workflow).toBeNull();
@@ -3159,11 +3161,12 @@ describe('managed act bindings (MRC-09-02)', () => {
 			attemptId: 'att-child',
 		});
 		expect(child.delegation).toEqual({
-			chain: [
+			principals: [
 				{ kind: 'service', id: 'plugin:p' },
 				{ kind: 'agent', id: 'a' },
 			],
-			grantRef: 'plugin-consent:p:sha256:abc:7',
+			delegation: null,
+			grants: [],
 		});
 		expect(child.identity.rootRunId).toBe(identity.requestId);
 		expect(child.identity.parentRunId).toBe(identity.requestId);
@@ -3249,7 +3252,7 @@ describe('managed act bindings (MRC-09-02)', () => {
 			env: { SAFE_FLAG: '1' },
 		});
 		expect(binding.receipt).toEqual(receipt);
-		expect(binding.delegation.delegation.chain).toEqual([{ kind: 'service', id: 'plugin:p' }]);
+		expect(binding.delegation.delegation.principals).toEqual([{ kind: 'service', id: 'plugin:p' }]);
 		expect(delegationContextProblems(binding.delegation)).toEqual([]);
 	});
 
@@ -3258,7 +3261,9 @@ describe('managed act bindings (MRC-09-02)', () => {
 		expect(pluginActBinding('p', { allowed: false, managed: receipt })).toBeUndefined();
 		const bound = pluginActBinding('p', { allowed: true, managed: receipt });
 		expect(bound?.receipt).toBe(receipt);
-		expect(bound?.delegation.delegation.grantRef).toBe('plugin-consent:p:sha256:abc:7');
+		// The consent reference is local, never a wire grant: the plugin is attributed as its principal only.
+		expect(bound?.delegation.delegation.delegation).toBeNull();
+		expect(bound?.delegation.delegation.principals).toEqual([{ kind: 'service', id: 'plugin:p' }]);
 		// No readable consent digest: the chain carries no grant reference.
 		expect(pluginConsentGrantRef('p', { contentHash: null, consentEpoch: null })).toBeNull();
 		expect(pluginConsentGrantRef('p', { contentHash: 'sha256:abc', consentEpoch: null })).toBe(
@@ -3305,7 +3310,7 @@ describe('managed act bindings (MRC-09-02)', () => {
 			expect(asked.context.origin).toBe('desktop');
 			expect(asked.context.identity).toEqual(binding.delegation.identity);
 			expect(asked.context.traceId).toBe(binding.delegation.traceId);
-			expect(asked.context.delegation.chain).toEqual([{ kind: 'service', id: 'plugin:p' }]);
+			expect(asked.context.delegation.principals).toEqual([{ kind: 'service', id: 'plugin:p' }]);
 			expect(asked.context.workflow).toBeNull();
 			expect(outcome.attribution).toMatchObject({ provider: 'plugin-process', operation: 'start' });
 			expect(outcome.lease.actor).toEqual(asked.context.actor);
@@ -3483,8 +3488,9 @@ describe('managed act bindings (MRC-09-02)', () => {
 			expect(binding.receipt).toEqual(receipt);
 			expect(delegationContextProblems(binding.delegation)).toEqual([]);
 			expect(binding.delegation.delegation).toEqual({
-				chain: [{ kind: 'service', id: 'plugin:p' }],
-				grantRef: 'plugin-consent:p:sha256:abc:7',
+				principals: [{ kind: 'service', id: 'plugin:p' }],
+				delegation: null,
+				grants: [],
 			});
 			expect(binding.delegation.policyRevision).toBe(3);
 			expect(deps.providerSessions!.isOwned('p', 'a', 'ps-2')).toBe(true);
@@ -3506,7 +3512,7 @@ describe('managed act bindings (MRC-09-02)', () => {
 			const args = generateTitle.mock.calls[0]!;
 			expect(args.slice(0, 3)).toEqual(['a', friendly, expect.any(AbortSignal)]);
 			expect((args[3] as PluginActBinding).receipt).toEqual(receipt);
-			expect((args[3] as PluginActBinding).delegation.delegation.chain).toEqual([
+			expect((args[3] as PluginActBinding).delegation.delegation.principals).toEqual([
 				{ kind: 'service', id: 'plugin:p' },
 			]);
 		});

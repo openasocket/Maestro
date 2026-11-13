@@ -366,7 +366,7 @@ describe('the fixture over a host composed from the public exports (MCOMP-03-03A
 			installation: fixture.host.installation,
 			origin: 'headless',
 			actor: fixture.host.actor,
-			delegation: { chain: [], grantRef: null },
+			delegation: { principals: [], delegation: null, grants: [] },
 			identity: {
 				requestId: 'req:submit-accepted',
 				idempotencyKey: 'idem-a',

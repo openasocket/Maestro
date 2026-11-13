@@ -62,15 +62,35 @@ export interface ManagedPrincipalRef {
 	id: string;
 }
 
+/** A grant as the contract names it: its UUID and the digest of the grant record (`grantReference`). */
+export interface ManagedGrantRef {
+	grantId: string;
+	digest: string;
+}
+
 /**
- * How the actor came to act: the chain of principals that delegated to it,
- * outermost first, and an opaque reference to the grant that authorizes the
- * chain. An empty chain is a direct action. The reference is looked up by the
- * host; its presence proves nothing.
+ * How the actor came to act. `principals` is the host's attribution: the
+ * principals behind the actor, outermost first. It is never a wire field and
+ * never proves authority. `delegation` is the wire reference: the grant the
+ * actor presents and its root-first chain, whose last entry equals `grant`.
+ * Null is a direct action. `grants` is every grant the operation relies on.
+ * A child never receives a grant it did not get from the grant issuer; the
+ * host only carries what its parent presented.
  */
 export interface ManagedDelegationRef {
-	chain: readonly ManagedPrincipalRef[];
-	grantRef: string | null;
+	principals: readonly ManagedPrincipalRef[];
+	delegation: { grant: ManagedGrantRef; chain: readonly ManagedGrantRef[] } | null;
+	grants: readonly ManagedGrantRef[];
+}
+
+/** A deep copy of a workflow reference, owner included, so a caller cannot rewrite a held fence. */
+export function copyWorkflowRef(workflow: ManagedWorkflowRef | null): ManagedWorkflowRef | null {
+	return workflow ? { ...workflow, owner: { ...workflow.owner } } : null;
+}
+
+/** A direct action: no principals behind it, no grant presented, none relied on. */
+export function directDelegationRef(): ManagedDelegationRef {
+	return { principals: [], delegation: null, grants: [] };
 }
 
 /**
@@ -120,13 +140,26 @@ export interface ManagedPolicySource {
 	revision: number | null;
 }
 
-/** The workflow (an Auto Run, a Cue pipeline) that owns the run, with the fencing that keeps one owner. */
-export interface ManagedWorkflowRef {
-	workflowId: string;
-	version: string;
-	triggerEventId: string;
+/**
+ * The owner a workflow lifecycle operation returned: who holds the workflow,
+ * at which opaque epoch, under which fencing token. The epoch is the string
+ * the endpoint issued; it is never a number counted here.
+ */
+export interface ManagedWorkflowOwner {
+	ownerId: string;
 	ownerEpoch: string;
 	fencingToken: string;
+}
+
+/**
+ * The workflow (an Auto Run, a Cue pipeline) that owns the run, named as the
+ * contract names it (`workflowContextV2`), with the owner that keeps one owner.
+ */
+export interface ManagedWorkflowRef {
+	workflowId: string;
+	workflowVersion: string;
+	triggerId: string;
+	owner: ManagedWorkflowOwner;
 }
 
 // ---------------------------------------------------------------------------
@@ -390,6 +423,76 @@ function principalProblems(value: unknown, at: string): string[] {
 	return problems;
 }
 
+/** Wire bounds from the contract: 32 grants at most, and a 64-character lowercase SHA-256 digest. */
+export const MAX_DELEGATION_GRANTS = 32;
+const GRANT_DIGEST = /^[0-9a-f]{64}$/;
+
+function grantRefProblems(value: unknown, at: string): string[] {
+	if (!isRecord(value)) return [`${at} is not an object`];
+	const problems: string[] = [];
+	if (!isId(value.grantId)) problems.push(`${at}.grantId is not an id`);
+	if (typeof value.digest !== 'string' || !GRANT_DIGEST.test(value.digest)) {
+		problems.push(`${at}.digest is not a lowercase SHA-256 digest`);
+	}
+	return problems;
+}
+
+/**
+ * The structural problems with a delegation reference. The principal chain is
+ * attribution; the grant chain is the wire reference, root first, with the
+ * presented grant as its last entry, and no grant may repeat.
+ */
+export function delegationRefProblems(value: unknown): string[] {
+	if (!isRecord(value)) return ['delegation is not an object'];
+	const problems: string[] = [];
+	if (!Array.isArray(value.principals)) {
+		problems.push('delegation.principals is not an array');
+	} else {
+		value.principals.forEach((link, i) =>
+			problems.push(...principalProblems(link, `delegation.principals[${i}]`))
+		);
+	}
+	if (!Array.isArray(value.grants) || value.grants.length > MAX_DELEGATION_GRANTS) {
+		problems.push(`delegation.grants is not an array of at most ${MAX_DELEGATION_GRANTS}`);
+	} else {
+		value.grants.forEach((grant, i) =>
+			problems.push(...grantRefProblems(grant, `delegation.grants[${i}]`))
+		);
+		const ids = value.grants.map((grant) => (isRecord(grant) ? grant.grantId : undefined));
+		if (new Set(ids).size !== ids.length) problems.push('delegation.grants repeats a grant');
+	}
+	const reference = value.delegation;
+	if (reference === null) return problems;
+	if (!isRecord(reference)) return [...problems, 'delegation.delegation is not an object or null'];
+	if (!isRecord(reference.grant)) {
+		problems.push('delegation.delegation.grant is not an object');
+	} else {
+		problems.push(...grantRefProblems(reference.grant, 'delegation.delegation.grant'));
+	}
+	const chain = reference.chain;
+	if (!Array.isArray(chain) || chain.length < 1 || chain.length > MAX_DELEGATION_GRANTS) {
+		problems.push(
+			`delegation.delegation.chain is not an array of 1 to ${MAX_DELEGATION_GRANTS} grants`
+		);
+		return problems;
+	}
+	chain.forEach((grant, i) =>
+		problems.push(...grantRefProblems(grant, `delegation.delegation.chain[${i}]`))
+	);
+	const ids = chain.map((grant) => (isRecord(grant) ? grant.grantId : undefined));
+	if (new Set(ids).size !== ids.length)
+		problems.push('delegation.delegation.chain repeats a grant');
+	const last = chain[chain.length - 1];
+	if (
+		isRecord(reference.grant) &&
+		isRecord(last) &&
+		(last.grantId !== reference.grant.grantId || last.digest !== reference.grant.digest)
+	) {
+		problems.push('delegation.delegation.chain does not end at the presented grant');
+	}
+	return problems;
+}
+
 /**
  * The structural problems with a value offered as a context. Empty means the
  * shape is right: every id present and bounded, every enum member known, the
@@ -411,17 +514,7 @@ export function managedContextProblems(value: unknown): string[] {
 	}
 	if (!MANAGED_ORIGINS.includes(value.origin as ManagedOrigin)) problems.push('origin is unknown');
 	problems.push(...principalProblems(value.actor, 'actor'));
-	const delegation = value.delegation;
-	if (!isRecord(delegation) || !Array.isArray(delegation.chain)) {
-		problems.push('delegation.chain is not an array');
-	} else {
-		delegation.chain.forEach((link, i) =>
-			problems.push(...principalProblems(link, `delegation.chain[${i}]`))
-		);
-		if (delegation.grantRef !== null && !isId(delegation.grantRef)) {
-			problems.push('delegation.grantRef is not an id or null');
-		}
-	}
+	problems.push(...delegationRefProblems(value.delegation));
 	const identity = value.identity;
 	if (!isRecord(identity)) problems.push('identity is not an object');
 	else {
@@ -447,15 +540,15 @@ export function managedContextProblems(value: unknown): string[] {
 	if (workflow !== null) {
 		if (!isRecord(workflow)) problems.push('workflow is not an object or null');
 		else {
-			const keys = [
-				'workflowId',
-				'version',
-				'triggerEventId',
-				'ownerEpoch',
-				'fencingToken',
-			] as const;
-			for (const key of keys) {
+			for (const key of ['workflowId', 'workflowVersion', 'triggerId'] as const) {
 				if (!isId(workflow[key])) problems.push(`workflow.${key} is not an id`);
+			}
+			const owner = workflow.owner;
+			if (!isRecord(owner)) problems.push('workflow.owner is not an object');
+			else {
+				for (const key of ['ownerId', 'ownerEpoch', 'fencingToken'] as const) {
+					if (!isId(owner[key])) problems.push(`workflow.owner.${key} is not an id`);
+				}
 			}
 		}
 	}

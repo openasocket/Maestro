@@ -41,6 +41,7 @@ export interface AutoRunWorkflowIdentity {
  * a turn runner or a renderer.
  */
 export interface AutoRunOwnerFence {
+	ownerId: string;
 	ownerEpoch: string;
 	fencingToken: string;
 }
@@ -140,10 +141,13 @@ export function autoRunWorkflowRef(
 	if (!fence) return null;
 	return {
 		workflowId: workflow.workflowId,
-		version: workflow.version,
-		triggerEventId: workflow.triggerEventId,
-		ownerEpoch: fence.ownerEpoch,
-		fencingToken: fence.fencingToken,
+		workflowVersion: workflow.version,
+		triggerId: workflow.triggerEventId,
+		owner: {
+			ownerId: fence.ownerId,
+			ownerEpoch: fence.ownerEpoch,
+			fencingToken: fence.fencingToken,
+		},
 	};
 }
 

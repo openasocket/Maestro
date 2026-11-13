@@ -42,6 +42,7 @@ import {
 	type MaestroRuntimeOptions,
 	type RuntimeDeps,
 } from '../index';
+import { delegationOfGrant } from '../../../../__tests__/helpers/managedGrants';
 
 const T0 = Date.parse('2026-10-04T12:00:00Z');
 const BUNDLED_PROMPTS = path.resolve(__dirname, '../../../../prompts');
@@ -362,13 +363,16 @@ describe('runtime group chats', () => {
 					workflow: owned
 						? {
 								workflowId: 'nightly',
-								version: 'v1',
-								triggerEventId: 'cue:1',
-								ownerEpoch: 'epoch-1',
-								fencingToken,
+								workflowVersion: 'v1',
+								triggerId: 'cue:1',
+								owner: { ownerId: 'owner-1', ownerEpoch: 'epoch-1', fencingToken: fencingToken },
 							}
 						: null,
-					delegation: { chain: [{ kind: 'agent', id: 'source-agent' }], grantRef: grant },
+					delegation: {
+						principals: [{ kind: 'agent', id: 'source-agent' }],
+						delegation: delegationOfGrant(grant),
+						grants: [],
+					},
 				});
 			custody.current = parent();
 			expect(custody.current.ok).toBe(true);
@@ -390,17 +394,17 @@ describe('runtime group chats', () => {
 					identity: { requestId: call.processId, rootRunId: 'root-run', parentRunId: 'cue-run' },
 					workflow: {
 						workflowId: 'nightly',
-						version: 'v1',
-						triggerEventId: 'cue:1',
-						ownerEpoch: 'epoch-1',
-						fencingToken: 'fence-1',
+						workflowVersion: 'v1',
+						triggerId: 'cue:1',
+						owner: { ownerId: 'owner-1', ownerEpoch: 'epoch-1', fencingToken: 'fence-1' },
 					},
 					delegation: {
-						chain: [
+						principals: [
 							{ kind: 'agent', id: 'source-agent' },
 							{ kind: 'human', id: 'source-operator' },
 						],
-						grantRef: 'grant-1',
+						delegation: delegationOfGrant('grant-1'),
+						grants: [],
 					},
 					policyRevision: 3,
 				});
@@ -450,7 +454,9 @@ describe('runtime group chats', () => {
 				await chat.idle(2);
 				expect(provider.calls).toHaveLength(4);
 				expect(
-					asked.every((request) => request.context.delegation.grantRef === 'fresh-grant')
+					asked.every(
+						(request) => request.context.delegation.delegation?.grant.grantId === 'fresh-grant'
+					)
 				).toBe(true);
 			}
 		);
@@ -489,11 +495,11 @@ describe('runtime group chats', () => {
 					if (!replacement.ok) throw new Error('Expected verified fixture parent.');
 					for (const request of asked.slice(effects)) {
 						expect(request.context.workflow).toEqual(replacement.context.workflow);
-						expect(request.context.delegation.grantRef).toBe(
-							replacement.context.delegation.grantRef
+						expect(request.context.delegation.delegation).toEqual(
+							replacement.context.delegation.delegation
 						);
 						expect(request.context.identity.parentRunId).toBe(replacement.context.identity.runId);
-						expect(request.context.delegation.chain).toContainEqual(replacement.context.actor);
+						expect(request.context.delegation.principals).toContainEqual(replacement.context.actor);
 					}
 					expect(authority.live()).toEqual([]);
 				}
@@ -563,9 +569,11 @@ describe('runtime group chats', () => {
 					request.context.identity.requestId.includes(chatId)
 				);
 				expect(requests).toHaveLength(4);
-				expect(requests.every((request) => request.context.delegation.grantRef === grant)).toBe(
-					true
-				);
+				expect(
+					requests.every(
+						(request) => request.context.delegation.delegation?.grant.grantId === grant
+					)
+				).toBe(true);
 			}
 			expect(authority.live()).toEqual([]);
 		});
@@ -600,7 +608,7 @@ describe('runtime group chats', () => {
 				expect(asked.slice(effects)).toHaveLength(4);
 				for (const request of asked.slice(effects)) {
 					expect(request.context).toMatchObject({
-						delegation: { grantRef: 'grant-2' },
+						delegation: { delegation: delegationOfGrant('grant-2'), grants: [] },
 						policyRevision: 4,
 					});
 				}
@@ -650,8 +658,11 @@ describe('runtime group chats', () => {
 				expect(asked).toHaveLength(5);
 				for (const request of asked.slice(1)) {
 					expect(request.context).toMatchObject({
-						delegation: { grantRef: change === 'grant' ? 'replacement-grant' : 'grant-1' },
-						workflow: { fencingToken: change === 'fence' ? 'fence-2' : 'fence-1' },
+						delegation: {
+							delegation: delegationOfGrant(change === 'grant' ? 'replacement-grant' : 'grant-1'),
+							grants: [],
+						},
+						workflow: { owner: { fencingToken: change === 'fence' ? 'fence-2' : 'fence-1' } },
 						policyRevision: change === 'policy' ? 4 : 3,
 					});
 				}
@@ -732,7 +743,12 @@ describe('runtime group chats', () => {
 					current: vi.fn(() => true),
 					finish: vi.fn<WorkflowFenceLifetime['finish']>().mockResolvedValue(undefined),
 				};
-				const claim = vi.fn(() => ({ ownerEpoch: 'epoch-9', fencingToken: 'fence-9', lifetime }));
+				const claim = vi.fn(() => ({
+					ownerId: 'owner-1',
+					ownerEpoch: 'epoch-9',
+					fencingToken: 'fence-9',
+					lifetime,
+				}));
 				const { runtime, asked, parentContext } = await enrolled(
 					AUTORUN,
 					{ workflowFence: claim },
@@ -756,13 +772,16 @@ describe('runtime group chats', () => {
 				expect(asked[0].context.workflow).toBeNull();
 				expect(nestedOf()!.context).toMatchObject({
 					identity: { parentRunId: 'cue-run', rootRunId: 'root-run' },
-					workflow: { ownerEpoch: 'epoch-9', fencingToken: 'fence-9' },
+					workflow: {
+						owner: { ownerId: 'owner-1', ownerEpoch: 'epoch-9', fencingToken: 'fence-9' },
+					},
 					delegation: {
-						chain: [
+						principals: [
 							{ kind: 'agent', id: 'source-agent' },
 							{ kind: 'human', id: 'source-operator' },
 						],
-						grantRef: 'grant-1',
+						delegation: delegationOfGrant('grant-1'),
+						grants: [],
 					},
 				});
 				expect(claim).toHaveBeenCalled();

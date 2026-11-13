@@ -57,6 +57,7 @@ import { createMaestroRuntime, type MaestroRuntime, type RuntimeDeps } from '../
 import type { WatchDirectory } from '../settings-watch';
 import * as runtimeTurns from '../turns';
 import { isVerifiedContext } from '../../managed/authority';
+import { delegationOfGrant } from '../../../../__tests__/helpers/managedGrants';
 
 const T0 = Date.parse('2026-10-04T12:00:00Z');
 const BUNDLED_PROMPTS = path.resolve(__dirname, '../../../../prompts');
@@ -589,7 +590,7 @@ describe('runtime turns', () => {
 				context: inProcessContext({
 					installation: runtime.installation,
 					actor: { kind: 'service', id: 'fleet' },
-					delegation: { chain: [], grantRef: null },
+					delegation: { principals: [], delegation: null, grants: [] },
 					identity: {
 						requestId: 'req-1',
 						idempotencyKey: 'key-1',
@@ -1312,12 +1313,15 @@ describe('runtime turns', () => {
 				const request = envelope(runtime, submission('delegated source'), {
 					workflow: {
 						workflowId: 'nightly',
-						version: 'v1',
-						triggerEventId: 'cue:1',
-						ownerEpoch: 'epoch-1',
-						fencingToken: 'fence-1',
+						workflowVersion: 'v1',
+						triggerId: 'cue:1',
+						owner: { ownerId: 'owner-1', ownerEpoch: 'epoch-1', fencingToken: 'fence-1' },
 					},
-					delegation: { chain: [{ kind: 'agent', id: 'parent' }], grantRef: 'grant-1' },
+					delegation: {
+						principals: [{ kind: 'agent', id: 'parent' }],
+						delegation: delegationOfGrant('grant-1'),
+						grants: [],
+					},
 					identity: { runId: 'run-source', rootRunId: 'root', parentRunId: 'parent' },
 				});
 				expect(value(await managedOf(runtime).submit(request))).toMatchObject({

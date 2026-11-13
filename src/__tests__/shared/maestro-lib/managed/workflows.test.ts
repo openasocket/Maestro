@@ -270,6 +270,7 @@ describe('workflow ownership', () => {
 				});
 				expect(store.held()[0].pending).toBeUndefined();
 				expect(store.fence(WORKFLOW)).toEqual({
+					ownerId: 'inst-1',
 					ownerEpoch: 'opaque-epoch',
 					fencingToken: 'server-fence',
 				});
@@ -394,14 +395,22 @@ describe('workflow ownership', () => {
 				expect(second.fence(WORKFLOW)).toBeNull();
 				expect(second.held()[0].state).toBe('fenced');
 				expect(held.current()).toBe(true);
-				expect(first.fence(WORKFLOW)).toEqual({ ownerEpoch: 'epoch-1', fencingToken: 'fence-1' });
+				expect(first.fence(WORKFLOW)).toEqual({
+					ownerId: 'inst-1',
+					ownerEpoch: 'epoch-1',
+					fencingToken: 'fence-1',
+				});
 
 				await held.finish('applied');
 				expect(first.fence(WORKFLOW)).toBeNull();
 				expect(first.held()[0].state).toBe('released');
 				const taken = await second.claim({ workflow: WORKFLOW, ...RETRY, offlineEnabled: true });
 				expect(taken).toMatchObject({ state: 'owned', disposition: 'claimed' });
-				expect(second.fence(WORKFLOW)).toEqual({ ownerEpoch: 'epoch-2', fencingToken: 'fence-2' });
+				expect(second.fence(WORKFLOW)).toEqual({
+					ownerId: 'inst-2',
+					ownerEpoch: 'epoch-2',
+					fencingToken: 'fence-2',
+				});
 				expect(holder).toBe('inst-2');
 			});
 
@@ -450,6 +459,7 @@ describe('workflow ownership', () => {
 					fencingToken: 'server-fence',
 				});
 				expect(restarted.fence(WORKFLOW)).toEqual({
+					ownerId: 'inst-1',
 					ownerEpoch: 'opaque-epoch',
 					fencingToken: 'server-fence',
 				});
@@ -495,7 +505,11 @@ describe('workflow ownership', () => {
 			attemptId: 'attempt-1',
 		});
 		// The proposal is not what is held; the receipt is.
-		expect(store.fence(WORKFLOW)).toEqual({ ownerEpoch: '4', fencingToken: 'token-A' });
+		expect(store.fence(WORKFLOW)).toEqual({
+			ownerId: 'inst-1',
+			ownerEpoch: '4',
+			fencingToken: 'token-A',
+		});
 		expect(store.held()[0]).toMatchObject({
 			workflowId: WORKFLOW.workflowId,
 			state: 'held',
@@ -509,7 +523,11 @@ describe('workflow ownership', () => {
 		const restarted = ownership(fakePort(denied('unavailable')));
 		expect(restarted.fence(WORKFLOW)).toBeNull();
 		await restarted.load();
-		expect(restarted.fence(WORKFLOW)).toEqual({ ownerEpoch: '4', fencingToken: 'token-A' });
+		expect(restarted.fence(WORKFLOW)).toEqual({
+			ownerId: 'inst-1',
+			ownerEpoch: '4',
+			fencingToken: 'token-A',
+		});
 	});
 
 	it('a retry re-claims with the held epoch and token, and the registry confirms it', async () => {
@@ -567,7 +585,11 @@ describe('workflow ownership', () => {
 			disposition: 'claimed',
 			fence: { ownerEpoch: '5' },
 		});
-		expect(store.fence(WORKFLOW)).toEqual({ ownerEpoch: '5', fencingToken: 'token-B' });
+		expect(store.fence(WORKFLOW)).toEqual({
+			ownerId: 'inst-1',
+			ownerEpoch: '5',
+			fencingToken: 'token-B',
+		});
 	});
 
 	it('a receipt naming another owner is a fence, not ours', async () => {
@@ -601,7 +623,11 @@ describe('workflow ownership', () => {
 		});
 		const lost = await store.claim({ workflow: OTHER, ...RETRY });
 		expect(lost).toMatchObject({ state: 'unavailable', code: 'runtime-unavailable' });
-		expect(store.fence(OTHER)).toEqual({ ownerEpoch: '4', fencingToken: 'token-A' });
+		expect(store.fence(OTHER)).toEqual({
+			ownerId: 'inst-1',
+			ownerEpoch: '4',
+			fencingToken: 'token-A',
+		});
 	});
 
 	it('with no producer attached, an offline-enabled holder keeps its fence and a first claim names CP-03', async () => {
@@ -852,6 +878,7 @@ describe('workflow ownership', () => {
 				claimedAt: '2026-10-21T12:00:00.000Z',
 			});
 			expect(restarted.store.fence(WORKFLOW)).toEqual({
+				ownerId: 'inst-1',
 				ownerEpoch: '1',
 				fencingToken: 'inst-1-nonce',
 			});
@@ -881,6 +908,7 @@ describe('workflow ownership', () => {
 			expect(await first.claim(RUN)).toMatchObject({ state: 'owned', disposition: 'claimed' });
 			expect(await second.claim(RUN)).toMatchObject({ state: 'denied', fenced: true });
 			expect(first.store.fence(WORKFLOW)).toEqual({
+				ownerId: 'inst-1',
 				ownerEpoch: '1',
 				fencingToken: 'inst-1-nonce',
 			});
@@ -893,7 +921,7 @@ describe('workflow ownership', () => {
 			expect(await second.claim(RETRY)).toMatchObject({
 				state: 'owned',
 				disposition: 'claimed',
-				fence: { ownerEpoch: '2', fencingToken: 'inst-2-nonce' },
+				fence: { ownerId: 'inst-2', ownerEpoch: '2', fencingToken: 'inst-2-nonce' },
 			});
 			expect(await first.claim(RETRY)).toMatchObject({ state: 'denied', fenced: true });
 			expect(reg.last()).toMatchObject({
@@ -919,6 +947,7 @@ describe('workflow ownership', () => {
 			// Exactly one holder, and it holds what the registry issued.
 			expect([first.store.fence(WORKFLOW), restarted.store.fence(WORKFLOW)]).toEqual([null, null]);
 			expect(second.store.fence(WORKFLOW)).toEqual({
+				ownerId: 'inst-2',
 				ownerEpoch: '2',
 				fencingToken: 'inst-2-nonce',
 			});
@@ -1007,7 +1036,11 @@ describe('workflow ownership', () => {
 				fencingToken: 'token-A',
 			});
 			expect(confirmed).toMatchObject({ state: 'owned', disposition: 'claimed' });
-			expect(restarted.fence(WORKFLOW)).toEqual({ ownerEpoch: '4', fencingToken: 'token-A' });
+			expect(restarted.fence(WORKFLOW)).toEqual({
+				ownerId: 'inst-1',
+				ownerEpoch: '4',
+				fencingToken: 'token-A',
+			});
 		});
 
 		it('queued claims behind a fenced one offer the fenced values and are fenced too: no second owner from the queue', async () => {

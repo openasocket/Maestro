@@ -53,6 +53,7 @@ import {
 } from '../index';
 import { createRequestHandler, runtimeManagedScope } from '../server-requests';
 import { CALLER_CREDENTIAL_ENV_VAR } from '../turns';
+import { delegationOfGrant } from '../../../../__tests__/helpers/managedGrants';
 
 const T0 = Date.parse('2026-10-04T12:00:00Z');
 const BUNDLED_PROMPTS = path.resolve(__dirname, '../../../../prompts');
@@ -549,7 +550,7 @@ describe('runtime consults', () => {
 				},
 				traceId: 'trace-7',
 				workflow: null,
-				delegation: { chain: [{ kind: 'agent', id: 'a1' }], grantRef: null },
+				delegation: { principals: [{ kind: 'agent', id: 'a1' }], delegation: null, grants: [] },
 				policyRevision,
 			};
 			return () => ({ delegation: record, writable });
@@ -567,11 +568,12 @@ describe('runtime consults', () => {
 				workflow: null,
 				policyRevision: null,
 				delegation: {
-					chain: [
+					principals: [
 						{ kind: 'agent', id: 'a1' },
 						{ kind: 'agent', id: 'a2' },
 					],
-					grantRef: null,
+					delegation: null,
+					grants: [],
 				},
 				identity: { requestId, attemptId: requestId, runId: requestId },
 			});
@@ -591,7 +593,7 @@ describe('runtime consults', () => {
 		it('carries an empty chain plus the target for an unattributed ask', async () => {
 			const runtime = await start();
 			value(await runtime.consults.ask({ targetAgentId: 'a2', question: 'Why?' }));
-			expect(lineageOf(0).delegation.chain).toEqual([{ kind: 'agent', id: 'a2' }]);
+			expect(lineageOf(0).delegation.principals).toEqual([{ kind: 'agent', id: 'a2' }]);
 			expect(lineageOf(0).identity.parentRunId).toMatch(
 				new RegExp(`^ask:${CROSS_AGENT_ASK_SESSION_ID}:`)
 			);
@@ -622,7 +624,7 @@ describe('runtime consults', () => {
 			expect(permissionMode(provider.callsFor('consult')[1].spec.args)).toBe('plan');
 			const outerLineage = lineageOf(0);
 			const inner = lineageOf(1);
-			expect(inner.delegation.chain).toEqual([
+			expect(inner.delegation.principals).toEqual([
 				{ kind: 'agent', id: 'a1' },
 				{ kind: 'agent', id: 'a2' },
 				{ kind: 'agent', id: 'a3' },
@@ -652,11 +654,12 @@ describe('runtime consults', () => {
 					delegation: expect.objectContaining({
 						policyRevision: 7,
 						delegation: {
-							chain: [
+							principals: [
 								{ kind: 'agent', id: 'a1' },
 								{ kind: 'agent', id: 'a2' },
 							],
-							grantRef: null,
+							delegation: null,
+							grants: [],
 						},
 						identity: expect.objectContaining({ parentRunId: 'run-7', rootRunId: 'run-7' }),
 					}),
@@ -1054,7 +1057,12 @@ describe('runtime consults', () => {
 						current: vi.fn(() => true),
 						finish: vi.fn(async () => {}),
 					};
-					const claim = vi.fn(() => ({ ownerEpoch: 'epoch-1', fencingToken: 'fence-1', lifetime }));
+					const claim = vi.fn(() => ({
+						ownerId: 'owner-1',
+						ownerEpoch: 'epoch-1',
+						fencingToken: 'fence-1',
+						lifetime,
+					}));
 					sourceLookup = vi.fn(() => (readable ? (callers.getStore() ?? null) : null));
 					const runtime = await startEnrolled(() => 'allow', sourceAdmissions, script, {
 						consultSource: sourceLookup,
@@ -1097,8 +1105,7 @@ describe('runtime consults', () => {
 							})
 						);
 						expect(child.workflow).toMatchObject({
-							ownerEpoch: 'epoch-1',
-							fencingToken: 'fence-1',
+							owner: { ownerId: 'owner-1', ownerEpoch: 'epoch-1', fencingToken: 'fence-1' },
 						});
 						expect(permissionMode(provider.calls[0].spec.args)).toBeUndefined();
 						expect(sourceAdmissions).toHaveLength(2);
@@ -1243,8 +1250,7 @@ describe('runtime consults', () => {
 								})
 							);
 							expect(child.workflow).toMatchObject({
-								ownerEpoch: 'epoch-1',
-								fencingToken: 'fence-1',
+								owner: { ownerId: 'owner-1', ownerEpoch: 'epoch-1', fencingToken: 'fence-1' },
 							});
 							expect(sourceLookup).not.toHaveBeenCalled();
 							expect(sourceAdmissions).toHaveLength(2);
@@ -1545,8 +1551,8 @@ describe('runtime consults', () => {
 					expect(provider.calls).toHaveLength(2);
 					expect(lineageOf(1).identity.parentRunId).toBe(lineageOf(0).identity.requestId);
 					expect(lineageOf(1).identity.rootRunId).toBe(lineageOf(0).identity.rootRunId);
-					expect(lineageOf(1).delegation.chain).toEqual([
-						...lineageOf(0).delegation.chain,
+					expect(lineageOf(1).delegation.principals).toEqual([
+						...lineageOf(0).delegation.principals,
 						{ kind: 'agent', id: 'a3' },
 					]);
 					expect(sourceAdmissions).toHaveLength(3);
@@ -1653,8 +1659,8 @@ describe('runtime consults', () => {
 					if (room.status !== 'ok') throw new Error('the participant carried no lineage');
 					expect(lineageOf(0).identity.parentRunId).toBe(room.context.identity.requestId);
 					expect(lineageOf(0).identity.rootRunId).toBe(room.context.identity.rootRunId);
-					expect(lineageOf(0).delegation.chain).toEqual([
-						...room.context.delegation.chain,
+					expect(lineageOf(0).delegation.principals).toEqual([
+						...room.context.delegation.principals,
 						{ kind: 'agent', id: 'a3' },
 					]);
 					expect(consultTab('a3')).toBeDefined();
@@ -1787,8 +1793,8 @@ describe('runtime consults', () => {
 				);
 				expect(lineageOf(2).identity.parentRunId).toBe(lineageOf(1).identity.requestId);
 				expect(lineageOf(2).identity.rootRunId).toBe(lineageOf(0).identity.rootRunId);
-				expect(lineageOf(2).delegation.chain).toEqual([
-					...lineageOf(1).delegation.chain,
+				expect(lineageOf(2).delegation.principals).toEqual([
+					...lineageOf(1).delegation.principals,
 					{ kind: 'agent', id: 'a1' },
 				]);
 				expect(permissionMode(provider.calls[2].spec.args)).toBe('plan');
@@ -1937,8 +1943,8 @@ describe('runtime consults', () => {
 							attemptId: child.identity.attemptId,
 						})
 					);
-					expect(child.delegation.chain).toEqual([
-						...source.delegation.chain,
+					expect(child.delegation.principals).toEqual([
+						...source.delegation.principals,
 						{ kind: 'agent', id: 'a2' },
 					]);
 					expect(sourceAdmissions).toHaveLength(2);
@@ -2075,12 +2081,11 @@ describe('runtime consults', () => {
 				let record = namedInitiator(7, false)({ agentId: 'a1' })!;
 				record.delegation.workflow = {
 					workflowId: 'nightly',
-					version: 'v1',
-					triggerEventId: 'cue:1',
-					ownerEpoch: 'epoch-1',
-					fencingToken: 'fence-1',
+					workflowVersion: 'v1',
+					triggerId: 'cue:1',
+					owner: { ownerId: 'owner-1', ownerEpoch: 'epoch-1', fencingToken: 'fence-1' },
 				};
-				record.delegation.delegation.grantRef = 'grant-1';
+				record.delegation.delegation.delegation = delegationOfGrant('grant-1');
 				const saved = structuredClone(record);
 				initiator = () => record;
 				const parentContext = vi.fn(() => source);
@@ -2118,11 +2123,11 @@ describe('runtime consults', () => {
 				}).context(record.delegation);
 				if (!verified.ok) throw new Error(verified.problems.join('; '));
 				source = verified;
-				if (mode === 'workflow') record.delegation.workflow!.fencingToken = 'forged';
-				if (mode === 'grant') record.delegation.delegation.grantRef = 'forged';
+				if (mode === 'workflow') record.delegation.workflow!.owner.fencingToken = 'forged';
+				if (mode === 'grant') record.delegation.delegation.delegation = delegationOfGrant('forged');
 				if (mode === 'root') record.delegation.identity.rootRunId = 'forged';
 				if (mode === 'parent') record.delegation.identity.runId = 'forged';
-				if (mode === 'chain') record.delegation.delegation.chain[0].id = 'forged';
+				if (mode === 'chain') record.delegation.delegation.principals[0].id = 'forged';
 				if (mode === 'policy') record.delegation.policyRevision = 8;
 				if (mode === 'copied') source = structuredClone(verified);
 				if (mode === 'withdrawn') source = withdrawn;
@@ -2174,11 +2179,12 @@ describe('runtime consults', () => {
 					policyRevision: 1,
 					identity: { rootRunId: 'run-7', parentRunId: 'run-7' },
 					delegation: {
-						chain: [
-							...saved.delegation.delegation.chain,
+						principals: [
+							...saved.delegation.delegation.principals,
 							{ kind: 'agent', id: input.targetAgentId },
 						],
-						grantRef: 'grant-1',
+						delegation: delegationOfGrant('grant-1'),
+						grants: [],
 					},
 				});
 				expect(asked.at(-1)!.context.actor).not.toEqual(verified.context.actor);
@@ -2197,12 +2203,11 @@ describe('runtime consults', () => {
 				current = namedInitiator(1, true)({ agentId: 'a1' })!;
 				current.delegation.workflow = {
 					workflowId: 'workflow-1',
-					version: 'v1',
-					triggerEventId: 'trigger-1',
-					ownerEpoch: 'epoch-1',
-					fencingToken: 'fence-1',
+					workflowVersion: 'v1',
+					triggerId: 'trigger-1',
+					owner: { ownerId: 'owner-1', ownerEpoch: 'epoch-1', fencingToken: 'fence-1' },
 				};
-				current.delegation.delegation.grantRef = 'grant-1';
+				current.delegation.delegation.delegation = delegationOfGrant('grant-1');
 				unreadable = false;
 				initiator = vi.fn(() => {
 					if (unreadable) throw new Error('source custody unavailable');
@@ -2236,11 +2241,12 @@ describe('runtime consults', () => {
 					expect(lineageOf(0)).toMatchObject({
 						workflow: saved!.delegation.workflow,
 						delegation: {
-							grantRef: 'grant-1',
-							chain: [
+							principals: [
 								{ kind: 'agent', id: 'a1' },
 								{ kind: 'agent', id: 'a2' },
 							],
+							delegation: delegationOfGrant('grant-1'),
+							grants: [],
 						},
 						identity: { parentRunId: 'run-7', rootRunId: 'run-7' },
 					});
@@ -2264,8 +2270,9 @@ describe('runtime consults', () => {
 					const saved = structuredClone(current);
 					if (change === 'missing') current = null;
 					if (change === 'unreadable') unreadable = true;
-					if (change === 'grant') current!.delegation.delegation.grantRef = 'grant-2';
-					if (change === 'fence') current!.delegation.workflow!.fencingToken = 'fence-2';
+					if (change === 'grant')
+						current!.delegation.delegation.delegation = delegationOfGrant('grant-2');
+					if (change === 'fence') current!.delegation.workflow!.owner.fencingToken = 'fence-2';
 					if (change === 'policy') current!.delegation.policyRevision = 2;
 					if (change === 'access') current!.writable = false;
 					if (change === 'run') current!.delegation.identity.runId = 'new-source-run';
@@ -2288,7 +2295,7 @@ describe('runtime consults', () => {
 					expect(asked).toHaveLength(2);
 					expect(lineageOf(1)).toMatchObject({
 						workflow: current!.delegation.workflow,
-						delegation: { grantRef: current!.delegation.delegation.grantRef },
+						delegation: { delegation: current!.delegation.delegation.delegation },
 						identity: { parentRunId: current!.delegation.identity.runId },
 					});
 					expect(permissionMode(provider.callsFor('consult')[1].spec.args)).toBe(
@@ -2355,8 +2362,9 @@ describe('runtime consults', () => {
 							if (recovered) return;
 							if (change === 'missing') current = null;
 							if (change === 'unreadable') unreadable = true;
-							if (change === 'grant') current!.delegation.delegation.grantRef = 'grant-2';
-							if (change === 'fence') current!.delegation.workflow!.fencingToken = 'fence-2';
+							if (change === 'grant')
+								current!.delegation.delegation.delegation = delegationOfGrant('grant-2');
+							if (change === 'fence') current!.delegation.workflow!.owner.fencingToken = 'fence-2';
 							if (change === 'policy') current!.delegation.policyRevision = 2;
 							if (change === 'access') current!.writable = false;
 							if (change === 'run') current!.delegation.identity.runId = 'new-source-run';
@@ -2424,8 +2432,9 @@ describe('runtime consults', () => {
 						expect(lineageOf(last)).toMatchObject({
 							workflow: current!.delegation.workflow,
 							delegation: {
-								grantRef: current!.delegation.delegation.grantRef,
-								chain: [
+								delegation: current!.delegation.delegation.delegation,
+								grants: [],
+								principals: [
 									{ kind: 'agent', id: 'a1' },
 									{ kind: 'agent', id: 'a2' },
 								],
@@ -2441,7 +2450,7 @@ describe('runtime consults', () => {
 
 			it('keeps concurrent consult source checks independent while one admission is pending', async () => {
 				const other = namedInitiator(1, false)({ agentId: 'a3' })!;
-				other.delegation.delegation.chain = [{ kind: 'agent', id: 'a3' }];
+				other.delegation.delegation.principals = [{ kind: 'agent', id: 'a3' }];
 				initiator = ({ agentId }) => (agentId === 'a3' ? other : current);
 				const asked: AdmissionRequest[] = [];
 				const runtime = await startEnrolled(() => 'allow', asked);
@@ -2452,7 +2461,7 @@ describe('runtime consults', () => {
 				vi.spyOn(authority, 'admit').mockImplementation(async (request) => {
 					const result = await admit(request);
 					if (result.state === 'admitted') issued.push(result.lease);
-					if (request.context.delegation.chain[0].id === 'a1') {
+					if (request.context.delegation.principals[0].id === 'a1') {
 						entered.resolve();
 						await proceed.promise;
 					}
@@ -2474,7 +2483,7 @@ describe('runtime consults', () => {
 						})
 					);
 					expect(provider.callsFor('consult')).toHaveLength(1);
-					expect(lineageOf(0).delegation.chain).toEqual([
+					expect(lineageOf(0).delegation.principals).toEqual([
 						{ kind: 'agent', id: 'a3' },
 						{ kind: 'agent', id: 'a2' },
 					]);
@@ -2512,11 +2521,12 @@ describe('runtime consults', () => {
 				policyRevision: 1,
 				workflow: null,
 				delegation: {
-					chain: [
+					principals: [
 						{ kind: 'agent', id: 'a1' },
 						{ kind: 'agent', id: 'a2' },
 					],
-					grantRef: null,
+					delegation: null,
+					grants: [],
 				},
 			});
 			expect(asked[0].snapshot).toMatchObject({

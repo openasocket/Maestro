@@ -97,6 +97,7 @@ import {
 	type PairProducerId,
 	type ProducerStanding,
 } from './journeys';
+import { delegationOfGrant } from '../../helpers/managedGrants';
 
 const RUN_TIMEOUT_MS = 30_000;
 const PRODUCERS: readonly PairProducerId[] = ['CP-01', 'CP-02', 'CP-03', 'registration-approval'];
@@ -445,7 +446,11 @@ describe('full pair: the journeys catalog against the labeled endpoint double', 
 		// A delegation chain or a grant reference: no authenticated v2 negotiation binds either, so no decision and no request.
 		const before = producer.state.requests.length;
 		const chained = await admit({
-			delegation: { chain: [{ kind: 'agent', id: 'agent-initiator' }], grantRef: null },
+			delegation: {
+				principals: [{ kind: 'agent', id: 'agent-initiator' }],
+				delegation: null,
+				grants: [],
+			},
 		});
 		const unnegotiated = {
 			state: 'unavailable',
@@ -453,7 +458,9 @@ describe('full pair: the journeys catalog against the labeled endpoint double', 
 			message: expect.stringContaining('No authenticated v2 workflow/delegation negotiation'),
 		};
 		expect(chained).toMatchObject(unnegotiated);
-		const granted = await admit({ delegation: { chain: [], grantRef: 'grant-1' } });
+		const granted = await admit({
+			delegation: { principals: [], delegation: delegationOfGrant('grant-1'), grants: [] },
+		});
 		expect(granted).toMatchObject(unnegotiated);
 		expect(producer.state.requests).toHaveLength(before);
 		expect(executionCalls()).toEqual([]);

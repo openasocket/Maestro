@@ -2186,7 +2186,7 @@ describe('createWsMaestroClient', () => {
 			installation: { installationId: 'inst-1', runtimeId: 'host-1', processEpoch: 'epoch-1' },
 			origin: 'cli',
 			actor: { kind: 'human', id: 'operator:inst-1' },
-			delegation: { chain: [], grantRef: null },
+			delegation: { principals: [], delegation: null, grants: [] },
 			identity: {
 				requestId: 'req-1',
 				idempotencyKey: 'key-1',

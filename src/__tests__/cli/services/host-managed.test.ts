@@ -662,7 +662,7 @@ describe('composeHostManaged', () => {
 			inProcessContext({
 				installation,
 				actor: { kind: 'human', id: 'ada' },
-				delegation: { chain: [], grantRef: null },
+				delegation: { principals: [], delegation: null, grants: [] },
 				identity: {
 					requestId: 'req-1',
 					idempotencyKey: 'key-1',

@@ -272,7 +272,7 @@ describe('PianolaSupervisor under management: an admitted child and its lease', 
 		expect(request.snapshot.resourceIds).toEqual(['agent:a1', 'pianola-target:w1']);
 		expect(request.snapshot.envKeys).toContain('ELECTRON_RUN_AS_NODE');
 		expect(request.snapshot.envKeys).toContain('MAESTRO_AGENT_ID');
-		expect(request.context.delegation.chain).toEqual([
+		expect(request.context.delegation.principals).toEqual([
 			{ kind: 'service', id: 'maestro-supervisor:pianola' },
 		]);
 		expect(request.context.traceId).toBe('pianola-supervisor:w1');

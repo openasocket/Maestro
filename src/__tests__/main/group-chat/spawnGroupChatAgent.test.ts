@@ -95,6 +95,7 @@ import {
 	type ListenerRequest,
 } from '../../../main/enterprise/listener-policy';
 import { logger } from '../../../main/utils/logger';
+import { delegationOfGrant } from '../../helpers/managedGrants';
 
 function makeAgent(): AgentConfig {
 	return {
@@ -604,11 +605,12 @@ describe('spawnGroupChatAgent', () => {
 				parentRunId: ROOM,
 			});
 			expect(context.delegation).toEqual({
-				chain: [
+				principals: [
 					{ kind: 'service', id: ROOM },
 					{ kind: 'agent', id: PARTICIPANT },
 				],
-				grantRef: null,
+				delegation: null,
+				grants: [],
 			});
 			expect(context.traceId).toBe(`delegated:${ROOM}:${PARTICIPANT}:${PARTICIPANT}`);
 			expect(context.workflow).toBeNull();
@@ -653,10 +655,10 @@ describe('spawnGroupChatAgent', () => {
 			expect(contexts.map((c) => c.identity.requestId)).toEqual(ids);
 			expect(new Set(contexts.map((c) => c.identity.parentRunId))).toEqual(new Set([ROOM]));
 			expect(new Set(contexts.map((c) => c.identity.rootRunId))).toEqual(new Set([ROOM]));
-			expect(contexts.map((c) => c.delegation.chain[0])).toEqual(
+			expect(contexts.map((c) => c.delegation.principals[0])).toEqual(
 				ids.map(() => ({ kind: 'service', id: ROOM }))
 			);
-			expect(contexts.map((c) => c.delegation.chain[1].id)).toEqual(ids);
+			expect(contexts.map((c) => c.delegation.principals[1].id)).toEqual(ids);
 			// Four leases live, one per turn; each exit releases its own and no other.
 			expect(port.authority.live()).toHaveLength(4);
 			manager.emit('exit', BETA, 0);
@@ -694,12 +696,13 @@ describe('spawnGroupChatAgent', () => {
 			expect(admitted.state).toBe('admitted');
 			const { context } = port.asked[1];
 			expect(context.delegation).toEqual({
-				chain: [
+				principals: [
 					{ kind: 'service', id: ROOM },
 					{ kind: 'agent', id: PARTICIPANT },
 					{ kind: 'agent', id: 'target' },
 				],
-				grantRef: null,
+				delegation: null,
+				grants: [],
 			});
 			expect(context.identity).toEqual({
 				requestId: 'req-grandchild',
@@ -719,7 +722,7 @@ describe('spawnGroupChatAgent', () => {
 			const { manager, spawned } = managedManager(port);
 			expect(await turn('cross-agent-req-1', manager)).toMatchObject({ success: true });
 			const { context } = port.asked[0];
-			expect(context.delegation).toEqual({ chain: [], grantRef: null });
+			expect(context.delegation).toEqual({ principals: [], delegation: null, grants: [] });
 			expect(context.identity).toMatchObject({ runId: null, rootRunId: null, parentRunId: null });
 			expect(context.identity.requestId).not.toBe('cross-agent-req-1');
 			expect(spawned().customEnvVars ?? {}).not.toHaveProperty(MANAGED_DELEGATION_ENV_VAR);
@@ -746,18 +749,19 @@ describe('spawnGroupChatAgent', () => {
 					ownerEpoch: '9',
 					fencingToken: 'forged-fence',
 				},
-				delegation: { chain: [], grantRef: 'grant-forged' },
+				delegation: { principals: [], delegation: delegationOfGrant('grant-forged'), grants: [] },
 				policyRevision: 99,
 			};
 			await turn(PARTICIPANT, manager, delegationContextEnv(planted));
 			const { context } = port.asked[0];
 			expect(context.workflow).toBeNull();
 			expect(context.delegation).toEqual({
-				chain: [
+				principals: [
 					{ kind: 'service', id: ROOM },
 					{ kind: 'agent', id: PARTICIPANT },
 				],
-				grantRef: null,
+				delegation: null,
+				grants: [],
 			});
 			expect(context.identity.rootRunId).toBe(ROOM);
 			const stamped = readDelegationContextEnv(spawned().customEnvVars ?? {});

@@ -52,6 +52,7 @@ import {
 	type ManagedOperationContext,
 	type ManagedPeerAuthentication,
 	type ManagedPrincipalRef,
+	directDelegationRef,
 } from '../managed/types';
 import type { MaestroRuntime } from './index';
 import { groupChatToWire, type Frame } from './server-frames';
@@ -409,7 +410,7 @@ export function managedScopeRefusal(
 			`A caller over this transport acts as ${actor.kind} ${actor.id}, the host's own principal; the context names ${context.actor.kind} ${context.actor.id}.`
 		);
 	}
-	if (context.delegation.chain.length > 0 || context.delegation.grantRef !== null) {
+	if (context.delegation.principals.length > 0 || context.delegation.delegation !== null) {
 		return unauthenticated(
 			'A caller over this transport carries no delegation this host can verify; the context names a chain or a grant reference.'
 		);
@@ -688,7 +689,7 @@ function standingContext(scope: ManagedRequestScope, trace: string): ManagedOper
 		installation: scope.installation,
 		origin: 'cli',
 		actor: scope.actor(),
-		delegation: { chain: [], grantRef: null },
+		delegation: directDelegationRef(),
 		identity: {
 			requestId,
 			// A bridge send is never a replay of an earlier one: each is its own submission.

@@ -551,10 +551,15 @@ describe('enterprise service', () => {
 			runId: 'run-1',
 			attemptId: 'att-1',
 		});
-		expect(fence).toEqual({ ownerEpoch: '2', fencingToken: 'fence-2' });
 		const claim = fake.calls.find(
 			(c) => (c.body as { operation?: string }).operation === 'workflow'
 		)?.body as { payload: Record<string, unknown> };
+		// The fence names the owner the registry holds it under, the same one the claim was made for.
+		expect(fence).toEqual({
+			ownerId: claim.payload.ownerId,
+			ownerEpoch: '2',
+			fencingToken: 'fence-2',
+		});
 		expect(claim.payload).toMatchObject({
 			ownerId: service.installation.installationId,
 			ownerEpoch: 0,
@@ -563,14 +568,18 @@ describe('enterprise service', () => {
 			runId: 'run-1',
 			attemptId: 'att-1',
 		});
-		expect(service.workflows.fence(WORKFLOW)).toEqual({ ownerEpoch: '2', fencingToken: 'fence-2' });
+		expect(service.workflows.fence(WORKFLOW)).toEqual({
+			ownerId: fence.ownerId,
+			ownerEpoch: '2',
+			fencingToken: 'fence-2',
+		});
 		expect(fs.existsSync(path.join(dir, 'maestro-managed-workflows.json'))).toBe(true);
 
 		// The process sink claims through the same held ownership (MRC-07-06B):
 		// a re-claim for another attempt confirms the held fence, one record.
 		expect(
 			await service.spawnAuthority.workflowFence?.(WORKFLOW, { runId: 'run-1', attemptId: 'att-2' })
-		).toEqual({ ownerEpoch: '2', fencingToken: 'fence-2' });
+		).toEqual({ ownerId: fence.ownerId, ownerEpoch: '2', fencingToken: 'fence-2' });
 		expect(service.workflows.held()).toHaveLength(1);
 
 		// A restarted desktop holds the same fence before it asks the endpoint anything.
@@ -579,6 +588,7 @@ describe('enterprise service', () => {
 		const restarted = compose();
 		await restarted.workflows.load();
 		expect(restarted.workflows.fence(WORKFLOW)).toEqual({
+			ownerId: fence.ownerId,
 			ownerEpoch: '2',
 			fencingToken: 'fence-2',
 		});

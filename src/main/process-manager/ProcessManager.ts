@@ -425,7 +425,7 @@ export function groupChatParticipantSourceOf(
 	if (!owner) return null;
 	const room = groupChatRoomRunId(owner.groupChatId);
 	const { identity, delegation } = config.delegation;
-	const chain = delegation?.chain;
+	const chain = delegation?.principals;
 	if (
 		identity?.runId !== room ||
 		identity.rootRunId !== room ||

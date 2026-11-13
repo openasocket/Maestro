@@ -37,6 +37,7 @@ import {
 	managedContextProblems,
 	type ManagedOperationContext,
 } from '../../../../shared/maestro-lib/managed/types';
+import { delegationOfGrant } from '../../../helpers/managedGrants';
 
 const INSTALLATION = { installationId: 'inst-1', runtimeId: 'rt-1', processEpoch: 'epoch-1' };
 
@@ -72,7 +73,11 @@ function context(): ManagedOperationContext {
 		installation: INSTALLATION,
 		origin: 'headless',
 		actor: { kind: 'human', id: 'alice' },
-		delegation: { chain: [{ kind: 'service', id: 'maestro-cli' }], grantRef: 'grant-1' },
+		delegation: {
+			principals: [{ kind: 'service', id: 'maestro-cli' }],
+			delegation: delegationOfGrant('grant-1'),
+			grants: [],
+		},
 		identity: {
 			requestId: 'req-1',
 			idempotencyKey: 'key-1',
@@ -84,10 +89,9 @@ function context(): ManagedOperationContext {
 		policyRevision: 3,
 		workflow: {
 			workflowId: 'wf-1',
-			version: 'v1',
-			triggerEventId: 'cue:1',
-			ownerEpoch: 'e1',
-			fencingToken: 'f1',
+			workflowVersion: 'v1',
+			triggerId: 'cue:1',
+			owner: { ownerId: 'owner-1', ownerEpoch: 'e1', fencingToken: 'f1' },
 		},
 		traceId: 'trace-1',
 		requestedCapabilities: ['runs.submit'],

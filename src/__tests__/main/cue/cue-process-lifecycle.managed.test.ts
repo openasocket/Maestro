@@ -100,11 +100,12 @@ function verifiedContext(
 		origin: 'cue',
 		actor: { kind: 'human', id: 'operator:inst-1' },
 		delegation: {
-			chain: [
+			principals: [
 				{ kind: 'service', id: 'cue-subscription:nightly' },
 				{ kind: 'agent', id: 'agent-1' },
 			],
-			grantRef: null,
+			delegation: null,
+			grants: [],
 		},
 		identity: {
 			requestId: 'run-1',
@@ -118,10 +119,9 @@ function verifiedContext(
 		policyRevision: 3,
 		workflow: {
 			workflowId: 'cue:nightly',
-			version: 'v1',
-			triggerEventId: 'time.scheduled:evt-1',
-			ownerEpoch: 'epoch-1',
-			fencingToken: 'fence-1',
+			workflowVersion: 'v1',
+			triggerId: 'time.scheduled:evt-1',
+			owner: { ownerId: 'owner-1', ownerEpoch: 'epoch-1', fencingToken: 'fence-1' },
 		},
 		traceId: 'cue:run-1:run-1:attempt-1',
 		requestedCapabilities: ['runs.submit'],
@@ -216,7 +216,7 @@ describe('runProcess managed admission', () => {
 		expect(snapshot.provider).toBe('claude-code');
 		expect(snapshot.model).toBe('opus');
 		expect(asked[0].context.origin).toBe('cue');
-		expect(asked[0].context.workflow?.fencingToken).toBe('fence-1');
+		expect(asked[0].context.workflow?.owner.fencingToken).toBe('fence-1');
 		expect(asked[0].policy.policyRevision).toBe(3);
 
 		// The lease was handed out, bound to the child, and is released on exit.

@@ -61,6 +61,7 @@ import {
 	type GroupChatRunnerHandlers,
 } from '../background-turns';
 import { createProcessRegistry, type ProcessRegistry } from '../processes';
+import { delegationOfGrant } from '../../../../__tests__/helpers/managedGrants';
 
 const CHAT_ID = '11111111-2222-4333-8444-555555555555';
 const MODERATOR = `group-chat-${CHAT_ID}-moderator-1700000000000`;
@@ -558,11 +559,12 @@ describe('background turns', () => {
 			traceId: 'delegated:turn-0:ask-1:ask-1',
 			workflow: null,
 			delegation: {
-				chain: [
+				principals: [
 					{ kind: 'agent', id: 'asker' },
 					{ kind: 'agent', id: 'target' },
 				],
-				grantRef: null,
+				delegation: null,
+				grants: [],
 			},
 			policyRevision,
 		});
@@ -636,12 +638,11 @@ describe('background turns', () => {
 				const delegation = carried(3);
 				delegation.workflow = {
 					workflowId: 'nightly',
-					version: 'v1',
-					triggerEventId: 'cue:1',
-					ownerEpoch: 'epoch-1',
-					fencingToken: 'fence-1',
+					workflowVersion: 'v1',
+					triggerId: 'cue:1',
+					owner: { ownerId: 'owner-1', ownerEpoch: 'epoch-1', fencingToken: 'fence-1' },
 				};
-				delegation.delegation.grantRef = 'grant-1';
+				delegation.delegation.delegation = delegationOfGrant('grant-1');
 				const original = structuredClone(delegation);
 				const spawn = spawnOf({
 					processId,
@@ -656,10 +657,10 @@ describe('background turns', () => {
 					spawn.prompt = 'replacement prompt';
 					spawn.readOnlyMode = false;
 					delegation.identity.runId = 'replacement-run';
-					delegation.delegation.chain[0].id = 'replacement-source';
-					delegation.delegation.chain[1].id = 'replacement-target';
-					delegation.delegation.grantRef = 'replacement-grant';
-					delegation.workflow.fencingToken = 'replacement-fence';
+					delegation.delegation.principals[0].id = 'replacement-source';
+					delegation.delegation.principals[1].id = 'replacement-target';
+					delegation.delegation.delegation = delegationOfGrant('replacement-grant');
+					delegation.workflow.owner.fencingToken = 'replacement-fence';
 					resume.resolve();
 					expect((await pending).success).toBe(true);
 					expect(provider.calls).toHaveLength(1);
@@ -1038,8 +1039,8 @@ describe('background turns', () => {
 				]);
 				const first = background.sourceCustody(PARTICIPANT)!;
 				const second = background.sourceCustody(MODERATOR)!;
-				expect(first.context.delegation.chain.at(-1)?.id).toBe('first-caller');
-				expect(second.context.delegation.chain.at(-1)?.id).toBe('second-caller');
+				expect(first.context.delegation.principals.at(-1)?.id).toBe('first-caller');
+				expect(second.context.delegation.principals.at(-1)?.id).toBe('second-caller');
 				expect(parents.run(other, () => background.sourceCustody(PARTICIPANT))).toEqual(first);
 				expect(parents.run(source, () => background.sourceCustody(MODERATOR))).toEqual(second);
 			});
@@ -1051,12 +1052,11 @@ describe('background turns', () => {
 				const record = carried(3);
 				record.workflow = {
 					workflowId: 'nightly',
-					version: 'v1',
-					triggerEventId: 'cue:1',
-					ownerEpoch: 'epoch-1',
-					fencingToken: 'fence-1',
+					workflowVersion: 'v1',
+					triggerId: 'cue:1',
+					owner: { ownerId: 'owner-1', ownerEpoch: 'epoch-1', fencingToken: 'fence-1' },
 				};
-				record.delegation.grantRef = 'grant-1';
+				record.delegation.delegation = delegationOfGrant('grant-1');
 				await runner.start(spawnOf({ delegation: record }));
 				const child = managedTurns(
 					() => ({ text: 'nested', hold: true }),
@@ -1079,8 +1079,9 @@ describe('background turns', () => {
 				const custody = child.background.sourceCustody(MODERATOR)!;
 				expect(custody.context.workflow).toEqual(record.workflow);
 				expect(custody.context.delegation).toEqual({
-					chain: [...record.delegation.chain, actor],
-					grantRef: 'grant-1',
+					principals: [...record.delegation.principals, actor],
+					delegation: delegationOfGrant('grant-1'),
+					grants: [],
 				});
 				expect(asked).toHaveLength(2);
 				runner.stop(PARTICIPANT);
@@ -1244,13 +1245,14 @@ describe('background turns', () => {
 				const record = carried(7);
 				record.workflow = {
 					workflowId: 'nightly',
-					version: 'v1',
-					triggerEventId: 'cue:1',
-					ownerEpoch: 'epoch-1',
-					fencingToken: 'fence-1',
+					workflowVersion: 'v1',
+					triggerId: 'cue:1',
+					owner: { ownerId: 'owner-1', ownerEpoch: 'epoch-1', fencingToken: 'fence-1' },
 				};
-				record.delegation.grantRef = change === 'grant' ? 'grant-2' : 'grant-1';
-				if (change === 'fence') record.workflow.fencingToken = 'fence-2';
+				record.delegation.delegation = delegationOfGrant(
+					change === 'grant' ? 'grant-2' : 'grant-1'
+				);
+				if (change === 'fence' && record.workflow) record.workflow.owner.fencingToken = 'fence-2';
 				if (change === 'policy') record.policyRevision = 8;
 				const verified = portOf(authority, actorId, 7).context(record);
 				if (!verified.ok) throw new Error(verified.problems.join('; '));
@@ -1315,7 +1317,7 @@ describe('background turns', () => {
 							};
 						if (mode === 'depth') {
 							const record = delegationContextOf(source.context);
-							record.delegation.chain = Array.from({ length: 16 }, (_, i) => ({
+							record.delegation.principals = Array.from({ length: 16 }, (_, i) => ({
 								kind: 'agent' as const,
 								id: `agent-${i}`,
 							}));
@@ -1349,10 +1351,10 @@ describe('background turns', () => {
 						requestId: 'ask-2',
 						attemptId: 'try-1',
 					});
-					if (field === 'workflow') delegation.workflow!.fencingToken = 'forged';
-					if (field === 'grant') delegation.delegation.grantRef = 'forged';
+					if (field === 'workflow') delegation.workflow!.owner.fencingToken = 'forged';
+					if (field === 'grant') delegation.delegation.delegation = delegationOfGrant('forged');
 					if (field === 'root') delegation.identity.rootRunId = 'forged';
-					if (field === 'chain') delegation.delegation.chain = [];
+					if (field === 'chain') delegation.delegation.principals = [];
 					const { background, provider } = managedTurns(
 						() => ({ text: 'never' }),
 						authority,
@@ -1437,7 +1439,9 @@ describe('background turns', () => {
 							unreadable = false;
 							await expect(runner.start(spawnOf())).resolves.toMatchObject({ success: true });
 							await background.whenSettled(() => true);
-							expect(asked.at(-1)!.context.delegation.chain.at(-1)!.id).toBe('replaced-source');
+							expect(asked.at(-1)!.context.delegation.principals.at(-1)!.id).toBe(
+								'replaced-source'
+							);
 						}
 					);
 				}
@@ -1608,12 +1612,11 @@ describe('background turns', () => {
 				const record = carried(7);
 				record.workflow = {
 					workflowId: 'playbook:nightly',
-					version: 'v1',
-					triggerEventId: 'timer:1',
-					ownerEpoch: 'opaque:epoch',
-					fencingToken: 'fence-1',
+					workflowVersion: 'v1',
+					triggerId: 'timer:1',
+					owner: { ownerId: 'owner-1', ownerEpoch: 'opaque:epoch', fencingToken: 'fence-1' },
 				};
-				record.delegation.grantRef = 'grant-1';
+				record.delegation.delegation = delegationOfGrant('grant-1');
 				const bound = { ...record, policyRevision: 3 };
 				const started = await background.groupChatRunner(handlers).start(
 					spawnOf({
@@ -1740,11 +1743,12 @@ describe('background turns', () => {
 				identity: turn.identity,
 				traceId: turn.traceId,
 				delegation: {
-					chain: [
+					principals: [
 						{ kind: 'service', id: `group-chat:${CHAT_ID}` },
 						{ kind: 'agent', id: PARTICIPANT },
 					],
-					grantRef: null,
+					delegation: null,
+					grants: [],
 				},
 			});
 			expect(asked[0].snapshot).toMatchObject({
@@ -2016,10 +2020,9 @@ describe('background turns', () => {
 					...carried(null),
 					workflow: {
 						workflowId: 'playbook:nightly',
-						version: 'v1',
-						triggerEventId: 'cli:launch:1',
-						ownerEpoch: '',
-						fencingToken: 'minted-by-the-asker',
+						workflowVersion: 'v1',
+						triggerId: 'cli:launch:1',
+						owner: { ownerId: 'owner-1', ownerEpoch: '', fencingToken: 'minted-by-the-asker' },
 					},
 				};
 
@@ -2030,7 +2033,7 @@ describe('background turns', () => {
 
 				expect(started).toMatchObject({
 					success: false,
-					error: expect.stringContaining('workflow.ownerEpoch is not an id'),
+					error: expect.stringContaining('workflow.owner.ownerEpoch is not an id'),
 					managed: { state: 'denied', code: 'invalid-input' },
 				});
 				expect(asked).toEqual([]);
@@ -2057,7 +2060,7 @@ describe('background turns', () => {
 				// never issued, and no generation to be reauthorized under.
 				const planted: ManagedDelegationContext = {
 					...record,
-					delegation: { chain: [], grantRef: 'grant-forged' },
+					delegation: { principals: [], delegation: delegationOfGrant('grant-forged'), grants: [] },
 					policyRevision: null,
 				};
 

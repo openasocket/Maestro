@@ -50,6 +50,7 @@ import {
 import { SUPPORT_RANK, type SupportStatus } from './compatibility';
 import { endpointComponentProblems, type EndpointComponent } from './endpoint-port';
 import {
+	copyWorkflowRef,
 	MANAGED_CONTRACT_VERSION,
 	type ManagedDelegationRef,
 	type ManagedDispatchTarget,
@@ -62,7 +63,9 @@ import {
 	type ManagedRunRecord,
 	type ManagedRunState,
 	type ManagedWorkflowRef,
+	directDelegationRef,
 } from './types';
+import { copyDelegationRef } from './delegation';
 
 /** The surface that ran the work: an AI tab's process, a terminal tab's PTY, a room's turn, a headless turn, or the host process itself (an inventory, MRC-10-06). */
 export const LIFECYCLE_SURFACES = [
@@ -749,11 +752,8 @@ export function lifecycleLineageOf(context: ManagedOperationContext): LifecycleL
 	return {
 		identity: { ...context.identity },
 		traceId: context.traceId,
-		workflow: context.workflow ? { ...context.workflow } : null,
-		delegation: {
-			chain: context.delegation.chain.map((link) => ({ ...link })),
-			grantRef: context.delegation.grantRef,
-		},
+		workflow: copyWorkflowRef(context.workflow),
+		delegation: copyDelegationRef(context.delegation),
 		actor: { ...context.actor },
 		policyRevision: context.policyRevision,
 		origin: context.origin,
@@ -816,12 +816,7 @@ function contextOf(
 		installation: { ...deps.installation },
 		origin: lineage?.origin ?? deps.origin,
 		actor: lineage?.actor ? { ...lineage.actor } : deps.actor(),
-		delegation: lineage
-			? {
-					chain: lineage.delegation.chain.map((link) => ({ ...link })),
-					grantRef: lineage.delegation.grantRef,
-				}
-			: { chain: [], grantRef: null },
+		delegation: lineage ? copyDelegationRef(lineage.delegation) : directDelegationRef(),
 		identity: lineage
 			? { ...lineage.identity }
 			: {
@@ -833,7 +828,7 @@ function contextOf(
 					parentRunId: null,
 				},
 		policyRevision,
-		workflow: lineage?.workflow ? { ...lineage.workflow } : null,
+		workflow: copyWorkflowRef(lineage?.workflow ?? null),
 		traceId: lineage?.traceId ?? own,
 		requestedCapabilities: [],
 	};

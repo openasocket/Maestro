@@ -310,8 +310,9 @@ export function createRuntimeConsults(options: RuntimeConsultsOptions): RuntimeC
 				traceId: originId,
 				workflow: null,
 				delegation: {
-					chain: source ? [{ kind: 'agent', id: source.id }] : [],
-					grantRef: null,
+					principals: source ? [{ kind: 'agent', id: source.id }] : [],
+					delegation: null,
+					grants: [],
 				},
 				policyRevision: null,
 			}),

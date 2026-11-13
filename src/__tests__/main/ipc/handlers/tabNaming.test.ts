@@ -21,6 +21,7 @@ import {
 } from '../../../../shared/maestro-lib/managed/delegation';
 import { MANAGED_CONTRACT_VERSION } from '../../../../shared/maestro-lib/managed/types';
 import type { AgentDetector, AgentConfig } from '../../../../main/agents';
+import { delegationOfGrant } from '../../../helpers/managedGrants';
 
 // Mock the logger
 vi.mock('../../../../main/utils/sentry', () => ({
@@ -2913,8 +2914,9 @@ describe('dispatched naming turn (MRC-09-02B)', () => {
 		traceId: 'plugin:p:req-plugin:att-plugin',
 		workflow: null,
 		delegation: {
-			chain: [{ kind: 'service', id: 'plugin:p' }],
-			grantRef: 'plugin-consent:p:sha256:deadbeef:1',
+			principals: [{ kind: 'service', id: 'plugin:p' }],
+			delegation: null,
+			grants: [],
 		},
 		policyRevision: 3,
 	};
@@ -3009,11 +3011,12 @@ describe('dispatched naming turn (MRC-09-02B)', () => {
 		// The CHILD of the plugin's operation: chain one link deeper (the ephemeral
 		// naming session, its own process), parented under the plugin's request,
 		// minted as the ids the caller fixed, this host's generation carried.
-		expect(child?.delegation.chain).toEqual([
+		expect(child?.delegation.principals).toEqual([
 			{ kind: 'service', id: 'plugin:p' },
 			{ kind: 'agent', id: NAMING_SESSION },
 		]);
-		expect(child?.delegation.grantRef).toBe('plugin-consent:p:sha256:deadbeef:1');
+		// The consent reference is local: the plugin is attributed as its principal, with no grant on the wire.
+		expect(child?.delegation.delegation).toBeNull();
 		expect(child?.identity).toEqual({
 			requestId: 'req-naming',
 			idempotencyKey: 'req-naming',

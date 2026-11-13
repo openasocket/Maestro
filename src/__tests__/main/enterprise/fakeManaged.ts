@@ -282,7 +282,7 @@ export function runAdmission(runId: string, requestId: string): AdmissionRequest
 		inProcessContext({
 			installation: INSTALLATION,
 			actor: { kind: 'human', id: 'ada' },
-			delegation: { chain: [], grantRef: null },
+			delegation: { principals: [], delegation: null, grants: [] },
 			identity: {
 				requestId,
 				idempotencyKey: `key-${requestId}`,

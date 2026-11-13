@@ -20,6 +20,7 @@
 
 import { canonicalJson } from '../../canonicalJson';
 import {
+	copyWorkflowRef,
 	MANAGED_CONTRACT_VERSION,
 	managedContextProblems,
 	type ManagedContractVersion,
@@ -110,9 +111,9 @@ export function delegationContextProblems(value: unknown): string[] {
 	);
 	if (workflow === undefined) problems.push('workflow is missing');
 	if (policyRevision === undefined) problems.push('policyRevision is missing');
-	if (isRecord(delegation) && Array.isArray(delegation.chain)) {
-		if (delegation.chain.length > MAX_DELEGATION_DEPTH) {
-			problems.push(`delegation.chain exceeds ${MAX_DELEGATION_DEPTH} links`);
+	if (isRecord(delegation) && Array.isArray(delegation.principals)) {
+		if (delegation.principals.length > MAX_DELEGATION_DEPTH) {
+			problems.push(`delegation.principals exceeds ${MAX_DELEGATION_DEPTH} links`);
 		}
 	}
 	return problems;
@@ -138,12 +139,23 @@ export function delegationContextOf(
 		contractVersion: MANAGED_CONTRACT_VERSION,
 		identity: { ...context.identity },
 		traceId: context.traceId,
-		workflow: context.workflow ? { ...context.workflow } : null,
-		delegation: {
-			chain: context.delegation.chain.map((link) => ({ ...link })),
-			grantRef: context.delegation.grantRef,
-		},
+		workflow: copyWorkflowRef(context.workflow),
+		delegation: copyDelegationRef(context.delegation),
 		policyRevision: context.policyRevision,
+	};
+}
+
+/** A deep copy of a delegation reference; the grant fields are carried as the issuer gave them. */
+export function copyDelegationRef(delegation: ManagedDelegationRef): ManagedDelegationRef {
+	return {
+		principals: delegation.principals.map((link) => ({ ...link })),
+		delegation: delegation.delegation
+			? {
+					grant: { ...delegation.delegation.grant },
+					chain: delegation.delegation.chain.map((grant) => ({ ...grant })),
+				}
+			: null,
+		grants: delegation.grants.map((grant) => ({ ...grant })),
 	};
 }
 
@@ -188,10 +200,12 @@ export function childDelegationContext(
 		// Root, own request and attempt, as a Cue trace is formed: the parent is
 		// named by `parentRunId`, not embedded, so the trace stays bounded at any depth.
 		traceId: `delegated:${rootRunOf(parent)}:${input.requestId}:${input.attemptId}`,
-		workflow: parent.workflow ? { ...parent.workflow } : null,
+		workflow: copyWorkflowRef(parent.workflow),
+		// The child extends the principal chain by its own hop. It never mints a grant: the
+		// wire reference and grant list are the parent's, as the grant issuer returned them.
 		delegation: {
-			chain: [...parent.delegation.chain.map((link) => ({ ...link })), { ...input.link }],
-			grantRef: parent.delegation.grantRef,
+			...copyDelegationRef(parent.delegation),
+			principals: [...parent.delegation.principals.map((link) => ({ ...link })), { ...input.link }],
 		},
 		policyRevision: parent.policyRevision,
 	};

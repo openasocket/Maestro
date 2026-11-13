@@ -1194,7 +1194,9 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 							? { agentId: room.agentId, tabId: input.fromTabId, processId: turn.processId }
 							: null;
 					}
-					const link = background.sourceCustody(turn.processId)?.context.delegation.chain.at(-1);
+					const link = background
+						.sourceCustody(turn.processId)
+						?.context.delegation.principals.at(-1);
 					return link?.kind === 'agent' && link.id === input.fromAgentId
 						? { agentId: link.id, tabId: input.fromTabId, processId: turn.processId }
 						: null;

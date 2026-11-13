@@ -309,7 +309,7 @@ describe('installation inventory (MRC-10-06A)', () => {
 					},
 					traceId: 'trace-c',
 					workflow: null,
-					delegation: { chain: [], grantRef: null },
+					delegation: { principals: [], delegation: null, grants: [] },
 				},
 			})
 		);

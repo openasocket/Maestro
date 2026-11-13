@@ -76,7 +76,7 @@ const lineage = (runId: string, parentRunId: string | null): LifecycleLineage =>
 	},
 	traceId: 'trace-1',
 	workflow: null,
-	delegation: { chain: [], grantRef: null },
+	delegation: { principals: [], delegation: null, grants: [] },
 });
 
 /** A parent run that starts, a child it delegated to that starts and ends, then the parent ends. */

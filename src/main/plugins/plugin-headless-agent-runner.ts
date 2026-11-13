@@ -121,7 +121,7 @@ export function pluginHeadlessAuthority(
 				...(input.delegation
 					? { delegation: input.delegation }
 					: chain.length > 0
-						? { delegation: { chain: [...chain], grantRef: null } }
+						? { delegation: { principals: [...chain], delegation: null, grants: [] } }
 						: {}),
 			}),
 	};

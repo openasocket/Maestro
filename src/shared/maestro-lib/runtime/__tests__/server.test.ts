@@ -231,7 +231,7 @@ describe('runtime server', () => {
 			installation: scope.installation,
 			origin: 'cli' as const,
 			actor,
-			delegation: { chain: [], grantRef: null },
+			delegation: { principals: [], delegation: null, grants: [] },
 			identity: {
 				requestId: 'req-1',
 				idempotencyKey: 'key-1',

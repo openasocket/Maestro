@@ -536,11 +536,12 @@ describe('cue-shell-executor', () => {
 					installation: { installationId: 'inst-1', runtimeId: 'cue-1', processEpoch: 'e1' },
 					actor: { kind: 'human', id: 'actor-registered' },
 					delegation: {
-						chain: [
+						principals: [
 							{ kind: 'service', id: 'cue-subscription:shell-test' },
 							{ kind: 'agent', id: 'session-1' },
 						],
-						grantRef: null,
+						delegation: null,
+						grants: [],
 					},
 					identity: {
 						requestId: 'run-1',
@@ -553,10 +554,9 @@ describe('cue-shell-executor', () => {
 					policyRevision: 3,
 					workflow: {
 						workflowId: 'cue:shell-test',
-						version: 'v1',
-						triggerEventId: 'time.heartbeat:evt-1',
-						ownerEpoch: 'epoch-1',
-						fencingToken: 'fence-1',
+						workflowVersion: 'v1',
+						triggerId: 'time.heartbeat:evt-1',
+						owner: { ownerId: 'owner-1', ownerEpoch: 'epoch-1', fencingToken: 'fence-1' },
 					},
 					traceId: 'cue:run-1:run-1:att-1',
 					requestedCapabilities: ['runs.submit'],

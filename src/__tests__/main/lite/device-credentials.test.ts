@@ -272,7 +272,7 @@ describe('a pairing admits a transport, never an enterprise actor (MRC-08-06)', 
 		expect(admitted.ok).toBe(true);
 		if (!admitted.ok) throw new Error('expected admission');
 		expect(admitted.context.actor).toEqual({ kind: 'human', id: 'actor-registered' });
-		expect(admitted.context.delegation.chain).toEqual([
+		expect(admitted.context.delegation.principals).toEqual([
 			{ kind: 'service', id: `lite-device:${device.id}` },
 		]);
 	});

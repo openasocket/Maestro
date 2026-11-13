@@ -57,6 +57,7 @@ import {
 	MAESTRO_LIB_VERSION,
 	MAESTRO_LIB_VERSION_INFO,
 } from '../../../../shared/maestro-lib/version';
+import { delegationOfGrant } from '../../../helpers/managedGrants';
 
 const REPO_ROOT = path.resolve(__dirname, '../../../../..');
 const sha256 = (bytes: Buffer | string): string => createHash('sha256').update(bytes).digest('hex');
@@ -561,7 +562,11 @@ const validContext = (): ManagedOperationContext => ({
 	installation: { installationId: 'inst-1', runtimeId: 'rt-1', processEpoch: 'epoch-1' },
 	origin: 'headless',
 	actor: { kind: 'service', id: 'controller' },
-	delegation: { chain: [{ kind: 'human', id: 'operator' }], grantRef: 'grant-1' },
+	delegation: {
+		principals: [{ kind: 'human', id: 'operator' }],
+		delegation: delegationOfGrant('grant-1'),
+		grants: [],
+	},
 	identity: {
 		requestId: 'req-1',
 		idempotencyKey: 'key-1',
@@ -607,7 +612,10 @@ describe('managedContextProblems', () => {
 		expect(isManagedOperationContext(broken)).toBe(false);
 		expect(managedContextProblems(null)).toEqual(['context is not an object']);
 		expect(managedContextProblems({ ...validContext(), workflow: { workflowId: 'w' } })).toEqual(
-			expect.arrayContaining([expect.stringContaining('workflow.fencingToken')])
+			expect.arrayContaining([
+				expect.stringContaining('workflow.workflowVersion'),
+				expect.stringContaining('workflow.owner is not an object'),
+			])
 		);
 	});
 });

@@ -79,7 +79,7 @@ export function groupChatRoomContext(chatId: string): ManagedDelegationContext {
 		},
 		traceId: runId,
 		workflow: null,
-		delegation: { chain: [{ kind: 'service', id: runId }], grantRef: null },
+		delegation: { principals: [{ kind: 'service', id: runId }], delegation: null, grants: [] },
 		policyRevision: null,
 	};
 }

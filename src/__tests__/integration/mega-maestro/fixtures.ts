@@ -556,7 +556,7 @@ export function verifiedContext(
 			installation: PAIR_INSTALLATION,
 			origin: 'headless',
 			actor: { kind: 'service', id: 'pair-test' },
-			delegation: { chain: [], grantRef: null },
+			delegation: { principals: [], delegation: null, grants: [] },
 			identity: {
 				requestId: `req-${contextCounter}`,
 				idempotencyKey: `key-${contextCounter}`,
@@ -687,7 +687,7 @@ export function conformanceContext(
 		installation: { ...host.installation, ...step.installation },
 		origin: 'headless',
 		actor: host.actor,
-		delegation: { chain: [], grantRef: null },
+		delegation: { principals: [], delegation: null, grants: [] },
 		identity: {
 			requestId: `req:${step.id}`,
 			idempotencyKey: `idem:${step.id}`,

@@ -362,7 +362,7 @@ describe('turn records', () => {
 				},
 				traceId: 'trace-1',
 				workflow: null,
-				delegation: { chain: [], grantRef: null },
+				delegation: { principals: [], delegation: null, grants: [] },
 				actor: { kind: 'human' as const, id: 'alice' },
 				policyRevision: 3,
 			};

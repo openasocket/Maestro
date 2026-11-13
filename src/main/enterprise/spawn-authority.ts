@@ -43,6 +43,7 @@ import {
 	type ManagedInstallationIdentity,
 	type ManagedOperationContext,
 	type ManagedPrincipalRef,
+	directDelegationRef,
 } from '../../shared/maestro-lib/managed/types';
 import type {
 	ProcessSpawnActor,
@@ -205,8 +206,9 @@ export function createProcessSpawnAuthority(
 				// in this target; it is bound as it is. Only a spawn that is its own
 				// request takes the transport's attribution.
 				delegation: input.delegation ?? {
-					chain: spawnDelegationChain(input.actor),
-					grantRef: null,
+					principals: spawnDelegationChain(input.actor),
+					delegation: null,
+					grants: [],
 				},
 				identity: input.identity,
 				policyRevision: input.policyRevision,
@@ -264,7 +266,7 @@ export function createCueSpawnAuthority(deps: CueSpawnAuthorityDeps): CueSpawnAu
 				installation: deps.installation,
 				origin: 'cue',
 				actor: spawnPrincipal(deps.identity.read(), deps.installation),
-				delegation: input.delegation ?? { chain: [], grantRef: null },
+				delegation: input.delegation ?? directDelegationRef(),
 				identity: input.identity,
 				policyRevision: input.policyRevision,
 				workflow: input.workflow ?? null,

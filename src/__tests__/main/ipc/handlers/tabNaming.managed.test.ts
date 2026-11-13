@@ -53,6 +53,7 @@ import { logger } from '../../../../main/utils/logger';
 import type { ManagedDelegationContext } from '../../../../shared/maestro-lib/managed/delegation';
 import { MANAGED_CONTRACT_VERSION } from '../../../../shared/maestro-lib/managed/types';
 import { fakeSpawnPort, type FakeSpawnPort } from '../../../helpers/managedSpawnPort';
+import { delegationOfGrant } from '../../../helpers/managedGrants';
 
 /** The context a plugin's `agents.generateTitle` hands the title sink under management. */
 const PLUGIN_CONTEXT: ManagedDelegationContext = {
@@ -68,8 +69,9 @@ const PLUGIN_CONTEXT: ManagedDelegationContext = {
 	traceId: 'plugin:p:req-plugin:att-plugin',
 	workflow: null,
 	delegation: {
-		chain: [{ kind: 'service', id: 'plugin:p' }],
-		grantRef: 'plugin-consent:p:sha256:deadbeef:1',
+		principals: [{ kind: 'service', id: 'plugin:p' }],
+		delegation: null,
+		grants: [],
 	},
 	policyRevision: 1,
 };
@@ -187,11 +189,12 @@ describe('generateTabName under management: the dispatched naming turn', () => {
 		expect(port.asked).toHaveLength(1);
 		const { context, snapshot } = port.asked[0];
 		expect(snapshot).toMatchObject({ provider: 'codex', operation: 'start', origin: 'desktop' });
-		expect(context.delegation.chain).toEqual([
+		expect(context.delegation.principals).toEqual([
 			{ kind: 'service', id: 'plugin:p' },
 			{ kind: 'agent', id: admitted.sessionId },
 		]);
-		expect(context.delegation.grantRef).toBe('plugin-consent:p:sha256:deadbeef:1');
+		// The consent reference is local: the plugin is attributed as its principal, with no grant on the wire.
+		expect(context.delegation.delegation).toBeNull();
 		expect(context.identity).toMatchObject({
 			requestId: 'req-naming',
 			attemptId: 'att-naming',

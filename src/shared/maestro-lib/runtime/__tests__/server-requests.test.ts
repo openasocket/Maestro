@@ -871,7 +871,7 @@ describe('managed_operation (MRC-08-05)', () => {
 		inProcessContext({
 			installation: runtime.installation,
 			actor: operator(),
-			delegation: { chain: [], grantRef: null },
+			delegation: { principals: [], delegation: null, grants: [] },
 			identity: {
 				requestId: 'req-1',
 				idempotencyKey: 'key-1',
@@ -1100,7 +1100,9 @@ describe('managed_operation (MRC-08-05)', () => {
 		});
 		const delegated = await send('agents', {
 			envelope: {
-				context: context({ delegation: { chain: [operator()], grantRef: null } }),
+				context: context({
+					delegation: { principals: [operator()], delegation: null, grants: [] },
+				}),
 				input: { cursor: null, limit: 1 },
 			},
 		});
@@ -1218,7 +1220,7 @@ describe('the parent a room round runs under on the host standing (MCOMP-17-03BZ
 			installation,
 			origin: 'cli',
 			actor: { kind: 'human', id: 'person-1' },
-			delegation: { chain: [], grantRef: null },
+			delegation: { principals: [], delegation: null, grants: [] },
 			workflow: null,
 			policyRevision: 7,
 			verification: { peer: 'host-secret', verifierId: 'host-secret:rt-1' },
@@ -1360,7 +1362,7 @@ describe('the group chat verbs run each round under the host standing parent (MC
 		expect(parent.context).toMatchObject({
 			installation,
 			actor: { kind: 'human', id: 'person-1' },
-			delegation: { chain: [], grantRef: null },
+			delegation: { principals: [], delegation: null, grants: [] },
 			workflow: null,
 			verification: { peer: 'host-secret', verifierId: 'host-secret:rt-1' },
 		});

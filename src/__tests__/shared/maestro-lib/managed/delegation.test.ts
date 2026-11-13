@@ -22,13 +22,13 @@ import {
 	type ManagedDelegationContext,
 } from '../../../../shared/maestro-lib/managed/delegation';
 import { MANAGED_CONTRACT_VERSION } from '../../../../shared/maestro-lib/managed/types';
+import { delegationOfGrant } from '../../../helpers/managedGrants';
 
 const WORKFLOW = {
 	workflowId: 'cue-pipeline:Nightly QA',
-	version: 'v1',
-	triggerEventId: 'time.scheduled:evt-1',
-	ownerEpoch: 'epoch-3',
-	fencingToken: 'fence-3',
+	workflowVersion: 'v1',
+	triggerId: 'time.scheduled:evt-1',
+	owner: { ownerId: 'owner-1', ownerEpoch: 'epoch-3', fencingToken: 'fence-3' },
 };
 
 function initiator(overrides: Partial<ManagedDelegationContext> = {}): ManagedDelegationContext {
@@ -45,11 +45,12 @@ function initiator(overrides: Partial<ManagedDelegationContext> = {}): ManagedDe
 		traceId: 'cue:root-1:run-9:attempt-1',
 		workflow: WORKFLOW,
 		delegation: {
-			chain: [
+			principals: [
 				{ kind: 'service', id: 'cue-subscription:nightly' },
 				{ kind: 'agent', id: 'agent-1' },
 			],
-			grantRef: 'grant-7',
+			delegation: delegationOfGrant('grant-7'),
+			grants: [],
 		},
 		policyRevision: 7,
 		...overrides,
@@ -62,7 +63,7 @@ describe('delegationContextOf', () => {
 		const context = delegationContextOf(source);
 		expect(context).toEqual(source);
 		expect(context.identity).not.toBe(source.identity);
-		expect(context.delegation.chain).not.toBe(source.delegation.chain);
+		expect(context.delegation.principals).not.toBe(source.delegation.principals);
 		expect(context.workflow).not.toBe(source.workflow);
 	});
 
@@ -71,7 +72,7 @@ describe('delegationContextOf', () => {
 			identity: initiator().identity,
 			traceId: 't',
 			workflow: null,
-			delegation: { chain: [], grantRef: null },
+			delegation: { principals: [], delegation: null, grants: [] },
 			policyRevision: null,
 		});
 		expect(context.workflow).toBeNull();
@@ -107,13 +108,21 @@ describe('delegationContextProblems', () => {
 			delegationContextProblems(initiator({ identity: { ...initiator().identity, requestId: '' } }))
 		).toContain('identity.requestId is not an id');
 		expect(
-			delegationContextProblems(initiator({ workflow: { ...WORKFLOW, fencingToken: '' } }))
-		).toContain('workflow.fencingToken is not an id');
+			delegationContextProblems(
+				initiator({ workflow: { ...WORKFLOW, owner: { ...WORKFLOW.owner, fencingToken: '' } } })
+			)
+		).toContain('workflow.owner.fencingToken is not an id');
 		expect(
 			delegationContextProblems(
-				initiator({ delegation: { chain: [{ kind: 'robot', id: 'x' } as never], grantRef: null } })
+				initiator({
+					delegation: {
+						principals: [{ kind: 'robot', id: 'x' } as never],
+						delegation: null,
+						grants: [],
+					},
+				})
 			)
-		).toContain('delegation.chain[0].kind is not a principal kind');
+		).toContain('delegation.principals[0].kind is not a principal kind');
 	});
 
 	it('bounds the chain depth', () => {
@@ -121,9 +130,11 @@ describe('delegationContextProblems', () => {
 			kind: 'agent' as const,
 			id: `agent-${i}`,
 		}));
-		expect(delegationContextProblems(initiator({ delegation: { chain, grantRef: null } }))).toEqual(
-			[`delegation.chain exceeds ${MAX_DELEGATION_DEPTH} links`]
-		);
+		expect(
+			delegationContextProblems(
+				initiator({ delegation: { principals: chain, delegation: null, grants: [] } })
+			)
+		).toEqual([`delegation.principals exceeds ${MAX_DELEGATION_DEPTH} links`]);
 	});
 });
 
@@ -149,12 +160,13 @@ describe('childDelegationContext', () => {
 			traceId: 'delegated:root-1:req-c:att-c',
 			workflow: WORKFLOW,
 			delegation: {
-				chain: [
+				principals: [
 					{ kind: 'service', id: 'cue-subscription:nightly' },
 					{ kind: 'agent', id: 'agent-1' },
 					{ kind: 'agent', id: 'agent-2' },
 				],
-				grantRef: 'grant-7',
+				delegation: delegationOfGrant('grant-7'),
+				grants: [],
 			},
 			policyRevision: 7,
 		});
@@ -181,8 +193,8 @@ describe('childDelegationContext', () => {
 		const parent = initiator();
 		const child = childDelegationContext(parent, { ...input, idempotencyKey: 'submit-1' });
 		expect(child.identity.idempotencyKey).toBe('submit-1');
-		child.delegation.chain.pop();
-		expect(parent.delegation.chain).toHaveLength(2);
+		child.delegation.principals.pop();
+		expect(parent.delegation.principals).toHaveLength(2);
 	});
 
 	it('a grandchild stays bounded in trace length at any depth', () => {
@@ -195,7 +207,7 @@ describe('childDelegationContext', () => {
 			});
 		}
 		expect(context.traceId.length).toBeLessThan(256);
-		expect(context.delegation.chain).toHaveLength(14);
+		expect(context.delegation.principals).toHaveLength(14);
 		expect(delegationContextProblems(context)).toEqual([]);
 	});
 });

@@ -90,6 +90,7 @@ import {
 import { MANAGED_CONTRACT_VERSION } from '../../../shared/maestro-lib/managed/types';
 import { CALLER_AGENT_ID_ENV_VAR, CALLER_TAB_ID_ENV_VAR } from '../../../shared/agentDelegation';
 import { QUERY_SOURCE_ENV_VAR } from '../../../shared/querySource';
+import { delegationOfGrant } from '../../helpers/managedGrants';
 
 function createSession(): SessionInfo {
 	return {
@@ -167,11 +168,12 @@ function createDelegation(
 		traceId: 'cue:root-1:run-1:attempt-1',
 		workflow: null,
 		delegation: {
-			chain: [
+			principals: [
 				{ kind: 'service', id: 'cue-subscription:cli-test' },
 				{ kind: 'agent', id: 'session-1' },
 			],
-			grantRef: null,
+			delegation: null,
+			grants: [],
 		},
 		policyRevision: null,
 		...overrides,
@@ -324,10 +326,9 @@ describe('cue-cli-executor nested dispatch delegation', () => {
 	describe('the fence and the child lineage (MRC-07-08)', () => {
 		const FENCED = {
 			workflowId: 'cue:/projects/test:nightly',
-			version: 'v3',
-			triggerEventId: 'time.scheduled:evt-1',
-			ownerEpoch: '4',
-			fencingToken: 'token-A',
+			workflowVersion: 'v3',
+			triggerId: 'time.scheduled:evt-1',
+			owner: { ownerId: 'owner-1', ownerEpoch: '4', fencingToken: 'token-A' },
 		};
 		/** The env the i-th courier was spawned with, and its child process. */
 		const courier = (i: number) => ({
@@ -346,8 +347,15 @@ describe('cue-cli-executor nested dispatch delegation', () => {
 			// The engine's own environment holds a stale, wider record with another fence.
 			process.env[MANAGED_DELEGATION_ENV_VAR] = delegationContextEnv(
 				createDelegation({
-					workflow: { ...FENCED, ownerEpoch: '9', fencingToken: 'stale-fence' },
-					delegation: { chain: [{ kind: 'service', id: 'stale' }], grantRef: 'grant-stale' },
+					workflow: {
+						...FENCED,
+						owner: { ownerId: 'owner-1', ownerEpoch: '9', fencingToken: 'stale-fence' },
+					},
+					delegation: {
+						principals: [{ kind: 'service', id: 'stale' }],
+						delegation: delegationOfGrant('grant-stale'),
+						grants: [],
+					},
 					policyRevision: 42,
 				})
 			)[MANAGED_DELEGATION_ENV_VAR];
@@ -363,7 +371,7 @@ describe('cue-cli-executor nested dispatch delegation', () => {
 			expect(carried).toEqual({ status: 'ok', context: delegation });
 			if (carried.status !== 'ok') return;
 			expect(carried.context.workflow).toEqual(FENCED);
-			expect(carried.context.delegation.grantRef).toBeNull();
+			expect(carried.context.delegation.delegation).toBeNull();
 			expect(carried.context.policyRevision).toBeNull();
 
 			const child = childOf(carried.context);
@@ -376,7 +384,7 @@ describe('cue-cli-executor nested dispatch delegation', () => {
 				rootRunId: 'root-1',
 				parentRunId: 'run-1',
 			});
-			expect(child.delegation.chain).toEqual([
+			expect(child.delegation.principals).toEqual([
 				{ kind: 'service', id: 'cue-subscription:cli-test' },
 				{ kind: 'agent', id: 'session-1' },
 				{ kind: 'agent', id: 'session-research' },
@@ -457,11 +465,12 @@ describe('cue-cli-executor nested dispatch delegation', () => {
 				identity: { ...one.identity, requestId: 'run-2', idempotencyKey: 'run-2', runId: 'run-2' },
 				traceId: 'cue:root-1:run-2:attempt-1',
 				delegation: {
-					chain: [
+					principals: [
 						{ kind: 'service', id: 'cue-subscription:other' },
 						{ kind: 'agent', id: 'session-1' },
 					],
-					grantRef: null,
+					delegation: null,
+					grants: [],
 				},
 			});
 			const promises = [

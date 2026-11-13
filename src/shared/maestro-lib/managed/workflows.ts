@@ -775,7 +775,13 @@ export function createWorkflowOwnership(deps: WorkflowOwnershipDeps): WorkflowOw
 
 /** The contract's fence of a held record: the registry's epoch, as the string the workflow reference carries. */
 function fenceOf(
-	record: Pick<HeldWorkflowOwnership, 'ownerEpoch' | 'fencingToken'>
+	record: Pick<HeldWorkflowOwnership, 'ownerId' | 'ownerEpoch' | 'fencingToken'>
 ): AutoRunOwnerFence {
-	return { ownerEpoch: String(record.ownerEpoch), fencingToken: record.fencingToken };
+	// KNOWN CONFLICT (see report): the held record's epoch is the v1 numeric counter.
+	// String() produces an epoch the endpoint never issued as an opaque string.
+	return {
+		ownerId: record.ownerId,
+		ownerEpoch: String(record.ownerEpoch),
+		fencingToken: record.fencingToken,
+	};
 }

@@ -459,6 +459,7 @@ Since `0.4.0` the entry exports the generic contracts a management peer (an ente
 
 ```ts
 import {
+	directDelegationRef,
 	managedContextProblems,
 	MANAGED_CONTRACT_VERSION,
 	type ManagedOperationContext,
@@ -469,7 +470,7 @@ const context: ManagedOperationContext = {
 	installation: { installationId: 'inst-1', runtimeId: 'rt-1', processEpoch: 'epoch-1' },
 	origin: 'headless',
 	actor: { kind: 'service', id: 'fleet-controller' },
-	delegation: { chain: [], grantRef: null },
+	delegation: directDelegationRef(),
 	identity: {
 		requestId: 'req-1',
 		idempotencyKey: 'submit-1',

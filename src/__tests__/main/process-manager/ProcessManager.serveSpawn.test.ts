@@ -306,7 +306,7 @@ describe('ProcessManager admission on an Auto Run lineage', () => {
 		triggerEventId: 'operator:1700000000000',
 		runId: 'run-root',
 	};
-	const FENCE = { ownerEpoch: 'epoch-1', fencingToken: 'fence-1' };
+	const FENCE = { ownerId: 'owner-1', ownerEpoch: 'epoch-1', fencingToken: 'fence-1' };
 	let ids = 0;
 	const newId = () => `id-${++ids}`;
 	const taskRequest = () =>
@@ -342,8 +342,7 @@ describe('ProcessManager admission on an Auto Run lineage', () => {
 		expect(context.workflow).toEqual(autoRunWorkflowRef(WORKFLOW, FENCE));
 		expect(context.workflow).toMatchObject({
 			workflowId: WORKFLOW.workflowId,
-			ownerEpoch: 'epoch-1',
-			fencingToken: 'fence-1',
+			owner: { ownerId: 'owner-1', ownerEpoch: 'epoch-1', fencingToken: 'fence-1' },
 		});
 		expect(context.traceId).toBe(autoRunTraceId(attribution));
 		expect(context.traceId).not.toBe(request.sessionId);
@@ -444,8 +443,8 @@ describe('ProcessManager claiming the owner fence at the sink', () => {
 		triggerEventId: 'operator:1700000000000',
 		runId: 'run-root',
 	};
-	const REGISTRY_FENCE = { ownerEpoch: '3', fencingToken: 'fence-3' };
-	const CARRIED_FENCE = { ownerEpoch: 'epoch-1', fencingToken: 'fence-1' };
+	const REGISTRY_FENCE = { ownerId: 'owner-1', ownerEpoch: '3', fencingToken: 'fence-3' };
+	const CARRIED_FENCE = { ownerId: 'owner-1', ownerEpoch: 'epoch-1', fencingToken: 'fence-1' };
 	let ids = 0;
 	const newId = () => `fence-id-${++ids}`;
 	const taskRequest = () =>
@@ -488,7 +487,7 @@ describe('ProcessManager claiming the owner fence at the sink', () => {
 		expect(port.asked).toHaveLength(1);
 		const { context } = port.asked[0];
 		expect(context.workflow).toEqual(autoRunWorkflowRef(WORKFLOW, REGISTRY_FENCE));
-		expect(context.workflow).toMatchObject({ ownerEpoch: '3', fencingToken: 'fence-3' });
+		expect(context.workflow).toMatchObject({ owner: { ownerEpoch: '3', fencingToken: 'fence-3' } });
 		expect(context.identity).toEqual(autoRunRunIdentity(attribution));
 		expect(context.traceId).toBe(autoRunTraceId(attribution));
 		expect(admitted.admission.requestId).toBe(attribution.requestId);
@@ -520,7 +519,7 @@ describe('ProcessManager claiming the owner fence at the sink', () => {
 		]);
 		expect(two.admission.requestId).toBe(one.admission.requestId);
 		expect(two.admission.attemptId).not.toBe(one.admission.attemptId);
-		expect(port.asked.map((ask) => ask.context.workflow?.fencingToken)).toEqual([
+		expect(port.asked.map((ask) => ask.context.workflow?.owner.fencingToken)).toEqual([
 			'fence-3',
 			'fence-3',
 		]);
@@ -649,17 +648,20 @@ describe('ProcessManager admission on a delegated dispatch', () => {
 			},
 			traceId: 'cue:run-root:req-cue-1:att-cue-1',
 			workflow: null,
-			delegation: { chain: [{ kind: 'agent', id: 'owner-agent' }], grantRef: null },
+			delegation: {
+				principals: [{ kind: 'agent', id: 'owner-agent' }],
+				delegation: null,
+				grants: [],
+			},
 			policyRevision: null,
 		}),
 		...overrides,
 	});
 	const FENCED_WORKFLOW = {
 		workflowId: 'cue:/work:nightly',
-		version: 'v1',
-		triggerEventId: 'evt-1',
-		ownerEpoch: 'epoch-1',
-		fencingToken: 'fence-1',
+		workflowVersion: 'v1',
+		triggerId: 'evt-1',
+		owner: { ownerId: 'owner-1', ownerEpoch: 'epoch-1', fencingToken: 'fence-1' },
 	};
 
 	function managedManager(port = fakeSpawnPort()) {
@@ -680,11 +682,12 @@ describe('ProcessManager admission on a delegated dispatch', () => {
 		// The chain is the initiator's with the target agent appended, never the
 		// transport's attribution and never a fresh chat identity.
 		expect(context.delegation).toEqual({
-			chain: [
+			principals: [
 				{ kind: 'agent', id: 'owner-agent' },
 				{ kind: 'agent', id: 'agent-1' },
 			],
-			grantRef: null,
+			delegation: null,
+			grants: [],
 		});
 		expect(context.identity).toMatchObject({ rootRunId: 'run-root', parentRunId: 'run-cue-1' });
 		expect(context.identity.requestId).not.toBe('req-cue-1');
@@ -718,11 +721,12 @@ describe('ProcessManager admission on a delegated dispatch', () => {
 			},
 			traceId: 'delegated:run-root:req-child:att-child',
 			delegation: {
-				chain: [
+				principals: [
 					{ kind: 'agent', id: 'owner-agent' },
 					{ kind: 'agent', id: 'agent-1' },
 				],
-				grantRef: null,
+				delegation: null,
+				grants: [],
 			},
 			workflow: null,
 			policyRevision: null,
@@ -801,7 +805,7 @@ describe('ProcessManager admission on a delegated dispatch', () => {
 		});
 		const both = config({
 			delegation: initiator(),
-			autoRun: { attribution, fence: { ownerEpoch: 'e', fencingToken: 'f' } },
+			autoRun: { attribution, fence: { ownerId: 'owner-1', ownerEpoch: 'e', fencingToken: 'f' } },
 		});
 		expect(await manager.admitSpawn(both, { peer: 'in-process' })).toMatchObject({
 			state: 'denied',
@@ -957,7 +961,7 @@ describe('ProcessManager: the actor each transport binds (MRC-08-01A)', () => {
 		expect(fake.asked).toHaveLength(1);
 		const { context } = fake.asked[0];
 		expect(context.verification.peer).toBe('host-secret');
-		expect(context.delegation.chain).toEqual([{ kind: 'service', id: 'maestro-cli' }]);
+		expect(context.delegation.principals).toEqual([{ kind: 'service', id: 'maestro-cli' }]);
 		expect(context.actor).toEqual({ kind: 'human', id: 'actor-registered' });
 	});
 
@@ -967,7 +971,7 @@ describe('ProcessManager: the actor each transport binds (MRC-08-01A)', () => {
 		expect(admitted.state).toBe('admitted');
 		const { context } = fake.asked[0];
 		expect(context.verification.peer).toBe('device-pairing');
-		expect(context.delegation.chain).toEqual([{ kind: 'service', id: 'lite-device:dev-7' }]);
+		expect(context.delegation.principals).toEqual([{ kind: 'service', id: 'lite-device:dev-7' }]);
 		expect(context.actor).toEqual({ kind: 'human', id: 'actor-registered' });
 	});
 
@@ -981,7 +985,7 @@ describe('ProcessManager: the actor each transport binds (MRC-08-01A)', () => {
 			'in-process',
 			'in-process',
 		]);
-		expect(fake.asked.map((a) => a.context.delegation.chain)).toEqual([
+		expect(fake.asked.map((a) => a.context.delegation.principals)).toEqual([
 			[{ kind: 'human', id: 'web-login:ada' }],
 			[],
 			[],
@@ -1007,7 +1011,7 @@ describe('ProcessManager: the actor each transport binds (MRC-08-01A)', () => {
 		expect(lease.snapshotDigest).toBe(admitted.admission.requestDigest);
 		expect(lease.actor).toEqual({ kind: 'human', id: 'actor-registered' });
 		expect(context.verification.peer).toBe('host-secret');
-		expect(context.delegation.chain).toEqual([{ kind: 'service', id: 'maestro-cli' }]);
+		expect(context.delegation.principals).toEqual([{ kind: 'service', id: 'maestro-cli' }]);
 	});
 
 	it('asks nothing of a standalone host, for any transport', async () => {
