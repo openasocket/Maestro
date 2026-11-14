@@ -15,7 +15,9 @@ export const grantRefFixture = (grantId: string): ManagedGrantRef => ({
 });
 
 /** A one-hop grant reference: the presented grant is the chain's only, and last, entry. */
-export const delegationOfGrant = (grantId: string): NonNullable<ManagedDelegationRef['delegation']> => ({
+export const delegationOfGrant = (
+	grantId: string
+): NonNullable<ManagedDelegationRef['delegation']> => ({
 	grant: grantRefFixture(grantId),
 	chain: [grantRefFixture(grantId)],
 });
