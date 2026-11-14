@@ -29,6 +29,11 @@ task content; `scripts/build-integration-completion-playbook.py` renders it.
 | Mega-Maestro | `.maestro/playbooks/2026-10-29-Mega-Maestro-Integration-Completion/GCOMP-01.md` through `GCOMP-30.md` | Clean public contracts/service artifacts, scoped actor approval/policy transport, real runtime adapter, protected prepared execution, desktop choices/settings policy, workflow fences, real commands, usage/content/detections, offline budgets, native endpoints and provider routes |
 | Maestro | Staged here under `.maestro/playbooks/2026-10-29-Maestro-Integration-Completion/MCOMP-01.md` through `MCOMP-34.md`; install from its agent | Preserved/upstream-aligned integration branch, mandatory admission/custody, real authority consumers, governed agent GUI, headless/effect/custody repairs, commands/telemetry and route consumers |
 
+## Current status
+
+Which MMV2 and MCOMP items are closed, and the receipts they rest on, is recorded
+in [`CUTOVER-STATUS-2026-11-13.md`](CUTOVER-STATUS-2026-11-13.md).
+
 ## Execution and handoffs
 
 Run finite stages in manifest dependency order with the owning agent. Stages with
