@@ -1,0 +1,459 @@
+{
+	"schemaVersion": 1,
+	"schema": "maestro-build-receipt/1",
+	"artifactId": "MAESTRO-V2-CONSUMER-BUILD",
+	"owner": "maestro",
+	"proofClass": "implementation-input",
+	"status": "published",
+	"recordedAt": "2026-11-15T07:06:01.810Z",
+	"writer": {
+		"path": "scripts/write-consumer-build-receipt.mjs",
+		"sha256": "ece777f5906d5481bdd3f87e3f431fc0e0aa17cebf4ac48bd59ca23f8c9da0dc"
+	},
+	"standing": "Verified, compiled public contract inputs and locally tested Maestro consumers, re-checked by the receipt writer, with the wire traffic of the production composition observed against a test double and the packaged runtime of this library version named. This receipt performs no live negotiation and qualifies no external adapter.",
+	"grants": {
+		"authority": "none",
+		"lease": "none",
+		"policy": "none"
+	},
+	"qualification": {
+		"paired": false,
+		"provider": false,
+		"native": false
+	},
+	"implementationRevision": "07ffcc4f6b731d133ada33d491737d5dedb0baf8",
+	"observedRevision": "d8c6645c1745b10e757c25d789856310bfe7611f",
+	"sourceClean": true,
+	"inputDigest": "197331f49e62bcfd1ed81fba0d498ac1d6697e51fd6076a1b31dfe740eedbfac",
+	"snapshot": {
+		"sourceRules": "maestro-implementation-tree/1",
+		"implementationDigest": "777faa408889a935abf5e112e7710e53d8718b5cf3d580327adee4bbd6b2bbce",
+		"implementationFiles": 7375,
+		"implementationDirty": false,
+		"inputMap": {
+			"path": ".maestro/playbooks/Working/receipts/maestro-v2-consumer/input-map.json",
+			"sha256": "044e0ccfa5a3647e4db46b573f21c8ccb40cc3082103a444ed1710c8687a734b"
+		},
+		"inputDigestEncoding": "sha256(canonicalJson(inputs))"
+	},
+	"testedSourceSha256": {
+		"scripts/import-mega-maestro.mjs": "6848851c43689637501b5949ca16121fb92d03dad820329c1581e38c443bb39b",
+		"scripts/check-mega-contract-vectors.mjs": "2c441eb4f05063f043abcc65110d36f8afac1021a9ed5c5b7eda34dac8641d87",
+		"scripts/write-mega-maestro-handoff.mjs": "a6fe25e130afe7ed69d1291edc01a859384f5107c722ce21ccdb7cc14b7e543d",
+		"scripts/package-mega-maestro-runtime.mjs": "7bde6c18aeea7cfc09bb91168ae6da99d5d3980d9184dd9a1219e4ebcc2b8e26",
+		"scripts/write-consumer-build-receipt.mjs": "ece777f5906d5481bdd3f87e3f431fc0e0aa17cebf4ac48bd59ca23f8c9da0dc",
+		"src/__tests__/integration/mega-maestro/conformance-host.ts": "2e2e944ee24b55846a4edc4b2ef950726c44072d142cf9229269076c08c837eb",
+		"src/__tests__/integration/mega-maestro/fixtures.ts": "d434abc748ade4b0b63eb9b4ecfe32601f972be6abb0c8182a232963d2a2fecc",
+		"src/__tests__/main/enterprise/fakeEndpoint.ts": "af07cffd4d543473b291913d9a6a8b3b3b0571aedef236705eb1e5441ee84fef",
+		"src/__tests__/fixtures/mega-maestro/contract-vectors.json": "b83f1d001e83718dc857eeec1f53ade19d9a3fc03f0d689f677167e38b914c94",
+		"src/main/enterprise/endpoint-client.ts": "abf4f1ce25838bf22e05eeca1f54b30dd2639b7c5c608361be5180326cceb913",
+		"src/shared/maestro-lib/managed/endpoint-port.ts": "e5690bb076e84a9915caf7560d7de5e1d78d08edf3f17d65ef65b9848ef3cd37",
+		"src/shared/maestro-lib/managed/host-adapter.ts": "87c078de3a0695f3bf4f3bb33117d6819820fa5b63ffb12e67070c89bdfd4136",
+		"package.json": "7906564db61e69331af18f467a605cec7b3e42268e37bb7f509c2213724dc6b8",
+		"package-lock.json": "4427b740182897384914d53296c355fe69c91593ba9c3a907bed4493e60c43d7",
+		"vitest.config.mts": "4c350be6facf41a74e81bd285726b477ef025caa9806ed032bace8c7814e0192",
+		"vendor/mega-maestro/contracts.pin.json": "369d6ddb56c9ce400b9ee9a4c4e49b64c5fe18ad0958a4a2a8e133a1ac1c2718",
+		"src/__tests__/integration/mega-maestro/runtime-wire-v2.test.ts": "74870be8644b812e8c6aab1c4c4a1d08d37bfe4f1196dba4148226277fecc5e1",
+		"Plans/integration-completion/runtime-conformance.json": "b0100db4d5f5f2a58468f7199cbaf8b445a591cf58e0d3c68ae1e93fc9a10bc2",
+		"src/__tests__/main/enterprise/workflowV2Producer.ts": "d9ac21aa38d7f84af118ea4d91b99e379d714b8adce3a785f6851b5a49f54bb9",
+		"src/main/enterprise/service.ts": "0823fa2cd035eba361b50d313251052292ebf1eb460eebe45cc299e0f334338d",
+		"src/main/enterprise/enrollment.ts": "1664e70abe84c370ccae99670c804cde7d25727cfcb0b1d66ec7f4639daebf7e",
+		"src/shared/maestro-lib/managed/workflow-lifecycle-v2.ts": "ae7188f8757c9bae64292f26e9aaf4b6de5812bbcc3e3708feaf306f648efe32",
+		"src/shared/maestro-lib/version.ts": "e77399b4bcdc462ce1958ff883fba246771b1efee183ea5c59e7f01e6f4b1361",
+		"src/__tests__/integration/mega-maestro/conformance.test.ts": "7824310f1affe4c3c7bccce12438dd81cc050c416dcf0fc548f02d9b325f7ab1",
+		"src/__tests__/shared/maestro-lib/managed/contracts.test.ts": "e41090d3565b6f5deeed44bf906872fbfb3aa55d53ecd507e3e42c539b9082b7",
+		"src/__tests__/shared/maestro-lib/managed/contract-vectors.test.ts": "9e63af6365b1492f83f59ea427ec5649c5b5d50351f7b5d8b43856216ebed51e",
+		"src/__tests__/main/enterprise/endpoint-client.test.ts": "88e7eb89a809c85a2318f8a8c573764fffd51922ac5145ad0780b139d70cbede"
+	},
+	"archive": {
+		"name": "@mega-maestro/contracts",
+		"version": "0.3.0",
+		"path": "/Users/dr3/dev-shit/mega-maestro/artifacts/enterprise/0.3.0/71c8aa927803c3facd4be5be6322125b468e1e4754c6f512ec49b119096b6a25/contracts.tgz",
+		"sha256": "71c8aa927803c3facd4be5be6322125b468e1e4754c6f512ec49b119096b6a25",
+		"integrity": "sha512-zXk5U5tZnOfQQsx1A69W3JgDeqlwH+qFMUzOPFsY5O71saJWdk2WIaxIo+GxBC7MwhkP4x2IfaM6pWePBKKqqQ==",
+		"manifest": {
+			"path": "/Users/dr3/dev-shit/mega-maestro/artifacts/enterprise/0.3.0/71c8aa927803c3facd4be5be6322125b468e1e4754c6f512ec49b119096b6a25/artifact.json",
+			"sha256": "e31cbe35e9d9fbbfa05411d3a272516c6f60770565ccb299f28b5f10a38de2c8"
+		},
+		"sidecar": {
+			"path": "/Users/dr3/dev-shit/mega-maestro/artifacts/enterprise/0.3.0/71c8aa927803c3facd4be5be6322125b468e1e4754c6f512ec49b119096b6a25/contracts.tgz.sha256",
+			"sha256": "775a6eb3e5a15eeed76f3e371cf830fe0139ba7bcf240fea4803cd3cc2e33b0b"
+		},
+		"sourceRevision": "6db2b152cacf2c470cb5869e492d24e9c02a5b0d",
+		"sourceDirty": false,
+		"implementationRevision": "6db2b152cacf2c470cb5869e492d24e9c02a5b0d",
+		"inputDigest": "9a1235916f586a591511d21c0ee04f4b9c689d49f3a67753ddc5e6145a50addc",
+		"payloadFiles": 48,
+		"importerPayloadDigest": "eefc555c21f32b926ad493414e9b581a1713e945eb96e102b9824d11b573fd09",
+		"pin": {
+			"path": "vendor/mega-maestro/contracts.pin.json",
+			"sha256": "369d6ddb56c9ce400b9ee9a4c4e49b64c5fe18ad0958a4a2a8e133a1ac1c2718"
+		},
+		"extractedPackage": "vendor/mega-maestro/contracts",
+		"extractedFiles": 50
+	},
+	"producerReceipt": {
+		"path": "/Users/dr3/dev-shit/mega-maestro/docs/evidence/integration-completion/endpoint-v2-contract-0.3.0-build.json",
+		"sha256": "0eeb82ce5a89ae20b603c151452ab6b29156c5b4cfcb85cd7780bc2bba305d55",
+		"artifactId": "MEGA-ENDPOINT-V2-CONTRACT-BUILD",
+		"status": "published",
+		"implementationRevision": "6db2b152cacf2c470cb5869e492d24e9c02a5b0d",
+		"inputDigest": "9a1235916f586a591511d21c0ee04f4b9c689d49f3a67753ddc5e6145a50addc"
+	},
+	"acceptedEndpointProtocols": [
+		2
+	],
+	"runtime": {
+		"artifactId": "MAESTRO-M0-RUNTIME",
+		"archive": {
+			"path": "dist/mega-maestro-runtime/0.38.0/d60e6e91ee5d9112fbb756bcb285cd4c54b067b99847aff4f9fed57e8ef9d202/runtime.tgz",
+			"file": "runtime.tgz",
+			"sha256": "d60e6e91ee5d9112fbb756bcb285cd4c54b067b99847aff4f9fed57e8ef9d202",
+			"sha512": "a28f0c554674e42a1c86adde7f75130da871a355de414cdfb0ec143ea8c2b1ee1dd043a91a1d72dd4c1179ad03d5ca41223a56ef599ee694053d9515f3b5cb3b",
+			"bytes": 2833339
+		},
+		"manifestSha256": "d5b65c3f0b0d4cd101431b4fad45531b1f71299eab343d0c320422f884d19ae6",
+		"payloadDigest": "b5b5985e2fced3268e59e2d572a3efb3617541a9a8904fe964cf1a9a2abea1cc",
+		"versions": {
+			"app": "1.1.1-RC",
+			"library": "0.38.0",
+			"managedContract": "maestro-managed/1",
+			"endpointProtocol": 1
+		},
+		"implementation": {
+			"rules": "maestro-implementation-tree/1",
+			"digest": "777faa408889a935abf5e112e7710e53d8718b5cf3d580327adee4bbd6b2bbce",
+			"commit": "07ffcc4f6b731d133ada33d491737d5dedb0baf8",
+			"fileCount": 7375
+		},
+		"pin": {
+			"path": "Plans/integration-completion/runtime-conformance.json",
+			"sha256": "b0100db4d5f5f2a58468f7199cbaf8b445a591cf58e0d3c68ae1e93fc9a10bc2"
+		}
+	},
+	"runtimeWire": {
+		"schemaVersion": 1,
+		"endpoint": "test double src/__tests__/main/enterprise/fakeEndpoint.ts, not a live endpoint",
+		"composition": "createEnterpriseService (src/main/enterprise/service.ts)",
+		"acceptedEndpointProtocols": [
+			2
+		],
+		"v1Requests": 0,
+		"v2Requests": 6,
+		"operations": [
+			"attachment",
+			"registration_challenge",
+			"registration_redeem",
+			"registration_use",
+			"workflow_claim"
+		],
+		"parsedBy": "localRequestEnvelopeV2 (vendored contracts protocol.js)",
+		"attachment": {
+			"supportedProtocols": [
+				2
+			],
+			"supportedCapabilities": [
+				"attachment",
+				"compatibility",
+				"registration_use",
+				"workflow_claim",
+				"workflow_renew",
+				"workflow_settle",
+				"workflow_release",
+				"noticeList",
+				"inbox",
+				"telemetry",
+				"budget",
+				"offline",
+				"desktopPolicy",
+				"model",
+				"localControl",
+				"command"
+			],
+			"requiredCapabilities": []
+		},
+		"workflowClaim": {
+			"delegation": null,
+			"grants": [],
+			"registrationDigest": "a813f1188b00284e168052157c62d7fb6c7a096041828a6500b0857ba9c405f7",
+			"owner": {
+				"ownerId": "82ad93ab9aca22992dce9d259300e122",
+				"ownerEpoch": "opaque-epoch-1"
+			},
+			"ownerIssuedBy": "the double"
+		},
+		"observation": {
+			"path": ".maestro/playbooks/Working/receipts/maestro-v2-consumer/runtime-wire.json",
+			"sha256": "29abeb4156a691c0a64cebeab2302ea0bf21b05835db914e555f53b37806595d"
+		},
+		"standing": "What this runtime sends, parsed by the pinned contract. The endpoint, owner and epoch are the test double, not a live endpoint or paired enforcement."
+	},
+	"dependencyClosure": {
+		"direct": {
+			"zod": "4.6.5"
+		},
+		"installed": {
+			"zod": {
+				"version": "4.6.5",
+				"packageJsonSha256": "a046ed85fa09571dba539fee9ef236152d12dabd1f229b014ec3bd2ebaad9000",
+				"integrity": "sha512-v5l/aFXZQeai4awLbOpSoHecE9UiMrnfx75tEXLjNonXVARxQ5mOeipTjROUchszUNCqnE+hqAMujRsRHsut2Q=="
+			}
+		},
+		"installedLock": {
+			"path": "vendor/mega-maestro/contracts/package-lock.json",
+			"sha256": "90a278636ba1c8f991d98dfcfe4ae554877cdb686b09dd49f939fb1aa3cc0033",
+			"packages": [
+				"",
+				"node_modules/zod"
+			]
+		}
+	},
+	"versions": {
+		"acceptedPackageRange": ">=0.3.0 <0.4.0",
+		"acceptedConsumerEndpointProtocols": [
+			1,
+			2
+		],
+		"importerAcceptedEndpointProtocols": [
+			1,
+			2
+		],
+		"declaredEndpointProtocols": [
+			1,
+			2
+		],
+		"published": {
+			"authority": "schemas-only",
+			"localProtocols": [
+				1,
+				2
+			],
+			"desktopPolicy": 1,
+			"features": [
+				"registration-use-v2",
+				"delegation-references-v2",
+				"workflow-lifecycle-v2",
+				"workflow-execution-references-v2",
+				"command-correlation-v2",
+				"desktop-authoring-projection-v1"
+			],
+			"execution": {
+				"module": "@mega-maestro/contracts/protocol",
+				"export": "executionRequestV2",
+				"protocol": 2,
+				"path": "/v2/invoke",
+				"envelopeOperation": "execution",
+				"payloadOperation": "runs.submit",
+				"importerRange": ">=0.3.0 <0.4.0",
+				"capabilityAdvertisement": false
+			},
+			"supersessions": [
+				{
+					"beforePackageVersion": "0.2.0",
+					"removedExport": "@mega-maestro/contracts/local-endpoint#executionRequestV2",
+					"replacementExport": "@mega-maestro/contracts/protocol#executionRequestV2",
+					"compatibility": "breaking-strict-parser; no payload conversion or v1 fallback",
+					"changes": [
+						"one complete workflow/delegation runs.submit request",
+						"opaque v2 ownerEpoch; frozen v1 numeric epoch unchanged"
+					]
+				}
+			]
+		},
+		"parsedLocalProtocols": [
+			1,
+			2
+		],
+		"v2Operations": [
+			"attachment",
+			"budget",
+			"command",
+			"compatibility",
+			"desktopPolicy",
+			"enrollment",
+			"execution",
+			"inbox",
+			"localControl",
+			"model",
+			"noticeList",
+			"offline",
+			"registration_challenge",
+			"registration_redeem",
+			"registration_use",
+			"telemetry",
+			"workflow_claim",
+			"workflow_release",
+			"workflow_renew",
+			"workflow_settle"
+		],
+		"runtimeModulesLoaded": 23,
+		"liveNegotiationPerformed": false
+	},
+	"tests": {
+		"files": 4,
+		"passed": 85,
+		"failed": 0,
+		"skipped": 0,
+		"suites": {
+			"src/__tests__/integration/mega-maestro/conformance.test.ts": 18,
+			"src/__tests__/main/enterprise/endpoint-client.test.ts": 19,
+			"src/__tests__/shared/maestro-lib/managed/contract-vectors.test.ts": 6,
+			"src/__tests__/shared/maestro-lib/managed/contracts.test.ts": 42
+		},
+		"result": {
+			"path": ".maestro/playbooks/Working/receipts/maestro-v2-consumer/focused-results.json",
+			"sha256": "a30e60d3b15ca21897504889e373c42925d8a33d9a8ef43d35c9b7d607f6db69"
+		},
+		"publicTypes": {
+			"path": ".maestro/playbooks/Working/receipts/maestro-v2-consumer/public-types.mts",
+			"sha256": "ce4a513e31209aed4e8773357a31316289120d789025c1d5afc4b3e1d9b9e8bc"
+		}
+	},
+	"toolchain": {
+		"node": "v26.13.1",
+		"platform": "darwin",
+		"arch": "arm64",
+		"nodeExecutable": "/opt/homebrew/Cellar/node/26.13.1/bin/node",
+		"nodeSha256": "a56388d53be92f39c69f60e25f18ef2d6c84b9692c67ac03fe4f9f208c40c208",
+		"packages": {
+			"typescript": "6.0.3",
+			"vitest": "4.1.11",
+			"vite": "8.3.5",
+			"prettier": "3.8.3",
+			"zod": "4.4.3"
+		}
+	},
+	"checks": [
+		{
+			"name": "snapshot-before",
+			"command": "node scripts/write-consumer-build-receipt.mjs --check snapshot",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/receipts/maestro-v2-consumer/snapshot-before.log",
+				"sha256": "8982155bbd8e34fc40febfaf0e32dd458502d49e8c0f28172e68eed254cd08bb"
+			}
+		},
+		{
+			"name": "importer",
+			"command": "node scripts/import-mega-maestro.mjs --manifest /Users/dr3/dev-shit/mega-maestro/artifacts/enterprise/0.3.0/71c8aa927803c3facd4be5be6322125b468e1e4754c6f512ec49b119096b6a25/artifact.json --archive /Users/dr3/dev-shit/mega-maestro/artifacts/enterprise/0.3.0/71c8aa927803c3facd4be5be6322125b468e1e4754c6f512ec49b119096b6a25/contracts.tgz --sha256 71c8aa927803c3facd4be5be6322125b468e1e4754c6f512ec49b119096b6a25 --verify-only",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/receipts/maestro-v2-consumer/importer.log",
+				"sha256": "8a46b714b9bfdeaa02a7f95711cd2fc075e6469721b615e661daf1f8259db3b6"
+			}
+		},
+		{
+			"name": "integrity",
+			"command": "node scripts/write-consumer-build-receipt.mjs --check integrity --manifest /Users/dr3/dev-shit/mega-maestro/artifacts/enterprise/0.3.0/71c8aa927803c3facd4be5be6322125b468e1e4754c6f512ec49b119096b6a25/artifact.json --archive /Users/dr3/dev-shit/mega-maestro/artifacts/enterprise/0.3.0/71c8aa927803c3facd4be5be6322125b468e1e4754c6f512ec49b119096b6a25/contracts.tgz --sha256 71c8aa927803c3facd4be5be6322125b468e1e4754c6f512ec49b119096b6a25",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/receipts/maestro-v2-consumer/integrity.log",
+				"sha256": "d32e4bf08ed155d9cba4c0b5f8f1851e006a3505c4381224221bf07c883fddfe"
+			}
+		},
+		{
+			"name": "schemas",
+			"command": "node scripts/write-consumer-build-receipt.mjs --check schemas",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/receipts/maestro-v2-consumer/schemas.log",
+				"sha256": "50f45a1bce0ac104f018658515778499bdfde72b92894ae661903e2cef947176"
+			}
+		},
+		{
+			"name": "public-types",
+			"command": "node node_modules/typescript/bin/tsc --ignoreConfig --noEmit --strict --module NodeNext --moduleResolution NodeNext --target ES2022 .maestro/playbooks/Working/receipts/maestro-v2-consumer/public-types.mts",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/receipts/maestro-v2-consumer/public-types.log",
+				"sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+			}
+		},
+		{
+			"name": "public-vectors",
+			"command": "node scripts/check-mega-contract-vectors.mjs --contracts-dir vendor/mega-maestro/contracts --expect-sha256 eefc555c21f32b926ad493414e9b581a1713e945eb96e102b9824d11b573fd09",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/receipts/maestro-v2-consumer/public-vectors.log",
+				"sha256": "363fab1a8ccdbb6949a4bfce043f94a658f212886d7cfc62ea60f498c710a037"
+			}
+		},
+		{
+			"name": "exact-dependency-vectors",
+			"command": "node scripts/write-consumer-build-receipt.mjs --check exactDependencyVectors",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/receipts/maestro-v2-consumer/exact-dependency-vectors.log",
+				"sha256": "23dcff6baa7081ba8c94ecd6d4e3ede497c3442b25687354261dc0396a688255"
+			}
+		},
+		{
+			"name": "focused-tests",
+			"command": "node node_modules/vitest/vitest.mjs run src/__tests__/integration/mega-maestro/conformance.test.ts src/__tests__/shared/maestro-lib/managed/contracts.test.ts src/__tests__/shared/maestro-lib/managed/contract-vectors.test.ts src/__tests__/main/enterprise/endpoint-client.test.ts --reporter=default --reporter=json --outputFile=.maestro/playbooks/Working/receipts/maestro-v2-consumer/focused-results.json",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/receipts/maestro-v2-consumer/focused-tests.log",
+				"sha256": "a724e7b43f5bec658cc8478c272f19eef62b37e43d75348b0d94518a60fc912c"
+			}
+		},
+		{
+			"name": "runtime-wire",
+			"command": "node node_modules/vitest/vitest.mjs run src/__tests__/integration/mega-maestro/runtime-wire-v2.test.ts",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/receipts/maestro-v2-consumer/runtime-wire.log",
+				"sha256": "66f8db99897871ba0a0dcca2a2339c00fb37586222b3b484bee618c3778a8044"
+			}
+		},
+		{
+			"name": "runtime-pin",
+			"command": "node scripts/write-consumer-build-receipt.mjs --check runtimePin",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/receipts/maestro-v2-consumer/runtime-pin.log",
+				"sha256": "fa645a11f99dbd8a62f8f522c9d90b667ae3ef380ec881d6a6e82cc4a6bae15b"
+			}
+		},
+		{
+			"name": "typecheck",
+			"command": "npm run lint",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/receipts/maestro-v2-consumer/typecheck.log",
+				"sha256": "fe36220ec374c21c79f929dcd2c9b649e69bb7f00d2673010752e2623eaf6092"
+			}
+		},
+		{
+			"name": "snapshot-after",
+			"command": "node scripts/write-consumer-build-receipt.mjs --check snapshot",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/receipts/maestro-v2-consumer/snapshot-after.log",
+				"sha256": "8982155bbd8e34fc40febfaf0e32dd458502d49e8c0f28172e68eed254cd08bb"
+			}
+		}
+	],
+	"notYetObserved": [
+		{
+			"field": "liveEndpointProtocols",
+			"reason": "runtimeWire records the protocols this runtime sends to the test double; traffic with a live endpoint is not observed by a build"
+		},
+		{
+			"field": "grantDigest",
+			"reason": "no execution grant is issued: the v2 workflow claim carries grants [] and execution waits for FINISH-10 (GCOMP-15-07)"
+		},
+		{
+			"field": "chainDigest",
+			"reason": "no delegation chain exists: the v2 workflow claim carries delegation null"
+		},
+		{
+			"field": "workflowOwner",
+			"reason": "runtimeWire names the owner the test double issued for the claim; no live endpoint issued an owner"
+		},
+		{
+			"field": "negotiatedWorkflowExecution",
+			"reason": "execution is not in the v2 operation set until FINISH-10 (GCOMP-15-07); the v1 execution operation is unreachable on a v2-only connection"
+		}
+	],
+	"publicationScope": "Local source-development input only. acceptedEndpointProtocols and runtimeWire are what the runtime sends to a test double; fields that need a live endpoint or an execution grant are named under notYetObserved and are not recorded."
+}
