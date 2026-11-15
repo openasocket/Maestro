@@ -152,12 +152,13 @@ describe('production attachment: one protocol 2 connection', () => {
 		return { life, port: ports[0] };
 	}
 
-	it('offers registration_use, the workflow verbs and the selected operations, nothing required', () => {
+	it('offers registration_use, the workflow verbs, delegation and the selected operations, nothing required', () => {
 		expect(ENTERPRISE_SUPPORTED_CAPABILITIES_V2).toEqual([
 			'attachment',
 			'compatibility',
 			'registration_use',
 			...WORKFLOW_VERBS,
+			'delegation',
 			...V2_OPERATIONS_SELECTED,
 		]);
 	});

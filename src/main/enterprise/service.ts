@@ -209,8 +209,10 @@ export const ENTERPRISE_SUPPORTED_CAPABILITIES: readonly string[] = [
  * `registration_use`, the four workflow custody verbs, and every operation in
  * `V2_OPERATIONS_SELECTED` (handoff item 7). Nothing is required: an endpoint
  * that offers a subset still attaches, and an operation it did not select is
- * never sent. Execution is not offered until the endpoint serves it
- * (GCOMP-15-07, Mega FINISH-10).
+ * never sent. `execution` is in the selection (handoff item 10) and
+ * `delegation` beside it, because a delegated run is sent only when both were
+ * negotiated (`createEndpointExecutionV2Client`); supporting them is not an
+ * offer, and neither is used until the endpoint offers it (Mega FINISH-10).
  */
 export const ENTERPRISE_SUPPORTED_CAPABILITIES_V2: readonly string[] = [
 	'attachment',
@@ -220,6 +222,7 @@ export const ENTERPRISE_SUPPORTED_CAPABILITIES_V2: readonly string[] = [
 	'workflow_renew',
 	'workflow_settle',
 	'workflow_release',
+	'delegation',
 	...V2_OPERATIONS_SELECTED,
 ];
 

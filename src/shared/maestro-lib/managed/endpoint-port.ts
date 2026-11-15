@@ -518,6 +518,76 @@ export interface EndpointWorkflowV2Exchange {
 }
 
 // ---------------------------------------------------------------------------
+// v2 execution (contracts 0.3.0 protocol.js), field for field
+// ---------------------------------------------------------------------------
+
+/** The envelope operation `/v2/invoke` carries a run submission under. */
+export const LOCAL_ENDPOINT_EXECUTION_V2_OPERATION = 'execution' as const;
+/** The payload's own `operation`: `runs.submit`, the sole v2 execution body. */
+export const ENDPOINT_EXECUTION_V2_PAYLOAD_OPERATION = 'runs.submit' as const;
+
+/** The contract's `executionWorkflowReferenceV2`: the claimed workflow and the owner custody echoed. */
+export interface EndpointExecutionWorkflowV2 {
+	workflowId: string;
+	workflowVersion: string;
+	triggerId: string;
+	owner: EndpointWorkflowOwnerV2;
+}
+
+/**
+ * The contract's `executionRequestV2` (`runs.submit`), every field. The
+ * authority references (`registration`, `delegation`, `grants`) and the
+ * workflow custody are echoed from the producer's lease; the endpoint
+ * resolves each of them under its own custody, so nothing here is authority.
+ */
+export interface EndpointExecutionRequestV2 {
+	requestId: string;
+	attemptId: string;
+	runId: string;
+	source: 'ux' | 'cli' | 'cue' | 'headless';
+	provider: string;
+	model: string;
+	policyRevision: number;
+	operation: typeof ENDPOINT_EXECUTION_V2_PAYLOAD_OPERATION;
+	agentId: string;
+	contentRef: string;
+	/** Lowercase SHA-256 hex of the approved content. */
+	contentSha256: string;
+	/** At most 64. */
+	resourceIds: readonly string[];
+	idempotencyKey: string;
+	workflow: EndpointExecutionWorkflowV2 | null;
+	registration: EndpointRuntimeUseReference;
+	delegation: EndpointDelegationReferenceV2 | null;
+	grants: readonly EndpointGrantReferenceV2[];
+	rootRunId: string;
+	parentRunId: string | null;
+}
+
+/**
+ * The contract's `dispatchReceiptV2`: the broker reports dispatch, never
+ * completion. `unknown` is an uncertain dispatch that needs durable
+ * reconciliation before anything is settled.
+ */
+export interface EndpointDispatchReceiptV2 {
+	outcome: 'broker_dispatched';
+	requestId: string;
+	attemptId: string;
+	runId: string;
+	decisionId: string;
+	requestDigest: string;
+	brokerId: string;
+	policyRevision: number;
+	protocol: typeof LOCAL_ENDPOINT_PROTOCOL_V2;
+	/** The grant the broker dispatched under (a UUID). */
+	grantId: string;
+	idempotencyKey: string;
+	authorityDigest: string;
+	ownerGeneration: number;
+	state: 'dispatched' | 'unknown';
+}
+
+// ---------------------------------------------------------------------------
 // The v2 operation clients (contracts 0.2.0 protocol.js), field for field
 // ---------------------------------------------------------------------------
 //
@@ -781,11 +851,13 @@ export interface EndpointOperationV2Exchange {
  * The v2 operations an existing caller is moved onto. Each one is a
  * **passing** row of Mega's endpoint v2 parity matrix
  * (`docs/evidence/endpoint-v2/parity-matrix.md`, FINISH-08-06, observed at
- * Mega `dd9a42b0`); `execution` is not served and is not here. Selection is
- * not an offer: an operation is still sent only when the attachment on the
- * current connection negotiated it, and otherwise nothing is sent.
- * `src/main/enterprise/endpoint-ops-v2.ts` re-exports it; this is its one
- * home so the shared callers can read it.
+ * Mega `dd9a42b0`), plus `execution` (Mega FINISH-10, handoff item 10),
+ * whose only client is `createEndpointExecutionV2Client` in `./execution-v2`;
+ * no v1 caller moves onto it. Selection is not an offer: an operation is
+ * still sent only when the attachment on the current connection negotiated
+ * it, and otherwise nothing is sent, so `execution` stays unused until a peer
+ * offers it. `src/main/enterprise/endpoint-ops-v2.ts` re-exports it; this is
+ * its one home so the shared callers can read it.
  */
 export const V2_OPERATIONS_SELECTED: readonly string[] = [
 	'noticeList',
@@ -797,6 +869,7 @@ export const V2_OPERATIONS_SELECTED: readonly string[] = [
 	'model',
 	'localControl',
 	'command',
+	LOCAL_ENDPOINT_EXECUTION_V2_OPERATION,
 ];
 
 /** Whether the v2 attachment behind `clientState` negotiated `operation`. False with no v2 attachment. */
@@ -1162,8 +1235,19 @@ export type EndpointUnavailableReason =
 	| 'peer-unverified'
 	/** The v2 attachment on the current connection did not negotiate the operation; nothing was sent. */
 	| 'not-negotiated'
-	/** This process's registration does not carry the purpose the request needs (`localControl`); nothing was sent. */
-	| 'not-authorized';
+	/**
+	 * This process's registration does not carry the purpose the request needs
+	 * (`localControl`), or an execution carries no grant to run under; nothing was sent.
+	 */
+	| 'not-authorized'
+	/**
+	 * An execution's lease is no longer what is held: the owner store's fence,
+	 * the lease's expiry, the current registration or the run's lineage moved;
+	 * nothing was sent.
+	 */
+	| 'stale-authority'
+	/** This client already sent an execution with that idempotency key; it is reconciled, not resent. */
+	| 'duplicate';
 
 /**
  * How one call ended. `denied` is the endpoint's own refusal (its reason),

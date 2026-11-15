@@ -180,8 +180,13 @@ import { MANAGED_CONTRACT_VERSION } from './managed/types';
  * `ManagedEnrollmentStatus.registrationUse`; `V2_OPERATIONS_SELECTED` now holds the passing parity rows.
  * `ManagedHostAdapter.workflows` is the v2 workflow lifecycle port (`./managed/workflow-lifecycle-v2`,
  * `createEndpointWorkflowV2OwnerPort`) and never sends the v1 `workflow` fence. Breaking below 1.0.
+ * 0.39.0: v2 execution (Mega handoff item 10). `./managed/endpoint-port` adds the `runs.submit` request
+ * and `dispatchReceiptV2` types (`EndpointExecutionRequestV2`, `EndpointDispatchReceiptV2`,
+ * `LOCAL_ENDPOINT_EXECUTION_V2_OPERATION`) and the `stale-authority` and `duplicate` unavailable
+ * reasons; `V2_OPERATIONS_SELECTED` now includes `execution`, sent only when negotiated, by the
+ * execution client in `./managed/execution-v2`. Additions only.
  */
-export const MAESTRO_LIB_VERSION = '0.38.0';
+export const MAESTRO_LIB_VERSION = '0.39.0';
 
 /** The Node range the built library runs on; `engines.node` of the built package. */
 export const MAESTRO_LIB_NODE_RANGE = '>=20';

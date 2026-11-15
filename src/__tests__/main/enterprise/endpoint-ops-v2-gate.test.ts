@@ -93,9 +93,6 @@ function reply(operation: string, payload: unknown): unknown {
 	return { echoed: payload };
 }
 
-/** The parity matrix rows that do not pass, and so are never selected. */
-const NOT_PASSING = ['execution'];
-
 const COMPONENTS = [{ id: 'maestro', kind: 'maestro' as const, version: '1.1.0-RC' }];
 const ATTACH_V1: EndpointAttachmentRequest = {
 	installationId: 'inst-1',
@@ -150,11 +147,11 @@ function callOp(client: EndpointOperationsV2Client, operation: EndpointOperation
 }
 
 describe('V2_OPERATIONS_SELECTED', () => {
-	it('holds every v2 operation client, which are the passing parity rows, and never execution', () => {
+	it('holds every v2 operation client, which are the passing parity rows, and execution', () => {
+		// execution has its own client (execution-v2.ts) and no v1 caller to move.
 		expect([...V2_OPERATIONS_SELECTED].sort()).toEqual(
-			[...LOCAL_ENDPOINT_OPERATION_V2_CLIENTS].sort()
+			[...LOCAL_ENDPOINT_OPERATION_V2_CLIENTS, 'execution'].sort()
 		);
-		for (const row of NOT_PASSING) expect(V2_OPERATIONS_SELECTED).not.toContain(row);
 	});
 });
 
