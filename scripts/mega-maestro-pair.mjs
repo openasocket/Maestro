@@ -142,7 +142,7 @@ export async function createActorApprovalBridge({ browser, origin, timeoutMs = 3
 		input: Object.freeze({
 			schemaVersion: 1,
 			contractSha256: pin.sha256,
-			protocol: 1,
+			protocol: 2,
 			proofClass: 'consumer-input',
 			authority: 'none',
 			paired: false,

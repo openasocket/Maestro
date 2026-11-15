@@ -2,15 +2,13 @@
  * The production attachment is ONE protocol 2 connection (handoff item 1,
  * contracts 0.3.0): the registration handshake (challenge, redeem), the v2
  * attachment and every operation after it share a socket, and no v1 envelope
- * is ever sent. The endpoint holds one protocol per socket session, and it
- * serves every operation Maestro sends on protocol 2, so nothing is left on v1.
+ * is sent on any other path. The endpoint holds one protocol per socket session.
  *
  * What is defended: the attachment offers `registration_use`, the four
  * workflow custody verbs and the selected operations, with nothing required;
  * it asks for the `registration_use` reference itself when that was
- * negotiated; an endpoint without protocol 2 is reported, and nothing is
- * retried on `/v1/invoke`; a subset offer still attaches, and an operation it
- * did not select is never sent.
+ * negotiated; a subset offer still attaches, and an operation the attachment
+ * did not negotiate is never sent.
  *
  * The daemon is a double (`fakeEndpoint.ts`); no OS peer is authenticated and
  * nothing here is paired enforcement.
@@ -30,11 +28,11 @@ import {
 	createEnterpriseIdentityStore,
 	type EnterpriseIdentityStore,
 } from '../../../main/enterprise/identity-store';
-import { ENTERPRISE_SUPPORTED_CAPABILITIES_V2 } from '../../../main/enterprise/service';
+import { ENTERPRISE_SUPPORTED_CAPABILITIES } from '../../../main/enterprise/service';
 import {
+	ENDPOINT_OPERATIONS_OFFERED,
+	invokeNegotiated,
 	LOCAL_ENDPOINT_INVOKE_PATH,
-	LOCAL_ENDPOINT_INVOKE_V2_PATH,
-	V2_OPERATIONS_SELECTED,
 	type EndpointPort,
 } from '../../../shared/maestro-lib/managed/endpoint-port';
 import type { Anchor } from '../../../main/utils/keyring-anchor';
@@ -52,7 +50,6 @@ const INSTALLATION = {
 	runtimeId: 'desktop-100',
 	processEpoch: 'epoch-1',
 };
-const V1_SUPPORTED = ['attachment', 'compatibility', 'enrollment', 'telemetry'];
 const SERVES_ENROLLMENT: FakeEndpointOptions = {
 	capabilities: ['enrollment', 'telemetry'],
 	operations: { enrollment: () => ({ outcome: 'enrollment_pending', enrollmentId: 'enr-1' }) },
@@ -134,9 +131,8 @@ describe('production attachment: one protocol 2 connection', () => {
 			},
 			installation: INSTALLATION,
 			components: [{ id: 'maestro', kind: 'maestro', version: '1.1.0-RC' }],
-			capabilities: { supported: V1_SUPPORTED, required: [] },
+			capabilities: { supported: ENTERPRISE_SUPPORTED_CAPABILITIES, required: [] },
 			now: () => NOW,
-			v2: { supported: ENTERPRISE_SUPPORTED_CAPABILITIES_V2 },
 		});
 		lifecycles.push(created);
 		return created;
@@ -153,34 +149,34 @@ describe('production attachment: one protocol 2 connection', () => {
 	}
 
 	it('offers registration_use, the workflow verbs, delegation and the selected operations, nothing required', () => {
-		expect(ENTERPRISE_SUPPORTED_CAPABILITIES_V2).toEqual([
+		expect(ENTERPRISE_SUPPORTED_CAPABILITIES).toEqual([
 			'attachment',
 			'compatibility',
 			'registration_use',
 			...WORKFLOW_VERBS,
 			'delegation',
-			...V2_OPERATIONS_SELECTED,
+			...ENDPOINT_OPERATIONS_OFFERED,
 		]);
 	});
 
-	it('runs the handshake, the attachment and registration_use on one socket, and sends nothing on v1', async () => {
+	it('runs the handshake, the attachment and registration_use on one socket, and nothing else before them', async () => {
 		const fake = await endpoint({
-			v2Capabilities: ['registration_use', ...WORKFLOW_VERBS],
+			capabilities: ['registration_use', ...WORKFLOW_VERBS],
 			operations: { ...SERVES_ENROLLMENT.operations, registration_use: () => PROJECTED },
 		});
 		const { life, port } = await run(fake);
 
-		const attach = fake.callsTo(LOCAL_ENDPOINT_INVOKE_V2_PATH).map(envelope)[2];
+		const attach = fake.callsTo(LOCAL_ENDPOINT_INVOKE_PATH).map(envelope)[2];
 		expect(attach.operation).toBe('attachment');
 		expect(attach.payload).toMatchObject({
 			installationId: INSTALLATION.installationId,
 			runtimeId: INSTALLATION.runtimeId,
 			processEpoch: INSTALLATION.processEpoch,
 			supportedProtocols: [2],
-			supportedCapabilities: ENTERPRISE_SUPPORTED_CAPABILITIES_V2,
+			supportedCapabilities: ENTERPRISE_SUPPORTED_CAPABILITIES,
 			requiredCapabilities: [],
 		});
-		expect(operationsOn(fake, LOCAL_ENDPOINT_INVOKE_V2_PATH)).toEqual([
+		expect(operationsOn(fake, LOCAL_ENDPOINT_INVOKE_PATH)).toEqual([
 			'registration_challenge',
 			'registration_redeem',
 			'attachment',
@@ -188,25 +184,23 @@ describe('production attachment: one protocol 2 connection', () => {
 			'attachment',
 			'registration_use',
 		]);
-		expect(fake.callsTo(LOCAL_ENDPOINT_INVOKE_PATH)).toEqual([]);
 		// The handshake and the first attachment shared one socket.
-		const firstThree = fake.callsTo(LOCAL_ENDPOINT_INVOKE_V2_PATH).slice(0, 3);
+		const firstThree = fake.callsTo(LOCAL_ENDPOINT_INVOKE_PATH).slice(0, 3);
 		expect(new Set(firstThree.map((call) => call.socket)).size).toBe(1);
 
 		for (const operation of ['registration_use', ...WORKFLOW_VERBS]) {
-			expect(port.v2!.negotiated(operation)).toBe(true);
+			expect(port.negotiated(operation)).toBe(true);
 		}
 		expect(port.state()).toMatchObject({ attached: true, registration: 'registered' });
 		expect(life.status()).toMatchObject({
 			authority: 'registered',
 			registrationUse: { reference: { processBirthDigest: 'b'.repeat(64) } },
 		});
-		// A v1 operation on the protocol 2 attachment is refused locally, never sent.
-		expect(await port.invoke('telemetry', { probe: 1 })).toMatchObject({
+		// An operation the attachment did not negotiate is refused by the shared gate, never sent.
+		expect(await invokeNegotiated(port, 'telemetry', { probe: 1 })).toMatchObject({
 			status: 'unavailable',
 			reason: 'not-negotiated',
 		});
-		expect(fake.callsTo(LOCAL_ENDPOINT_INVOKE_PATH)).toEqual([]);
 
 		await life.close();
 		expect(port.state().closed).toBe(true);
@@ -214,7 +208,7 @@ describe('production attachment: one protocol 2 connection', () => {
 
 	it.each([
 		['serves no /v2/invoke path', { v2: false }],
-		['offers no protocol 2 (unsupported_version)', { v2Offered: false }],
+		['offers no protocol 2 (unsupported_version)', { offered: false }],
 	])(
 		'an endpoint that %s is reported, and nothing is retried on v1',
 		async (_label, options: FakeEndpointOptions) => {
@@ -222,26 +216,24 @@ describe('production attachment: one protocol 2 connection', () => {
 			const life = await lifecycle(fake.socketPath);
 			expect((await life.connect()).status).not.toBe('ok');
 			expect(life.status().authority).toBe('none');
-			expect(fake.callsTo(LOCAL_ENDPOINT_INVOKE_PATH)).toEqual([]);
 			expect(identity.read()).toMatchObject({ status: 'ok', record: { management: 'enrolled' } });
 		}
 	);
 
 	it('a subset offer still attaches; an operation it did not select is never sent', async () => {
-		const fake = await endpoint({ v2Capabilities: ['workflow_claim'] });
+		const fake = await endpoint({ capabilities: ['workflow_claim'] });
 		const { life, port } = await run(fake);
 
 		expect(port.state().closed).toBe(false);
-		expect(port.v2!.negotiated('workflow_claim')).toBe(true);
-		expect(port.v2!.negotiated('registration_use')).toBe(false);
-		expect(port.v2!.negotiated('workflow_renew')).toBe(false);
+		expect(port.negotiated('workflow_claim')).toBe(true);
+		expect(port.negotiated('registration_use')).toBe(false);
+		expect(port.negotiated('workflow_renew')).toBe(false);
 		expect(life.status().registrationUse).toBeNull();
 
 		const used = await life.useRegistration();
 		expect(used).toMatchObject({ status: 'unavailable', reason: 'not-negotiated' });
-		expect(new Set(operationsOn(fake, LOCAL_ENDPOINT_INVOKE_V2_PATH))).toEqual(
+		expect(new Set(operationsOn(fake, LOCAL_ENDPOINT_INVOKE_PATH))).toEqual(
 			new Set(['registration_challenge', 'registration_redeem', 'attachment'])
 		);
-		expect(fake.callsTo(LOCAL_ENDPOINT_INVOKE_PATH)).toEqual([]);
 	});
 });

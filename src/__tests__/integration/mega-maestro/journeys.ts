@@ -318,13 +318,17 @@ export async function runPairJourneys(deps: JourneyDeps): Promise<JourneyRun> {
 		port.attach({
 			...installation,
 			components,
-			supportedProtocols: [1],
+			supportedProtocols: [2],
 			supportedCapabilities: ['attachment', 'compatibility', 'execution', 'telemetry'],
 			requiredCapabilities: [],
 		});
 	await journey({ ...find('library.handshake'), surface: 'library' }, async (step) => {
 		await step('compatibility', () =>
-			port.compatibility({ protocol: 1, components, requiredCapabilities: [] })
+			port.compatibility({
+				supportedProtocols: [2],
+				supportedCapabilities: ['attachment', 'compatibility'],
+				requiredCapabilities: [],
+			})
 		);
 		let status = await step('attach', attach);
 		const challenge = await step('registration.challenge', () =>

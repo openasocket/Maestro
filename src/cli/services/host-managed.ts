@@ -39,6 +39,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 import {
+	negotiatedCommandWire,
 	createCommandService,
 	type CommandService,
 	type CommandStatusInventory,
@@ -62,10 +63,7 @@ import {
 	type InboxClient,
 } from '../../main/enterprise/inbox';
 import { createPolicyStatusService } from '../../main/enterprise/policy-status';
-import {
-	ENTERPRISE_SUPPORTED_CAPABILITIES,
-	ENTERPRISE_SUPPORTED_CAPABILITIES_V2,
-} from '../../main/enterprise/service';
+import { ENTERPRISE_SUPPORTED_CAPABILITIES } from '../../main/enterprise/service';
 import {
 	anchorAccountForDirectory,
 	createKeyringAnchor,
@@ -586,8 +584,6 @@ export function composeHostManaged(deps: HostManagedDeps): HostManagedCompositio
 				{ id: 'maestro-lib', kind: 'runtime', version: MAESTRO_LIB_VERSION },
 			],
 			capabilities: { supported: ENTERPRISE_SUPPORTED_CAPABILITIES, required: [] },
-			// Protocol 2 on the one connection: the attachment every caller reads is v2.
-			v2: { supported: ENTERPRISE_SUPPORTED_CAPABILITIES_V2 },
 			now,
 			// As on the desktop: every accepted attachment lists the notices again. The inbox
 			// standing refuses the listing unless this process holds a live registration.
@@ -681,6 +677,7 @@ export function composeHostManaged(deps: HostManagedDeps): HostManagedCompositio
 			// The runtime's Auto Run checks in between tasks here, so pause/resume are composed as the
 			// cooperative task-boundary pause, never a process suspension.
 			cooperativePause: true,
+			commandWire: negotiatedCommandWire({ status: () => status() ?? enrollment.status() }),
 			now,
 		});
 		const track = <T>(work: Promise<T>): Promise<T> => {

@@ -23,9 +23,8 @@
  *   - `connect` attaches (after a registration, when the endpoint requires
  *     one) and projects what the endpoint answered onto the record: the
  *     management state it reports and the policy revisions it holds. With
- *     `deps.v2` (production) the attachment is the protocol 2 attachment on
- *     the one connection, followed by `registration_use` when it negotiated
- *     it; no v1 attachment is sent.
+ *     the attachment on the one connection, followed by `registration_use`
+ *     when it negotiated it.
  *   - `requestRotation`, `requestRevocation`, `requestRetirement` name what the
  *     protocol has no operation for; they answer `unsupported` with the owner
  *     named, and `acknowledgeRevocation` / `retire` are the explicit local
@@ -44,19 +43,18 @@
 import { canonicalJson } from '../../shared/canonicalJson';
 import {
 	ENDPOINT_ENROLLMENT_PHASE_OUTCOMES,
+	ENROLLMENT_IDENTITY_PROTOCOL,
 	LOCAL_ENDPOINT_PROTOCOL,
-	LOCAL_ENDPOINT_PROTOCOL_V2,
 	LOCAL_ENDPOINT_REGISTRATION_USE_OPERATION,
 	isEndpointDigest,
 	type EndpointAttachmentRequest,
-	type EndpointAttachmentRequestV2,
 	type EndpointComponent,
-	type EndpointEnrollmentActivationV2,
-	type EndpointEnrollmentManagementV2,
-	type EndpointEnrollmentPhaseRequestV2,
-	type EndpointEnrollmentPhaseResultV2,
+	type EndpointEnrollmentActivation,
+	type EndpointEnrollmentManagement,
+	type EndpointEnrollmentPhaseRequest,
+	type EndpointEnrollmentPhaseResult,
 	type EndpointInvokeOutcome,
-	type EndpointPossessionChallengeV2,
+	type EndpointPossessionChallenge,
 	type EndpointRuntimeUseReference,
 	type EndpointPort,
 	type EndpointRegistrationApproval,
@@ -85,24 +83,12 @@ export interface EnrollmentLifecycleDeps {
 	 * composer uses it to start work that follows an attach (MRC-11-05).
 	 */
 	onAttached?(status: EndpointStatus): void;
-	/**
-	 * Protocol 2, the production attachment (handoff item 1, contracts 0.3.0):
-	 * the attachment is the v2 attachment on the ONE connection every caller
-	 * reads, offering `supported` with nothing required, and no v1 attachment
-	 * is sent. The endpoint holds one protocol per socket session, so every
-	 * operation on this connection is a v2 one. Absent, the v1 attachment, as a
-	 * host that predates protocol 2 had it.
-	 */
-	v2?: {
-		/** What this host offers on the v2 attachment; nothing is required. */
-		supported: readonly string[];
-	};
 }
 
 /** What every relayed phase carries besides its own body. */
 interface EnrollmentPhaseCommon {
 	socketPath: string;
-	management: EndpointEnrollmentManagementV2;
+	management: EndpointEnrollmentManagement;
 }
 
 /**
@@ -116,8 +102,8 @@ export type EnrollmentRequestInput =
 			orgId: string;
 			serverCaPem: string;
 	  })
-	| (EnrollmentPhaseCommon & { phase: 'prove'; challenge: EndpointPossessionChallengeV2 })
-	| (EnrollmentPhaseCommon & { phase: 'activate'; activation: EndpointEnrollmentActivationV2 });
+	| (EnrollmentPhaseCommon & { phase: 'prove'; challenge: EndpointPossessionChallenge })
+	| (EnrollmentPhaseCommon & { phase: 'activate'; activation: EndpointEnrollmentActivation });
 
 export type LifecycleRefusal =
 	| 'custody-unprotected'
@@ -159,7 +145,7 @@ export interface EnrollmentLifecycle {
 	status(): ManagedEnrollmentStatus;
 	requestEnrollment(
 		input: EnrollmentRequestInput
-	): Promise<LifecycleOutcome<EndpointEnrollmentPhaseResultV2>>;
+	): Promise<LifecycleOutcome<EndpointEnrollmentPhaseResult>>;
 	/** Dial the recorded endpoint and attach; after a restart the endpoint will want a registration first. */
 	connect(): Promise<LifecycleOutcome<EndpointStatus>>;
 	beginRegistration(): Promise<LifecycleOutcome<RegistrationApprovalHandoff>>;
@@ -262,33 +248,9 @@ export function createEnrollmentLifecycle(deps: EnrollmentLifecycleDeps): Enroll
 		return port;
 	}
 
-	function attachmentRequestV2(supported: readonly string[]): EndpointAttachmentRequestV2 {
-		return {
-			installationId: deps.installation.installationId,
-			runtimeId: deps.installation.runtimeId,
-			processEpoch: deps.installation.processEpoch,
-			components: deps.components,
-			supportedProtocols: [LOCAL_ENDPOINT_PROTOCOL_V2],
-			supportedCapabilities: supported,
-			requiredCapabilities: [],
-		};
-	}
-
-	/**
-	 * The attachment on `p`: with `deps.v2`, the v2 attachment on this one
-	 * connection (a port with no v2 side sends nothing); without it, the v1
-	 * attachment. A refused v2 attachment is never resent on `/v1/invoke`.
-	 */
+	/** The attachment on `p`, the one connection every caller reads. */
 	async function attachOn(p: EndpointPort): Promise<LifecycleOutcome<EndpointStatus>> {
-		if (!deps.v2) return relay('attachment', await p.attach(attachmentRequest()));
-		if (!p.v2) {
-			return {
-				status: 'unavailable',
-				reason: 'not-negotiated',
-				message: 'attachment: this endpoint port has no protocol 2 path; nothing was sent.',
-			};
-		}
-		return relay('attachment', await p.v2.attach(attachmentRequestV2(deps.v2.supported)));
+		return relay('attachment', await p.attach(attachmentRequest()));
 	}
 
 	/**
@@ -300,14 +262,7 @@ export function createEnrollmentLifecycle(deps: EnrollmentLifecycleDeps): Enroll
 	async function projectRegistrationUse(
 		p: EndpointPort
 	): Promise<LifecycleOutcome<RegistrationUseResult>> {
-		if (!p.v2) {
-			return {
-				status: 'unavailable',
-				reason: 'not-negotiated',
-				message: 'registration_use: no v2 connection is open; nothing was sent.',
-			};
-		}
-		const outcome = relay(LOCAL_ENDPOINT_REGISTRATION_USE_OPERATION, await p.v2.registration.use());
+		const outcome = relay(LOCAL_ENDPOINT_REGISTRATION_USE_OPERATION, await p.registration.use());
 		if (outcome.status !== 'ok') return outcome;
 		const reply = outcome.value;
 		if (reply.outcome === 'denied') {
@@ -368,7 +323,7 @@ export function createEnrollmentLifecycle(deps: EnrollmentLifecycleDeps): Enroll
 		}
 		// The production caller of `registration_use`: every v2 attachment that
 		// negotiated it asks for the reference the workflow and command contexts carry.
-		if (deps.v2 && p.v2?.negotiated(LOCAL_ENDPOINT_REGISTRATION_USE_OPERATION)) {
+		if (p.negotiated(LOCAL_ENDPOINT_REGISTRATION_USE_OPERATION)) {
 			await projectRegistrationUse(p);
 		}
 		deps.onAttached?.(endpoint);
@@ -407,22 +362,18 @@ export function createEnrollmentLifecycle(deps: EnrollmentLifecycleDeps): Enroll
 					? { challengeId: pendingApproval.challengeId, expiresAt: pendingApproval.expiresAt }
 					: null,
 				lastDenial,
-				...(deps.v2
-					? {
-							registrationUse: (() => {
-								const use = currentRegistrationUse();
-								return use
-									? { reference: structuredClone(use.reference), expiresAt: use.expiresAt }
-									: null;
-							})(),
-						}
-					: {}),
+				registrationUse: (() => {
+					const use = currentRegistrationUse();
+					return use
+						? { reference: structuredClone(use.reference), expiresAt: use.expiresAt }
+						: null;
+				})(),
 			};
 		},
 
 		requestEnrollment: (input) =>
-			serialized(async (): Promise<LifecycleOutcome<EndpointEnrollmentPhaseResultV2>> => {
-				const custody = custodyRefusal<EndpointEnrollmentPhaseResultV2>();
+			serialized(async (): Promise<LifecycleOutcome<EndpointEnrollmentPhaseResult>> => {
+				const custody = custodyRefusal<EndpointEnrollmentPhaseResult>();
 				if (custody) return custody;
 				const current = deps.identity.read();
 				if (input.phase === 'request') {
@@ -459,19 +410,12 @@ export function createEnrollmentLifecycle(deps: EnrollmentLifecycleDeps): Enroll
 				} catch (error) {
 					return refuse('no-endpoint', error instanceof Error ? error.message : String(error));
 				}
-				if (!p.v2) {
-					return {
-						status: 'unsupported',
-						owner: 'mega-maestro',
-						message: `The endpoint port for ${input.socketPath} has no protocol 2 path, where relayed enrollment lives.`,
-					};
-				}
-				// Availability first, on v2: an endpoint that does not offer enrollment to
-				// this peer is answered `unsupported` and nothing is relayed.
+				// Availability first: an endpoint that does not offer enrollment to this
+				// peer is answered `unsupported` and nothing is relayed.
 				const probe = relay(
 					'compatibility',
-					await p.v2.compatibility({
-						supportedProtocols: [LOCAL_ENDPOINT_PROTOCOL_V2],
+					await p.compatibility({
+						supportedProtocols: [LOCAL_ENDPOINT_PROTOCOL],
 						supportedCapabilities: ['enrollment'],
 						requiredCapabilities: [],
 					})
@@ -491,13 +435,16 @@ export function createEnrollmentLifecycle(deps: EnrollmentLifecycleDeps): Enroll
 						message: `The endpoint at ${input.socketPath} does not offer relayed enrollment to this peer.`,
 					};
 				}
-				const request: EndpointEnrollmentPhaseRequestV2 =
+				const request: EndpointEnrollmentPhaseRequest =
 					input.phase === 'request'
 						? {
 								phase: 'request',
 								management: { ...input.management },
 								serverCaPem: input.serverCaPem,
-								identity: attachmentRequest(),
+								identity: {
+									...attachmentRequest(),
+									supportedProtocols: [ENROLLMENT_IDENTITY_PROTOCOL],
+								},
 							}
 						: input.phase === 'prove'
 							? {
@@ -510,7 +457,7 @@ export function createEnrollmentLifecycle(deps: EnrollmentLifecycleDeps): Enroll
 									management: { ...input.management },
 									activation: structuredClone(input.activation),
 								};
-				const answered = relay('enrollment', await p.v2.invoke('enrollment', request));
+				const answered = relay('enrollment', await p.invoke('enrollment', request));
 				if (answered.status !== 'ok') return answered;
 				const problems = enrollmentPhaseResultProblems(
 					input.phase,
@@ -524,7 +471,7 @@ export function createEnrollmentLifecycle(deps: EnrollmentLifecycleDeps): Enroll
 						message: `enrollment: the ${input.phase} answer is not the phase's own: ${problems.join('; ')}`,
 					};
 				}
-				const result = answered.value as EndpointEnrollmentPhaseResultV2;
+				const result = answered.value as EndpointEnrollmentPhaseResult;
 				const at = new Date(now()).toISOString();
 				if (result.outcome === 'enrollment_requested' && input.phase === 'request') {
 					await deps.identity.write({
@@ -642,7 +589,7 @@ export function createEnrollmentLifecycle(deps: EnrollmentLifecycleDeps): Enroll
 						registeredAt: new Date(now()).toISOString(),
 					},
 				});
-				if (redeemed.status === 'unknown' && deps.v2) {
+				if (redeemed.status === 'unknown') {
 					// The redeem may have published the registration before its answer was
 					// lost. Reattach with the existing claim and ask registration_use; never
 					// register again. Only a projected reference proves it.
@@ -668,11 +615,11 @@ export function createEnrollmentLifecycle(deps: EnrollmentLifecycleDeps): Enroll
 				if (!current.record.registration) {
 					return refuse('no-challenge', 'This installation holds no completed registration.');
 				}
-				if (!port?.v2) {
+				if (!port) {
 					return {
 						status: 'unavailable',
 						reason: 'not-negotiated',
-						message: 'registration_use: no v2 connection is open; nothing was sent.',
+						message: 'registration_use: no connection is open; nothing was sent.',
 					};
 				}
 				return projectRegistrationUse(port);
@@ -767,8 +714,8 @@ export function managementFromEndpoint(
  * its own schema.
  */
 export function enrollmentPhaseResultProblems(
-	phase: EndpointEnrollmentPhaseRequestV2['phase'],
-	management: EndpointEnrollmentManagementV2,
+	phase: EndpointEnrollmentPhaseRequest['phase'],
+	management: EndpointEnrollmentManagement,
 	value: unknown
 ): string[] {
 	if (typeof value !== 'object' || value === null || Array.isArray(value))

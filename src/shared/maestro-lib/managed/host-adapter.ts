@@ -61,11 +61,10 @@ import {
 	type PolicySourceSet,
 } from './authority';
 import {
-	inboxRequestV2,
-	invokeSelectedEndpointOperation,
+	inboxRequest,
+	invokeNegotiated,
 	isEndpointIdentifier,
 	type EndpointInvokeOutcome,
-	type EndpointOperationSelectable,
 	type EndpointPort,
 	type EndpointStatus,
 	type PreparedExecutionPort,
@@ -86,7 +85,7 @@ import {
 	type ManagedWorkflowRef,
 	directDelegationRef,
 } from './types';
-import { createEndpointWorkflowV2OwnerPort } from './workflow-lifecycle-v2';
+import { createEndpointWorkflowOwnerPort } from './workflow-lifecycle';
 import type { WorkflowOwnerPort } from './workflows';
 import {
 	createManagedEffectAuthority,
@@ -446,22 +445,15 @@ export interface InboxPort {
 
 /**
  * The port over an attached endpoint socket. `inbox` is effectful (a lost answer is unknown); `noticeList` is not.
- * Each call goes through the v1/v2 selection: v1 unless the operation is in
- * `selected` (default `V2_OPERATIONS_SELECTED`, empty) and negotiated. The
- * v2 inbox request carries the v1 `idempotencyKey` unchanged.
+ * Each call is sent only when the attachment negotiated it. The inbox request
+ * carries its `idempotencyKey` unchanged.
  */
 export function endpointInboxPort(
-	endpoint: EndpointOperationSelectable,
-	selected?: readonly string[]
+	endpoint: Pick<EndpointPort, 'invoke' | 'negotiated'>
 ): InboxPort {
 	return {
-		list: (request) =>
-			invokeSelectedEndpointOperation(endpoint, 'noticeList', request, { selected }),
-		act: (request) =>
-			invokeSelectedEndpointOperation(endpoint, 'inbox', request, {
-				selected,
-				v2Payload: inboxRequestV2,
-			}),
+		list: (request) => invokeNegotiated(endpoint, 'noticeList', request),
+		act: (request) => invokeNegotiated(endpoint, 'inbox', inboxRequest(request)),
 	};
 }
 
@@ -535,15 +527,13 @@ export interface TelemetryPort {
 
 /**
  * The port over an attached endpoint socket. The client decides unavailable vs unknown.
- * Each report goes through the v1/v2 selection: v1 unless `telemetry` is in
- * `selected` (default `V2_OPERATIONS_SELECTED`, empty) and negotiated.
+ * A report is sent only when the attachment negotiated `telemetry`.
  */
 export function endpointTelemetryPort(
-	endpoint: EndpointOperationSelectable,
-	selected?: readonly string[]
+	endpoint: Pick<EndpointPort, 'invoke' | 'negotiated'>
 ): TelemetryPort {
 	return {
-		report: (event) => invokeSelectedEndpointOperation(endpoint, 'telemetry', event, { selected }),
+		report: (event) => invokeNegotiated(endpoint, 'telemetry', event),
 	};
 }
 
@@ -737,7 +727,7 @@ export function createManagedHostAdapter(deps: ManagedHostAdapterDeps): ManagedH
 		}
 	>();
 	let invalidation = 0;
-	const workflowOwnerPort = createEndpointWorkflowV2OwnerPort({
+	const workflowOwnerPort = createEndpointWorkflowOwnerPort({
 		endpoint: () => deps.endpoint ?? null,
 		registration: () => deps.status().registrationUse?.reference ?? null,
 	});

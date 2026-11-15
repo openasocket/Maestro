@@ -1,5 +1,5 @@
 /**
- * The v2 execution client (`createEndpointExecutionV2Client`) over a real
+ * The v2 execution client (`createEndpointExecutionClient`) over a real
  * Unix socket against the fake daemon in `fakeEndpoint.ts`, after a real
  * `workflow_claim` round trip through the v2 lifecycle client.
  *
@@ -22,18 +22,18 @@ import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 import { createLocalEndpointClient } from '../../../../main/enterprise/endpoint-client';
 import {
-	createEndpointExecutionV2Client,
-	type EndpointExecutionV2Deps,
-	type EndpointExecutionV2Submission,
-} from '../../../../shared/maestro-lib/managed/execution-v2';
-import { createEndpointWorkflowV2Client } from '../../../../shared/maestro-lib/managed/workflow-lifecycle-v2';
+	createEndpointExecutionClient,
+	type EndpointExecutionDeps,
+	type EndpointExecutionSubmission,
+} from '../../../../shared/maestro-lib/managed/execution';
+import { createEndpointWorkflowClient } from '../../../../shared/maestro-lib/managed/workflow-lifecycle';
 import {
-	LOCAL_ENDPOINT_INVOKE_V2_PATH,
-	type EndpointAttachmentRequestV2,
+	LOCAL_ENDPOINT_INVOKE_PATH,
+	type EndpointAttachmentRequest,
 	type EndpointPort,
 	type EndpointRuntimeUseReference,
-	type EndpointWorkflowClaimRequestV2,
-	type EndpointWorkflowLeaseV2,
+	type EndpointWorkflowClaimRequest,
+	type EndpointWorkflowLease,
 } from '../../../../shared/maestro-lib/managed/endpoint-port';
 import { inspectContractsDir } from '../../../../../scripts/check-mega-contract-vectors.mjs';
 import { readPin } from '../../../../../scripts/import-mega-maestro.mjs';
@@ -42,10 +42,7 @@ import {
 	type FakeEndpoint,
 	type FakeEndpointOptions,
 } from '../../../main/enterprise/fakeEndpoint';
-import {
-	ISSUED,
-	workflowV2Producer as producer,
-} from '../../../main/enterprise/workflowV2Producer';
+import { ISSUED, workflowProducer as producer } from '../../../main/enterprise/workflowProducer';
 
 const WORKFLOW_OPERATIONS = [
 	'workflow_claim',
@@ -55,7 +52,7 @@ const WORKFLOW_OPERATIONS = [
 ];
 const OFFER = [...WORKFLOW_OPERATIONS, 'execution', 'delegation'];
 
-const ATTACH_V2: EndpointAttachmentRequestV2 = {
+const ATTACH: EndpointAttachmentRequest = {
 	installationId: 'inst-1',
 	runtimeId: 'desktop-100',
 	processEpoch: 'epoch-1',
@@ -84,7 +81,7 @@ const ROOT = { grantId: '6f1c2c1e-0000-4000-8000-0000000000c1', digest: '1'.repe
 const PARENT = { grantId: '6f1c2c1e-0000-4000-8000-0000000000c2', digest: '2'.repeat(64) };
 const PRESENTED = { grantId: '6f1c2c1e-0000-4000-8000-0000000000c3', digest: '3'.repeat(64) };
 
-const CLAIM: EndpointWorkflowClaimRequestV2 = {
+const CLAIM: EndpointWorkflowClaimRequest = {
 	registration: REGISTRATION,
 	delegation: { grant: PRESENTED, chain: [ROOT, PARENT, PRESENTED] },
 	grants: [ROOT],
@@ -158,22 +155,22 @@ describe('v2 execution client', () => {
 	/** A v2 attachment that negotiated `offer`, a claimed lease, and an execution client over the fence. */
 	async function claimed(
 		options: FakeEndpointOptions = {},
-		deps: Partial<EndpointExecutionV2Deps> = {}
+		deps: Partial<EndpointExecutionDeps> = {}
 	) {
 		const fake = await startFakeEndpoint({
-			v2Capabilities: OFFER,
+			capabilities: OFFER,
 			operations: { ...producer(), execution: broker() },
 			...options,
 		});
 		open.push(fake);
 		const port = createLocalEndpointClient({ socketPath: fake.socketPath });
 		ports.push(port);
-		expect((await port.v2!.attach(ATTACH_V2)).status).toBe('ok');
-		const claim = await createEndpointWorkflowV2Client(port).claim(CLAIM);
+		expect((await port.attach(ATTACH)).status).toBe('ok');
+		const claim = await createEndpointWorkflowClient(port).claim(CLAIM);
 		if (claim.status !== 'ok' || claim.payload.outcome !== 'owned') throw new Error('not owned');
 		const lease = claim.payload.lease;
 		const held = { fence: { ...lease.owner } as typeof lease.owner | null };
-		const client = createEndpointExecutionV2Client(port, {
+		const client = createEndpointExecutionClient(port, {
 			fence: () => held.fence,
 			registration: () => REGISTRATION,
 			...deps,
@@ -182,9 +179,9 @@ describe('v2 execution client', () => {
 	}
 
 	const submission = (
-		lease: EndpointWorkflowLeaseV2,
-		over: Partial<EndpointExecutionV2Submission> = {}
-	): EndpointExecutionV2Submission => ({
+		lease: EndpointWorkflowLease,
+		over: Partial<EndpointExecutionSubmission> = {}
+	): EndpointExecutionSubmission => ({
 		lease,
 		run: { runId: lease.runId, attemptId: lease.attemptId },
 		requestId: '6f1c2c1e-0000-4000-8000-0000000000d1',
@@ -201,7 +198,7 @@ describe('v2 execution client', () => {
 
 	const executions = (fake: FakeEndpoint) =>
 		fake
-			.callsTo(LOCAL_ENDPOINT_INVOKE_V2_PATH)
+			.callsTo(LOCAL_ENDPOINT_INVOKE_PATH)
 			.map((call) => call.body as { operation: string; payload: Payload })
 			.filter((body) => body.operation === 'execution');
 
@@ -237,11 +234,10 @@ describe('v2 execution client', () => {
 		expect(outcome.payload.receipt.grantId).toBe(PRESENTED.grantId);
 		// Dispatch is not completion: nothing settled or released.
 		const operations = fake
-			.callsTo(LOCAL_ENDPOINT_INVOKE_V2_PATH)
+			.callsTo(LOCAL_ENDPOINT_INVOKE_PATH)
 			.map((call) => (call.body as { operation: string }).operation);
 		expect(operations).not.toContain('workflow_settle');
 		expect(operations).not.toContain('workflow_release');
-		expect(fake.callsTo('/v1/invoke')).toHaveLength(0);
 	});
 
 	it('an uncertain dispatch is credited as unknown, never as done', async () => {
@@ -274,14 +270,11 @@ describe('v2 execution client', () => {
 			reason: 'stale-authority',
 		});
 		held.fence = { ...lease.owner };
-		const late = createEndpointExecutionV2Client(
-			{ v2: (await claimed()).port.v2 },
-			{
-				fence: () => held.fence,
-				registration: () => REGISTRATION,
-				now: () => Date.parse(lease.expiresAt) + 1,
-			}
-		);
+		const late = createEndpointExecutionClient((await claimed()).port, {
+			fence: () => held.fence,
+			registration: () => REGISTRATION,
+			now: () => Date.parse(lease.expiresAt) + 1,
+		});
 		expect(await late.submit(submission(lease))).toMatchObject({
 			status: 'unavailable',
 			reason: 'stale-authority',
@@ -334,7 +327,7 @@ describe('v2 execution client', () => {
 		});
 		expect(executions(fake)).toHaveLength(1);
 
-		const restarted = createEndpointExecutionV2Client(port, {
+		const restarted = createEndpointExecutionClient(port, {
 			fence: () => lease.owner,
 			registration: () => REGISTRATION,
 		});
@@ -366,19 +359,19 @@ describe('v2 execution client', () => {
 			).toMatchObject({ status: 'unavailable', reason: 'malformed' });
 		}
 		fake.options.operations!.execution = broker();
-		fake.options.v2Envelope = (envelope) => ({ ...envelope, correlationId: 'someone-else' });
+		fake.options.envelope = (envelope) => ({ ...envelope, correlationId: 'someone-else' });
 		const foreign = await client.submit(submission(lease, { idempotencyKey: 'exec-idem-env' }));
 		expect(foreign).toMatchObject({ status: 'unavailable', reason: 'malformed' });
 		if (foreign.status === 'unavailable') expect(foreign.message).toMatch(/correlationId/);
 	});
 
 	it('sends nothing until execution (and delegation, for a delegated lease) is negotiated, or with no grant', async () => {
-		const bare = await claimed({ v2Capabilities: WORKFLOW_OPERATIONS });
+		const bare = await claimed({ capabilities: WORKFLOW_OPERATIONS });
 		expect(await bare.client.submit(submission(bare.lease))).toMatchObject({
 			status: 'unavailable',
 			reason: 'not-negotiated',
 		});
-		const undelegated = await claimed({ v2Capabilities: [...WORKFLOW_OPERATIONS, 'execution'] });
+		const undelegated = await claimed({ capabilities: [...WORKFLOW_OPERATIONS, 'execution'] });
 		expect(await undelegated.client.submit(submission(undelegated.lease))).toMatchObject({
 			status: 'unavailable',
 			reason: 'not-negotiated',

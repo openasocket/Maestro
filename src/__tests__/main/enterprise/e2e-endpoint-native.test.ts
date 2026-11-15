@@ -9,6 +9,7 @@ import {
 } from '../../../main/enterprise/e2e-endpoint-native';
 import { createPlatformEndpointClient } from '../../../main/enterprise/endpoint-client';
 import {
+	LOCAL_ENDPOINT_PROTOCOL,
 	endpointNativePortProblem,
 	endpointServerVerificationProblems,
 	type EndpointPort,
@@ -17,8 +18,8 @@ import { startFakeEndpoint, type FakeEndpoint } from './fakeEndpoint';
 
 const ENV = { NODE_ENV: 'test', MAESTRO_E2E_ENDPOINT_NATIVE: 'fixture' };
 const COMPAT = {
-	protocol: 1 as const,
-	components: [{ id: 'maestro', kind: 'maestro', version: '1.1.0-RC' }],
+	supportedProtocols: [LOCAL_ENDPOINT_PROTOCOL] as const,
+	supportedCapabilities: ['attachment', 'compatibility'],
 	requiredCapabilities: [],
 };
 

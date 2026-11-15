@@ -34,13 +34,14 @@ import {
 import type { LifecycleFact } from '../../../shared/maestro-lib/managed/events';
 import type { Anchor } from '../../../main/utils/keyring-anchor';
 import { fakeAnchor, fakeSeal } from './fakeCustody';
+import { typedCommand, wireOf } from './commandWire';
 import { startFakeEndpoint, type FakeEndpoint } from './fakeEndpoint';
 import {
 	ISSUED,
 	projectedRegistrationUse,
-	WORKFLOW_V2_OFFER,
-	workflowV2Producer,
-} from './workflowV2Producer';
+	WORKFLOW_OFFER,
+	workflowProducer,
+} from './workflowProducer';
 import { requestPhase } from './enrollmentPhases';
 
 const NOW = Date.parse('2026-10-21T12:00:00Z');
@@ -542,12 +543,11 @@ describe('enterprise service', () => {
 			null;
 		fake = await startFakeEndpoint({
 			registrationRequired: true,
-			capabilities: ['execution'],
-			v2Capabilities: [...WORKFLOW_V2_OFFER],
+			capabilities: [...WORKFLOW_OFFER],
 			now: () => NOW,
 			operations: {
 				registration_use: () => projectedRegistrationUse(installation!),
-				...workflowV2Producer({ now: () => NOW }),
+				...workflowProducer({ now: () => NOW }),
 			},
 		});
 		const service = compose();
@@ -658,8 +658,7 @@ describe('enterprise service', () => {
 		const reports: Record<string, unknown>[] = [];
 		const telemetryFake = await startFakeEndpoint({
 			registrationRequired: true,
-			capabilities: ['execution', 'telemetry'],
-			v2Capabilities: ['telemetry'],
+			capabilities: ['telemetry'],
 			now: () => NOW,
 			operations: {
 				telemetry: (payload) => {
@@ -756,8 +755,7 @@ describe('enterprise service', () => {
 		};
 		const inboxFake = await startFakeEndpoint({
 			registrationRequired: true,
-			capabilities: ['execution', 'inbox', 'noticeList'],
-			v2Capabilities: ['inbox', 'noticeList'],
+			capabilities: ['inbox', 'noticeList'],
 			now: () => NOW,
 			operations: {
 				noticeList: (payload) => {
@@ -829,34 +827,31 @@ describe('enterprise service', () => {
 			// Maestro redeems names no actor (CP-01/CP-04), so it is refused by that name, and
 			// the refusal is the ledger's, durable in the data directory.
 			expect(service.commands.status().standing).toEqual({ ok: true });
-			const decided = await service.commands.receive({
-				commandId: 'cmd-1',
-				tenantId: 'tenant-1',
-				issuerId: 'issuer-1',
-				recipient: {
-					actorId: 'actor-1',
-					enrollmentId: 'enr-1',
-					installationId: service.installation.installationId,
-					runtimeId: service.installation.runtimeId,
-					processEpoch: service.installation.processEpoch,
-					runId: 'run-1',
-				},
-				action: { kind: 'report-status' },
-				preconditions: {
-					policyRevision: 3,
-					requiredCapability: 'command-report_status',
-					policyDigest: null,
-					bindingDigest: null,
-				},
-				approval: { kind: 'policy-not-required', policyRevision: 3 },
-				issuedAt: new Date(NOW - 1_000).toISOString(),
-				expiresAt: new Date(NOW + 60_000).toISOString(),
-				nonce: 'n'.repeat(64),
-				idempotencyKey: 'idem-1',
-				payloadDigest: 'a'.repeat(64),
-				releaseId: null,
-			});
-			expect(decided).toMatchObject({ status: 'denied', reason: 'unauthenticated' });
+			// The command arrives as a v2 delivery addressed to this registration. This composition does not
+			// negotiate the command wire, so it is refused unsupported_version before any standing is read.
+			const challengeId = service.lifecycle.status().identity.record!.registration!.challengeId;
+			const decided = await service.commands.receive(
+				wireOf(
+					typedCommand('cmd-1', {
+						tenantId: 'tenant-1',
+						issuerId: 'issuer-1',
+						recipient: {
+							actorId: 'actor-1',
+							enrollmentId: 'enr-1',
+							installationId: service.installation.installationId,
+							runtimeId: service.installation.runtimeId,
+							processEpoch: service.installation.processEpoch,
+							runId: 'run-1',
+						},
+						action: { kind: 'cancel-run' },
+						nonce: 'n'.repeat(64),
+						idempotencyKey: 'idem-1',
+						payloadDigest: 'a'.repeat(64),
+					}),
+					{ challengeId }
+				)
+			);
+			expect(decided).toEqual({ outcome: 'denied', reason: 'unsupported_version' });
 			// A command that does not bind to this host's actor is nobody's to record here.
 			expect(service.commands.status().commands).toMatchObject({ total: 0, open: 0 });
 

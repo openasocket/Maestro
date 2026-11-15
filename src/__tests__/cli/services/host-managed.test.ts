@@ -48,7 +48,7 @@ import {
 } from '../../../shared/maestro-lib/managed/endpoint-port';
 import { inProcessContext } from '../../../shared/maestro-lib/managed/operations';
 import { fakeAnchor, fakeSeal } from '../../main/enterprise/fakeCustody';
-import { anotherCommand } from '../../main/enterprise/fakeManaged';
+import { typedCommand, wireOf } from '../../main/enterprise/commandWire';
 import { startFakeEndpoint, type FakeEndpoint } from '../../main/enterprise/fakeEndpoint';
 import {
 	activatePhase,
@@ -241,7 +241,6 @@ describe('composeHostManaged', () => {
 		expect(await composed.control.completeRegistration()).toMatchObject({ status: 'ok' });
 		expect(composed.status()?.authority).toBe('registered');
 		// Every envelope is a protocol 2 one the pinned 0.3.0 contract accepts, and nothing went to v1.
-		expect(fake.callsTo('/v1/invoke')).toEqual([]);
 		const sentV2 = fake.callsTo('/v2/invoke');
 		expect(sentV2.length).toBeGreaterThan(0);
 		for (const call of sentV2) protocolSchemas.localRequestEnvelopeV2.parse(call.body);
@@ -278,8 +277,7 @@ describe('composeHostManaged', () => {
 		};
 		fake = await startFakeEndpoint({
 			registrationRequired: true,
-			capabilities: ['execution', 'inbox', 'noticeList'],
-			v2Capabilities: ['inbox', 'noticeList'],
+			capabilities: ['inbox', 'noticeList'],
 			now: () => NOW,
 			operations: {
 				noticeList: () => {
@@ -398,10 +396,15 @@ describe('composeHostManaged', () => {
 		expect(composed.status()?.authority).toBe('registered');
 		expect(commands.status().standing).toEqual({ ok: true });
 
-		// A recipient on another installation is refused by name, and the ledger records no acceptance.
-		expect(await commands.receive(anotherCommand('cmd-foreign'))).toMatchObject({
-			status: 'denied',
-			reason: 'stale-run',
+		// A recipient on another installation, delivered as v2. This composition never negotiates the
+		// command wire (no commandWire is passed to createCommandService here), so the delivery is
+		// refused unsupported_version before any standing is read, and the ledger records nothing.
+		const foreign = wireOf(
+			typedCommand('cmd-foreign', { recipient: { installationId: 'inst-other' } })
+		);
+		expect(await commands.receive(foreign)).toEqual({
+			outcome: 'denied',
+			reason: 'unsupported_version',
 		});
 		expect(commands.ledger.list()).toHaveLength(0);
 
@@ -548,7 +551,6 @@ describe('composeHostManaged', () => {
 			]);
 			for (const call of fake.callsTo('/v2/invoke'))
 				protocolSchemas.localRequestEnvelopeV2.parse(call.body);
-			expect(fake.callsTo('/v1/invoke')).toEqual([]);
 		} finally {
 			await composed.lifecycle.close();
 		}
@@ -875,7 +877,6 @@ describe('composeHostManaged', () => {
 		// The fake's registration gate is off, but authority is still this process's own registration.
 		expect(status?.authority).toBe('none');
 		expect(fake.calls.some((call) => call.path === '/v2/invoke')).toBe(true);
-		expect(fake.calls.some((call) => call.path === '/v1/invoke')).toBe(false);
 		// The adapter speaks over the socket the lifecycle opened.
 		expect(adapter.workflows).not.toBeNull();
 
@@ -925,7 +926,6 @@ describe('composeHostManaged', () => {
 		await linux.lifecycle.attach();
 		expect(linux.status()?.connection).toMatchObject({ attached: true });
 		expect(fake.calls.some((call) => call.path === '/v2/invoke')).toBe(true);
-		expect(fake.calls.some((call) => call.path === '/v1/invoke')).toBe(false);
 		await linux.lifecycle.close();
 	});
 });

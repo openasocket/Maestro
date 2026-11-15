@@ -131,20 +131,27 @@ describe('check-mega-contract-vectors.mjs', () => {
 		const actions = facts.commandActions
 			.map((a) => `z.strictObject({ kind: z.literal(${JSON.stringify(a)}) })`)
 			.join(', ');
-		const module = [
+		const protocol = [
 			`import { z } from 'zod';`,
 			`const component = z.strictObject({ id: z.string(), kind: ${names(facts.componentKinds)} });`,
-			`export const attachmentRequest = z.strictObject({ supportedProtocols: z.array(z.literal(${facts.protocol})), components: z.array(component) });`,
+			`export const attachmentRequestV2 = z.strictObject({ supportedProtocols: z.tuple([z.literal(${facts.protocol})]), components: z.array(component) });`,
+			`export const executionRequestV2 = z.strictObject({ source: ${names(facts.executionSources)} });`,
+			`export const localRequestEnvelopeV2 = z.strictObject({ operation: ${names(facts.operations)} });`,
+		].join('\n');
+		const shared = [
+			`import { z } from 'zod';`,
 			`export const denied = z.strictObject({ reason: ${names(facts.denialReasons)} });`,
 			`export const commandRequest = z.strictObject({ action: z.discriminatedUnion('kind', [${actions}]) });`,
-			`export const executionRequest = z.strictObject({ source: ${names(facts.executionSources)} });`,
-			`export const localRequestEnvelope = z.strictObject({ operation: ${names(facts.operations)} });`,
 			`export const localMaximumRequestBytes = ${facts.maxRequestBytes};`,
 			`export const localMaximumResponseBytes = ${facts.maxResponseBytes};`,
 		].join('\n');
 		fs.mkdirSync(path.join(dir, 'dist'), { recursive: true });
-		fs.writeFileSync(path.join(dir, 'dist/local-endpoint.js'), module);
-		const payloadSha256 = { 'dist/local-endpoint.js': sha256(module) };
+		fs.writeFileSync(path.join(dir, 'dist/protocol.js'), protocol);
+		fs.writeFileSync(path.join(dir, 'dist/local-endpoint.js'), shared);
+		const payloadSha256 = {
+			'dist/protocol.js': sha256(protocol),
+			'dist/local-endpoint.js': sha256(shared),
+		};
 		const { sourceRevision } = vectors.counterpart;
 		const provenance = { formatVersion: 1, sourceRevision, sourceDirty, payloadSha256 };
 		fs.writeFileSync(path.join(dir, 'provenance.json'), JSON.stringify(provenance));

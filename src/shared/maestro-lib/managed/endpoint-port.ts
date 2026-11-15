@@ -7,9 +7,7 @@
  * The production wire is protocol 2 (contracts 0.3.0): one `POST /v2/invoke`
  * per operation, a JSON envelope `{ schemaVersion: 2, correlationId,
  * operation, payload }` both ways, the registration handshake
- * (`registration_challenge`, `registration_redeem`) included. The protocol 1
- * wire (`POST /v1/invoke`) stays in the client until the endpoint retires it,
- * and no production caller sends on it. A request of at most 1 MiB,
+ * (`registration_challenge`, `registration_redeem`) included. A request of at most 1 MiB,
  * an answer of at most 64 KiB, and a per-socket session that begins with an
  * `attachment` and ends with the connection. The endpoint authenticates the
  * OS peer (uid, pid, process birth) on every request and resolves it through
@@ -38,16 +36,13 @@ import type {
 	EndpointTelemetryEvent,
 } from './host-adapter';
 
-export const LOCAL_ENDPOINT_PROTOCOL = 1 as const;
-export const LOCAL_ENDPOINT_SCHEMA_VERSION = 1 as const;
-export const LOCAL_ENDPOINT_INVOKE_PATH = '/v1/invoke';
 /**
- * Protocol 2 (contracts 0.3.0): the production protocol, negotiated per
- * connection on its own path. A request refused on /v2/invoke is never retried
- * on /v1/invoke.
+ * The endpoint wire protocol: one JSON envelope per `POST /v2/invoke`, both
+ * ways. It is the only protocol this client speaks; there is no earlier one.
  */
-export const LOCAL_ENDPOINT_PROTOCOL_V2 = 2 as const;
-export const LOCAL_ENDPOINT_INVOKE_V2_PATH = '/v2/invoke';
+export const LOCAL_ENDPOINT_PROTOCOL = 2 as const;
+export const LOCAL_ENDPOINT_INVOKE_PATH = '/v2/invoke';
+
 /**
  * The pre-registration handshake (contracts 0.3.0 `localEndpointContractsV2`):
  * two v2 envelopes on ONE connection, before any attachment. A pending
@@ -65,35 +60,44 @@ export const LOCAL_ENDPOINT_TIMEOUT_MS = 5_000;
 
 export const LOCAL_ENDPOINT_OPERATIONS = [
 	'attachment',
-	'enrollment',
-	'execution',
-	'offline',
-	'telemetry',
-	'command',
-	'inbox',
-	'noticeList',
-	'workflow',
-	'budget',
 	'compatibility',
-	'model',
-	// Contracts 0.2.0 local-endpoint.js lists it (the actor-bound desktop settings
-	// projection). No v1 caller sends it and it is not effectful; it is known here so
-	// an envelope that names it is read against the pinned contract.
+	'registration_use',
+	'registration_challenge',
+	'registration_redeem',
+	'enrollment',
+	'noticeList',
+	'offline',
 	'desktopPolicy',
+	'telemetry',
+	'inbox',
+	'budget',
+	'model',
+	'command',
+	'localControl',
+	'execution',
+	'workflow_claim',
+	'workflow_renew',
+	'workflow_settle',
+	'workflow_release',
 ] as const;
 export type LocalEndpointOperation = (typeof LOCAL_ENDPOINT_OPERATIONS)[number];
 
 /** Operations whose request, once sent, may have had an effect; a lost answer is `unknown`, not a retry. */
 export const LOCAL_ENDPOINT_EFFECTFUL_OPERATIONS: readonly LocalEndpointOperation[] = [
+	'registration_redeem',
 	'enrollment',
-	'execution',
-	'offline',
-	'telemetry',
-	'command',
 	'inbox',
-	'workflow',
+	'telemetry',
 	'budget',
+	'offline',
 	'model',
+	'localControl',
+	'command',
+	'execution',
+	'workflow_claim',
+	'workflow_renew',
+	'workflow_settle',
+	'workflow_release',
 ];
 
 export const LOCAL_ENDPOINT_DENIAL_REASONS = [
@@ -132,12 +136,17 @@ export interface EndpointComponent {
 	version: string;
 }
 
+/**
+ * The attachment, one per connection on `/v2/invoke`. `supportedProtocols` is
+ * exactly [2]; every required capability must also be supported, and neither
+ * list may repeat an entry.
+ */
 export interface EndpointAttachmentRequest {
 	installationId: string;
 	runtimeId: string;
 	processEpoch: string;
 	components: readonly EndpointComponent[];
-	supportedProtocols: readonly (typeof LOCAL_ENDPOINT_PROTOCOL)[];
+	supportedProtocols: readonly [typeof LOCAL_ENDPOINT_PROTOCOL];
 	supportedCapabilities: readonly string[];
 	requiredCapabilities: readonly string[];
 }
@@ -152,7 +161,7 @@ export type EndpointCollectionProfile = 'metadata' | 'redacted' | 'full' | 'full
  */
 export interface EndpointStatus {
 	outcome: 'attached';
-	protocol: typeof LOCAL_ENDPOINT_PROTOCOL | typeof LOCAL_ENDPOINT_PROTOCOL_V2;
+	protocol: typeof LOCAL_ENDPOINT_PROTOCOL;
 	capabilities: readonly string[];
 	management: EndpointManagementState;
 	desiredPolicyRevision: number | null;
@@ -162,58 +171,29 @@ export interface EndpointStatus {
 }
 
 /**
- * The protocol 2 attachment (contracts 0.2.0 `attachmentRequestV2`): the v1
- * request with `supportedProtocols` fixed at [2]. Every required capability
- * must also be supported, and neither list may repeat an entry.
- */
-export interface EndpointAttachmentRequestV2 extends Omit<
-	EndpointAttachmentRequest,
-	'supportedProtocols'
-> {
-	supportedProtocols: readonly [typeof LOCAL_ENDPOINT_PROTOCOL_V2];
-}
-
-/** The endpoint's answer to a v2 attachment: the v1 status at protocol 2, with the negotiated capabilities. */
-export interface EndpointStatusV2 extends Omit<EndpointStatus, 'protocol'> {
-	protocol: typeof LOCAL_ENDPOINT_PROTOCOL_V2;
-}
-
-/**
  * The v2 `compatibility` request (the contract's `protocolNegotiationRequest`):
  * availability only, answered before any attachment. Every required
  * capability must also be supported.
  */
-export interface EndpointCompatibilityRequestV2 {
-	supportedProtocols: readonly [typeof LOCAL_ENDPOINT_PROTOCOL_V2];
+export interface EndpointCompatibilityRequest {
+	supportedProtocols: readonly [typeof LOCAL_ENDPOINT_PROTOCOL];
 	supportedCapabilities: readonly string[];
 	requiredCapabilities: readonly string[];
 }
 
 /** The v2 `compatibility` answer (`protocolNegotiationResult` at protocol 2). */
-export interface EndpointCompatibilityResultV2 {
+export interface EndpointCompatibilityResult {
 	outcome: 'negotiated';
-	protocol: typeof LOCAL_ENDPOINT_PROTOCOL_V2;
+	protocol: typeof LOCAL_ENDPOINT_PROTOCOL;
 	capabilities: readonly string[];
 }
 
 /** What a v2 attachment negotiated on the current connection. */
 export interface EndpointNegotiation {
-	protocol: typeof LOCAL_ENDPOINT_PROTOCOL_V2;
+	protocol: typeof LOCAL_ENDPOINT_PROTOCOL;
 	/** The capabilities the endpoint selected; an operation is negotiated only when it is listed here. */
 	capabilities: readonly string[];
-	status: EndpointStatusV2;
-}
-
-export interface EndpointCompatibilityRequest {
-	protocol: typeof LOCAL_ENDPOINT_PROTOCOL;
-	components: readonly EndpointComponent[];
-	requiredCapabilities: readonly string[];
-}
-
-export interface EndpointCompatibilityResult {
-	outcome: 'compatible';
-	protocol: typeof LOCAL_ENDPOINT_PROTOCOL;
-	capabilities: readonly string[];
+	status: EndpointStatus;
 }
 
 /**
@@ -259,14 +239,14 @@ export interface EndpointRegistrationReceipt {
 // bearer, invitation, private key or the challenge nonce's answer.
 
 /** `enrollmentManagementV2`: a canonical HTTPS origin (`new URL(o).origin`), the tenant and the issuer digest. */
-export interface EndpointEnrollmentManagementV2 {
+export interface EndpointEnrollmentManagement {
 	origin: string;
 	tenantId: string;
 	issuerSha256: string;
 }
 
 /** `possessionChallenge`: what the operator's central begin issued for the service key to sign. */
-export interface EndpointPossessionChallengeV2 {
+export interface EndpointPossessionChallenge {
 	id: string;
 	enrollmentId: string;
 	/** 43 characters of `[A-Za-z0-9_-]`. */
@@ -275,7 +255,7 @@ export interface EndpointPossessionChallengeV2 {
 }
 
 /** `enrollmentActivationV2`: the certificate the operator's central activation issued, and its trust. */
-export interface EndpointEnrollmentActivationV2 {
+export interface EndpointEnrollmentActivation {
 	enrollmentId: string;
 	certificatePem: string;
 	trust: {
@@ -286,33 +266,47 @@ export interface EndpointEnrollmentActivationV2 {
 	};
 }
 
+/**
+ * The protocol the pinned 0.3.0 enrollment phase request names for its
+ * `identity`: the contract types that field with the attachment schema of
+ * local-endpoint.js, which admits only protocol 1. It is a fact of the contract,
+ * not a wire path: the phase itself travels on `/v2/invoke` like every
+ * operation. Moving the field to protocol 2 is a contract change Mega owns; until
+ * it lands, Maestro sends what the contract accepts.
+ */
+export const ENROLLMENT_IDENTITY_PROTOCOL = 1 as const;
+
+/** The `identity` of a request phase: the attachment the contract fixes for enrollment. */
+export type EndpointEnrollmentIdentity = Omit<EndpointAttachmentRequest, 'supportedProtocols'> & {
+	supportedProtocols: readonly [typeof ENROLLMENT_IDENTITY_PROTOCOL];
+};
+
 /** `enrollmentPhaseRequestV2`: one relayed phase per request. */
-export type EndpointEnrollmentPhaseRequestV2 =
+export type EndpointEnrollmentPhaseRequest =
 	| {
 			phase: 'request';
-			management: EndpointEnrollmentManagementV2;
+			management: EndpointEnrollmentManagement;
 			serverCaPem: string;
-			/** The v1 attachment request shape (`attachmentRequest`), `supportedProtocols` [1] as the schema fixes it. */
-			identity: EndpointAttachmentRequest;
+			identity: EndpointEnrollmentIdentity;
 	  }
 	| {
 			phase: 'prove';
-			management: EndpointEnrollmentManagementV2;
-			challenge: EndpointPossessionChallengeV2;
+			management: EndpointEnrollmentManagement;
+			challenge: EndpointPossessionChallenge;
 	  }
 	| {
 			phase: 'activate';
-			management: EndpointEnrollmentManagementV2;
-			activation: EndpointEnrollmentActivationV2;
+			management: EndpointEnrollmentManagement;
+			activation: EndpointEnrollmentActivation;
 	  };
 
-export type EndpointEnrollmentPhase = EndpointEnrollmentPhaseRequestV2['phase'];
+export type EndpointEnrollmentPhase = EndpointEnrollmentPhaseRequest['phase'];
 
 /** `enrollmentPhaseResultV2`: the outcome each phase answers, echoing the management it named. */
-export type EndpointEnrollmentPhaseResultV2 =
+export type EndpointEnrollmentPhaseResult =
 	| {
 			outcome: 'enrollment_requested';
-			management: EndpointEnrollmentManagementV2;
+			management: EndpointEnrollmentManagement;
 			requestId: string;
 			identity: EndpointAttachmentRequest & {
 				publicKeyPem: string;
@@ -321,7 +315,7 @@ export type EndpointEnrollmentPhaseResultV2 =
 	  }
 	| {
 			outcome: 'possession_signed';
-			management: EndpointEnrollmentManagementV2;
+			management: EndpointEnrollmentManagement;
 			enrollmentId: string;
 			challengeId: string;
 			/** 86 characters of base64url. */
@@ -329,7 +323,7 @@ export type EndpointEnrollmentPhaseResultV2 =
 	  }
 	| {
 			outcome: 'enrolled';
-			management: EndpointEnrollmentManagementV2;
+			management: EndpointEnrollmentManagement;
 			enrollmentId: string;
 			keyStorage: 'software' | 'platform_non_exportable';
 	  };
@@ -384,46 +378,46 @@ export type EndpointRegistrationUseReply =
 // ---------------------------------------------------------------------------
 
 /** The four lifecycle operations `/v2/invoke` serves, by their wire names. */
-export const LOCAL_ENDPOINT_WORKFLOW_V2_OPERATIONS = [
+export const LOCAL_ENDPOINT_WORKFLOW_OPERATIONS = [
 	'workflow_claim',
 	'workflow_renew',
 	'workflow_settle',
 	'workflow_release',
 ] as const;
-export type EndpointWorkflowV2Operation = (typeof LOCAL_ENDPOINT_WORKFLOW_V2_OPERATIONS)[number];
+export type EndpointWorkflowOperation = (typeof LOCAL_ENDPOINT_WORKFLOW_OPERATIONS)[number];
 
 /**
  * The contract's `workflowOwnerReference`. `ownerEpoch` is an opaque
  * identifier string in v2, never v1's numeric epoch. A claim never sends one;
  * the producer returns it, and renew, settle and release echo it.
  */
-export interface EndpointWorkflowOwnerV2 {
+export interface EndpointWorkflowOwner {
 	ownerId: string;
 	ownerEpoch: string;
 	fencingToken: string;
 }
 
 /** The contract's `grantReference`: a grant UUID and the digest of its record. */
-export interface EndpointGrantReferenceV2 {
+export interface EndpointGrantReference {
 	grantId: string;
 	digest: string;
 }
 
 /** The contract's `delegationReference`: the presented grant and its root-first chain ending in it. */
-export interface EndpointDelegationReferenceV2 {
-	grant: EndpointGrantReferenceV2;
-	chain: readonly EndpointGrantReferenceV2[];
+export interface EndpointDelegationReference {
+	grant: EndpointGrantReference;
+	chain: readonly EndpointGrantReference[];
 }
 
 /**
  * The contract's `workflowContextV2` (`operationAuthorityReferences` plus the
  * workflow lineage). References only: nothing here is an actor or authority.
  */
-export interface EndpointWorkflowContextV2 {
+export interface EndpointWorkflowContext {
 	registration: EndpointRuntimeUseReference;
-	delegation: EndpointDelegationReferenceV2 | null;
+	delegation: EndpointDelegationReference | null;
 	/** At most 32, unique by `grantId`. */
-	grants: readonly EndpointGrantReferenceV2[];
+	grants: readonly EndpointGrantReference[];
 	workflowId: string;
 	workflowVersion: string;
 	triggerId: string;
@@ -439,18 +433,18 @@ export interface EndpointWorkflowContextV2 {
 export const ENDPOINT_WORKFLOW_MAXIMUM_LEASE_MS = 300_000;
 
 /** `workflowClaimRequest`: the context and a requested lease. No owner: the producer returns one. */
-export interface EndpointWorkflowClaimRequestV2 extends EndpointWorkflowContextV2 {
+export interface EndpointWorkflowClaimRequest extends EndpointWorkflowContext {
 	/** An integer from 1 to `ENDPOINT_WORKFLOW_MAXIMUM_LEASE_MS`. */
 	requestedLeaseMs: number;
 }
 
 /** `workflowRenewRequest`: a claim that echoes the owner it holds. */
-export interface EndpointWorkflowRenewRequestV2 extends EndpointWorkflowClaimRequestV2 {
-	owner: EndpointWorkflowOwnerV2;
+export interface EndpointWorkflowRenewRequest extends EndpointWorkflowClaimRequest {
+	owner: EndpointWorkflowOwner;
 }
 
 /** The contract's `commandExecutionEffect`: settled with evidence, or uncertain with a reason. */
-export type EndpointWorkflowEffectV2 =
+export type EndpointWorkflowEffect =
 	| {
 			state: 'settled';
 			outcome: 'completed' | 'failed' | 'no_effect';
@@ -463,57 +457,57 @@ export type EndpointWorkflowEffectV2 =
 	  };
 
 /** `workflowSettleRequest`: the context, the echoed owner and the effect being settled. */
-export interface EndpointWorkflowSettleRequestV2 extends EndpointWorkflowContextV2 {
-	owner: EndpointWorkflowOwnerV2;
-	effect: EndpointWorkflowEffectV2;
+export interface EndpointWorkflowSettleRequest extends EndpointWorkflowContext {
+	owner: EndpointWorkflowOwner;
+	effect: EndpointWorkflowEffect;
 }
 
 /** `workflowReleaseRequest`: custody surrendered only once every effect settled or none began. */
-export interface EndpointWorkflowReleaseRequestV2 extends EndpointWorkflowContextV2 {
-	owner: EndpointWorkflowOwnerV2;
+export interface EndpointWorkflowReleaseRequest extends EndpointWorkflowContext {
+	owner: EndpointWorkflowOwner;
 	disposition: 'effects_settled' | 'no_effect_started';
 }
 
 /** `workflowLease`: the context echoed with the owner and a bounded positive lifetime. */
-export interface EndpointWorkflowLeaseV2 extends EndpointWorkflowContextV2 {
-	owner: EndpointWorkflowOwnerV2;
+export interface EndpointWorkflowLease extends EndpointWorkflowContext {
+	owner: EndpointWorkflowOwner;
 	/** A timestamp; `expiresAt` follows it by at most `ENDPOINT_WORKFLOW_MAXIMUM_LEASE_MS`. */
 	acquiredAt: string;
 	expiresAt: string;
 }
 
 /** `workflowSettlementReceipt`: the settle request echoed, recorded. */
-export interface EndpointWorkflowSettlementReceiptV2 extends EndpointWorkflowSettleRequestV2 {
+export interface EndpointWorkflowSettlementReceipt extends EndpointWorkflowSettleRequest {
 	outcome: 'recorded';
 	recordedAt: string;
 }
 
 /** `workflowReleaseReceipt`: the release request echoed, released. */
-export interface EndpointWorkflowReleaseReceiptV2 extends EndpointWorkflowReleaseRequestV2 {
+export interface EndpointWorkflowReleaseReceipt extends EndpointWorkflowReleaseRequest {
 	outcome: 'released';
 	releasedAt: string;
 }
 
-export type EndpointWorkflowClaimReplyV2 =
-	| { outcome: 'owned'; lease: EndpointWorkflowLeaseV2 }
+export type EndpointWorkflowClaimReply =
+	| { outcome: 'owned'; lease: EndpointWorkflowLease }
 	| EndpointDenied;
-export type EndpointWorkflowRenewReplyV2 =
-	| { outcome: 'renewed'; lease: EndpointWorkflowLeaseV2 }
+export type EndpointWorkflowRenewReply =
+	| { outcome: 'renewed'; lease: EndpointWorkflowLease }
 	| EndpointDenied;
-export type EndpointWorkflowSettleReplyV2 = EndpointWorkflowSettlementReceiptV2 | EndpointDenied;
-export type EndpointWorkflowReleaseReplyV2 = EndpointWorkflowReleaseReceiptV2 | EndpointDenied;
+export type EndpointWorkflowSettleReply = EndpointWorkflowSettlementReceipt | EndpointDenied;
+export type EndpointWorkflowReleaseReply = EndpointWorkflowReleaseReceipt | EndpointDenied;
 
 /** Each lifecycle operation's request and reply, keyed by its wire name. */
-export interface EndpointWorkflowV2Exchange {
-	workflow_claim: { request: EndpointWorkflowClaimRequestV2; reply: EndpointWorkflowClaimReplyV2 };
-	workflow_renew: { request: EndpointWorkflowRenewRequestV2; reply: EndpointWorkflowRenewReplyV2 };
+export interface EndpointWorkflowExchange {
+	workflow_claim: { request: EndpointWorkflowClaimRequest; reply: EndpointWorkflowClaimReply };
+	workflow_renew: { request: EndpointWorkflowRenewRequest; reply: EndpointWorkflowRenewReply };
 	workflow_settle: {
-		request: EndpointWorkflowSettleRequestV2;
-		reply: EndpointWorkflowSettleReplyV2;
+		request: EndpointWorkflowSettleRequest;
+		reply: EndpointWorkflowSettleReply;
 	};
 	workflow_release: {
-		request: EndpointWorkflowReleaseRequestV2;
-		reply: EndpointWorkflowReleaseReplyV2;
+		request: EndpointWorkflowReleaseRequest;
+		reply: EndpointWorkflowReleaseReply;
 	};
 }
 
@@ -522,16 +516,16 @@ export interface EndpointWorkflowV2Exchange {
 // ---------------------------------------------------------------------------
 
 /** The envelope operation `/v2/invoke` carries a run submission under. */
-export const LOCAL_ENDPOINT_EXECUTION_V2_OPERATION = 'execution' as const;
+export const LOCAL_ENDPOINT_EXECUTION_OPERATION = 'execution' as const;
 /** The payload's own `operation`: `runs.submit`, the sole v2 execution body. */
-export const ENDPOINT_EXECUTION_V2_PAYLOAD_OPERATION = 'runs.submit' as const;
+export const ENDPOINT_EXECUTION_PAYLOAD_OPERATION = 'runs.submit' as const;
 
 /** The contract's `executionWorkflowReferenceV2`: the claimed workflow and the owner custody echoed. */
-export interface EndpointExecutionWorkflowV2 {
+export interface EndpointExecutionWorkflow {
 	workflowId: string;
 	workflowVersion: string;
 	triggerId: string;
-	owner: EndpointWorkflowOwnerV2;
+	owner: EndpointWorkflowOwner;
 }
 
 /**
@@ -540,7 +534,7 @@ export interface EndpointExecutionWorkflowV2 {
  * workflow custody are echoed from the producer's lease; the endpoint
  * resolves each of them under its own custody, so nothing here is authority.
  */
-export interface EndpointExecutionRequestV2 {
+export interface EndpointExecutionRequest {
 	requestId: string;
 	attemptId: string;
 	runId: string;
@@ -548,7 +542,7 @@ export interface EndpointExecutionRequestV2 {
 	provider: string;
 	model: string;
 	policyRevision: number;
-	operation: typeof ENDPOINT_EXECUTION_V2_PAYLOAD_OPERATION;
+	operation: typeof ENDPOINT_EXECUTION_PAYLOAD_OPERATION;
 	agentId: string;
 	contentRef: string;
 	/** Lowercase SHA-256 hex of the approved content. */
@@ -556,10 +550,10 @@ export interface EndpointExecutionRequestV2 {
 	/** At most 64. */
 	resourceIds: readonly string[];
 	idempotencyKey: string;
-	workflow: EndpointExecutionWorkflowV2 | null;
+	workflow: EndpointExecutionWorkflow | null;
 	registration: EndpointRuntimeUseReference;
-	delegation: EndpointDelegationReferenceV2 | null;
-	grants: readonly EndpointGrantReferenceV2[];
+	delegation: EndpointDelegationReference | null;
+	grants: readonly EndpointGrantReference[];
 	rootRunId: string;
 	parentRunId: string | null;
 }
@@ -569,7 +563,7 @@ export interface EndpointExecutionRequestV2 {
  * completion. `unknown` is an uncertain dispatch that needs durable
  * reconciliation before anything is settled.
  */
-export interface EndpointDispatchReceiptV2 {
+export interface EndpointDispatchReceipt {
 	outcome: 'broker_dispatched';
 	requestId: string;
 	attemptId: string;
@@ -578,7 +572,7 @@ export interface EndpointDispatchReceiptV2 {
 	requestDigest: string;
 	brokerId: string;
 	policyRevision: number;
-	protocol: typeof LOCAL_ENDPOINT_PROTOCOL_V2;
+	protocol: typeof LOCAL_ENDPOINT_PROTOCOL;
 	/** The grant the broker dispatched under (a UUID). */
 	grantId: string;
 	idempotencyKey: string;
@@ -591,16 +585,14 @@ export interface EndpointDispatchReceiptV2 {
 // The v2 operation clients (contracts 0.2.0 protocol.js), field for field
 // ---------------------------------------------------------------------------
 //
-// `localEndpointContractsV2` spreads the v1 `localEndpointContracts` and
-// replaces only `attachment`, `compatibility`, `execution`, `command` and the
-// workflow rows. Every operation below is therefore carried on `/v2/invoke`
-// under its v1 name with the v1 domain schema unchanged (local-endpoint.js and
-// desktop-policy.js); no shape here is pending a later Mega batch. Schema
-// presence is not support: an operation is sent only when the v2 attachment on
-// the current connection negotiated it.
+// Every operation below is carried on `/v2/invoke` under its wire name, with the
+// domain schema the contract shares (local-endpoint.js and desktop-policy.js); no
+// shape here is pending a later Mega batch. Schema presence is not support: an
+// operation is sent only when the attachment on the current connection
+// negotiated it.
 
 /** The v2 operations Maestro has a client for, by their wire names. */
-export const LOCAL_ENDPOINT_OPERATION_V2_CLIENTS = [
+export const LOCAL_ENDPOINT_OPERATION_CLIENTS = [
 	'noticeList',
 	'inbox',
 	'telemetry',
@@ -611,24 +603,21 @@ export const LOCAL_ENDPOINT_OPERATION_V2_CLIENTS = [
 	'localControl',
 	'command',
 ] as const;
-export type EndpointOperationV2Client = (typeof LOCAL_ENDPOINT_OPERATION_V2_CLIENTS)[number];
+export type EndpointOperationClient = (typeof LOCAL_ENDPOINT_OPERATION_CLIENTS)[number];
 
 /** `noticeListRequest`: offset 0..7, limit 1..8; each page is freshly authorized. */
-export type EndpointNoticeListRequestV2 = EndpointNoticeListRequest;
 /** `noticeListResult` or `denied`. */
-export type EndpointNoticeListReplyV2 = EndpointNoticeListResult | EndpointDenied;
+export type EndpointNoticeListReply = EndpointNoticeListResult | EndpointDenied;
 
 /**
- * `inboxRequest`. The v2 request is the v1 request field for field; the
- * `idempotencyKey` a receipt ledger minted for the v1 path is the one the v2
- * path sends, so a resend across the two paths stays one receipt.
+ * `inboxRequest`: the inbox request as the wire carries it. A resend keeps its
+ * `idempotencyKey`, so it stays one receipt.
  */
-export type EndpointInboxRequestV2 = EndpointInboxRequest;
 /** `inboxReceipt` or `denied`. */
-export type EndpointInboxReplyV2 = EndpointInboxReceipt | EndpointDenied;
+export type EndpointInboxReply = EndpointInboxReceipt | EndpointDenied;
 
-/** The v1 inbox request as the v2 path sends it: every field copied, `idempotencyKey` unchanged. */
-export function inboxRequestV2(request: EndpointInboxRequest): EndpointInboxRequestV2 {
+/** The inbox request as it is sent: every field copied, `idempotencyKey` unchanged. */
+export function inboxRequest(request: EndpointInboxRequest): EndpointInboxRequest {
 	return {
 		campaignId: request.campaignId,
 		messageId: request.messageId,
@@ -638,18 +627,18 @@ export function inboxRequestV2(request: EndpointInboxRequest): EndpointInboxRequ
 }
 
 /** `incomingMetadataEvent`, as this host sends it (the runtime-report subset). */
-export type EndpointTelemetryRequestV2 = EndpointTelemetryEvent;
+export type EndpointTelemetryRequest = EndpointTelemetryEvent;
 /** The contract's `durableReceipt`. */
-export interface EndpointDurableReceiptV2 {
+export interface EndpointDurableReceipt {
 	outcome: 'durably_accepted';
 	eventId: string;
 	receivedAt: string;
 	duplicate: boolean;
 }
-export type EndpointTelemetryReplyV2 = EndpointDurableReceiptV2 | EndpointDenied;
+export type EndpointTelemetryReply = EndpointDurableReceipt | EndpointDenied;
 
 /** The contract's `budgetRequest`. */
-export interface EndpointBudgetRequestV2 {
+export interface EndpointBudgetRequest {
 	reservationId: string;
 	requestId: string;
 	runId: string;
@@ -663,7 +652,7 @@ export interface EndpointBudgetRequestV2 {
 	priceRevision: string | null;
 }
 /** The contract's `budgetReceipt`. */
-export interface EndpointBudgetReceiptV2 {
+export interface EndpointBudgetReceipt {
 	outcome: 'reserved';
 	reservationId: string;
 	destinationId: string;
@@ -671,10 +660,10 @@ export interface EndpointBudgetReceiptV2 {
 	maximumUnits: number;
 	expiresAt: string;
 }
-export type EndpointBudgetReplyV2 = EndpointBudgetReceiptV2 | EndpointDenied;
+export type EndpointBudgetReply = EndpointBudgetReceipt | EndpointDenied;
 
 /** The contract's `offlineRequest`. */
-export interface EndpointOfflineRequestV2 {
+export interface EndpointOfflineRequest {
 	policyRevision: number;
 	verifiedPolicyDigest: string;
 	exceptionExpiresAt: string | null;
@@ -684,17 +673,17 @@ export interface EndpointOfflineRequestV2 {
 	clockState: 'trusted' | 'uncertain' | 'rollback_detected';
 }
 /** The contract's `offlineResult`. */
-export interface EndpointOfflineResultV2 {
+export interface EndpointOfflineResult {
 	outcome: 'offline_active';
 	policyRevision: number;
 	allowanceId: string;
 	validUntil: string;
 	remainingUnits: number;
 }
-export type EndpointOfflineReplyV2 = EndpointOfflineResultV2 | EndpointDenied;
+export type EndpointOfflineReply = EndpointOfflineResult | EndpointDenied;
 
 /** The contract's `desktopAuthoringRequest` (desktop-policy.js). */
-export interface EndpointDesktopAuthoringRequestV2 {
+export interface EndpointDesktopAuthoringRequest {
 	subject: 'agent' | 'tab';
 	operation: DesktopAuthoringOperation;
 	items: number;
@@ -704,11 +693,11 @@ export interface EndpointDesktopAuthoringRequestV2 {
 	personalSettingKeys: readonly string[];
 }
 /** The contract's `desktopSettingsRequest`: a projection, or a decision on one exact authoring request. */
-export type EndpointDesktopPolicyRequestV2 =
+export type EndpointDesktopPolicyRequest =
 	| { kind: 'projection' }
-	| { kind: 'authorize'; projectionDigest: string; request: EndpointDesktopAuthoringRequestV2 };
+	| { kind: 'authorize'; projectionDigest: string; request: EndpointDesktopAuthoringRequest };
 /** The contract's `desktopDecisionReceipt`: metadata only, never a grant. */
-export interface EndpointDesktopDecisionReceiptV2 {
+export interface EndpointDesktopDecisionReceipt {
 	receiptId: string;
 	decidedAt: string;
 	binding: DesktopPolicyBinding;
@@ -731,13 +720,13 @@ export interface EndpointDesktopDecisionReceiptV2 {
 	receiptDigest: string;
 }
 /** The contract's `desktopSettingsResult` (it already includes `denied`). */
-export type EndpointDesktopPolicyReplyV2 =
+export type EndpointDesktopPolicyReply =
 	| { outcome: 'projection'; result: DesktopPolicyResult; projectionDigest: string | null }
-	| { outcome: 'decision'; receipt: EndpointDesktopDecisionReceiptV2 }
+	| { outcome: 'decision'; receipt: EndpointDesktopDecisionReceipt }
 	| EndpointDenied;
 
 /** The contract's `modelInvocationRequest`. */
-export interface EndpointModelRequestV2 {
+export interface EndpointModelRequest {
 	runId: string;
 	sessionId: string;
 	model: string;
@@ -748,7 +737,7 @@ export interface EndpointModelRequestV2 {
 	prompt: string;
 }
 /** The contract's `modelInvocationResult`. */
-export interface EndpointModelResultV2 {
+export interface EndpointModelResult {
 	outcome: 'model_completed';
 	requestId: string;
 	source: 'development-mock' | 'development-loopback';
@@ -760,13 +749,13 @@ export interface EndpointModelResultV2 {
 		source: 'observed';
 	} | null;
 }
-export type EndpointModelReplyV2 = EndpointModelResultV2 | EndpointDenied;
+export type EndpointModelReply = EndpointModelResult | EndpointDenied;
 
 // ---------------------------------------------------------------------------
 // Local control (decision D2) and signed v2 commands (contracts 0.3.0)
 // ---------------------------------------------------------------------------
 
-/** The local GUI selectors `localControl` carries (the v1 `commandRequest` actions). */
+/** The local GUI selectors `localControl` carries (the `commandRequest` actions of local-endpoint.js). */
 export type EndpointLocalControlAction =
 	| { kind: 'cancel_run'; runId: string }
 	| { kind: 'refresh_policy'; desiredRevision: number }
@@ -788,11 +777,11 @@ export const ENDPOINT_LOCAL_CONTROL_AUTHORITY: Readonly<
 });
 
 /**
- * `localControlRequestV2`: the v1 `commandRequest` shape, never a signed body.
+ * `localControlRequest`: the `commandRequest` shape, never a signed body.
  * A selector that reaches no run sends `expectedRunId: null`; a cancel must
  * expect the run it names.
  */
-export interface EndpointLocalControlRequestV2 {
+export interface EndpointLocalControlRequest {
 	commandId: string;
 	targetId: string;
 	expiresAt: string;
@@ -801,12 +790,12 @@ export interface EndpointLocalControlRequestV2 {
 	action: EndpointLocalControlAction;
 }
 
-/** The v1 `commandReceipt` `localControl` answers. */
-export interface EndpointLocalControlReceiptV2 {
+/** The `commandReceipt` that `localControl` answers. */
+export interface EndpointLocalControlReceipt {
 	outcome: 'accepted' | 'completed' | 'unknown';
 	commandId: string;
 }
-export type EndpointLocalControlReplyV2 = EndpointLocalControlReceiptV2 | EndpointDenied;
+export type EndpointLocalControlReply = EndpointLocalControlReceipt | EndpointDenied;
 
 /**
  * `commandRequestV2`: the signed central delivery embedded unchanged, and its
@@ -814,7 +803,7 @@ export type EndpointLocalControlReplyV2 = EndpointLocalControlReceiptV2 | Endpoi
  * envelope digest). The signature is the issuer's; this client never builds
  * or alters one, and the endpoint verifies it.
  */
-export interface EndpointCommandRequestV2 {
+export interface EndpointCommandRequest {
 	command: Record<string, unknown> & { payload: Record<string, unknown> & { commandId: string } };
 	correlation: Record<string, unknown> & {
 		registration: Record<string, unknown>;
@@ -825,26 +814,26 @@ export interface EndpointCommandRequestV2 {
 }
 
 /** `commandReceiptV2`: the outcome, the command, its run and epoch, and the correlation echoed exactly. */
-export interface EndpointCommandReceiptV2 {
+export interface EndpointCommandReceipt {
 	outcome: 'accepted' | 'completed' | 'unknown';
 	commandId: string;
 	runId: string;
 	processEpoch: string;
-	correlation: EndpointCommandRequestV2['correlation'];
+	correlation: EndpointCommandRequest['correlation'];
 }
-export type EndpointCommandReplyV2 = EndpointCommandReceiptV2 | EndpointDenied;
+export type EndpointCommandReply = EndpointCommandReceipt | EndpointDenied;
 
 /** Each v2 operation client's request and reply, keyed by its wire name. */
-export interface EndpointOperationV2Exchange {
-	noticeList: { request: EndpointNoticeListRequestV2; reply: EndpointNoticeListReplyV2 };
-	inbox: { request: EndpointInboxRequestV2; reply: EndpointInboxReplyV2 };
-	telemetry: { request: EndpointTelemetryRequestV2; reply: EndpointTelemetryReplyV2 };
-	budget: { request: EndpointBudgetRequestV2; reply: EndpointBudgetReplyV2 };
-	offline: { request: EndpointOfflineRequestV2; reply: EndpointOfflineReplyV2 };
-	desktopPolicy: { request: EndpointDesktopPolicyRequestV2; reply: EndpointDesktopPolicyReplyV2 };
-	model: { request: EndpointModelRequestV2; reply: EndpointModelReplyV2 };
-	localControl: { request: EndpointLocalControlRequestV2; reply: EndpointLocalControlReplyV2 };
-	command: { request: EndpointCommandRequestV2; reply: EndpointCommandReplyV2 };
+export interface EndpointOperationExchange {
+	noticeList: { request: EndpointNoticeListRequest; reply: EndpointNoticeListReply };
+	inbox: { request: EndpointInboxRequest; reply: EndpointInboxReply };
+	telemetry: { request: EndpointTelemetryRequest; reply: EndpointTelemetryReply };
+	budget: { request: EndpointBudgetRequest; reply: EndpointBudgetReply };
+	offline: { request: EndpointOfflineRequest; reply: EndpointOfflineReply };
+	desktopPolicy: { request: EndpointDesktopPolicyRequest; reply: EndpointDesktopPolicyReply };
+	model: { request: EndpointModelRequest; reply: EndpointModelReply };
+	localControl: { request: EndpointLocalControlRequest; reply: EndpointLocalControlReply };
+	command: { request: EndpointCommandRequest; reply: EndpointCommandReply };
 }
 
 /**
@@ -852,14 +841,14 @@ export interface EndpointOperationV2Exchange {
  * **passing** row of Mega's endpoint v2 parity matrix
  * (`docs/evidence/endpoint-v2/parity-matrix.md`, FINISH-08-06, observed at
  * Mega `dd9a42b0`), plus `execution` (Mega FINISH-10, handoff item 10),
- * whose only client is `createEndpointExecutionV2Client` in `./execution-v2`;
+ * whose only client is `createEndpointExecutionClient` in `./execution`;
  * no v1 caller moves onto it. Selection is not an offer: an operation is
  * still sent only when the attachment on the current connection negotiated
  * it, and otherwise nothing is sent, so `execution` stays unused until a peer
- * offers it. `src/main/enterprise/endpoint-ops-v2.ts` re-exports it; this is
+ * offers it. `src/main/enterprise/endpoint-ops.ts` re-exports it; this is
  * its one home so the shared callers can read it.
  */
-export const V2_OPERATIONS_SELECTED: readonly string[] = [
+export const ENDPOINT_OPERATIONS_OFFERED: readonly string[] = [
 	'noticeList',
 	'inbox',
 	'telemetry',
@@ -869,70 +858,35 @@ export const V2_OPERATIONS_SELECTED: readonly string[] = [
 	'model',
 	'localControl',
 	'command',
-	LOCAL_ENDPOINT_EXECUTION_V2_OPERATION,
+	LOCAL_ENDPOINT_EXECUTION_OPERATION,
 ];
 
-/** Whether the v2 attachment behind `clientState` negotiated `operation`. False with no v2 attachment. */
-export function v2OperationNegotiated(
+/** Whether the attachment on the connection behind `clientState` negotiated `operation`. False before an attachment. */
+export function operationNegotiated(
 	clientState: Pick<EndpointConnectionState, 'negotiated'>,
 	operation: string
 ): boolean {
 	return clientState.negotiated?.capabilities.includes(operation) ?? false;
 }
 
-/** The ports a v1 caller selects a path over: `invoke` always, the v2 side when the port has one. */
-export type EndpointOperationSelectable = Pick<EndpointPort, 'invoke'> &
-	Partial<Pick<EndpointPort, 'v2' | 'state'>>;
-
 /**
- * Which path an existing caller sends `operation` on. `v2` only when the
- * operation is in `selected` (default `V2_OPERATIONS_SELECTED`) AND the v2
- * attachment on the current connection negotiated it; `v1` otherwise. On a
- * connection attached at protocol 2 the v1 path sends nothing (the client
- * answers `unavailable` / `not-negotiated`), so a v2 refusal is never
- * retried as v1.
+ * The one gate for a caller that is not an operation client: an operation is
+ * sent only when the attachment on the current connection negotiated it;
+ * otherwise `unavailable` / `not-negotiated` and nothing is sent.
  */
-export function selectEndpointOperationPath(
-	endpoint: EndpointOperationSelectable,
-	operation: EndpointOperationV2Client,
-	selected: readonly string[] = V2_OPERATIONS_SELECTED
-): 'v1' | 'v2' {
-	if (!selected.includes(operation)) return 'v1';
-	if (!endpoint.v2 || !endpoint.state) return 'v1';
-	return v2OperationNegotiated(endpoint.state(), operation) ? 'v2' : 'v1';
-}
-
-/**
- * Send one operation for an existing v1 caller on the path
- * `selectEndpointOperationPath` picks, decided per call. The v1 path sends
- * `payload` through `invoke` exactly as before; the v2 path sends
- * `v2Payload(payload)` through `v2.invoke` under the same operation name.
- * Only operations that have a v1 caller qualify (`desktopPolicy` has none).
- */
-export function invokeSelectedEndpointOperation<
-	O extends EndpointOperationV2Client & LocalEndpointOperation,
->(
-	endpoint: EndpointOperationSelectable,
-	operation: O,
-	payload: EndpointOperationV2Exchange[O]['request'],
-	options: {
-		selected?: readonly string[];
-		v2Payload?: (
-			payload: EndpointOperationV2Exchange[O]['request']
-		) => EndpointOperationV2Exchange[O]['request'];
-	} = {}
+export async function invokeNegotiated(
+	endpoint: Pick<EndpointPort, 'invoke' | 'negotiated'>,
+	operation: LocalEndpointOperation,
+	payload: unknown
 ): Promise<EndpointInvokeOutcome<unknown>> {
-	if (selectEndpointOperationPath(endpoint, operation, options.selected) === 'v2' && endpoint.v2) {
-		return endpoint.v2.invoke(operation, options.v2Payload ? options.v2Payload(payload) : payload);
+	if (!endpoint.negotiated(operation)) {
+		return {
+			status: 'unavailable',
+			reason: 'not-negotiated',
+			message: `The attachment on this connection did not negotiate ${operation}; nothing was sent.`,
+		};
 	}
 	return endpoint.invoke(operation, payload);
-}
-
-export interface LocalEndpointEnvelope {
-	schemaVersion: typeof LOCAL_ENDPOINT_SCHEMA_VERSION;
-	correlationId: string;
-	operation: LocalEndpointOperation;
-	payload: unknown;
 }
 
 /**
@@ -941,8 +895,8 @@ export interface LocalEndpointEnvelope {
  * plain string because the v2 operation set is the endpoint's, negotiated per
  * connection; the client checks it against what the attachment returned.
  */
-export interface LocalEndpointEnvelopeV2 {
-	schemaVersion: typeof LOCAL_ENDPOINT_PROTOCOL_V2;
+export interface LocalEndpointEnvelope {
+	schemaVersion: typeof LOCAL_ENDPOINT_PROTOCOL;
 	correlationId: string;
 	operation: string;
 	payload: unknown;
@@ -999,14 +953,9 @@ export function endpointComponentProblems(value: unknown, at: string): string[] 
 	return problems;
 }
 
-/** Problems with a request this host is about to send; a client refuses to send one it cannot describe. */
-export function endpointAttachmentRequestProblems(value: unknown): string[] {
-	return attachmentRequestProblems(value, LOCAL_ENDPOINT_PROTOCOL);
-}
-
 /** `endpointAttachmentRequestProblems` for protocol 2: [2], unique lists, required within supported. */
-export function endpointAttachmentRequestV2Problems(value: unknown): string[] {
-	const problems = attachmentRequestProblems(value, LOCAL_ENDPOINT_PROTOCOL_V2);
+export function endpointAttachmentRequestProblems(value: unknown): string[] {
+	const problems = attachmentRequestProblems(value, LOCAL_ENDPOINT_PROTOCOL);
 	if (!isRecord(value)) return problems;
 	const supported = value.supportedCapabilities;
 	const required = value.requiredCapabilities;
@@ -1026,7 +975,10 @@ export function endpointAttachmentRequestV2Problems(value: unknown): string[] {
 
 const isUniqueList = (values: readonly string[]): boolean => new Set(values).size === values.length;
 
-function attachmentRequestProblems(value: unknown, protocol: 1 | 2): string[] {
+function attachmentRequestProblems(
+	value: unknown,
+	protocol: typeof LOCAL_ENDPOINT_PROTOCOL
+): string[] {
 	if (!isRecord(value)) return ['request is not an object'];
 	const problems: string[] = [];
 	for (const key of ['installationId', 'runtimeId', 'processEpoch'] as const) {
@@ -1057,19 +1009,15 @@ function attachmentRequestProblems(value: unknown, protocol: 1 | 2): string[] {
 	return problems;
 }
 
-export function endpointStatusProblems(value: unknown): string[] {
-	return statusProblems(value, LOCAL_ENDPOINT_PROTOCOL);
-}
-
 /** `endpointStatusProblems` for a v2 attachment answer: protocol 2, unique negotiated capabilities. */
-export function endpointStatusV2Problems(value: unknown): string[] {
-	const problems = statusProblems(value, LOCAL_ENDPOINT_PROTOCOL_V2);
+export function endpointStatusProblems(value: unknown): string[] {
+	const problems = statusProblems(value, LOCAL_ENDPOINT_PROTOCOL);
 	if (isRecord(value) && isStringList(value.capabilities, 128) && !isUniqueList(value.capabilities))
 		problems.push('capabilities repeats an entry');
 	return problems;
 }
 
-function statusProblems(value: unknown, protocol: 1 | 2): string[] {
+function statusProblems(value: unknown, protocol: typeof LOCAL_ENDPOINT_PROTOCOL): string[] {
 	if (!isRecord(value)) return ['status is not an object'];
 	const problems: string[] = [];
 	if (value.outcome !== 'attached') problems.push('outcome is not attached');
@@ -1095,8 +1043,8 @@ function statusProblems(value: unknown, protocol: 1 | 2): string[] {
 export function endpointCompatibilityResultProblems(value: unknown): string[] {
 	if (!isRecord(value)) return ['result is not an object'];
 	const problems: string[] = [];
-	if (value.outcome !== 'compatible') problems.push('outcome is not compatible');
-	if (value.protocol !== LOCAL_ENDPOINT_PROTOCOL) problems.push('protocol is not 1');
+	if (value.outcome !== 'negotiated') problems.push('outcome is not negotiated');
+	if (value.protocol !== LOCAL_ENDPOINT_PROTOCOL) problems.push('protocol is not 2');
 	if (!isStringList(value.capabilities, 128))
 		problems.push('capabilities is not a capability list');
 	return problems;
@@ -1157,46 +1105,24 @@ export function endpointRegistrationUseReplyProblems(value: unknown): string[] {
 	return problems;
 }
 
+/** Frame a request for `POST /v2/invoke`. */
 export function frameLocalEndpointRequest(
-	operation: LocalEndpointOperation,
+	operation: string,
 	payload: unknown,
 	correlationId: string
 ): LocalEndpointEnvelope {
 	if (!isEndpointIdentifier(correlationId))
 		throw new Error('correlationId is not an endpoint identifier');
-	return { schemaVersion: LOCAL_ENDPOINT_SCHEMA_VERSION, correlationId, operation, payload };
-}
-
-/**
- * Read an answer envelope against the request it must answer. A version,
- * correlation or operation mismatch is a malformed answer: the payload is not
- * looked at, since it could be the answer to another request.
- */
-export function parseLocalEndpointResponse(
-	raw: unknown,
-	expected: { correlationId: string; operation: LocalEndpointOperation }
-): { ok: true; payload: unknown } | { ok: false; problem: string } {
-	return parseEnvelopeAnswer(raw, LOCAL_ENDPOINT_SCHEMA_VERSION, expected);
-}
-
-/** Frame a protocol 2 request for `POST /v2/invoke`; never a v1 envelope. */
-export function frameLocalEndpointRequestV2(
-	operation: string,
-	payload: unknown,
-	correlationId: string
-): LocalEndpointEnvelopeV2 {
-	if (!isEndpointIdentifier(correlationId))
-		throw new Error('correlationId is not an endpoint identifier');
 	if (!isEndpointIdentifier(operation)) throw new Error('operation is not an endpoint identifier');
-	return { schemaVersion: LOCAL_ENDPOINT_PROTOCOL_V2, correlationId, operation, payload };
+	return { schemaVersion: LOCAL_ENDPOINT_PROTOCOL, correlationId, operation, payload };
 }
 
 /** `parseLocalEndpointResponse` for protocol 2: schemaVersion 2, same correlation and operation rule. */
-export function parseLocalEndpointResponseV2(
+export function parseLocalEndpointResponse(
 	raw: unknown,
 	expected: { correlationId: string; operation: string }
 ): { ok: true; payload: unknown } | { ok: false; problem: string } {
-	return parseEnvelopeAnswer(raw, LOCAL_ENDPOINT_PROTOCOL_V2, expected);
+	return parseEnvelopeAnswer(raw, LOCAL_ENDPOINT_PROTOCOL, expected);
 }
 
 function parseEnvelopeAnswer(
@@ -1277,7 +1203,7 @@ export interface EndpointConnectionState {
 	/**
 	 * What a v2 attachment negotiated on the CURRENT connection; absent until
 	 * one succeeds. The endpoint holds one protocol per socket session, so a
-	 * v1 attachment, a failed attachment or a new connection drops it.
+	 * a failed attachment or a new connection drops it.
 	 */
 	negotiated?: EndpointNegotiation;
 }
@@ -1434,66 +1360,41 @@ export interface EndpointPort {
 	readonly preparedExecution?: PreparedExecutionPort;
 	readonly socketPath: string;
 	state(): EndpointConnectionState;
+	/** Availability only, answered before any attachment; records nothing on the connection. */
 	compatibility(
 		request: EndpointCompatibilityRequest
 	): Promise<EndpointInvokeOutcome<EndpointCompatibilityResult>>;
+	/** The attachment: the one protocol this connection speaks, with the capabilities it negotiated. */
 	attach(request: EndpointAttachmentRequest): Promise<EndpointInvokeOutcome<EndpointStatus>>;
-	/** Any operation after `attach`; the payload is passed through and answered as the endpoint sent it. */
+	/**
+	 * Any operation after `attach`, sent under its wire name on `/v2/invoke`. An
+	 * operation the attachment on this connection did not negotiate is not sent
+	 * (`unavailable` / `not-negotiated`).
+	 */
 	invoke(
 		operation: LocalEndpointOperation,
 		payload: unknown
 	): Promise<EndpointInvokeOutcome<unknown>>;
-	/** Protocol 2 on its own path; absent on a port that speaks v1 only. v1 stays the default. */
-	readonly v2?: EndpointPortV2;
+	/** Whether the current connection's attachment negotiated `operation`. */
+	negotiated(operation: string): boolean;
 	registration: {
 		challenge(input: {
 			runtimeId: string;
 			processEpoch: string;
 		}): Promise<EndpointInvokeOutcome<EndpointRegistrationApproval>>;
 		redeem(): Promise<EndpointInvokeOutcome<EndpointRegistrationReceipt>>;
+		/**
+		 * The `registration_use` lookup: `unavailable` / `not-negotiated` with nothing
+		 * sent unless the current attachment negotiated it, otherwise the reply checked
+		 * by `endpointRegistrationUseReplyProblems`. A projected or denied reply is `ok`.
+		 */
+		use(): Promise<EndpointInvokeOutcome<EndpointRegistrationUseReply>>;
 	};
 	/** Drop the current socket so the next call dials fresh; the completed registration is kept. */
 	redial(): void;
 	/** Drop the connection; the endpoint's session for it ends with it. */
 	close(): Promise<void>;
 }
-
-/**
- * The protocol 2 side of an `EndpointPort`. Every call goes to
- * `/v2/invoke` only: a v2 refusal (`unsupported_version` included) is
- * returned as the refusal and is never retried on `/v1/invoke`.
- */
-export interface EndpointPortV2 {
-	/**
-	 * The v2 attachment on `/v2/invoke`: `supportedProtocols` [2], validated
-	 * before a byte leaves. `attached` at protocol 2 records the negotiation on
-	 * the connection state; any other answer leaves none.
-	 */
-	attach(req: EndpointAttachmentRequestV2): Promise<EndpointInvokeOutcome<EndpointStatusV2>>;
-	/** Whether the current connection's v2 attachment negotiated `operation`. */
-	negotiated(operation: string): boolean;
-	/**
-	 * The v2 `compatibility` probe (availability only, reachable before an
-	 * attachment): validated before a byte leaves, the answer checked to be a
-	 * protocol 2 negotiation. It records nothing on the connection.
-	 */
-	compatibility(
-		req: EndpointCompatibilityRequestV2
-	): Promise<EndpointInvokeOutcome<EndpointCompatibilityResultV2>>;
-	/** One v2 envelope out, one answer read against it. `attachment` goes through `attach()`. */
-	invoke(operation: string, payload: unknown): Promise<EndpointInvokeOutcome<unknown>>;
-	registration: {
-		/**
-		 * The `registration_use` lookup: `unavailable` / `not-negotiated` with
-		 * nothing sent unless the current v2 attachment negotiated it, otherwise
-		 * `{}` on `/v2/invoke` and the reply validated by
-		 * `endpointRegistrationUseReplyProblems` (`unavailable` / `malformed`
-		 * when it fails). A projected or denied reply is `ok`.
-		 */
-		use(): Promise<EndpointInvokeOutcome<EndpointRegistrationUseReply>>;
-	};
-}
-
 /** The serializable identity record a host's custody holds (`src/main/enterprise/identity-store.ts` is the sealed home). */
 export type ManagedIdentityManagement =
 	| 'enrolling'

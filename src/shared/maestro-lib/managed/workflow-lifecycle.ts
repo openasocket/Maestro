@@ -3,7 +3,7 @@
  * `workflow_settle` and `workflow_release` over the endpoint client's
  * `/v2/invoke` path (contracts 0.3.0 protocol.js, field for field).
  *
- * The envelope checks are the v2 path's own: `parseLocalEndpointResponseV2`
+ * The envelope checks are the v2 path's own: `parseLocalEndpointResponse`
  * refuses an answer whose correlationId or operation is not the request's,
  * and the client turns that into `unavailable` / `malformed`. On top of it
  * this file reads the payload against the request, as the contract's
@@ -21,9 +21,9 @@
  * This client holds no workflow state. What is held lives in the workflow
  * owner port (`src/shared/maestro-lib/managed/workflows.ts`); a refused
  * answer here is returned before anything reaches it, so it changes nothing
- * there. `endpointWorkflowV2LifecyclePort` presents the client as that
+ * there. `endpointWorkflowLifecyclePort` presents the client as that
  * store's `WorkflowOwnerLifecyclePort`, so a claim result reaches held state
- * only through it. `createEndpointWorkflowV2OwnerPort` is the port the
+ * only through it. `createEndpointWorkflowOwnerPort` is the port the
  * desktop and the host adapter compose. Nothing here wires the lifecycle into
  * execution.
  */
@@ -33,18 +33,18 @@ import {
 	isEndpointIdentifier,
 	type EndpointInvokeOutcome,
 	type EndpointPort,
-	type EndpointWorkflowClaimReplyV2,
-	type EndpointWorkflowClaimRequestV2,
-	type EndpointWorkflowContextV2,
-	type EndpointWorkflowOwnerV2,
-	type EndpointWorkflowReleaseReplyV2,
-	type EndpointWorkflowReleaseRequestV2,
-	type EndpointWorkflowRenewReplyV2,
-	type EndpointWorkflowRenewRequestV2,
-	type EndpointWorkflowSettleReplyV2,
-	type EndpointWorkflowSettleRequestV2,
-	type EndpointWorkflowV2Exchange,
-	type EndpointWorkflowV2Operation,
+	type EndpointWorkflowClaimReply,
+	type EndpointWorkflowClaimRequest,
+	type EndpointWorkflowContext,
+	type EndpointWorkflowOwner,
+	type EndpointWorkflowReleaseReply,
+	type EndpointWorkflowReleaseRequest,
+	type EndpointWorkflowRenewReply,
+	type EndpointWorkflowRenewRequest,
+	type EndpointWorkflowSettleReply,
+	type EndpointWorkflowSettleRequest,
+	type EndpointWorkflowExchange,
+	type EndpointWorkflowOperation,
 } from './endpoint-port';
 import {
 	UNISSUED_OWNER_EPOCH,
@@ -55,23 +55,23 @@ import {
 	type WorkflowOwnerStanding,
 } from './workflows';
 
-export interface EndpointWorkflowV2Client {
+export interface EndpointWorkflowClient {
 	claim(
-		request: EndpointWorkflowClaimRequestV2
-	): Promise<EndpointInvokeOutcome<EndpointWorkflowClaimReplyV2>>;
+		request: EndpointWorkflowClaimRequest
+	): Promise<EndpointInvokeOutcome<EndpointWorkflowClaimReply>>;
 	renew(
-		request: EndpointWorkflowRenewRequestV2
-	): Promise<EndpointInvokeOutcome<EndpointWorkflowRenewReplyV2>>;
+		request: EndpointWorkflowRenewRequest
+	): Promise<EndpointInvokeOutcome<EndpointWorkflowRenewReply>>;
 	settle(
-		request: EndpointWorkflowSettleRequestV2
-	): Promise<EndpointInvokeOutcome<EndpointWorkflowSettleReplyV2>>;
+		request: EndpointWorkflowSettleRequest
+	): Promise<EndpointInvokeOutcome<EndpointWorkflowSettleReply>>;
 	release(
-		request: EndpointWorkflowReleaseRequestV2
-	): Promise<EndpointInvokeOutcome<EndpointWorkflowReleaseReplyV2>>;
+		request: EndpointWorkflowReleaseRequest
+	): Promise<EndpointInvokeOutcome<EndpointWorkflowReleaseReply>>;
 }
 
 /** The keys of `workflowContextV2`, in the contract's order. */
-const WORKFLOW_CONTEXT_KEYS: readonly (keyof EndpointWorkflowContextV2)[] = [
+const WORKFLOW_CONTEXT_KEYS: readonly (keyof EndpointWorkflowContext)[] = [
 	'registration',
 	'delegation',
 	'grants',
@@ -111,8 +111,8 @@ function ownerProblems(value: unknown): string[] {
 /** Problems with a lease answered for `request`; `owner`, when given, is the owner it must echo. */
 function leaseProblems(
 	lease: unknown,
-	request: EndpointWorkflowContextV2,
-	owner: EndpointWorkflowOwnerV2 | null
+	request: EndpointWorkflowContext,
+	owner: EndpointWorkflowOwner | null
 ): string[] {
 	if (!isRecord(lease)) return ['lease is not an object'];
 	const problems = ownerProblems(lease.owner);
@@ -134,9 +134,9 @@ function leaseProblems(
 }
 
 /** Problems with the reply to `operation` for `request`; empty when it answers it. */
-export function endpointWorkflowV2ReplyProblems<O extends EndpointWorkflowV2Operation>(
+export function endpointWorkflowReplyProblems<O extends EndpointWorkflowOperation>(
 	operation: O,
-	request: EndpointWorkflowV2Exchange[O]['request'],
+	request: EndpointWorkflowExchange[O]['request'],
 	reply: unknown
 ): string[] {
 	if (!isRecord(reply)) return ['reply is not an object'];
@@ -146,7 +146,7 @@ export function endpointWorkflowV2ReplyProblems<O extends EndpointWorkflowV2Oper
 			const expected = operation === 'workflow_claim' ? 'owned' : 'renewed';
 			if (reply.outcome !== expected) return [`outcome is not ${expected}`];
 			const owner =
-				operation === 'workflow_renew' ? (request as EndpointWorkflowRenewRequestV2).owner : null;
+				operation === 'workflow_renew' ? (request as EndpointWorkflowRenewRequest).owner : null;
 			return leaseProblems(reply.lease, request, owner);
 		}
 		case 'workflow_settle':
@@ -155,7 +155,7 @@ export function endpointWorkflowV2ReplyProblems<O extends EndpointWorkflowV2Oper
 				operation === 'workflow_settle' ? ['recorded', 'recordedAt'] : ['released', 'releasedAt'];
 			const problems: string[] = [];
 			if (reply.outcome !== expected) problems.push(`outcome is not ${expected}`);
-			const held = (request as EndpointWorkflowSettleRequestV2 | EndpointWorkflowReleaseRequestV2)
+			const held = (request as EndpointWorkflowSettleRequest | EndpointWorkflowReleaseRequest)
 				.owner;
 			if (!sameFields({ owner: held }, reply, ['owner'])) {
 				problems.push('owner is not the owner the request holds');
@@ -172,24 +172,23 @@ export function endpointWorkflowV2ReplyProblems<O extends EndpointWorkflowV2Oper
 }
 
 /** The lifecycle over a v2 endpoint client. The client decides unavailable vs unknown on the wire. */
-export function createEndpointWorkflowV2Client(
-	endpoint: Pick<EndpointPort, 'v2'>
-): EndpointWorkflowV2Client {
-	async function call<O extends EndpointWorkflowV2Operation>(
+export function createEndpointWorkflowClient(
+	endpoint: Pick<EndpointPort, 'invoke' | 'negotiated'>
+): EndpointWorkflowClient {
+	async function call<O extends EndpointWorkflowOperation>(
 		operation: O,
-		request: EndpointWorkflowV2Exchange[O]['request']
-	): Promise<EndpointInvokeOutcome<EndpointWorkflowV2Exchange[O]['reply']>> {
-		const v2 = endpoint.v2;
-		if (!v2?.negotiated(operation)) {
+		request: EndpointWorkflowExchange[O]['request']
+	): Promise<EndpointInvokeOutcome<EndpointWorkflowExchange[O]['reply']>> {
+		if (!endpoint.negotiated(operation)) {
 			return {
 				status: 'unavailable',
 				reason: 'not-negotiated',
 				message: `The v2 attachment on this connection did not negotiate ${operation}; nothing was sent.`,
 			};
 		}
-		const outcome = await v2.invoke(operation, request);
+		const outcome = await endpoint.invoke(operation, request);
 		if (outcome.status !== 'ok') return outcome;
-		const problems = endpointWorkflowV2ReplyProblems(operation, request, outcome.payload);
+		const problems = endpointWorkflowReplyProblems(operation, request, outcome.payload);
 		if (problems.length > 0) {
 			return {
 				status: 'unavailable',
@@ -199,7 +198,7 @@ export function createEndpointWorkflowV2Client(
 		}
 		return {
 			status: 'ok',
-			payload: outcome.payload as EndpointWorkflowV2Exchange[O]['reply'],
+			payload: outcome.payload as EndpointWorkflowExchange[O]['reply'],
 		};
 	}
 
@@ -224,18 +223,18 @@ export function createEndpointWorkflowV2Client(
 // ---------------------------------------------------------------------------
 
 /** The authority references a v2 workflow request carries; supplied only after authenticated v2 negotiation. */
-export type EndpointWorkflowV2Authority = Pick<
-	EndpointWorkflowContextV2,
+export type EndpointWorkflowAuthority = Pick<
+	EndpointWorkflowContext,
 	'registration' | 'delegation' | 'grants'
 >;
 
-export interface EndpointWorkflowV2LifecycleDeps {
+export interface EndpointWorkflowLifecycleDeps {
 	/** Aborted when the authenticated v2 connection behind `client` is gone. */
 	signal: AbortSignal;
 	/** Whether `client` is still the current authenticated v2 path. */
 	current(): boolean;
 	/** The references for a request made as `owner`; null when there are none to carry (nothing is sent). */
-	authority(owner: WorkflowOwnerStanding): EndpointWorkflowV2Authority | null;
+	authority(owner: WorkflowOwnerStanding): EndpointWorkflowAuthority | null;
 	/**
 	 * The digest of the evidence that a finished run's effect settled with
 	 * `outcome`; null when there is none, and then nothing is settled or
@@ -255,7 +254,7 @@ const keyOf = (...parts: string[]): string => workflowEndpointId(JSON.stringify(
 function flatReceipt(
 	outcome: 'owned' | 'renewed' | 'released',
 	workflowId: string,
-	owner: EndpointWorkflowOwnerV2,
+	owner: EndpointWorkflowOwner,
 	expiresAt?: string
 ): Record<string, unknown> {
 	return {
@@ -277,9 +276,9 @@ function flatReceipt(
  * owner stays held, as the contract requires). A claim over a release whose
  * answer was lost is not re-sent: it needs the producer's reconciliation.
  */
-export function endpointWorkflowV2LifecyclePort(
-	client: EndpointWorkflowV2Client,
-	deps: EndpointWorkflowV2LifecycleDeps
+export function endpointWorkflowLifecyclePort(
+	client: EndpointWorkflowClient,
+	deps: EndpointWorkflowLifecycleDeps
 ): WorkflowOwnerLifecyclePort {
 	const requestedLeaseMs = Math.min(
 		deps.requestedLeaseMs ?? DEFAULT_REQUESTED_LEASE_MS,
@@ -291,7 +290,6 @@ export function endpointWorkflowV2LifecyclePort(
 	});
 
 	return {
-		version: 1,
 		signal: deps.signal,
 		current: () => deps.current() && !deps.signal.aborted,
 		async invoke(action, input, prior, owner, effect) {
@@ -305,7 +303,7 @@ export function endpointWorkflowV2LifecyclePort(
 			}
 			const workflowId = workflowEndpointId(input.workflow.workflowId);
 			const runId = workflowEndpointId(input.runId);
-			const context = (role: string, ...salt: string[]): EndpointWorkflowContextV2 => ({
+			const context = (role: string, ...salt: string[]): EndpointWorkflowContext => ({
 				...authority,
 				workflowId,
 				workflowVersion: workflowEndpointId(input.workflow.version),
@@ -317,7 +315,7 @@ export function endpointWorkflowV2LifecyclePort(
 				rootRunId: runId,
 				parentRunId: null,
 			});
-			const held: EndpointWorkflowOwnerV2 | null =
+			const held: EndpointWorkflowOwner | null =
 				prior && prior.ownerEpoch !== UNISSUED_OWNER_EPOCH
 					? {
 							ownerId: prior.ownerId,
@@ -364,9 +362,9 @@ export function endpointWorkflowV2LifecyclePort(
 			}
 
 			// release: settle what ran, then surrender custody.
-			let disposition: EndpointWorkflowReleaseRequestV2['disposition'] = 'no_effect_started';
+			let disposition: EndpointWorkflowReleaseRequest['disposition'] = 'no_effect_started';
 			if (effect !== undefined) {
-				const settlement: EndpointWorkflowSettleRequestV2['effect'] | null =
+				const settlement: EndpointWorkflowSettleRequest['effect'] | null =
 					effect === 'uncertain'
 						? { state: 'uncertain', reason: 'recovery_required' }
 						: (() => {
@@ -413,65 +411,50 @@ export function endpointWorkflowV2LifecyclePort(
 // ---------------------------------------------------------------------------
 
 /** What the v2 lifecycle needs negotiated on the current connection before it is offered. */
-export const WORKFLOW_V2_LIFECYCLE_CAPABILITIES = [
+export const WORKFLOW_LIFECYCLE_CAPABILITIES = [
 	'workflow_claim',
 	'workflow_renew',
 	'workflow_settle',
 	'workflow_release',
 ] as const;
 
-export interface EndpointWorkflowV2OwnerPortDeps {
+export interface EndpointWorkflowOwnerPortDeps {
 	/** The endpoint port every caller reads right now; null while none is open. */
-	endpoint(): Pick<EndpointPort, 'v2' | 'state'> | null;
+	endpoint(): Pick<EndpointPort, 'invoke' | 'negotiated' | 'state'> | null;
 	/**
 	 * The `registration_use` reference the endpoint projected for the CURRENT
 	 * connection; null when none is. Read from the endpoint only.
 	 */
-	registration(): EndpointWorkflowV2Authority['registration'] | null;
+	registration(): EndpointWorkflowAuthority['registration'] | null;
 	/** Passed to the lifecycle port; absent, a finished effect stays held (no evidence is fabricated). */
-	evidenceDigest?: EndpointWorkflowV2LifecycleDeps['evidenceDigest'];
+	evidenceDigest?: EndpointWorkflowLifecycleDeps['evidenceDigest'];
 	requestedLeaseMs?: number;
 }
 
 /**
- * The workflow owner port for `createWorkflowOwnership`, over the v2 lifecycle
- * (`workflow_claim`, `workflow_renew`, `workflow_settle`, `workflow_release`)
- * and off the legacy v1 `workflow` owner fence: the v1 `claim` sends nothing.
- * The lifecycle is offered only while the attachment on the current
- * connection negotiated all four operations and a `registration_use`
+ * The workflow owner producer for `createWorkflowOwnership`, over the workflow
+ * lifecycle (`workflow_claim`, `workflow_renew`, `workflow_settle`,
+ * `workflow_release`). The lifecycle is offered only while the attachment on the
+ * current connection negotiated all four operations and a `registration_use`
  * reference is projected for it; the requests carry that reference, no
- * delegation and no grants. One lifecycle port per connection (the store
- * checks it is still the one it claimed through), aborted when the connection
- * or the reference changes. Returns `port()` for the store's deps.
+ * delegation and no grants. One lifecycle port per connection (the store checks
+ * it is still the one it claimed through), aborted when the connection or the
+ * reference changes. Null while no producer is reachable; `unserved` when the
+ * attachment negotiated none of the lifecycle (the endpoint serves no owner
+ * operation to this peer).
  */
-export function createEndpointWorkflowV2OwnerPort(
-	deps: EndpointWorkflowV2OwnerPortDeps
+export function createEndpointWorkflowOwnerPort(
+	deps: EndpointWorkflowOwnerPortDeps
 ): () => WorkflowOwnerPort | null {
 	let held: {
-		endpoint: Pick<EndpointPort, 'v2' | 'state'>;
+		endpoint: Pick<EndpointPort, 'invoke' | 'negotiated' | 'state'>;
 		connection: number;
 		registration: string;
 		controller: AbortController;
 		port: WorkflowOwnerPort;
 	} | null = null;
-	// The legacy v1 `workflow` fence is never sent. An attachment (of either
-	// protocol) that did not negotiate the lifecycle is the endpoint's own answer
-	// that it serves no owner operation to this peer (`unsupported_capability`);
-	// anything else (no attachment, no projected reference yet) is not reachable
-	// right now.
-	const notNegotiated: WorkflowOwnerPort['claim'] = async () => ({
-		status: 'denied',
-		reason: 'unsupported_capability',
-	});
-	const notReady: WorkflowOwnerPort['claim'] = async () => ({
-		status: 'unavailable',
-		reason: 'not-negotiated',
-		message:
-			'The v2 workflow lifecycle needs an attachment that negotiated it and a registration_use reference; nothing was sent.',
-	});
-	const offered = (endpoint: Pick<EndpointPort, 'v2' | 'state'>): boolean =>
-		!!endpoint.v2 &&
-		WORKFLOW_V2_LIFECYCLE_CAPABILITIES.every((operation) => endpoint.v2!.negotiated(operation));
+	const offered = (endpoint: Pick<EndpointPort, 'invoke' | 'negotiated' | 'state'>): boolean =>
+		WORKFLOW_LIFECYCLE_CAPABILITIES.every((operation) => endpoint.negotiated(operation));
 	const drop = () => {
 		held?.controller.abort();
 		held = null;
@@ -487,20 +470,21 @@ export function createEndpointWorkflowV2OwnerPort(
 		const state = endpoint.state();
 		if (state.attached && !state.closed && !offered(endpoint)) {
 			drop();
-			return { claim: notNegotiated };
+			return { lifecycle: null, unserved: true };
 		}
 		if (!registration || state.closed || !offered(endpoint)) {
 			drop();
-			return { claim: notReady };
+			return null;
 		}
 		const key = JSON.stringify([registration.challengeId, registration.processEpoch]);
+		const reused = held as typeof held;
 		if (
-			held &&
-			held.endpoint === endpoint &&
-			held.connection === state.connection &&
-			held.registration === key
+			reused &&
+			reused.endpoint === endpoint &&
+			reused.connection === state.connection &&
+			reused.registration === key
 		) {
-			return held.port;
+			return reused.port;
 		}
 		drop();
 		const controller = new AbortController();
@@ -517,7 +501,7 @@ export function createEndpointWorkflowV2OwnerPort(
 				offered(endpoint)
 			);
 		};
-		const lifecycle = endpointWorkflowV2LifecyclePort(createEndpointWorkflowV2Client(endpoint), {
+		const lifecycle = endpointWorkflowLifecyclePort(createEndpointWorkflowClient(endpoint), {
 			signal: controller.signal,
 			current,
 			authority: () => {
@@ -529,13 +513,8 @@ export function createEndpointWorkflowV2OwnerPort(
 			...(deps.evidenceDigest ? { evidenceDigest: deps.evidenceDigest } : {}),
 			...(deps.requestedLeaseMs ? { requestedLeaseMs: deps.requestedLeaseMs } : {}),
 		});
-		held = {
-			endpoint,
-			connection,
-			registration: key,
-			controller,
-			port: { lifecycle, claim: notReady },
-		};
-		return held.port;
+		const port: WorkflowOwnerPort = { lifecycle };
+		held = { endpoint, connection, registration: key, controller, port };
+		return port;
 	};
 }

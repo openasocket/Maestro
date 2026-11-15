@@ -12,6 +12,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { createPlatformEndpointClient } from '../../../main/enterprise/endpoint-client';
 import {
+	LOCAL_ENDPOINT_PROTOCOL,
 	ENDPOINT_NATIVE_PORT_VERSION,
 	endpointAddressProblem,
 	endpointNativePortProblem,
@@ -31,8 +32,8 @@ const SERVER: EndpointServerIdentity = {
 	principal: '_megamaestro',
 };
 const COMPAT = {
-	protocol: 1 as const,
-	components: [{ id: 'maestro', kind: 'maestro', version: '1.1.0-RC' }],
+	supportedProtocols: [LOCAL_ENDPOINT_PROTOCOL] as const,
+	supportedCapabilities: ['attachment', 'compatibility'],
 	requiredCapabilities: [],
 };
 const PIPE = '\\\\.\\pipe\\mega-maestro-endpoint-a1';

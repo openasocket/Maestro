@@ -1,10 +1,12 @@
 /**
  * The local endpoint client over a real Unix socket, against the fake daemon
  * in `fakeEndpoint.ts`. What is defended: the client never speaks TCP, never
- * sends what it cannot describe, reads only answers to its own questions,
- * keeps the endpoint's per-socket session semantics (attach first; a dropped
+ * sends what it cannot describe, sends nothing before the attachment (bar the
+ * handshake, compatibility and relayed enrollment), reads only answers to its
+ * own questions, keeps the endpoint's per-socket session semantics (a dropped
  * socket drops everything but the process registration), and reports a lost
- * answer to an effectful request as `unknown`, never as a retry.
+ * answer to an effectful request as `unknown`, never as a retry. Every envelope
+ * goes to `/v2/invoke`; there is no other path.
  *
  * The daemon here is a double, so nothing in this file is paired enforcement
  * (CP-01, CP-03) and no OS peer is authenticated.
@@ -17,18 +19,20 @@ import {
 	endpointSocketPathProblem,
 } from '../../../main/enterprise/endpoint-client';
 import {
+	LOCAL_ENDPOINT_INVOKE_PATH,
 	LOCAL_ENDPOINT_MAX_REQUEST_BYTES,
+	LOCAL_ENDPOINT_PROTOCOL,
 	type EndpointAttachmentRequest,
 	type EndpointPort,
 } from '../../../shared/maestro-lib/managed/endpoint-port';
-import { startFakeEndpoint, type FakeEndpoint } from './fakeEndpoint';
+import { startFakeEndpoint, type FakeEndpoint, type FakeEndpointOptions } from './fakeEndpoint';
 
 const ATTACH: EndpointAttachmentRequest = {
 	installationId: 'inst-1',
 	runtimeId: 'desktop-100',
 	processEpoch: 'epoch-1',
 	components: [{ id: 'maestro', kind: 'maestro', version: '1.1.0-RC' }],
-	supportedProtocols: [1],
+	supportedProtocols: [LOCAL_ENDPOINT_PROTOCOL],
 	supportedCapabilities: ['attachment', 'compatibility', 'telemetry', 'execution'],
 	requiredCapabilities: [],
 };
@@ -37,7 +41,7 @@ describe('local endpoint client', () => {
 	const open: FakeEndpoint[] = [];
 	const clients: EndpointPort[] = [];
 
-	async function endpoint(options = {}): Promise<FakeEndpoint> {
+	async function endpoint(options: FakeEndpointOptions = {}): Promise<FakeEndpoint> {
 		const fake = await startFakeEndpoint(options);
 		open.push(fake);
 		return fake;
@@ -73,21 +77,28 @@ describe('local endpoint client', () => {
 		expect(endpointSocketPathProblem('/tmp/endpoint.sock')).toBeNull();
 	});
 
-	it('negotiates, attaches, and then invokes on the same connection', async () => {
-		const fake = await endpoint();
+	it('negotiates, attaches, and then invokes on the same connection, all on /v2/invoke', async () => {
+		const fake = await endpoint({ capabilities: ['telemetry', 'execution'] });
 		const port = client(fake);
 		const compat = await port.compatibility({
-			protocol: 1,
-			components: ATTACH.components,
+			supportedProtocols: [LOCAL_ENDPOINT_PROTOCOL],
+			supportedCapabilities: ['telemetry'],
 			requiredCapabilities: ['telemetry'],
 		});
-		expect(compat.status).toBe('ok');
-		if (compat.status === 'ok') expect(compat.payload.capabilities).toContain('telemetry');
+		expect(compat).toEqual({
+			status: 'ok',
+			payload: {
+				outcome: 'negotiated',
+				protocol: LOCAL_ENDPOINT_PROTOCOL,
+				capabilities: ['telemetry'],
+			},
+		});
 
 		const attached = await port.attach(ATTACH);
 		expect(attached.status).toBe('ok');
 		if (attached.status === 'ok') {
 			expect(attached.payload.management).toBe('managed');
+			expect(attached.payload.protocol).toBe(LOCAL_ENDPOINT_PROTOCOL);
 			expect(attached.payload.capabilities).toEqual([
 				'attachment',
 				'compatibility',
@@ -96,6 +107,7 @@ describe('local endpoint client', () => {
 			]);
 		}
 		expect(port.state()).toMatchObject({ connection: 1, attached: true, registration: 'none' });
+		expect(port.negotiated('telemetry')).toBe(true);
 
 		const echoed = await port.invoke('telemetry', { eventId: 'e1' });
 		expect(echoed).toEqual({
@@ -103,11 +115,24 @@ describe('local endpoint client', () => {
 			payload: { outcome: 'echo', operation: 'telemetry', payload: { eventId: 'e1' } },
 		});
 		expect(fake.calls.map((c) => c.socket)).toEqual([1, 1, 1]);
+		expect(fake.calls.every((c) => c.path === LOCAL_ENDPOINT_INVOKE_PATH)).toBe(true);
 		const ids = fake.calls.map((c) => (c.body as { correlationId: string }).correlationId);
 		expect(new Set(ids).size).toBe(3);
 	});
 
-	it('does not send an operation before the connection is attached', async () => {
+	it('an operation the attachment did not negotiate is not offered: execution stays off when the endpoint does not offer it', async () => {
+		const fake = await endpoint({ capabilities: ['telemetry'] });
+		const port = client(fake);
+		expect((await port.attach(ATTACH)).status).toBe('ok');
+		expect(port.state().negotiated?.capabilities).toEqual([
+			'attachment',
+			'compatibility',
+			'telemetry',
+		]);
+		expect(port.negotiated('execution')).toBe(false);
+	});
+
+	it('sends nothing before the attachment except the handshake, compatibility and relayed enrollment', async () => {
 		const fake = await endpoint();
 		const port = client(fake);
 		const outcome = await port.invoke('telemetry', {});
@@ -127,7 +152,11 @@ describe('local endpoint client', () => {
 	it("passes the endpoint's own denial through, and an attach denial leaves the socket unattached", async () => {
 		const fake = await endpoint();
 		const port = client(fake);
-		const outcome = await port.attach({ ...ATTACH, requiredCapabilities: ['model'] });
+		const outcome = await port.attach({
+			...ATTACH,
+			requiredCapabilities: ['model'],
+			supportedCapabilities: [...ATTACH.supportedCapabilities, 'model'],
+		});
 		expect(outcome).toEqual({ status: 'denied', reason: 'unsupported_capability' });
 		expect(port.state().attached).toBe(false);
 		const next = await port.invoke('telemetry', {});
@@ -135,19 +164,34 @@ describe('local endpoint client', () => {
 	});
 
 	it('a reused correlation id is a replay the endpoint refuses', async () => {
-		const fake = await endpoint();
+		const fake = await endpoint({ capabilities: ['telemetry'] });
 		const port = client(fake, { newCorrelationId: () => 'same-id' });
 		expect((await port.attach(ATTACH)).status).toBe('ok');
 		expect(await port.invoke('telemetry', {})).toEqual({ status: 'denied', reason: 'replay' });
 	});
 
+	it('an answer whose correlationId does not match the request is refused as malformed', async () => {
+		const fake = await endpoint({
+			envelope: (envelope) => ({ ...envelope, correlationId: 'not-the-request' }),
+		});
+		const port = client(fake);
+		const outcome = await port.compatibility({
+			supportedProtocols: [LOCAL_ENDPOINT_PROTOCOL],
+			supportedCapabilities: [],
+			requiredCapabilities: [],
+		});
+		expect(outcome).toMatchObject({ status: 'unavailable', reason: 'malformed' });
+		if (outcome.status === 'unavailable') expect(outcome.message).toMatch(/correlationId/);
+	});
+
 	it('forgets the session when the endpoint drops the connection', async () => {
-		const fake = await endpoint();
+		const fake = await endpoint({ capabilities: ['telemetry'] });
 		const port = client(fake);
 		expect((await port.attach(ATTACH)).status).toBe('ok');
 		fake.dropConnections();
 		await new Promise((resolve) => setTimeout(resolve, 50));
 		expect(port.state()).toMatchObject({ attached: false, status: null });
+		expect(port.state().negotiated).toBeUndefined();
 		const outcome = await port.invoke('telemetry', {});
 		expect(outcome).toMatchObject({ status: 'unavailable', reason: 'not-attached' });
 		expect((await port.attach(ATTACH)).status).toBe('ok');
@@ -172,11 +216,11 @@ describe('local endpoint client', () => {
 			expect(challenge.payload.nonce).toHaveLength(43);
 			expect(challenge.payload.challengeDigest).toMatch(/^[a-f0-9]{64}$/);
 		}
-		// A v2 envelope (contracts 0.3.0): the challenge carries version and purpose, never the v1 shape.
+		// The challenge carries version and purpose in its envelope payload.
 		const asked = fake
-			.callsTo('/v2/invoke')
+			.callsTo(LOCAL_ENDPOINT_INVOKE_PATH)
 			.find((c) => (c.body as { operation: string }).operation === 'registration_challenge');
-		expect((asked?.body as { schemaVersion: number }).schemaVersion).toBe(2);
+		expect((asked?.body as { schemaVersion: number }).schemaVersion).toBe(LOCAL_ENDPOINT_PROTOCOL);
 		expect((asked?.body as { payload: unknown }).payload).toEqual({
 			runtimeId: 'desktop-100',
 			processEpoch: 'epoch-1',
@@ -227,7 +271,7 @@ describe('local endpoint client', () => {
 	});
 
 	it('a revoked registration denies every later operation, attachment included', async () => {
-		const fake = await endpoint({ registrationRequired: true });
+		const fake = await endpoint({ registrationRequired: true, capabilities: ['telemetry'] });
 		const port = client(fake);
 		await port.registration.challenge({ runtimeId: 'desktop-100', processEpoch: 'epoch-1' });
 		await port.registration.redeem();
@@ -241,33 +285,35 @@ describe('local endpoint client', () => {
 		expect(port.state().attached).toBe(false);
 	});
 
-	it('does not send a request over the size bound, and drops an answer over it', async () => {
+	it('does not send a request over the size bound, and drops a read-only answer over it', async () => {
 		const fake = await endpoint({
-			capabilities: Array.from({ length: 4000 }, (_, i) => `capability-${i}-${'x'.repeat(16)}`),
+			capabilities: ['desktopPolicy', 'telemetry'],
+			operations: { desktopPolicy: () => ({ outcome: 'echo', blob: 'x'.repeat(70 * 1024) }) },
 			maxResponseBytes: 1024 * 1024,
 		});
 		const port = client(fake);
-		const big = await port.compatibility({
-			protocol: 1,
-			components: [
-				{ id: 'maestro', kind: 'maestro', version: 'x'.repeat(LOCAL_ENDPOINT_MAX_REQUEST_BYTES) },
-			],
-			requiredCapabilities: [],
+		expect(
+			(
+				await port.attach({
+					...ATTACH,
+					supportedCapabilities: [...ATTACH.supportedCapabilities, 'desktopPolicy'],
+				})
+			).status
+		).toBe('ok');
+		const big = await port.invoke('telemetry', {
+			blob: 'x'.repeat(LOCAL_ENDPOINT_MAX_REQUEST_BYTES),
 		});
 		expect(big).toMatchObject({ status: 'unavailable', reason: 'oversized' });
-		expect(fake.calls).toHaveLength(0);
-		// A read-only answer over the bound is dropped unread and reported as such.
-		const wide = await port.compatibility({
-			protocol: 1,
-			components: ATTACH.components,
-			requiredCapabilities: [],
-		});
-		expect(wide).toMatchObject({ status: 'unavailable', reason: 'oversized' });
 		expect(fake.calls).toHaveLength(1);
+		// A read-only answer over the bound is dropped unread and reported as such.
+		const wide = await port.invoke('desktopPolicy', { operation: 'read' });
+		expect(wide).toMatchObject({ status: 'unavailable', reason: 'oversized' });
+		expect(fake.calls).toHaveLength(2);
 	});
 
 	it('an oversized answer to an effectful request is unknown, since the request left', async () => {
 		const fake = await endpoint({
+			capabilities: ['telemetry'],
 			operations: { telemetry: () => ({ outcome: 'echo', blob: 'x'.repeat(70 * 1024) }) },
 			maxResponseBytes: 1024 * 1024,
 		});
@@ -277,11 +323,11 @@ describe('local endpoint client', () => {
 	});
 
 	it('a lost answer is unknown for an effectful request and a timeout for a read-only one', async () => {
-		const fake = await endpoint({ delayMs: 400 });
+		const fake = await endpoint({ delayMs: 400, capabilities: ['execution'] });
 		const port = client(fake, { timeoutMs: 100 });
 		const compat = await port.compatibility({
-			protocol: 1,
-			components: ATTACH.components,
+			supportedProtocols: [LOCAL_ENDPOINT_PROTOCOL],
+			supportedCapabilities: [],
 			requiredCapabilities: [],
 		});
 		expect(compat).toMatchObject({ status: 'unavailable', reason: 'timeout' });
@@ -292,18 +338,18 @@ describe('local endpoint client', () => {
 		expect(effect.status).toBe('unknown');
 	});
 
-	it('a daemon that rejects the schema version answers denied/unsupported_version', async () => {
-		const fake = await endpoint();
+	it('a daemon that speaks another schema version refuses every envelope as unsupported_version', async () => {
+		const fake = await endpoint({ schemaVersion: 3 });
 		const port = client(fake);
-		// The fake rejects any non-1 schemaVersion with a 400 denial; the client
-		// always sends 1, so force the daemon's view through a stale envelope.
-		fake.options.operations = {};
-		const outcome = await port.compatibility({
-			protocol: 1,
-			components: ATTACH.components,
-			requiredCapabilities: ['something-the-daemon-lacks'],
-		});
-		expect(outcome).toEqual({ status: 'denied', reason: 'unsupported_capability' });
+		expect(
+			await port.compatibility({
+				supportedProtocols: [LOCAL_ENDPOINT_PROTOCOL],
+				supportedCapabilities: [],
+				requiredCapabilities: [],
+			})
+		).toEqual({ status: 'denied', reason: 'unsupported_version' });
+		expect(await port.attach(ATTACH)).toEqual({ status: 'denied', reason: 'unsupported_version' });
+		expect(port.state().attached).toBe(false);
 	});
 
 	it('a peer the daemon cannot authenticate is denied on every envelope and refused a registration', async () => {
@@ -311,11 +357,12 @@ describe('local endpoint client', () => {
 		const port = client(fake);
 		expect(await port.attach(ATTACH)).toEqual({ status: 'denied', reason: 'unauthenticated' });
 		expect(
-			await port.compatibility({ protocol: 1, components: [], requiredCapabilities: [] })
-		).toEqual({
-			status: 'denied',
-			reason: 'unauthenticated',
-		});
+			await port.compatibility({
+				supportedProtocols: [LOCAL_ENDPOINT_PROTOCOL],
+				supportedCapabilities: [],
+				requiredCapabilities: [],
+			})
+		).toEqual({ status: 'denied', reason: 'unauthenticated' });
 		expect(await port.registration.challenge({ runtimeId: 'r', processEpoch: 'e' })).toEqual({
 			status: 'denied',
 			reason: 'unauthenticated',
@@ -341,25 +388,8 @@ describe('local endpoint client', () => {
 		expect(fake.registered()).toBe(false);
 	});
 
-	it('a daemon that speaks another schema version refuses every envelope as unsupported_version', async () => {
-		const fake = await endpoint({ schemaVersion: 2 });
-		const port = client(fake);
-		expect(
-			await port.compatibility({
-				protocol: 1,
-				components: ATTACH.components,
-				requiredCapabilities: [],
-			})
-		).toEqual({
-			status: 'denied',
-			reason: 'unsupported_version',
-		});
-		expect(await port.attach(ATTACH)).toEqual({ status: 'denied', reason: 'unsupported_version' });
-		expect(port.state().attached).toBe(false);
-	});
-
 	it('answers closed after close() and never dials again', async () => {
-		const fake = await endpoint();
+		const fake = await endpoint({ capabilities: ['telemetry'] });
 		const port = client(fake);
 		expect((await port.attach(ATTACH)).status).toBe('ok');
 		await port.close();
@@ -369,11 +399,12 @@ describe('local endpoint client', () => {
 			reason: 'not-attached',
 		});
 		expect(
-			await port.compatibility({ protocol: 1, components: [], requiredCapabilities: [] })
-		).toMatchObject({
-			status: 'unavailable',
-			reason: 'closed',
-		});
+			await port.compatibility({
+				supportedProtocols: [LOCAL_ENDPOINT_PROTOCOL],
+				supportedCapabilities: [],
+				requiredCapabilities: [],
+			})
+		).toMatchObject({ status: 'unavailable', reason: 'closed' });
 		expect(fake.calls).toHaveLength(1);
 	});
 });

@@ -93,7 +93,6 @@ export function answerEnrollmentPhase(payload: unknown): unknown {
 
 /** A fake endpoint that relays enrollment on protocol 2. */
 export const SERVES_RELAYED_ENROLLMENT: FakeEndpointOptions = {
-	capabilities: ['enrollment', 'telemetry', 'execution'],
-	v2Capabilities: ['enrollment'],
+	capabilities: ['enrollment'],
 	operations: { enrollment: answerEnrollmentPhase },
 };

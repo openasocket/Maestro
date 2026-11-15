@@ -106,7 +106,6 @@ describe('enrollment lifecycle', () => {
 		const outcome = await life.requestEnrollment(requestPhase(fake.socketPath));
 		expect(outcome).toMatchObject({ status: 'unsupported', owner: 'mega-maestro' });
 		expect(identity.read()).toEqual({ status: 'none' });
-		expect(fake.callsTo('/v1/invoke')).toEqual([]);
 		expect(fake.calls.map((c) => (c.body as { operation: string }).operation)).toEqual([
 			'compatibility',
 		]);
@@ -170,7 +169,6 @@ describe('enrollment lifecycle', () => {
 			status: 'ok',
 			record: { enrollmentId: ENROLLMENT_ID, management: 'enrolled' },
 		});
-		expect(fake.callsTo('/v1/invoke')).toEqual([]);
 	});
 
 	it('writes nothing on a denied phase or on an answer that is not the phase own', async () => {

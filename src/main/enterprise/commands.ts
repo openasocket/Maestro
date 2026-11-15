@@ -41,13 +41,11 @@
  * standing, or a policy observation admission is not possible under, makes a
  * command `unavailable` rather than decided.
  *
- * `receive()` is the typed inbound entry; `receiveV2()` (MCOMP-29-01) reads a
- * pinned `commandRequestV2` delivery into it and answers the exact
- * `commandReceiptV2`, only when the host reports the v2 command correlation
- * negotiated (`commandWire`) and the delivery addresses the registration
- * challenge the sealed record holds now. Nothing negotiates v2 in production
- * yet (accepted endpoint protocols are [1]), so it answers
- * `unsupported_version` there. `createEnterpriseService` composes
+ * `receive()` (MCOMP-29-01) is the one inbound entry: it reads a pinned
+ * `commandRequestV2` delivery and answers the exact `commandReceiptV2`, only when
+ * the host reports the command correlation negotiated (`commandWire`) and the
+ * delivery addresses the registration challenge the sealed record holds now;
+ * otherwise it answers `unsupported_version` or `unauthenticated`. `createEnterpriseService` composes
  * this in MRC-11-05; nothing here reaches Electron or the IPC layer.
  *
  * `issueLocal()` (MRC2-07-02) is the local operator's path, `maestro-cli
@@ -64,6 +62,11 @@
 import { randomUUID } from 'crypto';
 import { canonicalJson } from '../../shared/canonicalJson';
 import { sha256Hex } from '../../shared/maestro-lib/managed/authority';
+import {
+	LOCAL_ENDPOINT_PROTOCOL,
+	operationNegotiated,
+	type EndpointConnectionState,
+} from '../../shared/maestro-lib/managed/endpoint-port';
 import {
 	commandCapability,
 	commandReceiptV2Of,
@@ -165,6 +168,24 @@ export interface CommandServiceDeps {
 
 export const COMMAND_CORRELATION_FEATURE = 'command-correlation-v2';
 
+/**
+ * The command wire this host speaks: protocol 2 with the command correlation
+ * feature, but only while the attachment on the current connection negotiated
+ * the `command` operation. Otherwise null, and a delivery is refused as
+ * `unsupported_version` (nothing is recorded). `lifecycle` is the enrollment
+ * lifecycle whose `status()` names the connection and its negotiation.
+ */
+export function negotiatedCommandWire(lifecycle: {
+	status(): { connection: EndpointConnectionState | null };
+}): () => { protocol: number; features: readonly string[] } | null {
+	return () => {
+		const connection = lifecycle.status().connection;
+		return connection && operationNegotiated(connection, 'command')
+			? { protocol: LOCAL_ENDPOINT_PROTOCOL, features: [COMMAND_CORRELATION_FEATURE] }
+			: null;
+	};
+}
+
 export interface UncomposedCommand {
 	kind: ManagedCommandKind;
 	capability: string;
@@ -208,10 +229,8 @@ export interface CommandService {
 	capabilities(): readonly string[];
 	/** The actions this desktop does not compose, by name. */
 	unsupported(): readonly UncomposedCommand[];
-	/** The one inbound entry: a value a verified endpoint port delivered, answered with the published disposition. */
-	receive(raw: unknown): Promise<CommandExecution>;
-	/** A v2 `command` delivery in, its exact receipt (or the local `denied`) out. */
-	receiveV2(raw: unknown): Promise<CommandReceiptV2>;
+	/** The inbound entry: a v2 `command` delivery in, its exact receipt (or the local `denied`) out. */
+	receive(raw: unknown): Promise<CommandReceiptV2>;
 	/** The cooperative pause gate a run owner tracks its runs in; null when not composed. */
 	readonly runControl: CooperativePauseGate | null;
 	/** A local operator's command (`maestro-cli managed command`), through the same executor and ledger. */
@@ -546,12 +565,12 @@ export function createCommandService(deps: CommandServiceDeps): CommandService {
 	}
 
 	/**
-	 * A v2 delivery: negotiated first, then read against the pinned shape, then bound to the
+	 * A delivery: negotiated first, then read against the pinned shape, then bound to the
 	 * registration challenge the sealed record holds now (a delivery for an earlier or another
-	 * registration is `unauthenticated`, nothing recorded), then the same executor and ledger as
-	 * `receive`, with the envelope kept so a re-signed duplicate is a replay.
+	 * registration is `unauthenticated`, nothing recorded), then the executor and ledger,
+	 * with the envelope kept so a re-signed duplicate is a replay.
 	 */
-	async function receiveV2(raw: unknown): Promise<CommandReceiptV2> {
+	async function receive(raw: unknown): Promise<CommandReceiptV2> {
 		const wire = deps.commandWire?.() ?? null;
 		if (
 			wire === null ||
@@ -575,14 +594,13 @@ export function createCommandService(deps: CommandServiceDeps): CommandService {
 	return {
 		ledger,
 		runControl: gate,
-		receiveV2,
+		receive,
 		async load() {
 			load = await ledger.load();
 			return load;
 		},
 		capabilities: () => executor.capabilities(),
 		unsupported,
-		receive: (raw) => executor.execute(raw),
 		issueLocal,
 		settle: (commandId, effect, detail) => executor.settle(commandId, effect, detail),
 		status() {

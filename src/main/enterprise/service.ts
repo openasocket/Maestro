@@ -54,8 +54,8 @@ import {
 	type ManagedHostAdapter,
 } from '../../shared/maestro-lib/managed/host-adapter';
 import type { ManagedInstallationIdentity } from '../../shared/maestro-lib/managed/types';
-import { V2_OPERATIONS_SELECTED } from '../../shared/maestro-lib/managed/endpoint-port';
-import { createEndpointWorkflowV2OwnerPort } from '../../shared/maestro-lib/managed/workflow-lifecycle-v2';
+import { ENDPOINT_OPERATIONS_OFFERED } from '../../shared/maestro-lib/managed/endpoint-port';
+import { createEndpointWorkflowOwnerPort } from '../../shared/maestro-lib/managed/workflow-lifecycle';
 import {
 	createWorkflowOwnership,
 	workflowFenceOf,
@@ -72,6 +72,7 @@ import {
 } from '../../shared/maestro-lib/managed/commands';
 import type { EndpointInboxAction } from '../../shared/maestro-lib/managed/host-adapter';
 import {
+	negotiatedCommandWire,
 	createCommandService,
 	type CommandService,
 	type CommandServiceStatus,
@@ -161,7 +162,7 @@ import {
 	type SupportEntry,
 } from '../../shared/maestro-lib/managed/compatibility';
 import type {
-	EndpointEnrollmentPhaseResultV2,
+	EndpointEnrollmentPhaseResult,
 	EndpointStatus,
 } from '../../shared/maestro-lib/managed/endpoint-port';
 import { MANAGED_CONTRACT_VERSION } from '../../shared/maestro-lib/managed/types';
@@ -185,36 +186,15 @@ import { readManagedSettingLocks } from './settings-policy';
 import type { UpdateHold } from './update-policy';
 
 /**
- * What this host offers the endpoint on a v1 attachment: the operations the
- * endpoint serves today. Execution is off the list until the endpoint serves
- * it (GCOMP-15-07). Enrollment and workflow stay on it because the enrollment
- * request and the workflow fence claim invoke them over v1, and the endpoint
- * refuses an operation the attachment did not negotiate (see MMV2-02 Notes).
- * The MMV2 phase adds the v2 operations back as each one is served.
+ * What this host offers on the attachment, the one connection every caller
+ * reads (see `EnrollmentLifecycleDeps.capabilities`): `registration_use`, the
+ * four workflow custody verbs, `delegation`, and every operation in
+ * `ENDPOINT_OPERATIONS_OFFERED`. Nothing is required: an endpoint that offers a
+ * subset still attaches, and an operation it did not negotiate is never sent.
+ * `execution` is offered like the rest; a delegated run is sent only when both
+ * it and `delegation` were negotiated (`createEndpointExecutionClient`).
  */
 export const ENTERPRISE_SUPPORTED_CAPABILITIES: readonly string[] = [
-	'attachment',
-	'compatibility',
-	'enrollment',
-	'telemetry',
-	'noticeList',
-	'inbox',
-	'command',
-	'workflow',
-];
-
-/**
- * What this host offers on the v2 attachment, the production attachment on
- * the one connection (see `EnrollmentLifecycleDeps.v2`, handoff item 1):
- * `registration_use`, the four workflow custody verbs, and every operation in
- * `V2_OPERATIONS_SELECTED` (handoff item 7). Nothing is required: an endpoint
- * that offers a subset still attaches, and an operation it did not select is
- * never sent. `execution` is in the selection (handoff item 10) and
- * `delegation` beside it, because a delegated run is sent only when both were
- * negotiated (`createEndpointExecutionV2Client`); supporting them is not an
- * offer, and neither is used until the endpoint offers it (Mega FINISH-10).
- */
-export const ENTERPRISE_SUPPORTED_CAPABILITIES_V2: readonly string[] = [
 	'attachment',
 	'compatibility',
 	'registration_use',
@@ -223,7 +203,7 @@ export const ENTERPRISE_SUPPORTED_CAPABILITIES_V2: readonly string[] = [
 	'workflow_settle',
 	'workflow_release',
 	'delegation',
-	...V2_OPERATIONS_SELECTED,
+	...ENDPOINT_OPERATIONS_OFFERED,
 ];
 
 /**
@@ -321,7 +301,7 @@ export interface ManagedOperations {
 	/** One relayed enrollment phase (request, prove, activate; decision D1). */
 	requestEnrollment(
 		input: EnrollmentRequestInput
-	): Promise<LifecycleOutcome<EndpointEnrollmentPhaseResultV2>>;
+	): Promise<LifecycleOutcome<EndpointEnrollmentPhaseResult>>;
 	/** An authenticated status update: re-attach over the registered socket. */
 	refreshPolicy(): Promise<LifecycleOutcome<EndpointStatus>>;
 	/** What this installation is and can do (MRC-10-06B): no path, socket or secret. */
@@ -586,7 +566,7 @@ export function createManagedOperations(deps: ManagedOperationsDeps): ManagedOpe
 				policy: deps.policy.status(),
 				agentOptions: deps.policy.agentOptions?.(locks()),
 				custody: deps.identity.custody(),
-				supported: ENTERPRISE_SUPPORTED_CAPABILITIES_V2,
+				supported: ENTERPRISE_SUPPORTED_CAPABILITIES,
 				egress: holds.egress(),
 				update: holds.update(),
 				listeners: holds.listeners(),
@@ -638,7 +618,7 @@ export interface EnterpriseServiceDeps {
 	 * or null when unavailable. The default v1 client has no effect producer.
 	 */
 	effectProducer?(port: EndpointPort): ManagedEffectProducer | null;
-	/** Trusted host injection after authenticated CONTENT-LOCAL/1 negotiation; the v1 client has none. */
+	/** Trusted host injection after authenticated CONTENT-LOCAL/1 negotiation; the endpoint client has none. */
 	contentDelivery?(port: EndpointPort): ContentDeliveryPort | null;
 	/** Hears a dispatch ledger write that failed. Default: nothing; `dispatch.persistFailures()` counts them. */
 	onDispatchPersistError?(error: unknown): void;
@@ -860,8 +840,6 @@ export function createEnterpriseService(deps: EnterpriseServiceDeps): Enterprise
 		installation,
 		components,
 		capabilities: { supported: ENTERPRISE_SUPPORTED_CAPABILITIES, required: [] },
-		// Protocol 2 on the one connection: the attachment every caller reads is v2.
-		v2: { supported: ENTERPRISE_SUPPORTED_CAPABILITIES_V2 },
 		now,
 		// Every accepted attachment lists the notices again (below): what the endpoint
 		// holds for this actor is held here without a click, and the listing is the
@@ -909,7 +887,7 @@ export function createEnterpriseService(deps: EnterpriseServiceDeps): Enterprise
 	// record names, through the v2 workflow lifecycle on whatever socket is open
 	// right now, carrying the registration_use reference projected for it. No
 	// record, no standing to claim under; no negotiated lifecycle, nothing is sent.
-	const workflowOwnerPort = createEndpointWorkflowV2OwnerPort({
+	const workflowOwnerPort = createEndpointWorkflowOwnerPort({
 		endpoint: () => port,
 		registration: () => lifecycle.status().registrationUse?.reference ?? null,
 	});
@@ -1038,6 +1016,7 @@ export function createEnterpriseService(deps: EnterpriseServiceDeps): Enterprise
 		dispatch,
 		inventory,
 		file: `${deps.userDataDir}/${MANAGED_COMMAND_LEDGER_FILE_NAME}`,
+		commandWire: negotiatedCommandWire(lifecycle),
 		now,
 	});
 	// The notice inbox (MRC-11-02A) over the same host adapter and its own receipt

@@ -51,7 +51,7 @@ const denial = (
 });
 const request: CompatibilityRequest = {
 	contractVersions: [MANAGED_CONTRACT_VERSION],
-	endpointProtocols: [1],
+	endpointProtocols: [2],
 	transport: 'in-process',
 	required: ['capabilities.negotiate', 'runs.submit'],
 	minimumStatus: 'implemented',
@@ -72,7 +72,7 @@ describe('the counterpart-unsupported word', () => {
 		expect(COUNTERPART_SUPPORT_REVISION).toBe(vectors.counterpart.sourceRevision);
 		expect(rowsOf('CP-04')).toEqual([
 			'endpoint.command',
-			'endpoint.workflow',
+			'endpoint.workflow_claim',
 			'endpoint.offline',
 			'endpoint.enrollment',
 			'endpoint.budget',

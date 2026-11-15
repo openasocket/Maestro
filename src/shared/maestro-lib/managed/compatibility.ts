@@ -143,10 +143,10 @@ export const COUNTERPART_SUPPORT: readonly SupportEntry<string>[] = [
 		`${SERVED_OPERATIONS}; command falls through to unsupported_capability. Consumer: src/main/enterprise/commands.ts`
 	),
 	counterpartRow(
-		'endpoint.workflow',
+		'endpoint.workflow_claim',
 		'CP-04',
 		ENDPOINT_SERVER,
-		`${SERVED_OPERATIONS}; workflow falls through to unsupported_capability. Consumer: src/shared/maestro-lib/managed/workflows.ts (owner fences, with CP-03)`
+		`${SERVED_OPERATIONS}; workflow_claim falls through to unsupported_capability. Consumer: src/shared/maestro-lib/managed/workflows.ts (owner fences, with CP-03)`
 	),
 	counterpartRow(
 		'endpoint.offline',
@@ -244,8 +244,8 @@ export function applyCounterpartDenial<K extends string>(
 	return marked;
 }
 
-/** The endpoint wire protocols this build accepts. Mirrors the importer's ACCEPTED_ENDPOINT_PROTOCOLS. */
-export const MANAGED_ENDPOINT_PROTOCOLS: readonly number[] = [1, 2];
+/** The endpoint wire protocols this build accepts: protocol 2, the only one there is. Mirrors the importer's ACCEPTED_ENDPOINT_PROTOCOLS. */
+export const MANAGED_ENDPOINT_PROTOCOLS: readonly number[] = [2];
 
 /**
  * This build's own managed capability support. Negotiation was the only

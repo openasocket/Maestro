@@ -514,7 +514,7 @@ export async function composePair(options: PairCompositionOptions): Promise<Pair
 		const attached = await port.attach({
 			...installation,
 			components: [{ id: 'maestro', kind: 'maestro', version: '1.1.0-RC' }],
-			supportedProtocols: [1],
+			supportedProtocols: [2],
 			supportedCapabilities: ['attachment', 'compatibility', 'execution'],
 			requiredCapabilities: ['execution'],
 		});

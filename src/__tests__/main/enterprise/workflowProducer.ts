@@ -5,10 +5,10 @@
  * request, so nothing it answers is paired enforcement.
  */
 
-import type { EndpointWorkflowOwnerV2 } from '../../../shared/maestro-lib/managed/endpoint-port';
+import type { EndpointWorkflowOwner } from '../../../shared/maestro-lib/managed/endpoint-port';
 import type { FakeEndpointOptions } from './fakeEndpoint';
 
-export const ISSUED: EndpointWorkflowOwnerV2 = {
+export const ISSUED: EndpointWorkflowOwner = {
 	ownerId: 'inst-1',
 	ownerEpoch: 'opaque-epoch-1',
 	fencingToken: 'server-fence-1',
@@ -37,8 +37,8 @@ export function leaseOf(payload: Payload, owner: unknown, now: () => number = Da
  * the installation the request's registration names; leases and timestamps
  * read `now` (the host's clock in a composition test).
  */
-export function workflowV2Producer(
-	options: { issued?: EndpointWorkflowOwnerV2; now?: () => number } = {}
+export function workflowProducer(
+	options: { issued?: EndpointWorkflowOwner; now?: () => number } = {}
 ): NonNullable<FakeEndpointOptions['operations']> {
 	const { issued, now = Date.now } = options;
 	return {
@@ -94,7 +94,7 @@ export function projectedRegistrationUse(installation: {
 }
 
 /** Every v2 operation a workflow composition needs offered: the reference and the four verbs. */
-export const WORKFLOW_V2_OFFER = [
+export const WORKFLOW_OFFER = [
 	'registration_use',
 	'workflow_claim',
 	'workflow_renew',

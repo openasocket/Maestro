@@ -3,7 +3,7 @@
  * the wire, parsed by the pinned 0.3.0 contract (handoff items 1-3, 9): the
  * registration handshake, the protocol 2 attachment, `registration_use` and a
  * v2 workflow claim, all on `/v2/invoke`, every request envelope one
- * `localRequestEnvelopeV2` accepts, and nothing on `/v1/invoke`.
+ * `localRequestEnvelopeV2` accepts, and nothing on any other path.
  *
  * The consumer BUILD receipt writer runs this suite with
  * `MAESTRO_WIRE_OBSERVATION=<file>` and records what it wrote under
@@ -24,9 +24,9 @@ import { fakeAnchor, fakeSeal } from '../../main/enterprise/fakeCustody';
 import { startFakeEndpoint, type FakeEndpoint } from '../../main/enterprise/fakeEndpoint';
 import {
 	projectedRegistrationUse,
-	WORKFLOW_V2_OFFER,
-	workflowV2Producer,
-} from '../../main/enterprise/workflowV2Producer';
+	WORKFLOW_OFFER,
+	workflowProducer,
+} from '../../main/enterprise/workflowProducer';
 import { createHash } from 'node:crypto';
 
 const NOW = Date.parse('2026-11-14T12:00:00Z');
@@ -57,12 +57,11 @@ describe('runtime wire: the production composition on protocol 2', () => {
 			null;
 		fake = await startFakeEndpoint({
 			registrationRequired: true,
-			capabilities: ['execution'],
-			v2Capabilities: [...WORKFLOW_V2_OFFER],
+			capabilities: [...WORKFLOW_OFFER],
 			now: () => NOW,
 			operations: {
 				registration_use: () => projectedRegistrationUse(installation!),
-				...workflowV2Producer({ now: () => NOW }),
+				...workflowProducer({ now: () => NOW }),
 			},
 		});
 		const seal = fakeSeal();
@@ -111,7 +110,6 @@ describe('runtime wire: the production composition on protocol 2', () => {
 			});
 			expect(fence).toMatchObject({ ownerId: service.installation.installationId });
 
-			expect(fake.callsTo('/v1/invoke')).toEqual([]);
 			const sent = fake.callsTo('/v2/invoke').map((call) => call.body as Envelope);
 			for (const envelope of sent) {
 				const checked = protocol.localEndpointContractsV2[

@@ -808,7 +808,7 @@ describe('spawnGroupChatAgent', () => {
 					runtimeId: 'desktop-1',
 					processEpoch: 'e1',
 					components: [{ id: 'maestro', kind: 'maestro', version: '1.1.0-RC' }],
-					supportedProtocols: [1],
+					supportedProtocols: [2],
 					supportedCapabilities: ['attachment', 'compatibility', 'execution', 'telemetry'],
 					requiredCapabilities: ['execution'],
 				});
@@ -882,7 +882,7 @@ describe('spawnGroupChatAgent', () => {
 				expect(executions).toBe(0);
 				expect(
 					fake.calls
-						.filter((c) => c.path === '/v1/invoke')
+						.filter((c) => c.path === '/v2/invoke')
 						.map((c) => (c.body as { operation?: string }).operation)
 				).not.toContain('execution');
 				expect(adapter.authority.live()).toHaveLength(0);

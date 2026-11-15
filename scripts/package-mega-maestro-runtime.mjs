@@ -256,7 +256,7 @@ export function capabilityMatrix(libraryDir) {
 			library: lib.MAESTRO_LIB_VERSION,
 			managedContract: lib.MANAGED_CONTRACT_VERSION,
 			// The protocol the runtime speaks: its traffic is v2 only (/v2/invoke).
-			endpointProtocol: lib.LOCAL_ENDPOINT_PROTOCOL_V2,
+			endpointProtocol: lib.LOCAL_ENDPOINT_PROTOCOL,
 			node: lib.MAESTRO_LIB_VERSION_INFO.node,
 		},
 	};

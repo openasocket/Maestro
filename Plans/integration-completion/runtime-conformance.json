@@ -47,7 +47,7 @@
 		"standing": "a public, secret-free description of what the managed facade of library/index.js answers a consumer, read by a counterpart adapter as the behavior it maps and proven over the public exports by src/__tests__/integration/mega-maestro/conformance.test.ts; independent of sibling private source and of the acceptance artifacts under Plans/mega-maestro-rc/; it qualifies nothing (no pair, no provider, no lease): the sink it drives is a declared double and the runs it names never start a process",
 		"contract": {
 			"managedContract": "maestro-managed/1",
-			"endpointProtocol": 1,
+			"endpointProtocol": 2,
 			"transport": "in-process"
 		},
 		"invocation": {

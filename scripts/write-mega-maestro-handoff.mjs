@@ -506,7 +506,7 @@ export const HANDOFF_SCHEMA = {
 		},
 		capabilities: obj({
 			...of(['managedContract', 'nodeRange'], str),
-			endpointProtocol: int(1),
+			endpointProtocol: int(2),
 			contractVectors: obj({ file: str, sha256: nhex }),
 			counterpartRevision: nstr,
 		}),

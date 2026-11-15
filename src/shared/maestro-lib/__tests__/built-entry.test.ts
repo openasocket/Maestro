@@ -179,7 +179,7 @@ describe('the built maestro-lib entry', () => {
 			const profile = lib.hostCompatibilityProfile({ providers: lib.getAgentIds() });
 			const request = {
 				contractVersions: [lib.MANAGED_CONTRACT_VERSION],
-				endpointProtocols: [1],
+				endpointProtocols: [2],
 				transport: 'in-process',
 				required: ['capabilities.negotiate'],
 			};
@@ -461,7 +461,7 @@ describe('the packaged runtime archive, as a consumer loads it', () => {
 				versions: {
 					library: lib.MAESTRO_LIB_VERSION,
 					managedContract: lib.MANAGED_CONTRACT_VERSION,
-					endpointProtocol: lib.LOCAL_ENDPOINT_PROTOCOL_V2,
+					endpointProtocol: lib.LOCAL_ENDPOINT_PROTOCOL,
 					nodeRange: lib.MAESTRO_LIB_VERSION_INFO.node,
 				},
 				port,

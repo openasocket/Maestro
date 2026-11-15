@@ -1,17 +1,17 @@
 /**
- * The v2 execution client (handoff item 10): one `execution` envelope on the
+ * The execution client (handoff item 10): one `execution` envelope on the
  * endpoint client's `/v2/invoke` path carrying `runs.submit`, the contract's
  * `executionRequestV2` (contracts 0.3.0 protocol.js, unchanged from 0.2.0),
  * answered by a `dispatchReceiptV2` or a denial.
  *
  * Rules, each enforced here:
- *   - nothing is sent unless the v2 attachment on the CURRENT connection
+ *   - nothing is sent unless the attachment on the CURRENT connection
  *     negotiated `execution`, and `delegation` too when the lease carries a
  *     delegation chain. Otherwise `unavailable` / `not-negotiated`;
  *   - authority is never built from local fields. `registration`,
  *     `delegation`, `grants`, the workflow owner and the run lineage
  *     (`runId`, `attemptId`, `rootRunId`, `parentRunId`, `policyRevision`)
- *     are copied from the lease the v2 lifecycle answered (`workflow_claim` or
+ *     are copied from the lease the workflow lifecycle answered (`workflow_claim` or
  *     `workflow_renew`), whole. The caller supplies only what runs (agent,
  *     content, resources, provider, model) and the request's own ids;
  *   - before sending, the lease must still be what is held: the owner store's
@@ -37,29 +37,29 @@
 
 import { canonicalJson } from '../../canonicalJson';
 import {
-	ENDPOINT_EXECUTION_V2_PAYLOAD_OPERATION,
-	LOCAL_ENDPOINT_EXECUTION_V2_OPERATION,
-	LOCAL_ENDPOINT_PROTOCOL_V2,
+	ENDPOINT_EXECUTION_PAYLOAD_OPERATION,
+	LOCAL_ENDPOINT_EXECUTION_OPERATION,
+	LOCAL_ENDPOINT_PROTOCOL,
 	isEndpointDigest,
 	isEndpointIdentifier,
-	type EndpointDispatchReceiptV2,
-	type EndpointExecutionRequestV2,
-	type EndpointGrantReferenceV2,
+	type EndpointDispatchReceipt,
+	type EndpointExecutionRequest,
+	type EndpointGrantReference,
 	type EndpointInvokeOutcome,
 	type EndpointPort,
 	type EndpointRuntimeUseReference,
-	type EndpointWorkflowLeaseV2,
+	type EndpointWorkflowLease,
 } from './endpoint-port';
 import type { AutoRunOwnerFence } from '../autorun/attribution';
 
 /** What the caller says runs. None of it is authority. */
-export interface EndpointExecutionV2Submission {
-	/** The lease the v2 lifecycle answered for this run, as it answered it. */
-	lease: EndpointWorkflowLeaseV2;
+export interface EndpointExecutionSubmission {
+	/** The lease the workflow lifecycle answered for this run, as it answered it. */
+	lease: EndpointWorkflowLease;
 	/** The run and attempt the caller is executing; they must be the lease's. */
 	run: { runId: string; attemptId: string };
 	requestId: string;
-	source: EndpointExecutionRequestV2['source'];
+	source: EndpointExecutionRequest['source'];
 	provider: string;
 	model: string;
 	agentId: string;
@@ -70,25 +70,25 @@ export interface EndpointExecutionV2Submission {
 }
 
 /** A credited dispatch: the request as sent and the receipt that answers it. Not a completion. */
-export interface EndpointExecutionV2Dispatch {
+export interface EndpointExecutionDispatch {
 	/** `unknown` needs durable reconciliation before the effect is settled. */
-	dispatch: EndpointDispatchReceiptV2['state'];
-	request: EndpointExecutionRequestV2;
-	receipt: EndpointDispatchReceiptV2;
+	dispatch: EndpointDispatchReceipt['state'];
+	request: EndpointExecutionRequest;
+	receipt: EndpointDispatchReceipt;
 }
 
-export interface EndpointExecutionV2Deps {
+export interface EndpointExecutionDeps {
 	/** The fence the workflow owner store holds right now for the lease's workflow, or null. */
-	fence(lease: EndpointWorkflowLeaseV2): AutoRunOwnerFence | null;
+	fence(lease: EndpointWorkflowLease): AutoRunOwnerFence | null;
 	/** The `registration_use` reference projected for the CURRENT connection, or null. */
 	registration(): EndpointRuntimeUseReference | null;
 	now?(): number;
 }
 
-export interface EndpointExecutionV2Client {
+export interface EndpointExecutionClient {
 	submit(
-		submission: EndpointExecutionV2Submission
-	): Promise<EndpointInvokeOutcome<EndpointExecutionV2Dispatch>>;
+		submission: EndpointExecutionSubmission
+	): Promise<EndpointInvokeOutcome<EndpointExecutionDispatch>>;
 }
 
 const RECEIPT_KEYS = [
@@ -134,7 +134,7 @@ function grantListProblems(value: unknown, at: string, min: number): string[] {
 }
 
 /** Why `lease` cannot be executed under as the contract's references, or []. */
-export function executionLeaseProblems(lease: EndpointWorkflowLeaseV2): string[] {
+export function executionLeaseProblems(lease: EndpointWorkflowLease): string[] {
 	if (!isRecord(lease)) return ['the lease is not an object'];
 	const problems: string[] = [];
 	for (const key of [
@@ -175,7 +175,7 @@ export function executionLeaseProblems(lease: EndpointWorkflowLeaseV2): string[]
 }
 
 /** Why the caller's side of `submission` is not the contract's, or []. */
-function submissionProblems(submission: EndpointExecutionV2Submission): string[] {
+function submissionProblems(submission: EndpointExecutionSubmission): string[] {
 	const problems: string[] = [];
 	for (const key of [
 		'requestId',
@@ -199,9 +199,9 @@ function submissionProblems(submission: EndpointExecutionV2Submission): string[]
 }
 
 /** The `runs.submit` body: the lease's references and lineage whole, the caller's content beside them. */
-export function buildExecutionRequestV2(
-	submission: EndpointExecutionV2Submission
-): EndpointExecutionRequestV2 {
+export function buildExecutionRequest(
+	submission: EndpointExecutionSubmission
+): EndpointExecutionRequest {
 	const lease = structuredClone(submission.lease);
 	return {
 		requestId: submission.requestId,
@@ -211,7 +211,7 @@ export function buildExecutionRequestV2(
 		provider: submission.provider,
 		model: submission.model,
 		policyRevision: lease.policyRevision,
-		operation: ENDPOINT_EXECUTION_V2_PAYLOAD_OPERATION,
+		operation: ENDPOINT_EXECUTION_PAYLOAD_OPERATION,
 		agentId: submission.agentId,
 		contentRef: submission.contentRef,
 		contentSha256: submission.contentSha256,
@@ -236,21 +236,21 @@ export function buildExecutionRequestV2(
 }
 
 /** The grant ids a receipt may name for `request`: the presented delegation grant, else a listed grant. */
-function presentedGrantIds(request: EndpointExecutionRequestV2): string[] {
+function presentedGrantIds(request: EndpointExecutionRequest): string[] {
 	return request.delegation
 		? [request.delegation.grant.grantId]
-		: request.grants.map((grant: EndpointGrantReferenceV2) => grant.grantId);
+		: request.grants.map((grant: EndpointGrantReference) => grant.grantId);
 }
 
 /** Why `reply` is not the `dispatchReceiptV2` for `request`, or []. A denial never reaches here. */
-export function dispatchReceiptV2Problems(
-	request: EndpointExecutionRequestV2,
+export function dispatchReceiptProblems(
+	request: EndpointExecutionRequest,
 	reply: unknown
 ): string[] {
 	if (!isRecord(reply)) return ['the answer is not an object'];
 	const problems: string[] = [];
 	if (reply.outcome !== 'broker_dispatched') problems.push('outcome is not broker_dispatched');
-	if (reply.protocol !== LOCAL_ENDPOINT_PROTOCOL_V2) problems.push('protocol is not 2');
+	if (reply.protocol !== LOCAL_ENDPOINT_PROTOCOL) problems.push('protocol is not 2');
 	for (const key of [
 		'requestId',
 		'attemptId',
@@ -274,10 +274,10 @@ export function dispatchReceiptV2Problems(
 }
 
 /** The execution client over `endpoint`. One client per connection's owner; it remembers the keys it sent. */
-export function createEndpointExecutionV2Client(
-	endpoint: Pick<EndpointPort, 'v2'>,
-	deps: EndpointExecutionV2Deps
-): EndpointExecutionV2Client {
+export function createEndpointExecutionClient(
+	endpoint: Pick<EndpointPort, 'invoke' | 'negotiated'>,
+	deps: EndpointExecutionDeps
+): EndpointExecutionClient {
 	const sent = new Set<string>();
 	const now = deps.now ?? Date.now;
 	const unavailable = (
@@ -286,18 +286,17 @@ export function createEndpointExecutionV2Client(
 	): EndpointInvokeOutcome<never> => ({ status: 'unavailable', reason, message });
 
 	async function submit(
-		submission: EndpointExecutionV2Submission
-	): Promise<EndpointInvokeOutcome<EndpointExecutionV2Dispatch>> {
-		const v2 = endpoint.v2;
-		const operation = LOCAL_ENDPOINT_EXECUTION_V2_OPERATION;
-		if (!v2?.negotiated(operation)) {
+		submission: EndpointExecutionSubmission
+	): Promise<EndpointInvokeOutcome<EndpointExecutionDispatch>> {
+		const operation = LOCAL_ENDPOINT_EXECUTION_OPERATION;
+		if (!endpoint.negotiated(operation)) {
 			return unavailable(
 				'not-negotiated',
-				`The v2 attachment on this connection did not negotiate ${operation}; nothing was sent.`
+				`The attachment on this connection did not negotiate ${operation}; nothing was sent.`
 			);
 		}
 		const { lease } = submission;
-		if (isRecord(lease) && lease.delegation !== null && !v2.negotiated('delegation')) {
+		if (isRecord(lease) && lease.delegation !== null && !endpoint.negotiated('delegation')) {
 			return unavailable(
 				'not-negotiated',
 				'The lease carries a delegation chain and the attachment did not negotiate delegation; nothing was sent.'
@@ -340,18 +339,18 @@ export function createEndpointExecutionV2Client(
 				'An execution with this idempotency key was already sent; it is reconciled, not resent.'
 			);
 		}
-		const request = buildExecutionRequestV2(submission);
+		const request = buildExecutionRequest(submission);
 		sent.add(request.idempotencyKey);
-		const outcome = await v2.invoke(operation, request);
+		const outcome = await endpoint.invoke(operation, request);
 		if (outcome.status !== 'ok') return outcome;
-		const problems = dispatchReceiptV2Problems(request, outcome.payload);
+		const problems = dispatchReceiptProblems(request, outcome.payload);
 		if (problems.length > 0) {
 			return unavailable(
 				'malformed',
 				`The execution answer is not the dispatch receipt for this request: ${problems.join('; ')}`
 			);
 		}
-		const receipt = outcome.payload as EndpointDispatchReceiptV2;
+		const receipt = outcome.payload as EndpointDispatchReceipt;
 		return { status: 'ok', payload: { dispatch: receipt.state, request, receipt } };
 	}
 

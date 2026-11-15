@@ -38,7 +38,7 @@ It is not:
 | `windows-shell` | On Windows, the provider is installed as a `.cmd` shim that only starts through cmd.exe, and an argument cannot pass through cmd.exe intact (a line break, a `%NAME%` pair or `^`; for the prompt, only when the provider cannot read it from stdin). See [Windows](#windows). |
 | `launch`        | The launch could not be planned. The message says why.                                                                                                                                                                                                                         |
 
-What each provider supports in maestro-lib `0.39.0`:
+What each provider supports in maestro-lib `0.40.0`:
 
 | Agent id        | Name            | Runs a turn | Resume | Read-only |
 | --------------- | --------------- | ----------- | ------ | --------- |
@@ -491,7 +491,7 @@ if (problems.length > 0) throw new Error(problems.join('; '));
 
 The client interface carries the extension as `MaestroClient.managed`, optional: a host without it is `unsupported`, never "unmanaged, so allowed".
 
-What that adds up to in `0.39.0`, before the release-by-release detail below:
+What that adds up to in `0.40.0`, before the release-by-release detail below:
 
 - **Standalone is untouched.** A program that never passes `managed` to `createMaestroRuntime`, and a `startTurn` with no `admission`, plan and run exactly as the earlier sections describe. Nothing here reads a keyring, opens a socket or asks a peer.
 - **A managed host admits launches, not providers.** `providerRouteSupport(agentId)` is the table: `managed` is `implemented` on the `child-process` route alone (the launch is admitted at the real spawn), and `unsupported` on `pty`, `codex-app-server`, `opencode-server` and `ssh`. What a provider's own tools do once running is not governed. The one route whose effects are enforced is the synthetic harness route, which qualifies no real provider.
@@ -572,9 +572,11 @@ Since `0.36.0` the surface carries what the upstream/rc merge added (MCOMP-01-03
 
 Since `0.37.0` the surface carries what the second upstream/rc merge added (MCOMP-33-00, upstream `919d28a66`, which numbered its own releases `0.4.0` to `0.6.0` from the shared `0.3.0`). `cmdShellArgsRefusal(args, promptArgs)` (`launch/windows-command.ts`) checks a whole cmd.exe argument list and names the first argument cmd.exe cannot carry by its flag or position, never quoting its value; see [Windows](#windows). The types `CurrentTurnCursor`, `CurrentTurnMessage` and `CurrentTurnRead` describe the desktop current-turn observation wire protocol; see [Desktop current-turn observations](#desktop-current-turn-observations). All additions; no export is removed and no managed rule changes.
 
-Since `0.38.0` a managed host speaks endpoint protocol 2 only (contracts `0.3.0`): the registration challenge and redeem are v2 envelopes on the connection that then attaches, so the v1 registration path constants are removed and the redeem receipt is `{ outcome: 'registered' }`. `ManagedHostAdapter.workflows` is the v2 workflow lifecycle (`createEndpointWorkflowV2OwnerPort`): offered only while the attachment negotiated `workflow_claim`, `workflow_renew`, `workflow_settle` and `workflow_release` and a `registration_use` reference is projected, and the v1 `workflow` fence is never sent. `endpoint-port` adds the relayed enrollment phases, the `localControl` and signed `command` shapes and `EndpointPortV2.compatibility`. Below `1.0` a minor may break, and this one does.
+Since `0.38.0` a managed host speaks endpoint protocol 2 only (contracts `0.3.0`): the registration challenge and redeem are v2 envelopes on the connection that then attaches, so the v1 registration path constants are removed and the redeem receipt is `{ outcome: 'registered' }`. `ManagedHostAdapter.workflows` is the v2 workflow lifecycle (`createEndpointWorkflowOwnerPort`): offered only while the attachment negotiated `workflow_claim`, `workflow_renew`, `workflow_settle` and `workflow_release` and a `registration_use` reference is projected, and the v1 `workflow` fence is never sent. `endpoint-port` adds the relayed enrollment phases, the `localControl` and signed `command` shapes and `EndpointPort.compatibility`. Below `1.0` a minor may break, and this one does.
 
-Since `0.39.0` a managed host can submit a run over endpoint protocol 2 (contracts `0.3.0`, `execution` on `/v2/invoke`, payload `runs.submit`). The request copies the registration, the full delegation chain, the grants, the workflow owner and the run lineage from the lease the v2 workflow lifecycle answered, and is sent only while the attachment negotiated `execution` (and `delegation` for a delegated lease), the owner store still holds the lease's fence, the lease is unexpired and the projected registration is the lease's. Only a `dispatchReceiptV2` that answers that request exactly is credited, as a dispatch (`dispatched` or `unknown`), never as a completion. `V2_OPERATIONS_SELECTED` includes `execution`; the new unavailable reasons are `stale-authority` and `duplicate`.
+Since `0.40.0` endpoint protocol 2 is the only protocol: the protocol 1 wire, its selection gate and the v1 workflow fence are removed, and the port is one surface (`EndpointPort.invoke`, `.attach`, `.registration`, `.negotiated`). The command service's `receive` answers only v2 `command` deliveries.
+
+Since `0.39.0` a managed host can submit a run over endpoint protocol 2 (contracts `0.3.0`, `execution` on `/v2/invoke`, payload `runs.submit`). The request copies the registration, the full delegation chain, the grants, the workflow owner and the run lineage from the lease the v2 workflow lifecycle answered, and is sent only while the attachment negotiated `execution` (and `delegation` for a delegated lease), the owner store still holds the lease's fence, the lease is unexpired and the projected registration is the lease's. Only a `dispatchReceiptV2` that answers that request exactly is credited, as a dispatch (`dispatched` or `unknown`), never as a completion. `ENDPOINT_OPERATIONS_OFFERED` includes `execution`; the new unavailable reasons are `stale-authority` and `duplicate`.
 
 ## See also
 

@@ -22,7 +22,7 @@ import type { InstallationInventory } from '../../main/enterprise/inventory';
 import type { ManagedStateView } from '../../main/enterprise/managed-state';
 import type { ManagedSupportMatrix } from '../../main/enterprise/service';
 import type {
-	EndpointEnrollmentPhaseResultV2,
+	EndpointEnrollmentPhaseResult,
 	EndpointStatus,
 } from '../../shared/maestro-lib/managed/endpoint-port';
 import type { ManagedSettingLocksView } from '../../shared/managedSettingsLock';
@@ -310,7 +310,7 @@ export async function managedEnrollRequest(options: ManagedEnrollOptions): Promi
 	if (missing.length) {
 		return failCommand(`The ${phase} phase is missing: ${missing.join(', ')}.`, options.json);
 	}
-	const outcome = await askDesktop<LifecycleOutcome<EndpointEnrollmentPhaseResultV2>>(
+	const outcome = await askDesktop<LifecycleOutcome<EndpointEnrollmentPhaseResult>>(
 		{ type: 'managed_enroll_request', request },
 		'managed_enroll_request_result',
 		'outcome',
@@ -320,7 +320,7 @@ export async function managedEnrollRequest(options: ManagedEnrollOptions): Promi
 }
 
 /** One line for a relayed phase's result: what the operator takes to the central console next. */
-export function describeEnrollmentPhase(result: EndpointEnrollmentPhaseResultV2): string {
+export function describeEnrollmentPhase(result: EndpointEnrollmentPhaseResult): string {
 	switch (result.outcome) {
 		default:
 			return 'Enrollment phase relayed.';

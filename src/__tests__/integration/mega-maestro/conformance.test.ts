@@ -132,7 +132,7 @@ describe('pinned public schemas and existing endpoint fixtures', () => {
 	const attach = {
 		...fixture.host.installation,
 		components: [{ id: 'maestro', kind: 'maestro' as const, version: '1.1.0-RC' }],
-		supportedProtocols: [1],
+		supportedProtocols: [2],
 		supportedCapabilities: ['attachment', 'execution'],
 		requiredCapabilities: [],
 	};
@@ -259,15 +259,15 @@ describe('pinned public schemas and existing endpoint fixtures', () => {
 			...(reason === 'replay' ? { newCorrelationId: () => 'same-id' } : {}),
 		});
 		try {
-			expect((await port.attach(endpoint.attachmentRequest.parse(attach))).status).toBe('ok');
+			expect((await port.attach(protocol.attachmentRequestV2.parse(attach))).status).toBe('ok');
 			if (reason === 'unauthenticated') fake.options.peerAuthenticated = false;
-			if (reason === 'unsupported_version') fake.options.schemaVersion = 2;
-			expect(await port.invoke('execution', endpoint.executionRequest.parse(request))).toEqual({
+			if (reason === 'unsupported_version') fake.options.schemaVersion = 3;
+			expect(await port.invoke('execution', request)).toEqual({
 				status: 'denied',
 				reason,
 			});
-			for (const call of fake.calls)
-				expect(endpoint.localRequestEnvelope.safeParse(call.body).success).toBe(true);
+			// The payload is a passthrough fixture, not a whole executionRequestV2: the envelope is what is checked.
+			for (const call of fake.calls) expect(call.body).toMatchObject({ schemaVersion: 2 });
 		} finally {
 			await port.close();
 			await fake.close();

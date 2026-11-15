@@ -18,10 +18,8 @@ import {
 	type InstallationStanding,
 } from '../../../shared/maestro-lib/managed/binding';
 import type { EndpointInvokeOutcome } from '../../../shared/maestro-lib/managed/endpoint-port';
-import type {
-	WorkflowOwnerPort,
-	WorkflowOwnerRequest,
-} from '../../../shared/maestro-lib/managed/workflows';
+import type { WorkflowOwnerPort } from '../../../shared/maestro-lib/managed/workflows';
+import { workflowEndpointId } from '../../../shared/maestro-lib/managed/workflows';
 
 const initializeOutputParsers = vi.fn();
 const executeCuePrompt = vi.fn();
@@ -594,25 +592,51 @@ describe('managed admission (MRC-07-02A)', () => {
 		};
 	}
 
-	/** A workflow owner producer that records every claim and answers as told: the registry, a double. */
-	function ownerPort(answer: (request: WorkflowOwnerRequest) => EndpointInvokeOutcome<unknown>) {
-		const requests: WorkflowOwnerRequest[] = [];
+	/** What the producer was asked: the lifecycle action, the run and attempt, the owner and its held epoch. */
+	interface ProducerCall {
+		action: string;
+		workflowId: string;
+		runId: string;
+		attemptId: string;
+		ownerId: string;
+		ownerEpoch: string;
+		fencingToken: string | null;
+		policyRevision: number | null;
+	}
+	/** A workflow owner producer (the lifecycle port) that records every call and answers as told: the registry, a double. */
+	function ownerPort(answer: (call: ProducerCall) => EndpointInvokeOutcome<unknown>) {
+		const requests: ProducerCall[] = [];
 		const port: WorkflowOwnerPort = {
-			claim: async (request) => {
-				requests.push(request);
-				return answer(request);
+			lifecycle: {
+				signal: new AbortController().signal,
+				current: () => true,
+				invoke: async (action, input, prior, owner) => {
+					const call: ProducerCall = {
+						action,
+						workflowId: workflowEndpointId(input.workflow.workflowId),
+						runId: input.runId,
+						attemptId: input.attemptId,
+						ownerId: owner.ownerId,
+						ownerEpoch: prior?.ownerEpoch ?? 'unissued',
+						fencingToken: prior?.fencingToken ?? null,
+						policyRevision: owner.policyRevision,
+					};
+					requests.push(call);
+					return answer(call);
+				},
 			},
 		};
 		return { port, requests };
 	}
-	const owned = (request: WorkflowOwnerRequest): EndpointInvokeOutcome<unknown> => ({
+	const owned = (call: ProducerCall): EndpointInvokeOutcome<unknown> => ({
 		status: 'ok',
 		payload: {
-			outcome: 'owned',
-			workflowId: request.workflowId,
-			ownerId: request.ownerId,
-			ownerEpoch: 3,
+			outcome: call.action === 'renew' ? 'renewed' : 'owned',
+			workflowId: call.workflowId,
+			ownerId: call.ownerId,
+			ownerEpoch: 'epoch-3',
 			fencingToken: 'fence-3',
+			expiresAt: new Date(Date.now() + 60_000).toISOString(),
 		},
 	});
 
@@ -794,16 +818,17 @@ describe('managed admission (MRC-07-02A)', () => {
 		// The owner id is the registry-issued identity for this installation; assert it is present, not its value.
 		expect(admission.context.workflow).toMatchObject({
 			workflowId: 'cue:ask',
-			owner: { ownerEpoch: '3', fencingToken: 'fence-3' },
+			owner: { ownerEpoch: 'epoch-3', fencingToken: 'fence-3' },
 		});
 		expect(admission.context.workflow.owner.ownerId).toMatch(/^[0-9a-f]+$|^inst-/);
 		// A first claim offers epoch 0 and a nonce for this run and attempt; the owner is the
 		// installation, named as an identifier, under the binding's policy generation.
-		expect(requests).toHaveLength(1);
+		// The claim, then the release the run settles on its end.
+		expect(requests.map((call) => call.action)).toEqual(['claim', 'release']);
 		expect(requests[0]).toMatchObject({
+			action: 'claim',
 			runId: 'run-owned',
-			ownerEpoch: 0,
-			offlineEnabled: false,
+			ownerEpoch: 'unissued',
 			policyRevision: 7,
 		});
 		expect(requests[0].ownerId).toMatch(/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/);
@@ -812,9 +837,10 @@ describe('managed admission (MRC-07-02A)', () => {
 
 		// The next firing re-claims with what the registry issued, never afresh.
 		expect(await promptRun(deps, 'run-owned-2')).toMatchObject({ status: 'completed' });
-		expect(requests[1]).toMatchObject({
+		expect(requests[2]).toMatchObject({
+			action: 'claim',
 			runId: 'run-owned-2',
-			ownerEpoch: 3,
+			ownerEpoch: 'epoch-3',
 			fencingToken: 'fence-3',
 		});
 		expect(executeCuePrompt).toHaveBeenCalledTimes(2);
@@ -834,7 +860,7 @@ describe('managed admission (MRC-07-02A)', () => {
 			managed: { state: 'denied', code: 'policy-denied' },
 		});
 		expect(result.stderr).toContain('[managed-denied]');
-		expect(result.stderr).toContain('is fenced');
+		expect(result.stderr).toContain('The producer fenced this workflow owner.');
 		expect(executeCuePrompt).not.toHaveBeenCalled();
 	});
 
@@ -1135,7 +1161,8 @@ describe('managed admission (MRC-07-02A)', () => {
 			expect(custody.inputs.at(-1)).toMatchObject({ userDataDir: other });
 			expect(await promptRun(deps, 'run-there')).toMatchObject({ status: 'completed' });
 			expect(executeCuePrompt.mock.calls[1][0].admission).toBeUndefined();
-			expect(requests).toHaveLength(1);
+			// The claim, then the release the run settles on its end.
+			expect(requests.map((call) => call.action)).toEqual(['claim', 'release']);
 			expect(fs.readdirSync(other)).not.toContain('maestro-managed-workflows.json');
 
 			// A binding file in that directory the custody does not hold: managed, unavailable, refused.
@@ -1159,7 +1186,7 @@ describe('managed admission (MRC-07-02A)', () => {
 			process.env.MAESTRO_USER_DATA = dir;
 			expect(await promptRun(deps, 'run-back')).toMatchObject({ status: 'completed' });
 			expect(executeCuePrompt).toHaveBeenCalledTimes(3);
-			expect(requests).toHaveLength(2);
+			expect(requests.filter((call) => call.action === 'claim')).toHaveLength(2);
 		});
 
 		it('names user-webhook and vendor-telemetry at the real sinks, and a standalone engine lets them leave', async () => {

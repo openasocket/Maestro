@@ -4,11 +4,11 @@
  * and keeps holding it across retries, a restart and a stretch offline
  * (MRC-07-06, CP-03).
  *
- * The contract is the endpoint's `workflow` operation (local-endpoint protocol
- * 1): a claim names the workflow, trigger, run and attempt, the owner with the
- * epoch and fencing token it holds, whether it may keep running offline, and
- * the policy generation; the answer is `owned` with the owner, epoch and token
- * the registry holds, or a denial (`owner_unfenced`: another owner, a moved
+ * The contract is the endpoint's workflow lifecycle (`workflow_claim`,
+ * `workflow_renew`, `workflow_settle`, `workflow_release`, see
+ * `./workflow-lifecycle`): a claim names the workflow, trigger, run and attempt
+ * and the policy generation; the answer is `owned` with the owner, epoch and
+ * token the registry holds, or a denial (`owner_unfenced`: another owner, a moved
  * epoch, a stale token). The registry is the one owner of epochs and tokens:
  * nothing here mints a fence. A first claim offers epoch 0 and a nonce the
  * registry may adopt or replace; what is held afterwards is the RECEIPT's
@@ -31,7 +31,6 @@ import { sha256Hex } from './authority';
 import {
 	isEndpointIdentifier,
 	type EndpointInvokeOutcome,
-	type EndpointPort,
 	type LocalEndpointDenialReason,
 } from './endpoint-port';
 import type { ManagedDenialCode } from './types';
@@ -45,36 +44,12 @@ export interface WorkflowIdentityLike {
 	triggerEventId: string;
 }
 
-/** The endpoint's `workflow` request, transcribed. Every id is an endpoint identifier. */
-export interface WorkflowOwnerRequest {
-	workflowId: string;
-	triggerId: string;
-	runId: string;
-	attemptId: string;
-	ownerId: string;
-	ownerEpoch: number;
-	fencingToken: string;
-	offlineEnabled: boolean;
-	policyRevision: number;
-}
-
-/** The registry's answer: who owns the workflow, at which epoch, under which token. */
-export interface WorkflowOwnerReceipt {
-	outcome: 'owned';
-	workflowId: string;
-	ownerId: string;
-	ownerEpoch: number;
-	fencingToken: string;
-}
-
-/** The producer port. A host builds it over its endpoint socket; a test injects a table. */
-/** Trusted WORKFLOW-CONTEXT/1 adapter, supplied only after authenticated v2 negotiation.
+/** Supplied only after authenticated negotiation of the workflow lifecycle.
  * This is a local port, not a wire DTO. The producer binds registration/delegation,
  * preserves the full input, reconciles prior pending operations on restart, and
  * confirms settlement before returning released. Expiry never transfers ownership.
  */
 export interface WorkflowOwnerLifecyclePort {
-	version: 1;
 	signal: AbortSignal;
 	current(): boolean;
 	invoke(
@@ -92,9 +67,15 @@ export interface WorkflowFenceLifetime {
 	finish(effect: 'applied' | 'no_effect' | 'uncertain'): Promise<void>;
 }
 
+/**
+ * The producer as a host composes it: the lifecycle over an attached,
+ * negotiated endpoint, or `unserved` when the attachment negotiated no owner
+ * operation (the endpoint serves none to this peer, CP-03). Neither: no
+ * producer is reachable right now.
+ */
 export interface WorkflowOwnerPort {
-	lifecycle?: WorkflowOwnerLifecyclePort;
-	claim(request: WorkflowOwnerRequest): Promise<EndpointInvokeOutcome<unknown>>;
+	lifecycle: WorkflowOwnerLifecyclePort | null;
+	unserved?: true;
 }
 
 /**
@@ -108,56 +89,12 @@ export function workflowEndpointId(id: string): string {
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
 	typeof value === 'object' && value !== null && !Array.isArray(value);
-const isEpoch = (value: unknown): value is number =>
-	typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
-
-/** The problems with a value offered as a receipt for `request`; empty when it is one. */
-export function workflowOwnerReceiptProblems(
-	value: unknown,
-	request: Pick<WorkflowOwnerRequest, 'workflowId'>
-): string[] {
-	if (!isRecord(value)) return ['receipt is not an object'];
-	const problems: string[] = [];
-	if (value.outcome !== 'owned') problems.push('outcome is not owned');
-	if (value.workflowId !== request.workflowId) problems.push('workflowId is not the one claimed');
-	if (!isEndpointIdentifier(value.ownerId)) problems.push('ownerId is not an identifier');
-	if (!isEpoch(value.ownerEpoch)) problems.push('ownerEpoch is not a count');
-	if (!isEndpointIdentifier(value.fencingToken)) problems.push('fencingToken is not an identifier');
-	return problems;
-}
-
-/** The port over an attached endpoint socket. The client decides unavailable vs unknown. */
-export function endpointWorkflowOwnerPort(
-	endpoint: Pick<EndpointPort, 'invoke'>
-): WorkflowOwnerPort {
-	return { claim: (request) => endpoint.invoke('workflow', request) };
-}
-
 /**
  * What a record holds before the registry has issued an epoch (a first claim
  * that was fenced, or a lifecycle claim awaiting its answer). Not an epoch: it
- * never reaches a fence, and the v1 wire offers 0 for it.
+ * never reaches a fence.
  */
 export const UNISSUED_OWNER_EPOCH = 'unissued';
-
-// ---------------------------------------------------------------------------
-// The v1 wire boundary (local-endpoint protocol 1, frozen until parity)
-//
-// The contract's owner epoch is an opaque string the registry issues; Maestro
-// never counts it or converts it from a number. The v1 `workflow` operation
-// alone carries it as a count, so the two conversions live here and nowhere
-// else: the held string offered back on a v1 request, and the registry's
-// issued count stored from a v1 receipt.
-// ---------------------------------------------------------------------------
-
-const V1_EPOCH = /^(0|[1-9][0-9]*)$/;
-
-/** The count a v1 request offers for a held epoch: the registry's own count back, else 0 (a fresh proposal). */
-function v1WireEpoch(held: string | undefined): number {
-	return held !== undefined && V1_EPOCH.test(held) && Number.isSafeInteger(Number(held))
-		? Number(held)
-		: 0;
-}
 
 // ---------------------------------------------------------------------------
 // What is held
@@ -176,11 +113,9 @@ export interface HeldWorkflowOwnership {
 	/**
 	 * The epoch the registry issued, as the opaque string the contract defines.
 	 * Never counted or derived here; `UNISSUED_OWNER_EPOCH` until the registry
-	 * has answered. A v1 receipt's count becomes this string only at the v1
-	 * boundary (`v1HeldEpoch`).
+	 * has answered.
 	 */
 	ownerEpoch: string;
-	lifecycleVersion?: 1;
 	expiresAt?: string;
 	pending?: 'claim' | 'renew' | 'release';
 	fencingToken: string;
@@ -312,15 +247,6 @@ const DECIDED: Readonly<Partial<Record<LocalEndpointDenialReason, ManagedDenialC
 
 const HELD_IDS = ['workflowId', 'endpointWorkflowId', 'ownerId', 'fencingToken', 'authorityId'];
 
-/**
- * A record written while the held epoch was the v1 count. Refused on load and
- * not repaired: it is dropped, so the workflow reads as never claimed and the
- * next claim is issued a fresh opaque epoch by the registry.
- */
-function isLegacyNumericEpochRecord(value: unknown): boolean {
-	return isRecord(value) && typeof value.ownerEpoch === 'number';
-}
-
 function heldProblem(value: unknown): string | null {
 	if (!isRecord(value)) return 'a record is not an object';
 	for (const key of HELD_IDS) {
@@ -328,8 +254,6 @@ function heldProblem(value: unknown): string | null {
 	}
 	if (typeof value.ownerEpoch !== 'string' || value.ownerEpoch === '')
 		return 'ownerEpoch is not an opaque epoch';
-	if (value.lifecycleVersion === 1 && !isEndpointIdentifier(value.ownerEpoch))
-		return 'ownerEpoch is not an identifier';
 	if (!['held', 'fenced', 'unknown', 'released'].includes(value.state as string))
 		return 'state is unknown';
 	return null;
@@ -356,7 +280,6 @@ export function createWorkflowOwnership(deps: WorkflowOwnershipDeps): WorkflowOw
 			const read = await readStoreDocument<WorkflowOwnershipDocument>(deps.file, (value) => {
 				if (!Array.isArray(value.workflows)) return 'workflows is not an array';
 				for (const entry of value.workflows) {
-					if (isLegacyNumericEpochRecord(entry)) continue;
 					const problem = heldProblem(entry);
 					if (problem) return problem;
 				}
@@ -367,7 +290,6 @@ export function createWorkflowOwnership(deps: WorkflowOwnershipDeps): WorkflowOw
 			}
 			if (read.status === 'ok') {
 				doc = read.data;
-				doc.workflows = doc.workflows.filter((entry) => !isLegacyNumericEpochRecord(entry));
 			}
 			loaded = true;
 			return { ok: true, held: doc.workflows.filter((w) => w.state === 'held').length };
@@ -378,9 +300,9 @@ export function createWorkflowOwnership(deps: WorkflowOwnershipDeps): WorkflowOw
 	async function persist(): Promise<void> {
 		if (doc.workflows.length > maxWorkflows) {
 			const rank = (w: HeldWorkflowOwnership) => (w.state === 'held' ? 1 : 0);
-			const ordered = doc.workflows
-				.filter((w) => w.lifecycleVersion !== 1 || w.state === 'released')
-				.sort((a, b) => rank(a) - rank(b) || a.confirmedAt.localeCompare(b.confirmedAt));
+			const ordered = doc.workflows.sort(
+				(a, b) => rank(a) - rank(b) || a.confirmedAt.localeCompare(b.confirmedAt)
+			);
 			const dropped = new Set(ordered.slice(0, doc.workflows.length - maxWorkflows));
 			doc.workflows = doc.workflows.filter((w) => !dropped.has(w));
 		}
@@ -415,13 +337,7 @@ export function createWorkflowOwnership(deps: WorkflowOwnershipDeps): WorkflowOw
 			live.get(key)?.stop();
 			live.delete(key);
 		};
-		if (
-			!owner ||
-			owner.policyRevision === null ||
-			port.version !== 1 ||
-			!port.current() ||
-			port.signal.aborted
-		) {
+		if (!owner || owner.policyRevision === null || !port.current() || port.signal.aborted) {
 			stop();
 			return unavailable('No current authenticated workflow lifecycle authority.');
 		}
@@ -455,7 +371,6 @@ export function createWorkflowOwnership(deps: WorkflowOwnershipDeps): WorkflowOw
 			confirmedAt: prior?.confirmedAt ?? iso(),
 			lastRunId: input.runId,
 			lastAttemptId: input.attemptId,
-			lifecycleVersion: 1,
 			pending: action,
 			expiresAt: prior?.expiresAt,
 			detail: 'Workflow operation awaiting producer reconciliation.',
@@ -645,180 +560,29 @@ export function createWorkflowOwnership(deps: WorkflowOwnershipDeps): WorkflowOw
 
 	async function claim(input: WorkflowClaimInput): Promise<WorkflowClaimOutcome> {
 		const { workflow } = input;
-		const lifecycle = deps.port()?.lifecycle;
-		if (lifecycle) return lifecycleClaim(input, lifecycle);
-		if (find(workflow.workflowId)?.lifecycleVersion === 1) {
+		const port = deps.port();
+		if (port?.lifecycle) return lifecycleClaim(input, port.lifecycle);
+		if (port?.unserved) {
 			live.get(workflow.workflowId)?.stop();
 			live.delete(workflow.workflowId);
 			return {
 				state: 'unavailable',
 				code: 'capability-unsupported',
-				message: 'Workflow lifecycle custody cannot be downgraded to the legacy claim protocol.',
+				message: `The endpoint serves no workflow owner operation, so workflow "${workflow.workflowId}" has no owner producer (CP-03, owner mega-maestro).`,
 			};
 		}
-		const at = iso();
-		const unavailable = (
-			message: string,
-			code: 'runtime-unavailable' | 'capability-unsupported' = 'runtime-unavailable'
-		): WorkflowClaimOutcome => ({ state: 'unavailable', code, message });
-		const fencedBy = (message: string): WorkflowClaimOutcome => ({
-			state: 'denied',
-			code: 'policy-denied',
-			message,
-			fenced: true,
-		});
 		const owner = deps.owner();
 		if (!owner) {
-			return unavailable(
-				`This installation holds no managed standing to own workflow "${workflow.workflowId}" under.`
-			);
-		}
-		if (owner.policyRevision === null) {
-			return unavailable(
-				`No policy revision is known for this host, so workflow "${workflow.workflowId}" cannot be claimed under one.`
-			);
-		}
-		const existing = find(workflow.workflowId);
-		// A record under the current authority is what this host holds; one from
-		// another enrollment is evidence of nothing and is replaced by the answer.
-		const prior = existing && existing.authorityId === owner.authorityId ? existing : undefined;
-		const request: WorkflowOwnerRequest = {
-			workflowId: workflowEndpointId(workflow.workflowId),
-			triggerId: workflowEndpointId(workflow.triggerEventId),
-			runId: workflowEndpointId(input.runId),
-			attemptId: workflowEndpointId(input.attemptId),
-			ownerId: owner.ownerId,
-			// v1 wire: the held opaque epoch is offered back as the count it was issued as.
-			ownerEpoch: v1WireEpoch(prior?.ownerEpoch),
-			fencingToken: prior?.fencingToken ?? workflowEndpointId(newId()),
-			offlineEnabled: input.offlineEnabled ?? false,
-			policyRevision: owner.policyRevision,
-		};
-		const held = (
-			fence: Pick<HeldWorkflowOwnership, 'ownerEpoch' | 'fencingToken'>,
-			state: HeldWorkflowState,
-			detail: string | null
-		): HeldWorkflowOwnership => ({
-			workflowId: workflow.workflowId,
-			endpointWorkflowId: request.workflowId,
-			version: workflow.version,
-			triggerEventId: workflow.triggerEventId,
-			ownerId: owner.ownerId,
-			ownerEpoch: fence.ownerEpoch,
-			fencingToken: fence.fencingToken,
-			authorityId: owner.authorityId,
-			policyRevision: owner.policyRevision as number,
-			offlineEnabled: request.offlineEnabled,
-			state,
-			claimedAt: prior?.claimedAt ?? at,
-			confirmedAt: state === 'held' ? at : (prior?.confirmedAt ?? at),
-			lastRunId: input.runId,
-			lastAttemptId: input.attemptId,
-			detail,
-		});
-		const offline = async (message: string): Promise<WorkflowClaimOutcome> => {
-			if (prior?.state === 'held' && prior.offlineEnabled) {
-				const kept = await upsert(existing, {
-					...prior,
-					lastRunId: input.runId,
-					lastAttemptId: input.attemptId,
-					detail: message,
-				});
-				return { state: 'owned', fence: fenceOf(kept), held: kept, disposition: 'offline' };
-			}
-			return unavailable(message);
-		};
-
-		const port = deps.port();
-		if (!port) {
-			return offline(
-				`No workflow owner producer is attached, so workflow "${workflow.workflowId}" cannot be claimed (CP-03, owner mega-maestro).`
-			);
-		}
-		const outcome = await port.claim(request);
-		switch (outcome.status) {
-			case 'unavailable':
-				return offline(`The workflow owner producer could not be reached: ${outcome.message}`);
-			case 'unknown': {
-				if (prior) await upsert(existing, { ...prior, state: 'unknown', detail: outcome.message });
-				return {
-					state: 'unknown',
-					code: 'outcome-unknown',
-					message: `The answer to the claim on workflow "${workflow.workflowId}" was lost: ${outcome.message}`,
-				};
-			}
-			case 'denied': {
-				const code = DECIDED[outcome.reason];
-				if (outcome.reason === 'owner_unfenced') {
-					await upsert(
-						existing,
-						held(
-							{
-								ownerEpoch: prior?.ownerEpoch ?? UNISSUED_OWNER_EPOCH,
-								fencingToken: request.fencingToken,
-							},
-							'fenced',
-							'The registry holds another owner, epoch or token.'
-						)
-					);
-					return fencedBy(
-						`Workflow "${workflow.workflowId}" is fenced: the registry holds another owner, epoch or token, and this host is not its owner.`
-					);
-				}
-				if (code) {
-					return {
-						state: 'denied',
-						code,
-						message: `The registry refused the claim on workflow "${workflow.workflowId}": ${outcome.reason}.`,
-						fenced: false,
-					};
-				}
-				if (outcome.reason === 'unsupported_capability') {
-					return unavailable(
-						`The endpoint serves no workflow owner operation, so workflow "${workflow.workflowId}" has no owner producer (CP-03, owner mega-maestro).`,
-						'capability-unsupported'
-					);
-				}
-				return unavailable(
-					`The endpoint did not decide the claim on workflow "${workflow.workflowId}": ${outcome.reason}.`
-				);
-			}
-			case 'ok':
-				break;
-		}
-		const problems = workflowOwnerReceiptProblems(outcome.payload, request);
-		if (problems.length > 0) {
-			if (prior)
-				await upsert(existing, { ...prior, state: 'unknown', detail: problems.join('; ') });
 			return {
-				state: 'unknown',
-				code: 'outcome-unknown',
-				message: `The registry answered the claim on workflow "${workflow.workflowId}" with a receipt that is not one: ${problems.join('; ')}.`,
+				state: 'unavailable',
+				code: 'runtime-unavailable',
+				message: `This installation holds no managed standing to own workflow "${workflow.workflowId}" under.`,
 			};
 		}
-		const receipt = outcome.payload as WorkflowOwnerReceipt;
-		// v1 wire, the single number-to-opaque conversion: the registry issued this
-		// count, and it is held from here on as the opaque string the contract defines.
-		const issued = { ownerEpoch: String(receipt.ownerEpoch), fencingToken: receipt.fencingToken };
-		if (receipt.ownerId !== owner.ownerId) {
-			await upsert(
-				existing,
-				held(issued, 'fenced', `The registry holds owner ${receipt.ownerId}.`)
-			);
-			return fencedBy(
-				`Workflow "${workflow.workflowId}" is owned by ${receipt.ownerId}, not this installation.`
-			);
-		}
-		const confirmed =
-			prior?.state === 'held' &&
-			prior.ownerEpoch === issued.ownerEpoch &&
-			prior.fencingToken === issued.fencingToken;
-		const kept = await upsert(existing, held(issued, 'held', null));
 		return {
-			state: 'owned',
-			fence: fenceOf(kept),
-			held: kept,
-			disposition: confirmed ? 'confirmed' : 'claimed',
+			state: 'unavailable',
+			code: 'runtime-unavailable',
+			message: `No workflow owner producer is attached, so workflow "${workflow.workflowId}" cannot be claimed (CP-03, owner mega-maestro).`,
 		};
 	}
 
@@ -829,11 +593,11 @@ export function createWorkflowOwnership(deps: WorkflowOwnershipDeps): WorkflowOw
 			if (!loaded) return null;
 			const owner = deps.owner();
 			const record = find(workflow.workflowId);
-			if (record?.lifecycleVersion === 1)
-				return live.get(workflow.workflowId)?.lifetime.current() ? fenceOf(record) : null;
-			return record && owner && record.state === 'held' && record.authorityId === owner.authorityId
-				? fenceOf(record)
-				: null;
+			if (!record || !owner || record.state !== 'held' || record.authorityId !== owner.authorityId)
+				return null;
+			// A held fence is good only while its lease is live: custody is never kept
+			// past the producer that issued it.
+			return live.get(workflow.workflowId)?.lifetime.current() ? fenceOf(record) : null;
 		},
 		async claim(input) {
 			input = structuredClone(input);

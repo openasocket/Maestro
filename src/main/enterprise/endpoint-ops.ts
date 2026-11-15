@@ -1,14 +1,13 @@
 /**
- * The v2 operation clients (noticeList, inbox, telemetry, budget, offline,
- * desktopPolicy, model, localControl, command) over the endpoint client's
- * `/v2/invoke` path, behind a negotiation gate.
+ * The operation clients (noticeList, inbox, telemetry, budget, offline,
+ * desktopPolicy, model, localControl, command, execution is in
+ * `shared/maestro-lib/managed/execution.ts`) over the endpoint port, behind a
+ * negotiation gate.
  *
  * Rules, each enforced here:
- *   - an operation is sent on v2 only when the v2 attachment on the CURRENT
- *     connection negotiated it (`v2OperationNegotiated`). Otherwise the call
- *     is `unavailable` / `not-negotiated` and nothing is sent;
- *   - an existing caller moves to v2 only for an operation in
- *     `V2_OPERATIONS_SELECTED`, each a passing row of Mega's parity matrix;
+ *   - an operation is sent only when the attachment on the CURRENT connection
+ *     negotiated it (`EndpointPort.negotiated`). Otherwise the call is
+ *     `unavailable` / `not-negotiated` and nothing is sent;
  *   - `localControl` (decision D2) is the local GUI selector path:
  *     `cancel_run` and `report_status` need a `runtime_use` registration,
  *     `refresh_policy` a `fleet_management` one, and a selector this
@@ -20,40 +19,26 @@
  *
  * The payloads are the contract's (contracts 0.3.0 protocol.js), typed in
  * `src/shared/maestro-lib/managed/endpoint-port.ts`. The inbox request is the
- * v1 request field for field, `idempotencyKey` unchanged (`inboxRequestV2`).
+ * v1 request field for field, `idempotencyKey` unchanged (`inboxRequest`).
  */
 
 import { canonicalJson } from '../../shared/canonicalJson';
 
 import {
 	ENDPOINT_LOCAL_CONTROL_AUTHORITY,
-	inboxRequestV2,
+	inboxRequest,
 	isEndpointIdentifier,
-	v2OperationNegotiated,
 	type EndpointInvokeOutcome,
-	type EndpointOperationV2Client,
-	type EndpointOperationV2Exchange,
+	type EndpointOperationClient,
+	type EndpointOperationExchange,
 	type EndpointPort,
 } from '../../shared/maestro-lib/managed/endpoint-port';
 
-/**
- * The v2 operations an existing v1 caller is moved onto (EMPTY until Mega's
- * parity matrix shows an operation served), the negotiation gate, and the
- * selection the v1 callers go through. Their one home is the shared
- * endpoint-port module so the shared host-adapter callers read the same list.
- */
-export {
-	V2_OPERATIONS_SELECTED,
-	invokeSelectedEndpointOperation,
-	selectEndpointOperationPath,
-	v2OperationNegotiated,
-} from '../../shared/maestro-lib/managed/endpoint-port';
+type Request<O extends EndpointOperationClient> = EndpointOperationExchange[O]['request'];
+type Reply<O extends EndpointOperationClient> = EndpointOperationExchange[O]['reply'];
+type Outcome<O extends EndpointOperationClient> = Promise<EndpointInvokeOutcome<Reply<O>>>;
 
-type Request<O extends EndpointOperationV2Client> = EndpointOperationV2Exchange[O]['request'];
-type Reply<O extends EndpointOperationV2Client> = EndpointOperationV2Exchange[O]['reply'];
-type Outcome<O extends EndpointOperationV2Client> = Promise<EndpointInvokeOutcome<Reply<O>>>;
-
-export interface EndpointOperationsV2Client {
+export interface EndpointOperationsClient {
 	noticeList(request: Request<'noticeList'>): Outcome<'noticeList'>;
 	inbox(request: Request<'inbox'>): Outcome<'inbox'>;
 	telemetry(request: Request<'telemetry'>): Outcome<'telemetry'>;
@@ -67,7 +52,7 @@ export interface EndpointOperationsV2Client {
 	command(request: Request<'command'>): Outcome<'command'>;
 }
 
-export interface EndpointOperationsV2Options {
+export interface EndpointOperationsOptions {
 	/**
 	 * The purpose of the registration this process holds on the current
 	 * connection (the `registration_use` reference's), or null when none is
@@ -129,28 +114,27 @@ function receiptProblems(
 }
 
 /**
- * The nine v2 operation clients over `endpoint`. Each one asks the gate
- * first; a port with no v2 side, or a connection whose v2 attachment did not
- * negotiate the operation, answers `unavailable` / `not-negotiated` and sends
- * nothing. The endpoint client decides unavailable vs unknown on the wire.
+ * The operation clients over `endpoint`. Each one asks the negotiation gate
+ * first; a connection whose attachment did not negotiate the operation answers
+ * `unavailable` / `not-negotiated` and sends nothing. The endpoint client
+ * decides unavailable vs unknown on the wire.
  */
-export function createEndpointOperationsV2Client(
-	endpoint: Pick<EndpointPort, 'v2' | 'state'>,
-	options: EndpointOperationsV2Options = {}
-): EndpointOperationsV2Client {
-	async function call<O extends EndpointOperationV2Client>(
+export function createEndpointOperationsClient(
+	endpoint: Pick<EndpointPort, 'invoke' | 'negotiated'>,
+	options: EndpointOperationsOptions = {}
+): EndpointOperationsClient {
+	async function call<O extends EndpointOperationClient>(
 		operation: O,
 		request: Request<O>
 	): Outcome<O> {
-		const v2 = endpoint.v2;
-		if (!v2 || !v2OperationNegotiated(endpoint.state(), operation)) {
+		if (!endpoint.negotiated(operation)) {
 			return {
 				status: 'unavailable',
 				reason: 'not-negotiated',
-				message: `The v2 attachment on this connection did not negotiate ${operation}; nothing was sent.`,
+				message: `The attachment on this connection did not negotiate ${operation}; nothing was sent.`,
 			};
 		}
-		const outcome = await v2.invoke(operation, request);
+		const outcome = await endpoint.invoke(operation, request);
 		if (outcome.status !== 'ok') return outcome;
 		if (operation === 'localControl' || operation === 'command') {
 			const problems = receiptProblems(
@@ -193,7 +177,7 @@ export function createEndpointOperationsV2Client(
 
 	return {
 		noticeList: (request) => call('noticeList', request),
-		inbox: (request) => call('inbox', inboxRequestV2(request)),
+		inbox: (request) => call('inbox', inboxRequest(request)),
 		telemetry: (request) => call('telemetry', request),
 		budget: (request) => call('budget', request),
 		offline: (request) => call('offline', request),

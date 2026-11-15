@@ -56,7 +56,7 @@
 				}
 			},
 			{
-				"key": "endpoint.workflow",
+				"key": "endpoint.workflow_claim",
 				"status": "unsupported-by-counterpart",
 				"owner": "mega-maestro",
 				"dependency": "CP-04",
@@ -195,7 +195,7 @@
 		"observedRule": "every row and producer row carries observed: how and when its status was read; a row with no observation is inferred and must not be added",
 		"supportKeysInLibrary": [
 			"endpoint.command",
-			"endpoint.workflow",
+			"endpoint.workflow_claim",
 			"endpoint.offline",
 			"endpoint.enrollment",
 			"endpoint.budget",

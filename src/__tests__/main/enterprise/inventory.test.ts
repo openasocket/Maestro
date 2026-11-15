@@ -81,7 +81,7 @@ const record = (): ManagedIdentityRecord => ({
 
 const live = (): EndpointStatus => ({
 	outcome: 'attached',
-	protocol: 1,
+	protocol: 2,
 	capabilities: ['execution', 'telemetry'],
 	management: 'managed',
 	desiredPolicyRevision: 3,
@@ -223,7 +223,7 @@ describe('installation inventory (MRC-10-06A)', () => {
 			app: '1.1.0-RC',
 			library: MAESTRO_LIB_VERSION,
 			contract: MANAGED_CONTRACT_VERSION,
-			endpointProtocol: 1,
+			endpointProtocol: 2,
 			pluginHostApi: HOST_API_VERSION,
 			contracts: { status: 'absent', reason: 'no pin (CP-01, owner mega-maestro)' },
 		});

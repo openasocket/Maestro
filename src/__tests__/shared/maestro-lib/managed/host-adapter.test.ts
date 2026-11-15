@@ -67,9 +67,9 @@ import {
 import {
 	ISSUED,
 	projectedRegistrationUse,
-	WORKFLOW_V2_OFFER,
-	workflowV2Producer,
-} from '../../../main/enterprise/workflowV2Producer';
+	WORKFLOW_OFFER,
+	workflowProducer,
+} from '../../../main/enterprise/workflowProducer';
 import type { EndpointRuntimeUseReference } from '../../../../shared/maestro-lib/managed/endpoint-port';
 
 import { managedRecord, NOW } from '../../../main/enterprise/fakeManaged';
@@ -185,7 +185,7 @@ function admission(
 }
 
 /** Register this process and attach on `fake` with the named capabilities, as the lifecycle does. */
-async function attachPort(fake: FakeEndpoint, supported: string[]): Promise<EndpointPort> {
+async function attachPort(fake: FakeEndpoint, supported: readonly string[]): Promise<EndpointPort> {
 	const port = createLocalEndpointClient({ socketPath: fake.socketPath, timeoutMs: 1_000 });
 	await port.registration.challenge({ runtimeId: 'desktop-100', processEpoch: 'epoch-1' });
 	await port.registration.redeem();
@@ -194,35 +194,15 @@ async function attachPort(fake: FakeEndpoint, supported: string[]): Promise<Endp
 		runtimeId: 'desktop-100',
 		processEpoch: 'epoch-1',
 		components: [{ id: 'maestro', kind: 'maestro', version: '1.1.0-RC' }],
-		supportedProtocols: [1],
-		supportedCapabilities: supported,
-		requiredCapabilities: ['execution'],
-	});
-	expect(attached.status).toBe('ok');
-	return port;
-}
-
-/** As `attachPort`, on protocol 2: the handshake and the v2 attachment on one connection. */
-async function attachPortV2(
-	fake: FakeEndpoint,
-	supported: readonly string[]
-): Promise<EndpointPort> {
-	const port = createLocalEndpointClient({ socketPath: fake.socketPath, timeoutMs: 1_000 });
-	await port.registration.challenge({ runtimeId: 'desktop-100', processEpoch: 'epoch-1' });
-	await port.registration.redeem();
-	const attached = await port.v2!.attach({
-		installationId: 'inst-1',
-		runtimeId: 'desktop-100',
-		processEpoch: 'epoch-1',
-		components: [{ id: 'maestro', kind: 'maestro', version: '1.1.0-RC' }],
 		supportedProtocols: [2],
-		supportedCapabilities: ['attachment', 'compatibility', ...supported],
+		supportedCapabilities: [...new Set(['attachment', 'compatibility', ...supported])],
 		requiredCapabilities: [],
 	});
 	expect(attached.status).toBe('ok');
 	return port;
 }
 
+/** As `attachPort`, on protocol 2: the handshake and the v2 attachment on one connection. */
 /** The status a lifecycle reports once the attachment projected a registration_use reference. */
 function withRegistrationUse(
 	status: ManagedEnrollmentStatus,
@@ -373,13 +353,12 @@ describe('managed host adapter', () => {
 		).toHaveLength(0);
 	});
 
-	it('exposes the v2 workflow lifecycle over its endpoint, never the legacy fence, and none without one (MRC-07-06A, handoff item 3)', async () => {
+	it('exposes the workflow lifecycle over its endpoint, and none without a projected reference (MRC-07-06A, handoff item 3)', async () => {
 		const fake = await endpoint({
-			capabilities: ['execution'],
-			v2Capabilities: [...WORKFLOW_V2_OFFER],
-			operations: workflowV2Producer({ now: () => T0 }),
+			capabilities: [...WORKFLOW_OFFER],
+			operations: workflowProducer({ now: () => T0 }),
 		});
-		const port = await attachPortV2(fake, WORKFLOW_V2_OFFER);
+		const port = await attachPort(fake, WORKFLOW_OFFER);
 		ports.push(port);
 		const view = okView(record(fake.socketPath));
 		const adapter = createManagedHostAdapter({
@@ -391,24 +370,8 @@ describe('managed host adapter', () => {
 		});
 		expect(adapter.workflows?.lifecycle).toBeDefined();
 		expect(adapter.workflows?.lifecycle?.current()).toBe(true);
-		// The legacy v1 `workflow` claim is never sent.
-		const before = fake.calls.length;
-		expect(
-			(
-				await adapter.workflows!.claim({
-					workflowId: 'wf-1',
-					triggerId: 'trig-1',
-					runId: 'run-1',
-					attemptId: 'att-1',
-					ownerId: 'inst-1',
-					ownerEpoch: 0,
-					fencingToken: 'nonce-1',
-					offlineEnabled: false,
-					policyRevision: 3,
-				})
-			).status
-		).toBe('unavailable');
-		expect(fake.calls).toHaveLength(before);
+		// The lifecycle is the only owner operation: the port carries nothing beside it.
+		expect(Object.keys(adapter.workflows ?? {})).toEqual(['lifecycle']);
 
 		// Without a projected reference the lifecycle is not offered.
 		const unreferenced = createManagedHostAdapter({
@@ -651,8 +614,8 @@ describe('managed host adapter', () => {
 		'workflow-only',
 		'no-source',
 		'no-negotiation',
-		'v1',
-		'legacy-workflow',
+		'other-protocol',
+		'retired-fence-capability',
 		'execution',
 		'registration_use',
 		'delegation',
@@ -742,8 +705,8 @@ describe('managed host adapter', () => {
 		);
 		request.context.identity.rootRunId = 'root-run';
 		request.context.identity.parentRunId = 'parent-run';
-		if (change === 'v1') Object.assign(negotiated, { protocol: 1 });
-		if (change === 'legacy-workflow')
+		if (change === 'other-protocol') Object.assign(negotiated, { protocol: 3 });
+		if (change === 'retired-fence-capability')
 			negotiated.capabilities = ['execution', 'registration_use', 'delegation', 'workflow'];
 		if (change === 'duplicate')
 			negotiated.capabilities = [...negotiated.capabilities, 'delegation'];
@@ -1115,7 +1078,7 @@ describe('projectPolicyStatus', () => {
 		closed: false,
 		status: {
 			outcome: 'attached' as const,
-			protocol: 1 as const,
+			protocol: 2 as const,
 			capabilities: ['execution'],
 			management: 'managed' as const,
 			desiredPolicyRevision: 4,
@@ -1401,11 +1364,10 @@ describe('runtime with a host adapter', () => {
 		open.splice(0);
 
 		const requests: Array<Record<string, unknown>> = [];
-		const producer = workflowV2Producer({ now: () => T0 });
+		const producer = workflowProducer({ now: () => T0 });
 		const fake = await startFakeEndpoint({
 			registrationRequired: true,
-			capabilities: ['execution'],
-			v2Capabilities: [...WORKFLOW_V2_OFFER],
+			capabilities: [...WORKFLOW_OFFER],
 			operations: {
 				...producer,
 				workflow_claim: (payload) => {
@@ -1414,7 +1376,7 @@ describe('runtime with a host adapter', () => {
 				},
 			},
 		});
-		const port = await attachPortV2(fake, WORKFLOW_V2_OFFER);
+		const port = await attachPort(fake, WORKFLOW_OFFER);
 		try {
 			const runtime = await start(view, port, true);
 			expect(runtime.managedHost!.workflows?.lifecycle).toBeDefined();

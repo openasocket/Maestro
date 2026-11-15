@@ -81,7 +81,7 @@ describe('owned actor approval bridge (local contract evidence only)', () => {
 	it('uses the pinned browser/CSRF API once and emits no execution authority', async () => {
 		const { browser } = browserPort();
 		const bridge = await createActorApprovalBridge({ browser, origin });
-		expect(bridge.input).toMatchObject({ protocol: 1, authority: 'none', paired: false });
+		expect(bridge.input).toMatchObject({ protocol: 2, authority: 'none', paired: false });
 		const input = challenge();
 		expect(await bridge.approve(input)).toEqual({ outcome: 'approved' });
 		expect(await bridge.approve(input)).toEqual({ outcome: 'denied' });

@@ -287,7 +287,8 @@ describe('enterprise handlers', () => {
 			localRelease: { allowed: false, reason: 'required' },
 		});
 		expect(view.capabilities.supported).toContain('telemetry');
-		expect(view.capabilities.supported).not.toContain('execution');
+		// execution is offered like the rest; this endpoint does not negotiate it, so it is missing.
+		expect(view.capabilities.supported).toContain('execution');
 		expect(view.capabilities.missing).toEqual(view.capabilities.supported);
 		const text = JSON.stringify(view);
 		expect(text).not.toContain('/run/endpoint.sock');

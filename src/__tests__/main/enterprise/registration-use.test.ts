@@ -27,9 +27,9 @@ import {
 	createEnterpriseIdentityStore,
 	type EnterpriseIdentityStore,
 } from '../../../main/enterprise/identity-store';
-import { ENTERPRISE_SUPPORTED_CAPABILITIES_V2 } from '../../../main/enterprise/service';
+import { ENTERPRISE_SUPPORTED_CAPABILITIES } from '../../../main/enterprise/service';
 import {
-	LOCAL_ENDPOINT_INVOKE_V2_PATH,
+	LOCAL_ENDPOINT_INVOKE_PATH,
 	endpointRegistrationUseReplyProblems,
 	type EndpointPort,
 } from '../../../shared/maestro-lib/managed/endpoint-port';
@@ -111,8 +111,7 @@ describe('registration bootstrap', () => {
 			},
 			installation: INSTALLATION,
 			components: [{ id: 'maestro', kind: 'maestro', version: '1.1.0-RC' }],
-			capabilities: { supported: ['attachment', 'compatibility', 'enrollment'], required: [] },
-			v2: { supported: ENTERPRISE_SUPPORTED_CAPABILITIES_V2 },
+			capabilities: { supported: ENTERPRISE_SUPPORTED_CAPABILITIES, required: [] },
 		});
 		lifecycles.push(created);
 		return created;
@@ -139,7 +138,7 @@ describe('registration bootstrap', () => {
 
 	const v2Calls = (fake: FakeEndpoint) =>
 		fake
-			.callsTo(LOCAL_ENDPOINT_INVOKE_V2_PATH)
+			.callsTo(LOCAL_ENDPOINT_INVOKE_PATH)
 			.map((call) => (call.body as { operation: string }).operation);
 
 	it('stores the approval challenge digest, not the challenge id, on the registration record', async () => {
@@ -165,15 +164,15 @@ describe('registration bootstrap', () => {
 	});
 
 	it('returns not-negotiated and sends nothing when the v2 attachment did not negotiate registration_use', async () => {
-		const fake = await endpoint({ ...SERVES_ENROLLMENT, v2Capabilities: [] });
+		const fake = await endpoint({ ...SERVES_ENROLLMENT, capabilities: [] });
 		const { life, port } = await enrolledAndRegistered(fake);
 		const before = record();
 		const handshake = ['registration_challenge', 'registration_redeem', 'attachment'];
 		expect(v2Calls(fake)).toEqual(handshake);
 
 		// The one v2 attachment, which the endpoint answered without selecting it.
-		expect(port.v2!.negotiated('registration_use')).toBe(false);
-		expect(await port.v2!.registration.use()).toMatchObject({
+		expect(port.negotiated('registration_use')).toBe(false);
+		expect(await port.registration.use()).toMatchObject({
 			status: 'unavailable',
 			reason: 'not-negotiated',
 		});
@@ -188,7 +187,7 @@ describe('registration bootstrap', () => {
 		let received: unknown = 'none';
 		const fake = await endpoint({
 			...SERVES_ENROLLMENT,
-			v2Capabilities: ['registration_use'],
+			capabilities: ['registration_use'],
 			operations: {
 				registration_use: (payload) => {
 					received = payload;
@@ -235,7 +234,7 @@ describe('registration bootstrap', () => {
 	it('writes nothing and returns the reason on a denied reply', async () => {
 		const fake = await endpoint({
 			...SERVES_ENROLLMENT,
-			v2Capabilities: ['registration_use'],
+			capabilities: ['registration_use'],
 			operations: {
 				registration_use: () => ({ outcome: 'denied', reason: 'registration_not_found' }),
 			},
@@ -254,7 +253,7 @@ describe('registration bootstrap', () => {
 	it('writes nothing and returns malformed on a reply that is not a registration_use answer', async () => {
 		const fake = await endpoint({
 			...SERVES_ENROLLMENT,
-			v2Capabilities: ['registration_use'],
+			capabilities: ['registration_use'],
 			operations: { registration_use: () => ({ outcome: 'projected', reference: null }) },
 		});
 		const { life } = await enrolledAndRegistered(fake);
@@ -268,7 +267,7 @@ describe('registration bootstrap', () => {
 	it('refuses a processBirthDigest that is not 64 lowercase hex and writes nothing', async () => {
 		const fake = await endpoint({
 			...SERVES_ENROLLMENT,
-			v2Capabilities: ['registration_use'],
+			capabilities: ['registration_use'],
 			operations: {
 				registration_use: () => projected({ processBirthDigest: 'B'.repeat(64) }),
 			},

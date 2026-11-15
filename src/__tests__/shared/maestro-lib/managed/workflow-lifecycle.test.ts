@@ -2,7 +2,7 @@
  * The v2 workflow lifecycle client (`workflow_claim`, `workflow_renew`,
  * `workflow_settle`, `workflow_release`) over a real Unix socket against the
  * fake daemon in `fakeEndpoint.ts`, and the same client presented to the one
- * workflow owner store through `endpointWorkflowV2LifecyclePort`.
+ * workflow owner store through `endpointWorkflowLifecyclePort`.
  *
  * What is defended: each operation round trips on `/v2/invoke` and answers
  * the outcome the contract names; an answer whose owner is not the one the
@@ -22,19 +22,18 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createLocalEndpointClient } from '../../../../main/enterprise/endpoint-client';
 import {
-	createEndpointWorkflowV2Client,
-	createEndpointWorkflowV2OwnerPort,
-	endpointWorkflowV2LifecyclePort,
-	type EndpointWorkflowV2Authority,
-} from '../../../../shared/maestro-lib/managed/workflow-lifecycle-v2';
+	createEndpointWorkflowClient,
+	createEndpointWorkflowOwnerPort,
+	endpointWorkflowLifecyclePort,
+	type EndpointWorkflowAuthority,
+} from '../../../../shared/maestro-lib/managed/workflow-lifecycle';
 import {
 	LOCAL_ENDPOINT_INVOKE_PATH,
-	LOCAL_ENDPOINT_INVOKE_V2_PATH,
-	type EndpointAttachmentRequestV2,
+	type EndpointAttachmentRequest,
 	type EndpointPort,
-	type EndpointWorkflowClaimRequestV2,
-	type EndpointWorkflowContextV2,
-	type EndpointWorkflowOwnerV2,
+	type EndpointWorkflowClaimRequest,
+	type EndpointWorkflowContext,
+	type EndpointWorkflowOwner,
 } from '../../../../shared/maestro-lib/managed/endpoint-port';
 import {
 	MANAGED_WORKFLOWS_FILE_NAME,
@@ -50,8 +49,8 @@ import {
 import {
 	ISSUED,
 	leaseOf,
-	workflowV2Producer as producer,
-} from '../../../main/enterprise/workflowV2Producer';
+	workflowProducer as producer,
+} from '../../../main/enterprise/workflowProducer';
 
 const WORKFLOW_OPERATIONS = [
 	'workflow_claim',
@@ -60,7 +59,7 @@ const WORKFLOW_OPERATIONS = [
 	'workflow_release',
 ] as const;
 
-const ATTACH_V2: EndpointAttachmentRequestV2 = {
+const ATTACH: EndpointAttachmentRequest = {
 	installationId: 'inst-1',
 	runtimeId: 'desktop-100',
 	processEpoch: 'epoch-1',
@@ -70,7 +69,7 @@ const ATTACH_V2: EndpointAttachmentRequestV2 = {
 	requiredCapabilities: [],
 };
 
-const AUTHORITY: EndpointWorkflowV2Authority = {
+const AUTHORITY: EndpointWorkflowAuthority = {
 	registration: {
 		version: 2,
 		purpose: 'runtime_use',
@@ -89,7 +88,7 @@ const AUTHORITY: EndpointWorkflowV2Authority = {
 	grants: [],
 };
 
-const CONTEXT: EndpointWorkflowContextV2 = {
+const CONTEXT: EndpointWorkflowContext = {
 	...AUTHORITY,
 	workflowId: 'wf-nightly',
 	workflowVersion: 'v1',
@@ -101,9 +100,9 @@ const CONTEXT: EndpointWorkflowContextV2 = {
 	rootRunId: 'run-1',
 	parentRunId: null,
 };
-const CLAIM: EndpointWorkflowClaimRequestV2 = { ...CONTEXT, requestedLeaseMs: 60_000 };
+const CLAIM: EndpointWorkflowClaimRequest = { ...CONTEXT, requestedLeaseMs: 60_000 };
 
-const FOREIGN: EndpointWorkflowOwnerV2 = {
+const FOREIGN: EndpointWorkflowOwner = {
 	ownerId: 'inst-1',
 	ownerEpoch: 'opaque-epoch-other',
 	fencingToken: 'server-fence-other',
@@ -129,25 +128,25 @@ describe('v2 workflow lifecycle client', () => {
 
 	async function attached(options: FakeEndpointOptions = {}) {
 		const fake = await startFakeEndpoint({
-			v2Capabilities: [...WORKFLOW_OPERATIONS],
+			capabilities: [...WORKFLOW_OPERATIONS],
 			operations: producer(),
 			...options,
 		});
 		open.push(fake);
 		const port = createLocalEndpointClient({ socketPath: fake.socketPath });
 		ports.push(port);
-		expect((await port.v2!.attach(ATTACH_V2)).status).toBe('ok');
-		return { fake, port, client: createEndpointWorkflowV2Client(port) };
+		expect((await port.attach(ATTACH)).status).toBe('ok');
+		return { fake, port, client: createEndpointWorkflowClient(port) };
 	}
 
 	/** The one workflow owner store, with the v2 client as its lifecycle port. */
 	function ownership(port: EndpointPort) {
 		const signal = new AbortController();
 		signals.push(signal);
-		const client = createEndpointWorkflowV2Client(port);
+		const client = createEndpointWorkflowClient(port);
 		const v1Claims: unknown[] = [];
 		const ownerPort = {
-			lifecycle: endpointWorkflowV2LifecyclePort(client, {
+			lifecycle: endpointWorkflowLifecyclePort(client, {
 				signal: signal.signal,
 				current: () => true,
 				authority: () => AUTHORITY,
@@ -193,14 +192,13 @@ describe('v2 workflow lifecycle client', () => {
 			Date.parse(outcome.payload.lease.acquiredAt)
 		);
 
-		const sent = fake.callsTo(LOCAL_ENDPOINT_INVOKE_V2_PATH).at(-1)!.body as {
+		const sent = fake.callsTo(LOCAL_ENDPOINT_INVOKE_PATH).at(-1)!.body as {
 			operation: string;
 			payload: Payload;
 		};
 		expect(sent.operation).toBe('workflow_claim');
 		expect(sent.payload).toEqual(CLAIM);
 		expect(sent.payload).not.toHaveProperty('owner');
-		expect(fake.callsTo(LOCAL_ENDPOINT_INVOKE_PATH)).toHaveLength(0);
 	});
 
 	it('renew returns renewed with the held owner echoed', async () => {
@@ -210,7 +208,7 @@ describe('v2 workflow lifecycle client', () => {
 		if (outcome.status !== 'ok' || outcome.payload.outcome !== 'renewed')
 			throw new Error('not renewed');
 		expect(outcome.payload.lease.owner).toEqual(ISSUED);
-		const sent = fake.callsTo(LOCAL_ENDPOINT_INVOKE_V2_PATH).at(-1)!.body as {
+		const sent = fake.callsTo(LOCAL_ENDPOINT_INVOKE_PATH).at(-1)!.body as {
 			operation: string;
 		};
 		expect(sent.operation).toBe('workflow_renew');
@@ -306,9 +304,9 @@ describe('v2 workflow lifecycle client', () => {
 		// A retry over an issued owner is a renew that echoes it.
 		const retried = await store.claim({ workflow: WORKFLOW, ...RETRY });
 		expect(retried.state).not.toBe('owned');
-		const sent = fake.callsTo(LOCAL_ENDPOINT_INVOKE_V2_PATH).at(-1)!.body as {
+		const sent = fake.callsTo(LOCAL_ENDPOINT_INVOKE_PATH).at(-1)!.body as {
 			operation: string;
-			payload: { owner: EndpointWorkflowOwnerV2 };
+			payload: { owner: EndpointWorkflowOwner };
 		};
 		expect(sent.operation).toBe('workflow_renew');
 		expect(sent.payload.owner).toEqual(ISSUED);
@@ -331,7 +329,7 @@ describe('v2 workflow lifecycle client', () => {
 
 	it('an answer whose correlationId does not match the request is refused', async () => {
 		const { fake, client, port } = await attached();
-		fake.options.v2Envelope = (envelope) => ({ ...envelope, correlationId: 'not-the-request' });
+		fake.options.envelope = (envelope) => ({ ...envelope, correlationId: 'not-the-request' });
 
 		const outcome = await client.claim(CLAIM);
 		expect(outcome).toMatchObject({ status: 'unavailable', reason: 'malformed' });
@@ -368,25 +366,19 @@ describe('v2 workflow lifecycle client', () => {
 
 	it('the owner port offers the lifecycle only with all four verbs negotiated and a reference, and never sends the legacy fence', async () => {
 		const { fake, port } = await attached();
-		let reference: EndpointWorkflowV2Authority['registration'] | null = null;
-		const ownerPort = createEndpointWorkflowV2OwnerPort({
+		let reference: EndpointWorkflowAuthority['registration'] | null = null;
+		const ownerPort = createEndpointWorkflowOwnerPort({
 			endpoint: () => port,
 			registration: () => reference,
 		});
 		// Negotiated, but no reference projected yet: not reachable, nothing sent.
 		const before = fake.calls.length;
-		const unreferenced = ownerPort();
-		expect(unreferenced?.lifecycle).toBeUndefined();
-		expect(await unreferenced!.claim({} as never)).toMatchObject({
-			status: 'unavailable',
-			reason: 'not-negotiated',
-		});
+		expect(ownerPort()).toBeNull();
 		reference = AUTHORITY.registration;
 		const offered = ownerPort();
 		expect(offered?.lifecycle?.current()).toBe(true);
 		// The same port while the connection and reference hold.
 		expect(ownerPort()).toBe(offered);
-		expect(await offered!.claim({} as never)).toMatchObject({ status: 'unavailable' });
 		expect(fake.calls).toHaveLength(before);
 		// Another reference retires the port it handed out.
 		reference = { ...AUTHORITY.registration, challengeId: '6f1c2c1e-0000-4000-8000-0000000000cc' };
@@ -396,23 +388,18 @@ describe('v2 workflow lifecycle client', () => {
 		expect(offered!.lifecycle!.signal.aborted).toBe(true);
 		expect(offered!.lifecycle!.current()).toBe(false);
 		expect(
-			createEndpointWorkflowV2OwnerPort({ endpoint: () => null, registration: () => reference })()
+			createEndpointWorkflowOwnerPort({ endpoint: () => null, registration: () => reference })()
 		).toBeNull();
 	});
 
 	it('the owner port answers unsupported_capability when the attachment negotiated without the lifecycle', async () => {
-		const { fake, port } = await attached({ v2Capabilities: ['workflow_claim'] });
-		const ownerPort = createEndpointWorkflowV2OwnerPort({
+		const { fake, port } = await attached({ capabilities: ['workflow_claim'] });
+		const ownerPort = createEndpointWorkflowOwnerPort({
 			endpoint: () => port,
 			registration: () => AUTHORITY.registration,
 		});
 		const before = fake.calls.length;
-		const answer = ownerPort();
-		expect(answer?.lifecycle).toBeUndefined();
-		expect(await answer!.claim({} as never)).toEqual({
-			status: 'denied',
-			reason: 'unsupported_capability',
-		});
+		expect(ownerPort()).toEqual({ lifecycle: null, unserved: true });
 		expect(fake.calls).toHaveLength(before);
 	});
 });

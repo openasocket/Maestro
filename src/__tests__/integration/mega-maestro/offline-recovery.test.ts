@@ -28,10 +28,7 @@ import {
 	type AdmissionOutcome,
 	type DispatchLease,
 } from '../../../shared/maestro-lib/managed/authority';
-import {
-	LOCAL_ENDPOINT_PROTOCOL,
-	type PreparedExecutionPort,
-} from '../../../shared/maestro-lib/managed/endpoint-port';
+import { type PreparedExecutionPort } from '../../../shared/maestro-lib/managed/endpoint-port';
 import type { LifecycleFact } from '../../../shared/maestro-lib/managed/events';
 import { fakeAnchor, fakeSeal } from '../../main/enterprise/fakeCustody';
 import {
@@ -66,8 +63,7 @@ function doubleOptions(now: () => number): Double {
 		spool,
 		inbox,
 		registrationRequired: true,
-		capabilities: ['execution', 'telemetry', 'inbox', 'noticeList'],
-		v2Capabilities: ['telemetry', 'inbox', 'noticeList'],
+		capabilities: ['telemetry', 'inbox', 'noticeList'],
 		now,
 		operations: {
 			execution: (payload) =>
@@ -574,7 +570,7 @@ describe('offline recovery: a daemon speaking another schema version', () => {
 	const now = () => T0;
 
 	beforeAll(async () => {
-		const options = { ...doubleOptions(now), schemaVersion: 2, v2SchemaVersion: 3 };
+		const options = { ...doubleOptions(now), schemaVersion: 3 };
 		booted = await boot('offline-version-', options, { value: null });
 	});
 	afterAll(async () => {
@@ -593,13 +589,6 @@ describe('offline recovery: a daemon speaking another schema version', () => {
 		try {
 			expect(
 				await probe.compatibility({
-					protocol: LOCAL_ENDPOINT_PROTOCOL,
-					components: [{ id: 'maestro', kind: 'maestro', version: '1.1.0-RC' }],
-					requiredCapabilities: ['attachment'],
-				})
-			).toEqual({ status: 'denied', reason: 'unsupported_version' });
-			expect(
-				await probe.v2!.compatibility({
 					supportedProtocols: [2],
 					supportedCapabilities: ['attachment'],
 					requiredCapabilities: [],

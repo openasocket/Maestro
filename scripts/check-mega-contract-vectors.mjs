@@ -15,9 +15,11 @@
  * without `--allow-dirty-source` is a refusal (exit 2) and nothing is loaded.
  * Nothing scans a sibling checkout or picks the newest archive.
  *
- * `dist/local-endpoint.js` is then loaded in a child Node under the permission
- * model (no network, no child process, reads limited to a scratch copy and this
- * checkout's `zod`), which reports the enumerations its schemas carry. Drift
+ * `dist/protocol.js` (the protocol 2 envelope and attachment) and
+ * `dist/local-endpoint.js` (the local-control selectors and byte bounds the
+ * protocol shares) are then loaded in a child Node under the permission model
+ * (no network, no child process, reads limited to a scratch copy and this
+ * checkout's `zod`), which reports the enumerations their schemas carry. Drift
  * exits 1 with every differing fact named. The runtime port is not in the
  * contracts package; the unit test checks that section against Maestro's types.
  */
@@ -34,7 +36,10 @@ import { ImportError, LIMITS, verifyArtifact } from './import-mega-maestro.mjs';
 export const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const DEFAULT_FIXTURE = 'src/__tests__/fixtures/mega-maestro/contract-vectors.json';
 export const FIXTURE_FORMAT_VERSION = 1;
-export const ENDPOINT_MODULE = 'dist/local-endpoint.js';
+/** The protocol 2 envelope, attachment and execution shapes. */
+export const PROTOCOL_MODULE = 'dist/protocol.js';
+/** The local-control selectors and the byte bounds, shared by the protocol. */
+export const SHARED_MODULE = 'dist/local-endpoint.js';
 export const PROBE_TIMEOUT_MS = 20_000;
 /** The facts the module carries, in report order. The numeric ones are protocol and the byte limits. */
 export const CHECKED_FACTS = Object.freeze([
@@ -137,7 +142,9 @@ export function inspectContractsDir({ contractsDir, expectedSha256, allowDirtySo
 			fail('payload-extra', `"${file}" is not a payload file named by provenance.json`);
 		}
 	}
-	if (!files.has(ENDPOINT_MODULE)) fail('payload-missing', `payload has no ${ENDPOINT_MODULE}`);
+	for (const module of [PROTOCOL_MODULE, SHARED_MODULE]) {
+		if (!files.has(module)) fail('payload-missing', `payload has no ${module}`);
+	}
 	if (sourceDirty && !allowDirtySource) {
 		fail('dirty-source', `built from dirty source at ${sourceRevision}; pass --allow-dirty-source`);
 	}
@@ -145,18 +152,19 @@ export function inspectContractsDir({ contractsDir, expectedSha256, allowDirtySo
 }
 
 /** What runs in the child: read the schemas' enumerations, never a request. */
-export const PROBE_SOURCE = `import * as m from './${ENDPOINT_MODULE}';
+export const PROBE_SOURCE = `import * as p from './${PROTOCOL_MODULE}';
+import * as s from './${SHARED_MODULE}';
 const options = (schema) => [...schema.options];
 const literal = (schema) => ([...schema.values].length === 1 ? [...schema.values][0] : [...schema.values]);
 process.stdout.write(JSON.stringify({
-	protocol: literal(m.attachmentRequest.shape.supportedProtocols.element),
-	operations: options(m.localRequestEnvelope.shape.operation),
-	denialReasons: options(m.denied.shape.reason),
-	commandActions: m.commandRequest.shape.action.options.map((o) => literal(o.shape.kind)),
-	componentKinds: options(m.attachmentRequest.shape.components.element.shape.kind),
-	executionSources: options(m.executionRequest.shape.source),
-	maxRequestBytes: m.localMaximumRequestBytes,
-	maxResponseBytes: m.localMaximumResponseBytes,
+	protocol: literal(p.attachmentRequestV2.shape.supportedProtocols.def.items[0]),
+	operations: options(p.localRequestEnvelopeV2.shape.operation),
+	denialReasons: options(s.denied.shape.reason),
+	commandActions: s.commandRequest.shape.action.options.map((o) => literal(o.shape.kind)),
+	componentKinds: options(p.attachmentRequestV2.shape.components.element.shape.kind),
+	executionSources: options(p.executionRequestV2.shape.source),
+	maxRequestBytes: s.localMaximumRequestBytes,
+	maxResponseBytes: s.localMaximumResponseBytes,
 }));
 `;
 
@@ -241,7 +249,7 @@ export function checkContractVectors(options) {
 		fixture: { file: path.relative(REPO_ROOT, fixturePath), counterpartRevision },
 		archive: { ...archive, revisionMatchesFixture: archive.sourceRevision === counterpartRevision },
 		runtimePort: 'not-in-archive',
-		probe: { node: process.version, module: ENDPOINT_MODULE },
+		probe: { node: process.version, modules: [PROTOCOL_MODULE, SHARED_MODULE] },
 		observed,
 		drift,
 	};

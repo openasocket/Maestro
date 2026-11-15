@@ -116,7 +116,7 @@ function makeArtifact(dir: string, mutate?: (parts: ArtifactParts) => void, foun
 	const payload: Record<string, string> = {
 		'dist/identity.d.ts': 'export declare const identifier: string;\n',
 		'dist/identity.js': 'export const identifier = "id";\n',
-		'dist/local-endpoint.d.ts': ENDPOINT_DTS(1),
+		'dist/local-endpoint.d.ts': ENDPOINT_DTS(2),
 		'dist/local-endpoint.js': 'export const attachmentRequest = {};\n',
 	};
 	const parts: ArtifactParts = {
@@ -162,7 +162,7 @@ function makeArtifact(dir: string, mutate?: (parts: ArtifactParts) => void, foun
 				authority: 'schemas-only',
 				localProtocols: [1, 2],
 				desktopPolicy: 1,
-				features: ['registration-use-v2', 'workflow-lifecycle-v2'],
+				features: ['registration-use-v2', 'workflow-lifecycle'],
 			},
 		});
 		setPayload(
@@ -254,7 +254,7 @@ describe('import-mega-maestro verifyArtifact', () => {
 			inputSetVersion: 1,
 			inputDigest: 'b'.repeat(64),
 			endpointProtocols: [1, 2],
-			acceptedEndpointProtocols: [1, 2],
+			acceptedEndpointProtocols: [2],
 			contractSchemas: { authority: 'schemas-only', localProtocols: [1, 2], desktopPolicy: 1 },
 		});
 	});
@@ -343,8 +343,8 @@ describe('import-mega-maestro verifyArtifact', () => {
 			version: '0.3.0',
 			sha256: artifact.sha256,
 			sourceDirty: false,
-			endpointProtocols: [1],
-			acceptedEndpointProtocols: [1],
+			endpointProtocols: [2],
+			acceptedEndpointProtocols: [2],
 			dependencies: { zod: '4.6.5' },
 			payloadFiles: 4,
 			exports: ['./identity', './local-endpoint', './provenance'],
@@ -457,7 +457,7 @@ describe('import-mega-maestro verifyArtifact', () => {
 	});
 
 	it('refuses an endpoint protocol it does not speak, read from declarations only', () => {
-		expect(importer.declaredEndpointProtocols(ENDPOINT_DTS(1))).toEqual([1]);
+		expect(importer.declaredEndpointProtocols(ENDPOINT_DTS(2))).toEqual([2]);
 		expect(importer.declaredEndpointProtocols('nothing here')).toEqual([]);
 		const protocol3 = fixture((p) => setPayload(p, 'dist/local-endpoint.d.ts', ENDPOINT_DTS(3)));
 		expect(refusal(protocol3)).toBe('protocol');
@@ -633,7 +633,7 @@ describe('managedContextProblems', () => {
 const profile = hostCompatibilityProfile({ providers: ['claude-code', 'codex'] });
 const baseRequest: CompatibilityRequest = {
 	contractVersions: [MANAGED_CONTRACT_VERSION],
-	endpointProtocols: [1],
+	endpointProtocols: [2],
 	transport: 'in-process',
 	required: ['capabilities.negotiate'],
 };
@@ -650,7 +650,7 @@ describe('negotiateCompatibility', () => {
 			outcome: 'activated',
 			library: MAESTRO_LIB_VERSION,
 			contractVersion: MANAGED_CONTRACT_VERSION,
-			endpointProtocol: 1,
+			endpointProtocol: 2,
 			transport: 'in-process',
 			capabilities: ['capabilities.negotiate'],
 			support: [expect.objectContaining({ key: 'capabilities.negotiate' })],
@@ -711,8 +711,8 @@ describe('negotiateCompatibility', () => {
 	});
 
 	it('picks the highest common endpoint protocol and the peer-preferred contract', () => {
-		const wide = { ...profile, endpointProtocols: [1, 2, 3] };
-		const outcome = negotiateCompatibility(wide, { ...baseRequest, endpointProtocols: [3, 1] });
+		const wide = { ...profile, endpointProtocols: [2, 3] };
+		const outcome = negotiateCompatibility(wide, { ...baseRequest, endpointProtocols: [3, 2] });
 		expect(outcome).toMatchObject({ outcome: 'activated', endpointProtocol: 3 });
 	});
 });
@@ -787,7 +787,7 @@ const RUNTIME_VERSIONS = {
 	app: '1.1.0-RC',
 	library: MAESTRO_LIB_VERSION,
 	managedContract: MANAGED_CONTRACT_VERSION,
-	endpointProtocol: 1,
+	endpointProtocol: 2,
 };
 
 /**

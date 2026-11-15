@@ -94,10 +94,10 @@ export const TESTED_SOURCES = Object.freeze([
 	DEFAULT_PIN_FILE,
 	RUNTIME_WIRE_TEST,
 	RUNTIME_PIN_FILE,
-	'src/__tests__/main/enterprise/workflowV2Producer.ts',
+	'src/__tests__/main/enterprise/workflowProducer.ts',
 	'src/main/enterprise/service.ts',
 	'src/main/enterprise/enrollment.ts',
-	'src/shared/maestro-lib/managed/workflow-lifecycle-v2.ts',
+	'src/shared/maestro-lib/managed/workflow-lifecycle.ts',
 	'src/shared/maestro-lib/version.ts',
 ]);
 /** What Mega's final consumer receipt needs that no build check can see yet. */
@@ -124,7 +124,7 @@ export const NOT_YET_OBSERVED = Object.freeze([
 	{
 		field: 'negotiatedWorkflowExecution',
 		reason:
-			'execution is not in the v2 operation set until FINISH-10 (GCOMP-15-07); the v1 execution operation is unreachable on a v2-only connection',
+			'execution is not in the v2 operation set until FINISH-10 (GCOMP-15-07); an execution is not offered on the v2 connection',
 	},
 ]);
 

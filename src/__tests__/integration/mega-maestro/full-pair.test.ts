@@ -35,6 +35,7 @@ import { pathToFileURL } from 'node:url';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createCommandService, type CommandService } from '../../../main/enterprise/commands';
+import { NEGOTIATED_V2, typedCommand, wireOf } from '../../main/enterprise/commandWire';
 import { contentDeliveryStanding } from '../../../main/enterprise/content';
 import { createLocalEndpointClient } from '../../../main/enterprise/endpoint-client';
 import { INVENTORY_DELIVERY } from '../../../main/enterprise/inventory';
@@ -51,10 +52,7 @@ import {
 	type AdmissionRequest,
 	type PolicyDecision,
 } from '../../../shared/maestro-lib/managed/authority';
-import {
-	ENDPOINT_COMMAND_ACTIONS,
-	type ManagedRuntimeCommand,
-} from '../../../shared/maestro-lib/managed/commands';
+import type { ManagedRuntimeCommand } from '../../../shared/maestro-lib/managed/commands';
 import type {
 	ManagedEnrollmentStatus,
 	PreparedExecutionPort,
@@ -807,8 +805,7 @@ describe('full pair: fleet evidence, usage, VIBES, TRACE, governance, commands a
 		dir = fs.mkdtempSync(path.join(os.tmpdir(), 'full-pair-fleet-'));
 		fake = await startFakeEndpoint({
 			registrationRequired: true,
-			capabilities: ['execution', 'telemetry', 'inbox', 'noticeList'],
-			v2Capabilities: ['telemetry', 'inbox', 'noticeList'],
+			capabilities: ['telemetry', 'inbox', 'noticeList'],
 			status: { collectionProfile: 'full_vibes' },
 			now,
 			operations: {
@@ -1174,7 +1171,6 @@ describe('full pair: fleet evidence, usage, VIBES, TRACE, governance, commands a
 		];
 		expect(wireOperations()).toEqual(new Set(handshake));
 		// One protocol 2 connection: nothing went to v1.
-		expect(fake.callsTo('/v1/invoke')).toEqual([]);
 	});
 
 	it('fleet evidence: the run ends under a host revocation and settles its usage as estimated; the pump hands every runtime-family event to the double once under the contract and withholds the inventory by family; canaries stay off the wire and the prompt out of the journal; a resend is a duplicate and another boot is refused', async () => {
@@ -1293,17 +1289,25 @@ describe('full pair: fleet evidence, usage, VIBES, TRACE, governance, commands a
 		expect(denials).toEqual([{ operation: 'telemetry', reason: 'unauthenticated' }]);
 	}, 20_000);
 
-	// --- Commands: the real service refuses every one (its registration names no actor: CP-01/CP-04); the harness
-	// service is the same real composition with the actor id supplied, and says so. ---
-	type CommandOver = Omit<Partial<ManagedRuntimeCommand>, 'recipient'> & {
+	// --- Commands: the real service refuses every v2 delivery until the attachment negotiates the
+	// command wire (none does here); the harness is the same real composition with the actor id
+	// supplied and the wire negotiated, and says so. Reports and refreshes are local operator actions.
+	type PairOver = Partial<Omit<ManagedRuntimeCommand, 'recipient'>> & {
 		recipient?: Partial<ManagedRuntimeCommand['recipient']>;
 	};
-	const command = ({ recipient, ...rest }: CommandOver = {}): ManagedRuntimeCommand => {
-		const kind = rest.action?.kind ?? 'cancel-run';
-		return {
-			commandId: `cmd-${kind}`,
+	/** A typed command on the pair's registration, in the endpoint's shape (cancel by default). */
+	const pairCommand = (commandId: string, over: PairOver = {}): ManagedRuntimeCommand => {
+		const { recipient, ...rest } = over;
+		return typedCommand(commandId, {
+			commandId,
 			tenantId: 'tenant-pair',
 			issuerId: 'issuer-pair',
+			action: { kind: 'cancel-run' },
+			preconditions: { policyRevision: PAIR_POLICY_REVISION },
+			approval: { kind: 'policy-not-required', policyRevision: PAIR_POLICY_REVISION },
+			issuedAt: new Date(now() - 1_000).toISOString(),
+			expiresAt: new Date(now() + 60_000).toISOString(),
+			...rest,
 			recipient: {
 				actorId: 'actor-pair',
 				enrollmentId: 'enr-pair',
@@ -1313,22 +1317,7 @@ describe('full pair: fleet evidence, usage, VIBES, TRACE, governance, commands a
 				runId: 'run-c',
 				...recipient,
 			},
-			action: { kind: 'cancel-run' },
-			preconditions: {
-				policyRevision: PAIR_POLICY_REVISION,
-				requiredCapability: `command-${ENDPOINT_COMMAND_ACTIONS[kind]}`,
-				policyDigest: null,
-				bindingDigest: null,
-			},
-			approval: { kind: 'policy-not-required', policyRevision: PAIR_POLICY_REVISION },
-			issuedAt: new Date(now() - 1_000).toISOString(),
-			expiresAt: new Date(now() + 60_000).toISOString(),
-			nonce: sha(`nonce-${kind}`),
-			idempotencyKey: `idem-${kind}`,
-			payloadDigest: DIGEST_A,
-			releaseId: null,
-			...rest,
-		};
+		});
 	};
 	/** The real standing with the actor id the registration never carried: what a registration producer would supply (CP-01/CP-04). */
 	const withActor = (): ManagedEnrollmentStatus => {
@@ -1343,14 +1332,14 @@ describe('full pair: fleet evidence, usage, VIBES, TRACE, governance, commands a
 			},
 		};
 	};
+	/** The registration challenge the sealed record holds now: a delivery addresses it or is refused. */
+	const challenge = () => service.lifecycle.status().identity.record!.registration!.challengeId;
 
-	it('commands: the real service refuses every command by name (no actor); with the actor supplied, cancel_run revokes a second real child (exit observed), report_status leaks no path, program text, canary or run id, refresh_policy re-attaches, pause and resume are refused by name, and stale or replayed control is denied with no record', async () => {
+	it('commands: the real service refuses every v2 delivery (the command wire is not negotiated); with the actor supplied and the wire negotiated, cancel_run revokes a second real child (exit observed), report_status leaks no path, program text, canary or run id, refresh_policy re-attaches, pause and resume are refused by name, and stale or replayed control is denied with no record', async () => {
 		expect(service.lifecycle.status().identity.record?.registration?.actorId).toBeNull();
-		expect(await service.commands.receive(command({ commandId: 'cmd-real' }))).toMatchObject({
-			status: 'denied',
-			reason: 'unauthenticated',
-			detail: expect.stringContaining('names no actor'),
-		});
+		expect(
+			await service.commands.receive(wireOf(pairCommand('cmd-real'), { challengeId: challenge() }))
+		).toEqual({ outcome: 'denied', reason: 'unsupported_version' });
 		expect(service.commands.status().commands.total).toBe(0);
 		harness = createCommandService({
 			installation: service.installation,
@@ -1360,8 +1349,11 @@ describe('full pair: fleet evidence, usage, VIBES, TRACE, governance, commands a
 			dispatch: service.dispatch,
 			inventory: service.inventory,
 			file: path.join(dir, 'harness-commands.json'),
+			commandWire: NEGOTIATED_V2,
 			now,
 		});
+		const deliver = (raw: ManagedRuntimeCommand) =>
+			harness.receive(wireOf(raw, { challengeId: challenge() }));
 		expect((await harness.load()).ok).toBe(true);
 		expect(harness.unsupported().map((u) => u.kind)).toEqual([
 			'pause-run',
@@ -1378,11 +1370,10 @@ describe('full pair: fleet evidence, usage, VIBES, TRACE, governance, commands a
 		expect(service.lifecycle.status().identity.record?.registration?.actorId).toBeNull();
 		expect(alive(second.child.pid!)).toBe(true);
 		expect(service.dispatch.receipt(second.lease.leaseId)?.effect.state).toBe('bound');
-		const cancelled = await harness.receive(command({ commandId: 'cmd-cancel-1' }));
-		expect(cancelled).toMatchObject({
-			status: 'completed',
+		const cancelOne = pairCommand('cmd-cancel-1');
+		expect(await deliver(cancelOne)).toMatchObject({
+			outcome: 'completed',
 			commandId: 'cmd-cancel-1',
-			duplicate: false,
 		});
 		expect((await second.exited).signal).toBe('SIGTERM');
 		expect(alive(second.child.pid!)).toBe(false);
@@ -1391,77 +1382,58 @@ describe('full pair: fleet evidence, usage, VIBES, TRACE, governance, commands a
 		expect(service.dispatch.receipt(second.lease.leaseId)?.effect.state).toBe('revoked');
 		expect(service.dispatch.authority.live()).toEqual([]);
 		// The same command again: answered from the ledger, nothing revoked twice.
-		expect(await harness.receive(command({ commandId: 'cmd-cancel-1' }))).toMatchObject({
-			status: 'completed',
-			duplicate: true,
+		expect(await deliver(cancelOne)).toMatchObject({
+			outcome: 'completed',
+			commandId: 'cmd-cancel-1',
 		});
 		expect(second.revocations).toHaveLength(1);
 
-		// report_status: the installation and the standing, never the work.
-		const report = await harness.receive(
-			command({ action: { kind: 'report-status' }, recipient: { runId: null } })
-		);
-		expect(report).toMatchObject({ status: 'completed', commandId: 'cmd-report-status' });
+		// report_status: the installation and the standing, never the work (a local operator action).
+		const report = await harness.issueLocal({ kind: 'report-status' });
+		expect(report).toMatchObject({ status: 'completed' });
 		const facts = JSON.stringify(report.status === 'completed' ? report.facts : null);
 		expect(facts).toContain(service.installation.installationId);
 		const secrets = [process.execPath, dir, 'setInterval', 'synthetic', 'CANARY', 'run-a', 'run-c'];
 		for (const secret of secrets) expect(facts).not.toContain(secret);
 
 		// refresh_policy: one more attachment on the wire, the registration kept. It is a
-		// protocol 2 attachment on the one connection; nothing goes to /v1/invoke.
+		// protocol 2 attachment on the one connection.
 		const attachmentsOn = (target: string) =>
 			operations('attachment').filter((call) => call.path === target).length;
-		const attachments = attachmentsOn('/v1/invoke');
-		const attachmentsV2 = attachmentsOn('/v2/invoke');
-		const refresh = command({
-			action: { kind: 'refresh-policy', desiredRevision: PAIR_POLICY_REVISION },
-			recipient: { runId: null },
-		});
-		expect(await harness.receive(refresh)).toMatchObject({
-			status: 'completed',
-			commandId: 'cmd-refresh-policy',
-		});
-		expect(attachmentsOn('/v1/invoke')).toBe(attachments);
-		expect(attachments).toBe(0);
-		expect(attachmentsOn('/v2/invoke')).toBe(attachmentsV2 + 1);
+		const attachments = attachmentsOn('/v2/invoke');
+		expect(
+			await harness.issueLocal({ kind: 'refresh-policy', desiredRevision: PAIR_POLICY_REVISION })
+		).toMatchObject({ status: 'completed' });
+		expect(attachmentsOn('/v2/invoke')).toBe(attachments + 1);
 		expect(service.lifecycle.status().authority).toBe('registered');
 		for (const kind of ['pause-run', 'resume-run'] as const) {
-			expect(await harness.receive(command({ action: { kind } }))).toMatchObject({
-				status: 'denied',
-				reason: 'unsupported-capability',
-				detail: `this host does not execute command-${ENDPOINT_COMMAND_ACTIONS[kind]}`,
+			expect(await deliver(pairCommand(`cmd-${kind}`, { action: { kind } }))).toEqual({
+				outcome: 'denied',
+				reason: 'unsupported_capability',
 			});
 		}
 
 		// Stale or replayed control: denied with no record on the ledger.
 		const total = harness.status().commands.total;
-		const fresh = (id: string, over: CommandOver = {}) =>
-			command({
-				commandId: id,
-				nonce: sha(id),
-				idempotencyKey: `idem-${id}`,
-				recipient: { runId: null },
-				action: { kind: 'report-status' },
-				...over,
-			});
-		const denied = async (raw: ManagedRuntimeCommand, reason: string, detail?: RegExp) => {
-			const out = await harness.receive(raw);
-			expect(out).toMatchObject({ status: 'denied', reason });
-			if (detail && out.status === 'denied') expect(out.detail).toMatch(detail);
-		};
-		await denied(
-			fresh('stale-epoch', { recipient: { runId: null, processEpoch: 'epoch-other' } }),
-			'stale-run',
-			/process epoch/
-		);
-		await denied(fresh('lapsed', { expiresAt: new Date(now() - 1).toISOString() }), 'expired');
-		await denied(
-			fresh('other-tenant', { tenantId: 'tenant-other' }),
-			'stale-run',
-			/another tenant/
-		);
-		await denied(fresh('nonce-reuse', { nonce: sha('nonce-cancel-run') }), 'replay');
-		await denied(fresh('key-reuse', { idempotencyKey: 'idem-cancel-run' }), 'replay');
+		const fresh = (id: string, over: PairOver = {}) =>
+			pairCommand(id, { nonce: sha(id), idempotencyKey: `idem-${id}`, ...over });
+		await expect(
+			deliver(fresh('stale-epoch', { recipient: { processEpoch: 'epoch-other' } }))
+		).resolves.toEqual({ outcome: 'denied', reason: 'policy_denied' });
+		await expect(
+			deliver(fresh('lapsed', { expiresAt: new Date(now() - 1).toISOString() }))
+		).resolves.toEqual({ outcome: 'denied', reason: 'expired' });
+		await expect(deliver(fresh('other-tenant', { tenantId: 'tenant-other' }))).resolves.toEqual({
+			outcome: 'denied',
+			reason: 'policy_denied',
+		});
+		await expect(deliver(fresh('nonce-reuse', { nonce: cancelOne.nonce }))).resolves.toEqual({
+			outcome: 'denied',
+			reason: 'replay',
+		});
+		await expect(
+			deliver(fresh('key-reuse', { idempotencyKey: cancelOne.idempotencyKey }))
+		).resolves.toEqual({ outcome: 'denied', reason: 'replay' });
 		expect(harness.status().commands.total).toBe(total);
 		const ledger = fs.readFileSync(path.join(dir, 'harness-commands.json'), 'utf8');
 		expect(ledger).toContain('cmd-cancel-1');
