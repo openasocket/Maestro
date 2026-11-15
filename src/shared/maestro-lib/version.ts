@@ -169,8 +169,19 @@ import { MANAGED_CONTRACT_VERSION } from './managed/types';
  * a lone `%` now passes, only a `%NAME%` pair, `^` or a line break is refused) and the desktop current-turn
  * observation types `CurrentTurnCursor`, `CurrentTurnMessage` and `CurrentTurnRead` (`../currentTurn`).
  * Additions only; nothing is removed and no managed rule changes.
+ * 0.38.0: endpoint protocol 2 in production (contracts 0.3.0, Mega handoff items 1-8). The registration
+ * handshake is two v2 envelopes (`LOCAL_ENDPOINT_REGISTRATION_CHALLENGE_OPERATION`,
+ * `LOCAL_ENDPOINT_REGISTRATION_REDEEM_OPERATION`) and the v1 paths
+ * `LOCAL_ENDPOINT_REGISTRATION_CHALLENGE_PATH`, `LOCAL_ENDPOINT_REGISTRATION_REDEEM_PATH` and
+ * `LOCAL_ENDPOINT_MAX_REGISTRATION_BYTES` are removed; the redeem receipt is `{ outcome: 'registered' }`.
+ * `./managed/endpoint-port` adds the relayed enrollment phase types (request, prove, activate), the
+ * `localControl` and signed `command` request and receipt types with `ENDPOINT_LOCAL_CONTROL_AUTHORITY`,
+ * `EndpointPortV2.compatibility`, the `not-authorized` unavailable reason and
+ * `ManagedEnrollmentStatus.registrationUse`; `V2_OPERATIONS_SELECTED` now holds the passing parity rows.
+ * `ManagedHostAdapter.workflows` is the v2 workflow lifecycle port (`./managed/workflow-lifecycle-v2`,
+ * `createEndpointWorkflowV2OwnerPort`) and never sends the v1 `workflow` fence. Breaking below 1.0.
  */
-export const MAESTRO_LIB_VERSION = '0.37.0';
+export const MAESTRO_LIB_VERSION = '0.38.0';
 
 /** The Node range the built library runs on; `engines.node` of the built package. */
 export const MAESTRO_LIB_NODE_RANGE = '>=20';
