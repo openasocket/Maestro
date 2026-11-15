@@ -6,18 +6,26 @@
  * retires the device through the endpoint's own tooling, holding the device
  * key Maestro never sees. What Maestro does is REQUEST and OBSERVE:
  *
- *   - `requestEnrollment` sends the protocol's `enrollment` operation when the
- *     endpoint advertises it, and writes a record in `enrolling` when the
- *     endpoint answers `enrollment_pending`. The endpoint in the sibling
- *     checkout advertises no such capability (CP-04, owner mega-maestro); the
- *     request is then answered `unsupported` and nothing is written.
- *   - `beginRegistration` / `completeRegistration` run the actor registration
- *     the endpoint consumes: a challenge on one connection, a browser approval
- *     by the actor, a redeem on the same connection. The approval code is
- *     handed to the caller once and is neither persisted nor logged.
+ *   - `requestEnrollment` relays ONE enrollment phase (decision D1, contracts
+ *     0.3.0): `request`, then `prove`, then `activate`, with the operator's
+ *     central begin, prove and activate between them. It sends the phase only
+ *     when the v2 `compatibility` probe offers `enrollment`, checks the answer
+ *     is the phase's own outcome echoing the management it named, and only
+ *     then writes: `request` an `enrolling` record, `prove` its enrollment
+ *     id, `activate` `enrolled`. A denied or malformed answer writes nothing.
+ *   - `beginRegistration` / `completeRegistration` run the runtime_use
+ *     registration the endpoint consumes: `registration_challenge` on one
+ *     connection, a browser approval by the actor, `registration_redeem` on
+ *     the same connection, both v2 envelopes. The approval code is handed to
+ *     the caller once and is neither persisted nor logged. A redeem whose
+ *     answer was lost is recovered by reattaching with the existing claim and
+ *     asking `registration_use`, never by registering again.
  *   - `connect` attaches (after a registration, when the endpoint requires
  *     one) and projects what the endpoint answered onto the record: the
- *     management state it reports and the policy revisions it holds.
+ *     management state it reports and the policy revisions it holds. With
+ *     `deps.v2` (production) the attachment is the protocol 2 attachment on
+ *     the one connection, followed by `registration_use` when it negotiated
+ *     it; no v1 attachment is sent.
  *   - `requestRotation`, `requestRevocation`, `requestRetirement` name what the
  *     protocol has no operation for; they answer `unsupported` with the owner
  *     named, and `acknowledgeRevocation` / `retire` are the explicit local
@@ -33,15 +41,23 @@
  * No Electron import, so a headless host runs the same lifecycle.
  */
 
+import { canonicalJson } from '../../shared/canonicalJson';
 import {
+	ENDPOINT_ENROLLMENT_PHASE_OUTCOMES,
 	LOCAL_ENDPOINT_PROTOCOL,
 	LOCAL_ENDPOINT_PROTOCOL_V2,
+	LOCAL_ENDPOINT_REGISTRATION_USE_OPERATION,
+	isEndpointDigest,
 	type EndpointAttachmentRequest,
 	type EndpointAttachmentRequestV2,
 	type EndpointComponent,
-	type EndpointEnrollmentRequest,
-	type EndpointEnrollmentResult,
+	type EndpointEnrollmentActivationV2,
+	type EndpointEnrollmentManagementV2,
+	type EndpointEnrollmentPhaseRequestV2,
+	type EndpointEnrollmentPhaseResultV2,
 	type EndpointInvokeOutcome,
+	type EndpointPossessionChallengeV2,
+	type EndpointRuntimeUseReference,
 	type EndpointPort,
 	type EndpointRegistrationApproval,
 	type EndpointUnavailableReason,
@@ -70,28 +86,38 @@ export interface EnrollmentLifecycleDeps {
 	 */
 	onAttached?(status: EndpointStatus): void;
 	/**
-	 * The protocol 2 attachment, tried before every v1 attachment. The endpoint
-	 * holds ONE negotiated protocol per socket session (a v2 attachment drops the
-	 * socket's v1 session and the reverse), and every operation this host sends
-	 * today goes over v1 (`V2_OPERATIONS_SELECTED` is empty). So the v2 attachment
-	 * runs on its own connection, opened with `openPort` here, never on the v1
-	 * one: the v1 attachment and every v1 operation are exactly what they were.
-	 * Absent, nothing is sent on `/v2/invoke`.
+	 * Protocol 2, the production attachment (handoff item 1, contracts 0.3.0):
+	 * the attachment is the v2 attachment on the ONE connection every caller
+	 * reads, offering `supported` with nothing required, and no v1 attachment
+	 * is sent. The endpoint holds one protocol per socket session, so every
+	 * operation on this connection is a v2 one. Absent, the v1 attachment, as a
+	 * host that predates protocol 2 had it.
 	 */
 	v2?: {
-		/** Opens the v2 connection. It must not replace the port the host's v1 callers read. */
-		openPort(socketPath: string): EndpointPort;
 		/** What this host offers on the v2 attachment; nothing is required. */
 		supported: readonly string[];
 	};
 }
 
-export interface EnrollmentRequestInput extends EndpointEnrollmentRequest {
+/** What every relayed phase carries besides its own body. */
+interface EnrollmentPhaseCommon {
 	socketPath: string;
-	/** Asserted by the enrolling operator from the invitation; the endpoint does not report them over the socket. */
-	tenantId: string;
-	orgId: string;
+	management: EndpointEnrollmentManagementV2;
 }
+
+/**
+ * One relayed enrollment phase (decision D1). `request` also carries the
+ * organization the operator asserts from the central console (the tenant is
+ * the management's); the endpoint does not report it over the socket.
+ */
+export type EnrollmentRequestInput =
+	| (EnrollmentPhaseCommon & {
+			phase: 'request';
+			orgId: string;
+			serverCaPem: string;
+	  })
+	| (EnrollmentPhaseCommon & { phase: 'prove'; challenge: EndpointPossessionChallengeV2 })
+	| (EnrollmentPhaseCommon & { phase: 'activate'; activation: EndpointEnrollmentActivationV2 });
 
 export type LifecycleRefusal =
 	| 'custody-unprotected'
@@ -133,7 +159,7 @@ export interface EnrollmentLifecycle {
 	status(): ManagedEnrollmentStatus;
 	requestEnrollment(
 		input: EnrollmentRequestInput
-	): Promise<LifecycleOutcome<EndpointEnrollmentResult>>;
+	): Promise<LifecycleOutcome<EndpointEnrollmentPhaseResultV2>>;
 	/** Dial the recorded endpoint and attach; after a restart the endpoint will want a registration first. */
 	connect(): Promise<LifecycleOutcome<EndpointStatus>>;
 	beginRegistration(): Promise<LifecycleOutcome<RegistrationApprovalHandoff>>;
@@ -156,14 +182,18 @@ export interface EnrollmentLifecycle {
 }
 
 const NO_OPERATION =
-	'local-endpoint protocol 1 has no operation for this; the endpoint administrator performs it with the endpoint tooling (owner: mega-maestro, CP-04).';
+	'the local endpoint protocol has no operation for this; the endpoint administrator performs it with the endpoint tooling (owner: mega-maestro, CP-04).';
 
 export function createEnrollmentLifecycle(deps: EnrollmentLifecycleDeps): EnrollmentLifecycle {
 	const now = deps.now ?? (() => Date.now());
 	let port: EndpointPort | null = null;
 	let endpoint: EndpointStatus | null = null;
-	/** The v2 connection, kept only while its attachment negotiated protocol 2. */
-	let v2Port: EndpointPort | null = null;
+	/** The `registration_use` reference projected on one connection (by its count), and its expiry. */
+	let registrationUse: {
+		connection: number;
+		reference: EndpointRuntimeUseReference;
+		expiresAt: string;
+	} | null = null;
 	/**
 	 * The open challenge: its id, the digest the actor approves, and when it lapses.
 	 * The digest is kept for the registration record only; `status()` projects the
@@ -226,6 +256,7 @@ export function createEnrollmentLifecycle(deps: EnrollmentLifecycleDeps): Enroll
 			void port.close();
 			port = null;
 			endpoint = null;
+			registrationUse = null;
 		}
 		port ??= deps.openPort(socketPath);
 		return port;
@@ -243,42 +274,80 @@ export function createEnrollmentLifecycle(deps: EnrollmentLifecycleDeps): Enroll
 		};
 	}
 
-	async function dropV2(): Promise<void> {
-		const open = v2Port;
-		v2Port = null;
-		if (open) await open.close();
+	/**
+	 * The attachment on `p`: with `deps.v2`, the v2 attachment on this one
+	 * connection (a port with no v2 side sends nothing); without it, the v1
+	 * attachment. A refused v2 attachment is never resent on `/v1/invoke`.
+	 */
+	async function attachOn(p: EndpointPort): Promise<LifecycleOutcome<EndpointStatus>> {
+		if (!deps.v2) return relay('attachment', await p.attach(attachmentRequest()));
+		if (!p.v2) {
+			return {
+				status: 'unavailable',
+				reason: 'not-negotiated',
+				message: 'attachment: this endpoint port has no protocol 2 path; nothing was sent.',
+			};
+		}
+		return relay('attachment', await p.v2.attach(attachmentRequestV2(deps.v2.supported)));
 	}
 
 	/**
-	 * The v2 attachment on its own connection to `socketPath`. Kept when the
-	 * endpoint negotiated protocol 2 (any subset of the offer); dropped on any
-	 * other answer. An endpoint without protocol 2 (`unsupported_version`, no
-	 * `/v2/invoke` path) leaves the host on v1 alone, which is what it was. A
-	 * refused v2 attachment is never resent on `/v1/invoke`: the v1 attachment
-	 * that follows is the host's own, sent with the same bytes whatever v2 said.
+	 * `registration_use` on `p`: on `projected`, the reference is kept for this
+	 * connection and its `enrollmentId` and `processBirthDigest` are written onto
+	 * the record (every other field kept). Never computed here; a denial writes
+	 * nothing. Sends nothing unless the attachment on `p` negotiated it.
 	 */
-	async function attachV2(socketPath: string): Promise<void> {
-		if (!deps.v2) return;
-		if (v2Port && (v2Port.socketPath !== socketPath || v2Port.state().closed)) await dropV2();
-		let p: EndpointPort;
-		try {
-			p = v2Port ?? deps.v2.openPort(socketPath);
-		} catch {
-			return;
-		}
-		v2Port = p;
+	async function projectRegistrationUse(
+		p: EndpointPort
+	): Promise<LifecycleOutcome<RegistrationUseResult>> {
 		if (!p.v2) {
-			await dropV2();
-			return;
+			return {
+				status: 'unavailable',
+				reason: 'not-negotiated',
+				message: 'registration_use: no v2 connection is open; nothing was sent.',
+			};
 		}
-		const outcome = await p.v2.attach(attachmentRequestV2(deps.v2.supported));
-		if (outcome.status !== 'ok') await dropV2();
+		const outcome = relay(LOCAL_ENDPOINT_REGISTRATION_USE_OPERATION, await p.v2.registration.use());
+		if (outcome.status !== 'ok') return outcome;
+		const reply = outcome.value;
+		if (reply.outcome === 'denied') {
+			registrationUse = null;
+			return { status: 'ok', value: { outcome: 'denied', reason: reply.reason } };
+		}
+		const { enrollmentId, processBirthDigest } = reply.reference;
+		registrationUse = {
+			connection: p.state().connection,
+			reference: structuredClone(reply.reference),
+			expiresAt: reply.expiresAt,
+		};
+		// Re-read inside the step: the write keeps whatever the record holds now.
+		const latest = deps.identity.read();
+		if (latest.status === 'ok' && latest.record.registration) {
+			await deps.identity.write({
+				...latest.record,
+				enrollmentId,
+				registration: { ...latest.record.registration, processBirthDigest },
+			});
+		}
+		return {
+			status: 'ok',
+			value: { outcome: 'projected', enrollmentId, processBirthDigest, expiresAt: reply.expiresAt },
+		};
+	}
+
+	/** The projected reference while it is this connection's and has not lapsed. */
+	function currentRegistrationUse(): typeof registrationUse {
+		if (!registrationUse || !port) return null;
+		const state = port.state();
+		if (state.closed || !state.attached || state.connection !== registrationUse.connection)
+			return null;
+		return Date.parse(registrationUse.expiresAt) > now() ? registrationUse : null;
 	}
 
 	/** Attach on `p` and fold what the endpoint said into the record, when there is one. */
 	async function attach(p: EndpointPort): Promise<LifecycleOutcome<EndpointStatus>> {
-		await attachV2(p.socketPath);
-		const outcome = relay('attachment', await p.attach(attachmentRequest()));
+		registrationUse = null;
+		const outcome = await attachOn(p);
 		if (outcome.status !== 'ok') {
 			endpoint = null;
 			return outcome;
@@ -296,6 +365,11 @@ export function createEnrollmentLifecycle(deps: EnrollmentLifecycleDeps): Enroll
 					observedAt: new Date(now()).toISOString(),
 				},
 			});
+		}
+		// The production caller of `registration_use`: every v2 attachment that
+		// negotiated it asks for the reference the workflow and command contexts carry.
+		if (deps.v2 && p.v2?.negotiated(LOCAL_ENDPOINT_REGISTRATION_USE_OPERATION)) {
+			await projectRegistrationUse(p);
 		}
 		deps.onAttached?.(endpoint);
 		return outcome;
@@ -318,7 +392,7 @@ export function createEnrollmentLifecycle(deps: EnrollmentLifecycleDeps): Enroll
 			else if (identity.record?.management !== 'enrolled') {
 				reason = `The record is ${identity.record?.management ?? 'absent'}, not enrolled.`;
 			} else if (!connection || connection.closed) reason = 'No endpoint connection is open.';
-			else if (connection.registration !== 'registered') {
+			else if (connection.registration !== 'registered' && !currentRegistrationUse()) {
 				reason = 'This process has not redeemed an actor registration.';
 			} else if (!connection.attached || !endpoint) reason = 'The connection is not attached.';
 			else if (endpoint.management !== 'managed')
@@ -333,19 +407,51 @@ export function createEnrollmentLifecycle(deps: EnrollmentLifecycleDeps): Enroll
 					? { challengeId: pendingApproval.challengeId, expiresAt: pendingApproval.expiresAt }
 					: null,
 				lastDenial,
+				...(deps.v2
+					? {
+							registrationUse: (() => {
+								const use = currentRegistrationUse();
+								return use
+									? { reference: structuredClone(use.reference), expiresAt: use.expiresAt }
+									: null;
+							})(),
+						}
+					: {}),
 			};
 		},
 
 		requestEnrollment: (input) =>
-			serialized(async () => {
-				const custody = custodyRefusal<EndpointEnrollmentResult>();
+			serialized(async (): Promise<LifecycleOutcome<EndpointEnrollmentPhaseResultV2>> => {
+				const custody = custodyRefusal<EndpointEnrollmentPhaseResultV2>();
 				if (custody) return custody;
 				const current = deps.identity.read();
-				if (current.status === 'ok') {
-					return refuse(
-						'already-enrolled',
-						`This installation already holds a record (${current.record.management}) for ${current.record.endpoint.socketPath}.`
-					);
+				if (input.phase === 'request') {
+					if (current.status === 'ok') {
+						return refuse(
+							'already-enrolled',
+							`This installation already holds a record (${current.record.management}) for ${current.record.endpoint.socketPath}.`
+						);
+					}
+				} else {
+					// `prove` and `activate` continue an enrollment this installation requested.
+					if (current.status !== 'ok' || current.record.management !== 'enrolling') {
+						return refuse(
+							'not-enrolled',
+							`No requested enrollment is open; ${input.phase} follows the request phase.`
+						);
+					}
+					if (
+						current.record.tenantId !== input.management.tenantId ||
+						current.record.endpoint.socketPath !== input.socketPath
+					) {
+						return refuse(
+							'installation-mismatch',
+							`The requested enrollment names tenant ${current.record.tenantId} at ${current.record.endpoint.socketPath}.`
+						);
+					}
+					if (input.phase === 'activate' && current.record.enrollmentId === null) {
+						return refuse('not-enrolled', 'Activation follows a signed possession proof (prove).');
+					}
 				}
 				let p: EndpointPort;
 				try {
@@ -353,63 +459,105 @@ export function createEnrollmentLifecycle(deps: EnrollmentLifecycleDeps): Enroll
 				} catch (error) {
 					return refuse('no-endpoint', error instanceof Error ? error.message : String(error));
 				}
-				const compat = relay(
-					'compatibility',
-					await p.compatibility({
-						protocol: LOCAL_ENDPOINT_PROTOCOL,
-						components: deps.components,
-						requiredCapabilities: ['attachment'],
-					})
-				);
-				if (compat.status !== 'ok') return compat;
-				if (!compat.value.capabilities.includes('enrollment')) {
+				if (!p.v2) {
 					return {
 						status: 'unsupported',
 						owner: 'mega-maestro',
-						message: `The endpoint at ${input.socketPath} does not serve the enrollment operation; ${NO_OPERATION}`,
+						message: `The endpoint port for ${input.socketPath} has no protocol 2 path, where relayed enrollment lives.`,
 					};
 				}
-				const attached = await attach(p);
-				if (attached.status !== 'ok') return attached;
-				const request: EndpointEnrollmentRequest = {
-					mode: input.mode,
-					invitation: input.invitation,
-					collectionProfile: input.collectionProfile,
-					trustRootDigest: input.trustRootDigest,
-					keyPossessionProof: input.keyPossessionProof,
-				};
-				const answered = relay('enrollment', await p.invoke('enrollment', request));
+				// Availability first, on v2: an endpoint that does not offer enrollment to
+				// this peer is answered `unsupported` and nothing is relayed.
+				const probe = relay(
+					'compatibility',
+					await p.v2.compatibility({
+						supportedProtocols: [LOCAL_ENDPOINT_PROTOCOL_V2],
+						supportedCapabilities: ['enrollment'],
+						requiredCapabilities: [],
+					})
+				);
+				if (probe.status === 'denied' && probe.reason === 'unsupported_capability') {
+					return {
+						status: 'unsupported',
+						owner: 'mega-maestro',
+						message: `The endpoint at ${input.socketPath} does not offer relayed enrollment to this peer.`,
+					};
+				}
+				if (probe.status !== 'ok') return probe;
+				if (!probe.value.capabilities.includes('enrollment')) {
+					return {
+						status: 'unsupported',
+						owner: 'mega-maestro',
+						message: `The endpoint at ${input.socketPath} does not offer relayed enrollment to this peer.`,
+					};
+				}
+				const request: EndpointEnrollmentPhaseRequestV2 =
+					input.phase === 'request'
+						? {
+								phase: 'request',
+								management: { ...input.management },
+								serverCaPem: input.serverCaPem,
+								identity: attachmentRequest(),
+							}
+						: input.phase === 'prove'
+							? {
+									phase: 'prove',
+									management: { ...input.management },
+									challenge: { ...input.challenge },
+								}
+							: {
+									phase: 'activate',
+									management: { ...input.management },
+									activation: structuredClone(input.activation),
+								};
+				const answered = relay('enrollment', await p.v2.invoke('enrollment', request));
 				if (answered.status !== 'ok') return answered;
-				const result = answered.value as Partial<EndpointEnrollmentResult> | null;
-				if (result?.outcome !== 'enrollment_pending' || typeof result.enrollmentId !== 'string') {
+				const problems = enrollmentPhaseResultProblems(
+					input.phase,
+					request.management,
+					answered.value
+				);
+				if (problems.length > 0) {
 					return {
 						status: 'unavailable',
-						message: 'The enrollment answer is not an enrollment receipt.',
+						reason: 'malformed',
+						message: `enrollment: the ${input.phase} answer is not the phase's own: ${problems.join('; ')}`,
 					};
 				}
-				await deps.identity.write({
-					installationId: deps.installation.installationId,
-					tenantId: input.tenantId,
-					orgId: input.orgId,
-					enrollmentId: result.enrollmentId,
-					endpoint: {
-						socketPath: input.socketPath,
-						bindingDigest: input.trustRootDigest,
-						trustRootDigest: input.trustRootDigest,
-					},
-					management: 'enrolling',
-					registration: null,
-					policy: {
-						desiredRevision: endpoint?.desiredPolicyRevision ?? null,
-						appliedRevision: endpoint?.appliedPolicyRevision ?? null,
-						observedAt: new Date(now()).toISOString(),
-					},
-					enrolledAt: new Date(now()).toISOString(),
-				});
-				return {
-					status: 'ok',
-					value: { outcome: 'enrollment_pending', enrollmentId: result.enrollmentId },
-				};
+				const result = answered.value as EndpointEnrollmentPhaseResultV2;
+				const at = new Date(now()).toISOString();
+				if (result.outcome === 'enrollment_requested' && input.phase === 'request') {
+					await deps.identity.write({
+						installationId: deps.installation.installationId,
+						tenantId: input.management.tenantId,
+						orgId: input.orgId,
+						enrollmentId: null,
+						endpoint: {
+							socketPath: input.socketPath,
+							bindingDigest: input.management.issuerSha256,
+							trustRootDigest: input.management.issuerSha256,
+						},
+						management: 'enrolling',
+						registration: null,
+						policy: { desiredRevision: null, appliedRevision: null, observedAt: at },
+						enrolledAt: at,
+					});
+				} else {
+					const latest = deps.identity.read();
+					if (latest.status !== 'ok') {
+						return refuse('not-enrolled', 'The record changed before the phase could be written.');
+					}
+					const enrollmentId =
+						result.outcome === 'possession_signed' || result.outcome === 'enrolled'
+							? result.enrollmentId
+							: latest.record.enrollmentId;
+					await deps.identity.write({
+						...latest.record,
+						enrollmentId,
+						...(result.outcome === 'enrolled' ? { management: 'enrolled' as const } : {}),
+					});
+				}
+				return { status: 'ok', value: structuredClone(result) };
 			}),
 
 		connect: () =>
@@ -477,11 +625,10 @@ export function createEnrollmentLifecycle(deps: EnrollmentLifecycleDeps): Enroll
 					);
 				}
 				const challenge = pendingApproval;
-				const redeemed = relay('registration.redeem', await port.registration.redeem());
+				const p = port;
+				const redeemed = relay('registration.redeem', await p.registration.redeem());
 				pendingApproval = null;
-				if (redeemed.status !== 'ok') return redeemed;
-				const at = new Date(now()).toISOString();
-				await deps.identity.write({
+				const record = () => ({
 					...current.record,
 					registration: {
 						challengeId: challenge.challengeId,
@@ -492,10 +639,23 @@ export function createEnrollmentLifecycle(deps: EnrollmentLifecycleDeps): Enroll
 						processBirthDigest: null,
 						challengeDigest: challenge.challengeDigest,
 						expiresAt: challenge.expiresAt,
-						registeredAt: at,
+						registeredAt: new Date(now()).toISOString(),
 					},
 				});
-				return attach(port);
+				if (redeemed.status === 'unknown' && deps.v2) {
+					// The redeem may have published the registration before its answer was
+					// lost. Reattach with the existing claim and ask registration_use; never
+					// register again. Only a projected reference proves it.
+					p.redial();
+					const reattached = await attach(p);
+					if (reattached.status !== 'ok' || !currentRegistrationUse()) return redeemed;
+					await deps.identity.write(record());
+					await projectRegistrationUse(p);
+					return reattached;
+				}
+				if (redeemed.status !== 'ok') return redeemed;
+				await deps.identity.write(record());
+				return attach(p);
 			}),
 
 		useRegistration: () =>
@@ -508,42 +668,14 @@ export function createEnrollmentLifecycle(deps: EnrollmentLifecycleDeps): Enroll
 				if (!current.record.registration) {
 					return refuse('no-challenge', 'This installation holds no completed registration.');
 				}
-				if (!v2Port?.v2) {
+				if (!port?.v2) {
 					return {
 						status: 'unavailable',
 						reason: 'not-negotiated',
 						message: 'registration_use: no v2 connection is open; nothing was sent.',
 					};
 				}
-				const outcome = relay('registration_use', await v2Port.v2.registration.use());
-				if (outcome.status !== 'ok') return outcome;
-				const reply = outcome.value;
-				if (reply.outcome === 'denied') {
-					return { status: 'ok', value: { outcome: 'denied', reason: reply.reason } };
-				}
-				const { enrollmentId, processBirthDigest } = reply.reference;
-				// Re-read inside the step: the write keeps whatever the record holds now.
-				const latest = deps.identity.read();
-				if (latest.status !== 'ok' || !latest.record.registration) {
-					return refuse(
-						'not-enrolled',
-						'The record changed before the reference could be written.'
-					);
-				}
-				await deps.identity.write({
-					...latest.record,
-					enrollmentId,
-					registration: { ...latest.record.registration, processBirthDigest },
-				});
-				return {
-					status: 'ok',
-					value: {
-						outcome: 'projected',
-						enrollmentId,
-						processBirthDigest,
-						expiresAt: reply.expiresAt,
-					},
-				};
+				return projectRegistrationUse(port);
 			}),
 
 		requestRotation: async () => ({
@@ -569,10 +701,10 @@ export function createEnrollmentLifecycle(deps: EnrollmentLifecycleDeps): Enroll
 			serialized(async () => {
 				pendingApproval = null;
 				endpoint = null;
+				registrationUse = null;
 				const open = port;
 				port = null;
 				if (open) await open.close();
-				await dropV2();
 			}),
 	};
 
@@ -627,4 +759,59 @@ export function managementFromEndpoint(
 		case 'unenrolled':
 			return current;
 	}
+}
+
+/**
+ * Why an `enrollment` answer is not the outcome `phase` must answer, echoing
+ * `management` exactly, or []. Structural; the endpoint is the authority on
+ * its own schema.
+ */
+export function enrollmentPhaseResultProblems(
+	phase: EndpointEnrollmentPhaseRequestV2['phase'],
+	management: EndpointEnrollmentManagementV2,
+	value: unknown
+): string[] {
+	if (typeof value !== 'object' || value === null || Array.isArray(value))
+		return ['the answer is not an object'];
+	const answer = value as Record<string, unknown>;
+	const problems: string[] = [];
+	const id = (key: string) =>
+		typeof answer[key] === 'string' && (answer[key] as string).length > 0
+			? null
+			: `${key} is not an id`;
+	if (answer.outcome !== ENDPOINT_ENROLLMENT_PHASE_OUTCOMES[phase]) {
+		problems.push(`outcome is not ${ENDPOINT_ENROLLMENT_PHASE_OUTCOMES[phase]}`);
+	}
+	if (canonicalJson(answer.management) !== canonicalJson(management)) {
+		problems.push('management is not the one this phase named');
+	}
+	const keyStorage = (v: unknown) => v === 'software' || v === 'platform_non_exportable';
+	if (phase === 'request') {
+		const requestId = id('requestId');
+		if (requestId) problems.push(requestId);
+		const identity = answer.identity as Record<string, unknown> | undefined;
+		if (
+			!identity ||
+			typeof identity.publicKeyPem !== 'string' ||
+			!/^-----BEGIN PUBLIC KEY-----\r?\n[A-Za-z0-9+/=\r\n]+-----END PUBLIC KEY-----\r?\n?$/.test(
+				identity.publicKeyPem
+			)
+		) {
+			problems.push('identity does not carry exactly a public key');
+		} else if (!keyStorage(identity.keyStorage)) problems.push('identity.keyStorage is unknown');
+	} else if (phase === 'prove') {
+		for (const key of ['enrollmentId', 'challengeId']) {
+			const problem = id(key);
+			if (problem) problems.push(problem);
+		}
+		if (typeof answer.signature !== 'string' || !/^[A-Za-z0-9_-]{86}$/.test(answer.signature))
+			problems.push('signature is not a possession signature');
+	} else {
+		const enrollmentId = id('enrollmentId');
+		if (enrollmentId) problems.push(enrollmentId);
+		if (!keyStorage(answer.keyStorage)) problems.push('keyStorage is unknown');
+	}
+	if (!isEndpointDigest(management.issuerSha256))
+		problems.push('management.issuerSha256 is not a digest');
+	return problems;
 }

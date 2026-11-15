@@ -57,8 +57,9 @@ import { withIpcErrorLogging } from '../../utils/ipcHandler';
 
 const LOG_CONTEXT = '[Enterprise]';
 const MAX_TEXT = 8192;
-const MODES = ['attended', 'managed'] as const;
-const PROFILES = ['metadata', 'redacted', 'full', 'full_vibes'] as const;
+const PHASES = ['request', 'prove', 'activate'] as const;
+const ACTIVATION_KEY_STORAGE = ['software', 'customer_kms'] as const;
+const NONCE = /^[A-Za-z0-9_-]{43}$/;
 
 export interface EnterpriseHandlerDependencies {
 	getLifecycle: () => EnrollmentLifecycle | null;
@@ -94,27 +95,98 @@ function oneOf<T extends string>(value: unknown, name: string, allowed: readonly
 	return value as T;
 }
 
-/** The enrollment request as the renderer may send it; anything else is refused before the lifecycle. */
+function record(value: unknown, name: string): Record<string, unknown> {
+	if (typeof value !== 'object' || value === null || Array.isArray(value))
+		throw new Error(`${name} must be an object.`);
+	return value as Record<string, unknown>;
+}
+
+function digest(value: unknown, name: string): string {
+	if (!isEndpointDigest(value)) throw new Error(`${name} must be a lowercase sha256 hex digest.`);
+	return value;
+}
+
+function timestamp(value: unknown, name: string): string {
+	const at = text(value, name, 64);
+	if (!Number.isFinite(Date.parse(at))) throw new Error(`${name} must be a timestamp.`);
+	return at;
+}
+
+/** A canonical HTTPS management origin (`new URL(origin).origin === origin`). */
+function managementOrigin(value: unknown): string {
+	const origin = text(value, 'management.origin', 2048);
+	let url: URL;
+	try {
+		url = new URL(origin);
+	} catch {
+		throw new Error('management.origin must be a canonical HTTPS origin.');
+	}
+	if (url.protocol !== 'https:' || url.origin !== origin)
+		throw new Error('management.origin must be a canonical HTTPS origin.');
+	return origin;
+}
+
+/**
+ * One relayed enrollment phase as the renderer, the bridge or the CLI may send
+ * it (decision D1: request, prove, activate); anything else is refused before
+ * the lifecycle. No phase carries an invitation, a bearer or a private key.
+ */
 export function validateEnrollmentRequest(raw: unknown): EnrollmentRequestInput {
-	if (typeof raw !== 'object' || raw === null)
-		throw new Error('The enrollment request must be an object.');
-	const input = raw as Record<string, unknown>;
+	const input = record(raw, 'The enrollment request');
 	const socketPath = text(input.socketPath, 'socketPath', 103);
 	if (!path.isAbsolute(socketPath))
 		throw new Error('socketPath must be an absolute Unix socket path.');
-	const trustRootDigest = text(input.trustRootDigest, 'trustRootDigest', 64);
-	if (!isEndpointDigest(trustRootDigest))
-		throw new Error('trustRootDigest must be a lowercase sha256 hex digest.');
-	return {
-		socketPath,
-		tenantId: text(input.tenantId, 'tenantId', 128),
-		orgId: text(input.orgId, 'orgId', 128),
-		mode: oneOf(input.mode, 'mode', MODES),
-		invitation: text(input.invitation, 'invitation'),
-		collectionProfile: oneOf(input.collectionProfile, 'collectionProfile', PROFILES),
-		trustRootDigest,
-		keyPossessionProof: text(input.keyPossessionProof, 'keyPossessionProof'),
+	const m = record(input.management, 'management');
+	const management = {
+		origin: managementOrigin(m.origin),
+		tenantId: text(m.tenantId, 'management.tenantId', 128),
+		issuerSha256: digest(m.issuerSha256, 'management.issuerSha256'),
 	};
+	const phase = oneOf(input.phase, 'phase', PHASES);
+	if (phase === 'request') {
+		return {
+			phase,
+			socketPath,
+			management,
+			orgId: text(input.orgId, 'orgId', 128),
+			serverCaPem: text(input.serverCaPem, 'serverCaPem', 32768),
+		};
+	}
+	if (phase === 'prove') {
+		const c = record(input.challenge, 'challenge');
+		const nonce = text(c.nonce, 'challenge.nonce', 43);
+		if (!NONCE.test(nonce)) throw new Error('challenge.nonce must be 43 base64url characters.');
+		return {
+			phase,
+			socketPath,
+			management,
+			challenge: {
+				id: text(c.id, 'challenge.id', 128),
+				enrollmentId: text(c.enrollmentId, 'challenge.enrollmentId', 128),
+				nonce,
+				expiresAt: timestamp(c.expiresAt, 'challenge.expiresAt'),
+			},
+		};
+	}
+	const act = record(input.activation, 'activation');
+	const trust = record(act.trust, 'activation.trust');
+	const activation = {
+		enrollmentId: text(act.enrollmentId, 'activation.enrollmentId', 128),
+		certificatePem: text(act.certificatePem, 'activation.certificatePem', 16384),
+		trust: {
+			tenantId: text(trust.tenantId, 'activation.trust.tenantId', 128),
+			certificatePem: text(trust.certificatePem, 'activation.trust.certificatePem', 16384),
+			issuerSha256: digest(trust.issuerSha256, 'activation.trust.issuerSha256'),
+			keyStorage: oneOf(trust.keyStorage, 'activation.trust.keyStorage', ACTIVATION_KEY_STORAGE),
+		},
+	};
+	if (
+		activation.trust.tenantId !== management.tenantId ||
+		activation.trust.issuerSha256 !== management.issuerSha256
+	) {
+		throw new Error('The activation must carry the named tenant and trust.');
+	}
+	return { phase, socketPath, management, activation };
 }
 
 function installationInput(raw: unknown): { installationId: string } {

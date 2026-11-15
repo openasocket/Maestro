@@ -46,14 +46,13 @@ import {
 	LOCAL_ENDPOINT_EFFECTFUL_OPERATIONS,
 	LOCAL_ENDPOINT_INVOKE_PATH,
 	LOCAL_ENDPOINT_INVOKE_V2_PATH,
-	LOCAL_ENDPOINT_MAX_REGISTRATION_BYTES,
 	LOCAL_ENDPOINT_MAX_REQUEST_BYTES,
 	LOCAL_ENDPOINT_MAX_RESPONSE_BYTES,
 	LOCAL_ENDPOINT_PROTOCOL,
 	LOCAL_ENDPOINT_PROTOCOL_V2,
-	LOCAL_ENDPOINT_REGISTRATION_CHALLENGE_PATH,
+	LOCAL_ENDPOINT_REGISTRATION_CHALLENGE_OPERATION,
 	LOCAL_ENDPOINT_REGISTRATION_PURPOSE,
-	LOCAL_ENDPOINT_REGISTRATION_REDEEM_PATH,
+	LOCAL_ENDPOINT_REGISTRATION_REDEEM_OPERATION,
 	LOCAL_ENDPOINT_REGISTRATION_USE_OPERATION,
 	LOCAL_ENDPOINT_REGISTRATION_VERSION,
 	LOCAL_ENDPOINT_TIMEOUT_MS,
@@ -76,6 +75,7 @@ import {
 	type EndpointAttachmentRequest,
 	type EndpointAttachmentRequestV2,
 	type EndpointCompatibilityResult,
+	type EndpointCompatibilityResultV2,
 	type EndpointConnectionState,
 	type EndpointInvokeOutcome,
 	type EndpointNegotiation,
@@ -130,7 +130,11 @@ const unavailable = (reason: Unavailable['reason'], message: string): Unavailabl
 function isEffectfulV2(operation: string): boolean {
 	return (
 		(LOCAL_ENDPOINT_EFFECTFUL_OPERATIONS as readonly string[]).includes(operation) ||
-		operation.startsWith('workflow_')
+		operation.startsWith('workflow_') ||
+		// A redeem may have published the registration before its answer was lost,
+		// and a local control selector may have acted: neither is resent blindly.
+		operation === LOCAL_ENDPOINT_REGISTRATION_REDEEM_OPERATION ||
+		operation === 'localControl'
 	);
 }
 
@@ -164,6 +168,24 @@ class RequestTimeout extends Error {
 	}
 }
 
+/** Problems with a v2 compatibility request: identifier lists, unique, required within supported. */
+function compatibilityRequestV2Problems(req: {
+	supportedCapabilities: readonly string[];
+	requiredCapabilities: readonly string[];
+}): string[] {
+	const problems: string[] = [];
+	const list = (value: unknown): value is string[] =>
+		Array.isArray(value) && value.length <= 128 && value.every(isEndpointIdentifier);
+	if (!list(req.supportedCapabilities)) problems.push('supportedCapabilities is not a list');
+	if (!list(req.requiredCapabilities)) problems.push('requiredCapabilities is not a list');
+	if (problems.length > 0) return problems;
+	if (new Set(req.supportedCapabilities).size !== req.supportedCapabilities.length)
+		problems.push('supportedCapabilities repeats an entry');
+	if (!req.requiredCapabilities.every((item) => req.supportedCapabilities.includes(item)))
+		problems.push('requiredCapabilities names a capability that is not supported');
+	return problems;
+}
+
 export function createLocalEndpointClient(deps: LocalEndpointClientDeps): EndpointPort {
 	const native = deps.native;
 	const platform = deps.platform ?? (native ? process.platform : undefined);
@@ -181,6 +203,8 @@ export function createLocalEndpointClient(deps: LocalEndpointClientDeps): Endpoi
 	let connection = 0;
 	let socket: Socket | null = null;
 	let attached = false;
+	/** The protocol the current connection's attachment negotiated; v1 operations are sent only at 1. */
+	let attachedProtocol: 1 | 2 | null = null;
 	let status: EndpointStatus | null = null;
 	/** The v2 attachment's negotiation on the current connection; one protocol per socket session. */
 	let negotiated: EndpointNegotiation | null = null;
@@ -271,6 +295,7 @@ export function createLocalEndpointClient(deps: LocalEndpointClientDeps): Endpoi
 		socket = null;
 		server = null;
 		attached = false;
+		attachedProtocol = null;
 		status = null;
 		negotiated = null;
 		if (registration === 'challenged') registration = 'none';
@@ -283,6 +308,7 @@ export function createLocalEndpointClient(deps: LocalEndpointClientDeps): Endpoi
 		server = verified.get(next) ?? null;
 		connection += 1;
 		attached = false;
+		attachedProtocol = null;
 		status = null;
 		negotiated = null;
 		if (registration === 'challenged') registration = 'none';
@@ -466,6 +492,7 @@ export function createLocalEndpointClient(deps: LocalEndpointClientDeps): Endpoi
 				}
 				// The endpoint drops the socket's session before it answers any attachment.
 				attached = false;
+				attachedProtocol = null;
 				status = null;
 				negotiated = null;
 				const outcome = await invokeOnV2('attachment', req);
@@ -478,7 +505,44 @@ export function createLocalEndpointClient(deps: LocalEndpointClientDeps): Endpoi
 					capabilities: [...answer.capabilities],
 					status: answer,
 				};
+				// The connection is attached, at protocol 2: v2 operations only from here.
+				status = { ...answer, capabilities: [...answer.capabilities] };
+				attached = true;
+				attachedProtocol = LOCAL_ENDPOINT_PROTOCOL_V2;
 				return { status: 'ok', payload: answer };
+			}),
+		compatibility: (req) =>
+			serialized(async (): Promise<EndpointInvokeOutcome<EndpointCompatibilityResultV2>> => {
+				const problems = compatibilityRequestV2Problems(req);
+				if (problems.length > 0) {
+					return unavailable(
+						'malformed',
+						`The v2 compatibility request was not sent: ${problems.join('; ')}`
+					);
+				}
+				const outcome = await invokeOnV2('compatibility', {
+					supportedProtocols: [LOCAL_ENDPOINT_PROTOCOL_V2],
+					supportedCapabilities: [...req.supportedCapabilities],
+					requiredCapabilities: [...req.requiredCapabilities],
+				});
+				if (outcome.status !== 'ok') return outcome;
+				const answer = outcome.payload as Partial<EndpointCompatibilityResultV2> | null;
+				if (
+					answer?.outcome !== 'negotiated' ||
+					answer.protocol !== LOCAL_ENDPOINT_PROTOCOL_V2 ||
+					!Array.isArray(answer.capabilities) ||
+					!answer.capabilities.every(isEndpointIdentifier)
+				) {
+					return unavailable('malformed', 'The v2 compatibility answer is not a negotiation.');
+				}
+				return {
+					status: 'ok',
+					payload: {
+						outcome: 'negotiated',
+						protocol: LOCAL_ENDPOINT_PROTOCOL_V2,
+						capabilities: [...answer.capabilities],
+					},
+				};
 			}),
 		negotiated: (operation) => negotiated?.capabilities.includes(operation) ?? false,
 		invoke: (operation, payload) =>
@@ -507,29 +571,6 @@ export function createLocalEndpointClient(deps: LocalEndpointClientDeps): Endpoi
 				}),
 		},
 	};
-
-	async function registrationCall(
-		urlPath: string,
-		body: string
-	): Promise<EndpointInvokeOutcome<unknown>> {
-		if (closed) return unavailable('closed', 'The endpoint client is closed.');
-		if (Buffer.byteLength(body) > LOCAL_ENDPOINT_MAX_REGISTRATION_BYTES) {
-			return unavailable(
-				'oversized',
-				'The registration request is larger than its bound; it was not sent.'
-			);
-		}
-		const pending = exchange(urlPath, body);
-		let answer: Exchange;
-		try {
-			answer = await pending;
-		} catch (error) {
-			return failure(error, false, pending.sent());
-		}
-		if (answer.statusCode !== 200) return refused(answer.statusCode, answer.body);
-		if (isEndpointDenied(answer.body)) return { status: 'denied', reason: answer.body.reason };
-		return { status: 'ok', payload: answer.body };
-	}
 
 	const port: EndpointPort = {
 		socketPath: deps.socketPath,
@@ -577,6 +618,7 @@ export function createLocalEndpointClient(deps: LocalEndpointClientDeps): Endpoi
 				if (bad.length > 0) return unavailable('malformed', bad.join('; '));
 				status = outcome.payload as EndpointStatus;
 				attached = true;
+				attachedProtocol = LOCAL_ENDPOINT_PROTOCOL;
 				return { status: 'ok', payload: status };
 			}),
 
@@ -587,6 +629,13 @@ export function createLocalEndpointClient(deps: LocalEndpointClientDeps): Endpoi
 				}
 				if (!attached) {
 					return unavailable('not-attached', 'This connection is not attached; attach() first.');
+				}
+				if (attachedProtocol !== LOCAL_ENDPOINT_PROTOCOL) {
+					// One protocol per socket session: a v1 envelope on a v2 session is never sent.
+					return unavailable(
+						'not-negotiated',
+						`This connection is attached at protocol 2; ${operation} was not sent on /v1/invoke.`
+					);
 				}
 				return invokeOn(operation, payload);
 			}),
@@ -600,21 +649,24 @@ export function createLocalEndpointClient(deps: LocalEndpointClientDeps): Endpoi
 							'runtimeId and processEpoch must be endpoint identifiers.'
 						);
 					}
-					const outcome = await registrationCall(
-						LOCAL_ENDPOINT_REGISTRATION_CHALLENGE_PATH,
-						JSON.stringify({
-							runtimeId: input.runtimeId,
-							processEpoch: input.processEpoch,
-							version: LOCAL_ENDPOINT_REGISTRATION_VERSION,
-							purpose: LOCAL_ENDPOINT_REGISTRATION_PURPOSE,
-						})
-					);
+					// `registrationChallengeRequestV2`: exactly these four fields, purpose runtime_use.
+					const outcome = await invokeOnV2(LOCAL_ENDPOINT_REGISTRATION_CHALLENGE_OPERATION, {
+						version: LOCAL_ENDPOINT_REGISTRATION_VERSION,
+						purpose: LOCAL_ENDPOINT_REGISTRATION_PURPOSE,
+						runtimeId: input.runtimeId,
+						processEpoch: input.processEpoch,
+					});
 					if (outcome.status !== 'ok') {
 						// The daemon drops any handshake on this socket when a challenge fails.
 						registration = registration === 'challenged' ? 'none' : registration;
 						return outcome;
 					}
 					const problems = endpointRegistrationApprovalProblems(outcome.payload);
+					const approval = outcome.payload as { version?: unknown; purpose?: unknown };
+					if (approval?.version !== LOCAL_ENDPOINT_REGISTRATION_VERSION)
+						problems.push('version is not 2');
+					if (approval?.purpose !== LOCAL_ENDPOINT_REGISTRATION_PURPOSE)
+						problems.push('purpose is not runtime_use');
 					if (problems.length > 0) return unavailable('malformed', problems.join('; '));
 					registration = 'challenged';
 					return { status: 'ok', payload: outcome.payload as EndpointRegistrationApproval };
@@ -624,22 +676,27 @@ export function createLocalEndpointClient(deps: LocalEndpointClientDeps): Endpoi
 					if (registration !== 'challenged') {
 						return unavailable('no-challenge', 'No challenge is open on this connection.');
 					}
-					const outcome = await registrationCall(LOCAL_ENDPOINT_REGISTRATION_REDEEM_PATH, '{}');
+					const outcome = await invokeOnV2(LOCAL_ENDPOINT_REGISTRATION_REDEEM_OPERATION, {});
 					if (outcome.status !== 'ok') {
-						// The endpoint forgets the handshake on any failure, answer loss included.
+						// The endpoint forgets the handshake on any failure. A lost answer is
+						// `unknown`: the redeem may have published the registration, so the
+						// caller reattaches with the existing claim instead of registering again.
 						registration = 'none';
 						return outcome;
 					}
-					const receipt = outcome.payload as Partial<EndpointRegistrationReceipt> | null;
-					if (receipt?.protocol !== LOCAL_ENDPOINT_PROTOCOL || receipt.outcome !== 'registered') {
+					// `{ outcome: "registered" }` exactly: the v2 envelope carries the protocol.
+					const receipt = outcome.payload as Record<string, unknown> | null;
+					if (
+						receipt === null ||
+						typeof receipt !== 'object' ||
+						receipt.outcome !== 'registered' ||
+						Object.keys(receipt).length !== 1
+					) {
 						registration = 'none';
 						return unavailable('malformed', 'The redeem answer is not a registration receipt.');
 					}
 					registration = 'registered';
-					return {
-						status: 'ok',
-						payload: { protocol: LOCAL_ENDPOINT_PROTOCOL, outcome: 'registered' },
-					};
+					return { status: 'ok', payload: { outcome: 'registered' } };
 				}),
 		},
 

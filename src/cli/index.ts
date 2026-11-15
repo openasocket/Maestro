@@ -2884,18 +2884,11 @@ const managedEnroll = managed
 managedEnroll
 	.command('request')
 	.description(
-		'Relay an enrollment request from a JSON file (socketPath, tenantId, orgId, mode, collectionProfile, trustRootDigest, invitation, keyPossessionProof); secrets stay in the file'
+		'Relay one enrollment phase from a JSON file: phase request (socketPath, management, orgId, serverCaPem), prove (socketPath, management, challenge) or activate (socketPath, management, activation)'
 	)
 	.requiredOption('-f, --file <path>', 'The JSON enrollment request file')
 	.option('--socket <path>', "Override the file's socketPath (the endpoint's Unix socket)")
-	.option('--tenant <id>', "Override the file's tenantId")
-	.option('--org <id>', "Override the file's orgId")
-	.option('--mode <mode>', "Override the file's mode: attended or managed")
-	.option(
-		'--profile <profile>',
-		"Override the file's collectionProfile: metadata, redacted, full or full_vibes"
-	)
-	.option('--trust-root <digest>', "Override the file's trustRootDigest (sha256 hex)")
+	.option('--phase <phase>', "Override the file's phase: request, prove or activate")
 	.option('--json', 'Output as JSON (for scripting)')
 	.action((options) => managedEnrollRequest(options));
 

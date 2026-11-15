@@ -586,8 +586,8 @@ export function composeHostManaged(deps: HostManagedDeps): HostManagedCompositio
 				{ id: 'maestro-lib', kind: 'runtime', version: MAESTRO_LIB_VERSION },
 			],
 			capabilities: { supported: ENTERPRISE_SUPPORTED_CAPABILITIES, required: [] },
-			// The v2 connection is opened with the raw factory so `port` stays the v1 one.
-			v2: { openPort, supported: ENTERPRISE_SUPPORTED_CAPABILITIES_V2 },
+			// Protocol 2 on the one connection: the attachment every caller reads is v2.
+			v2: { supported: ENTERPRISE_SUPPORTED_CAPABILITIES_V2 },
 			now,
 			// As on the desktop: every accepted attachment lists the notices again. The inbox
 			// standing refuses the listing unless this process holds a live registration.

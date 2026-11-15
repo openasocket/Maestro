@@ -81,7 +81,7 @@ describe('write-consumer-build-receipt', () => {
 
 	it('names the fields a build cannot observe and gives none of them a value', () => {
 		expect(NOT_YET_OBSERVED.map((entry: { field: string }) => entry.field)).toEqual([
-			'acceptedEndpointProtocols',
+			'liveEndpointProtocols',
 			'grantDigest',
 			'chainDigest',
 			'workflowOwner',

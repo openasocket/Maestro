@@ -28,6 +28,16 @@ import {
 } from '../../../main/enterprise/identity-store';
 import type { Anchor } from '../../../main/utils/keyring-anchor';
 import { fakeAnchor, fakeSeal } from './fakeCustody';
+import {
+	activatePhase,
+	ENROLLMENT_ID,
+	MANAGEMENT,
+	provePhase,
+	requestPhase,
+	REQUEST_ID,
+	SERVES_RELAYED_ENROLLMENT,
+	TENANT_ID,
+} from './enrollmentPhases';
 import { startFakeEndpoint, type FakeEndpoint, type FakeEndpointOptions } from './fakeEndpoint';
 
 const INSTALLATION = {
@@ -35,19 +45,7 @@ const INSTALLATION = {
 	runtimeId: 'desktop-100',
 	processEpoch: 'epoch-1',
 };
-const ENROLL_INPUT = {
-	tenantId: 'tenant-1',
-	orgId: 'org-1',
-	mode: 'attended' as const,
-	invitation: 'invite-token',
-	collectionProfile: 'metadata' as const,
-	trustRootDigest: 'a'.repeat(64),
-	keyPossessionProof: 'proof-from-endpoint-tooling',
-};
-const SERVES_ENROLLMENT: FakeEndpointOptions = {
-	capabilities: ['enrollment', 'telemetry', 'execution'],
-	operations: { enrollment: () => ({ outcome: 'enrollment_pending', enrollmentId: 'enr-1' }) },
-};
+const SERVES_ENROLLMENT: FakeEndpointOptions = SERVES_RELAYED_ENROLLMENT;
 
 describe('enrollment lifecycle', () => {
 	let dir: string;
@@ -102,63 +100,132 @@ describe('enrollment lifecycle', () => {
 		return done;
 	}
 
-	it('answers unsupported, with the owner, when the endpoint does not serve enrollment, and writes nothing', async () => {
+	it('answers unsupported, with the owner, when the endpoint does not offer enrollment on v2, and writes nothing', async () => {
 		const fake = await endpoint();
 		const life = lifecycle();
-		const outcome = await life.requestEnrollment({ ...ENROLL_INPUT, socketPath: fake.socketPath });
+		const outcome = await life.requestEnrollment(requestPhase(fake.socketPath));
 		expect(outcome).toMatchObject({ status: 'unsupported', owner: 'mega-maestro' });
-		if (outcome.status === 'unsupported') expect(outcome.message).toMatch(/CP-04/);
 		expect(identity.read()).toEqual({ status: 'none' });
+		expect(fake.callsTo('/v1/invoke')).toEqual([]);
 		expect(fake.calls.map((c) => (c.body as { operation: string }).operation)).toEqual([
 			'compatibility',
 		]);
 	});
 
-	it('records an enrolling identity when the endpoint accepts the enrollment request', async () => {
+	it('relays request, prove and activate on v2, writing the record each phase answered', async () => {
 		const fake = await endpoint(SERVES_ENROLLMENT);
 		const life = lifecycle();
-		const outcome = await life.requestEnrollment({ ...ENROLL_INPUT, socketPath: fake.socketPath });
-		expect(outcome).toEqual({
+		const requested = await life.requestEnrollment(requestPhase(fake.socketPath));
+		expect(requested).toMatchObject({
 			status: 'ok',
-			value: { outcome: 'enrollment_pending', enrollmentId: 'enr-1' },
+			value: { outcome: 'enrollment_requested', management: MANAGEMENT, requestId: REQUEST_ID },
 		});
-		const read = identity.read();
-		expect(read.status).toBe('ok');
-		if (read.status === 'ok') {
-			expect(read.record).toMatchObject({
+		let read = identity.read();
+		expect(read).toMatchObject({
+			status: 'ok',
+			record: {
 				installationId: 'inst-1',
-				tenantId: 'tenant-1',
-				enrollmentId: 'enr-1',
+				tenantId: TENANT_ID,
+				orgId: 'org-1',
+				enrollmentId: null,
 				management: 'enrolling',
-				endpoint: { socketPath: fake.socketPath },
+				endpoint: { socketPath: fake.socketPath, trustRootDigest: 'a'.repeat(64) },
 				registration: null,
-			});
-		}
-		expect(life.status().authority).toBe('none');
-		const sent = fake.calls.find(
-			(c) => (c.body as { operation: string }).operation === 'enrollment'
-		);
-		expect((sent?.body as { payload: unknown }).payload).toEqual({
-			mode: 'attended',
-			invitation: 'invite-token',
-			collectionProfile: 'metadata',
-			trustRootDigest: 'a'.repeat(64),
-			keyPossessionProof: 'proof-from-endpoint-tooling',
+			},
 		});
+		expect(life.status().authority).toBe('none');
+		const sent = fake
+			.callsTo('/v2/invoke')
+			.find((c) => (c.body as { operation: string }).operation === 'enrollment');
+		expect((sent?.body as { schemaVersion: number }).schemaVersion).toBe(2);
+		expect((sent?.body as { payload: Record<string, unknown> }).payload).toMatchObject({
+			phase: 'request',
+			management: MANAGEMENT,
+			identity: { installationId: 'inst-1', runtimeId: 'desktop-100' },
+		});
+
+		// Activation before the possession proof is refused and nothing is sent.
+		const before = fake.calls.length;
+		expect(await life.requestEnrollment(activatePhase(fake.socketPath))).toMatchObject({
+			status: 'refused',
+			reason: 'not-enrolled',
+		});
+		expect(fake.calls).toHaveLength(before);
+
+		expect(await life.requestEnrollment(provePhase(fake.socketPath))).toMatchObject({
+			status: 'ok',
+			value: { outcome: 'possession_signed', enrollmentId: ENROLLMENT_ID },
+		});
+		read = identity.read();
+		expect(read).toMatchObject({
+			status: 'ok',
+			record: { enrollmentId: ENROLLMENT_ID, management: 'enrolling' },
+		});
+
+		expect(await life.requestEnrollment(activatePhase(fake.socketPath))).toMatchObject({
+			status: 'ok',
+			value: { outcome: 'enrolled', enrollmentId: ENROLLMENT_ID },
+		});
+		expect(identity.read()).toMatchObject({
+			status: 'ok',
+			record: { enrollmentId: ENROLLMENT_ID, management: 'enrolled' },
+		});
+		expect(fake.callsTo('/v1/invoke')).toEqual([]);
+	});
+
+	it('writes nothing on a denied phase or on an answer that is not the phase own', async () => {
+		const fake = await endpoint({
+			...SERVES_ENROLLMENT,
+			operations: { enrollment: () => ({ outcome: 'denied', reason: 'invalid_request' }) },
+		});
+		const life = lifecycle();
+		expect((await life.requestEnrollment(requestPhase(fake.socketPath))).status).toBe('denied');
+		expect(identity.read()).toEqual({ status: 'none' });
+
+		fake.options.operations = {
+			enrollment: (payload) => ({
+				outcome: 'enrolled',
+				management: (payload as { management: unknown }).management,
+				enrollmentId: ENROLLMENT_ID,
+				keyStorage: 'software',
+			}),
+		};
+		expect(await life.requestEnrollment(requestPhase(fake.socketPath))).toMatchObject({
+			status: 'unavailable',
+			reason: 'malformed',
+		});
+		fake.options.operations = {
+			enrollment: (payload) => ({
+				outcome: 'enrollment_requested',
+				management: { ...(payload as { management: object }).management, tenantId: 'other' },
+				requestId: 'req-1',
+				identity: {
+					publicKeyPem: '-----BEGIN PUBLIC KEY-----\nAAAA\n-----END PUBLIC KEY-----\n',
+					keyStorage: 'software',
+				},
+			}),
+		};
+		expect(await life.requestEnrollment(requestPhase(fake.socketPath))).toMatchObject({
+			status: 'unavailable',
+			reason: 'malformed',
+		});
+		expect(identity.read()).toEqual({ status: 'none' });
 	});
 
 	it('refuses to enroll twice, and refuses while custody is unprotected or untrusted, writing nothing', async () => {
 		const fake = await endpoint(SERVES_ENROLLMENT);
 		const life = lifecycle();
-		expect(
-			(await life.requestEnrollment({ ...ENROLL_INPUT, socketPath: fake.socketPath })).status
-		).toBe('ok');
-		expect(
-			await life.requestEnrollment({ ...ENROLL_INPUT, socketPath: fake.socketPath })
-		).toMatchObject({
+		expect((await life.requestEnrollment(requestPhase(fake.socketPath))).status).toBe('ok');
+		expect(await life.requestEnrollment(requestPhase(fake.socketPath))).toMatchObject({
 			status: 'refused',
 			reason: 'already-enrolled',
 		});
+		expect(
+			await life.requestEnrollment({
+				...provePhase(fake.socketPath),
+				management: { ...MANAGEMENT, tenantId: 'other' },
+			})
+		).toMatchObject({ status: 'refused', reason: 'installation-mismatch' });
 
 		const unprotected = createEnterpriseIdentityStore({
 			file: path.join(dir, 'other.bin'),
@@ -167,10 +234,7 @@ describe('enrollment lifecycle', () => {
 		});
 		const calls = fake.calls.length;
 		expect(
-			await lifecycle(unprotected).requestEnrollment({
-				...ENROLL_INPUT,
-				socketPath: fake.socketPath,
-			})
+			await lifecycle(unprotected).requestEnrollment(requestPhase(fake.socketPath))
 		).toMatchObject({ status: 'refused', reason: 'custody-unprotected' });
 		expect(fake.calls).toHaveLength(calls);
 		expect(fs.existsSync(path.join(dir, 'other.bin'))).toBe(false);

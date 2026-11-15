@@ -28,6 +28,7 @@ vi.mock('../../../../main/plugins/plugin-manager-singleton', () => ({
 	getHeadlessAgentRunner: vi.fn(() => null),
 }));
 
+import { requestPhase } from '../../enterprise/enrollmentPhases';
 import { WebSocket } from 'ws';
 import { WebSocketMessageHandler } from '../../../../main/web-server/handlers/messageHandlers';
 import type { WebClient } from '../../../../main/web-server/handlers/messageHandlers';
@@ -54,16 +55,7 @@ import type {
 const STATE = { standing: 'unenrolled', reason: null };
 const LOCKS = { policyRevision: null, locks: {} };
 const INVENTORY = { installation: { installationId: 'inst-1' } };
-const ENROLL = {
-	socketPath: '/run/endpoint/runtime.sock',
-	tenantId: 'tenant-1',
-	orgId: 'org-1',
-	mode: 'attended',
-	invitation: 'invite-secret-value',
-	collectionProfile: 'metadata',
-	trustRootDigest: 'a'.repeat(64),
-	keyPossessionProof: 'proof-secret-value',
-};
+const ENROLL = requestPhase('/run/endpoint/runtime.sock');
 
 function createClient(extra: Partial<WebClient> = {}): WebClient {
 	return {
@@ -208,11 +200,16 @@ describe('managed bridge handlers (MRC2-07-03)', () => {
 		const cli = () => createClient({ cli: true });
 		const short = await ask(handler, cli(), {
 			type: 'managed_enroll_request',
-			request: { ...ENROLL, invitation: '' },
+			request: {
+				...ENROLL,
+				management: { ...ENROLL.management, origin: 'http://origin-canary-value.example' },
+			},
 		});
-		expect(short).toMatchObject({ success: false, error: expect.stringContaining('invitation') });
-		expect(JSON.stringify(short)).not.toContain('proof-secret-value');
-		expect(JSON.stringify(short)).not.toContain('invite-secret-value');
+		expect(short).toMatchObject({
+			success: false,
+			error: expect.stringContaining('management.origin'),
+		});
+		expect(JSON.stringify(short)).not.toContain('origin-canary-value');
 		expect(managed.requestEnrollment).not.toHaveBeenCalled();
 
 		expect(

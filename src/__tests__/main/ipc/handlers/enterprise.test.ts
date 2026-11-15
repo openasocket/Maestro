@@ -30,6 +30,7 @@ import {
 	registerEnterpriseHandlers,
 	validateEnrollmentRequest,
 } from '../../../../main/ipc/handlers/enterprise';
+import { activatePhase, provePhase, requestPhase } from '../../enterprise/enrollmentPhases';
 import { createManagedOperations } from '../../../../main/enterprise/service';
 
 const lifecycle = {
@@ -105,16 +106,9 @@ const POLICY = {
 	admission: { possible: false, reasons: ['No endpoint connection is open.'] },
 };
 
-const ENROLL = {
-	socketPath: '/run/endpoint/runtime.sock',
-	tenantId: 'tenant-1',
-	orgId: 'org-1',
-	mode: 'attended',
-	invitation: 'invite',
-	collectionProfile: 'metadata',
-	trustRootDigest: 'a'.repeat(64),
-	keyPossessionProof: 'proof',
-};
+const ENROLL = requestPhase('/run/endpoint/runtime.sock');
+const PROVE = provePhase('/run/endpoint/runtime.sock');
+const ACTIVATE = activatePhase('/run/endpoint/runtime.sock');
 
 function invoke(channel: string, ...args: unknown[]): Promise<any> {
 	const handler = registeredHandlers.get(channel);
@@ -234,22 +228,46 @@ describe('enterprise handlers', () => {
 		lifecycle.requestEnrollment.mockResolvedValue({ status: 'ok', value: { enrollmentId: 'e' } });
 		expect(await invoke('enterprise:requestEnrollment', ENROLL)).toMatchObject({ status: 'ok' });
 		expect(lifecycle.requestEnrollment).toHaveBeenCalledWith(ENROLL);
+		expect(await invoke('enterprise:requestEnrollment', PROVE)).toMatchObject({ status: 'ok' });
+		expect(await invoke('enterprise:requestEnrollment', ACTIVATE)).toMatchObject({ status: 'ok' });
+		expect(lifecycle.requestEnrollment).toHaveBeenLastCalledWith(ACTIVATE);
 
 		for (const bad of [
 			{ ...ENROLL, socketPath: 'http://127.0.0.1:9000' },
 			{ ...ENROLL, socketPath: 'relative.sock' },
-			{ ...ENROLL, mode: 'forced' },
-			{ ...ENROLL, collectionProfile: 'everything' },
-			{ ...ENROLL, trustRootDigest: 'A'.repeat(64) },
-			{ ...ENROLL, invitation: '' },
-			{ ...ENROLL, keyPossessionProof: 'x'.repeat(9000) },
-			{ ...ENROLL, tenantId: undefined },
+			{ ...ENROLL, phase: 'forced' },
+			{ ...ENROLL, management: { ...ENROLL.management, origin: 'http://mega.example' } },
+			{ ...ENROLL, management: { ...ENROLL.management, origin: 'https://mega.example/path' } },
+			{ ...ENROLL, management: { ...ENROLL.management, issuerSha256: 'A'.repeat(64) } },
+			{ ...ENROLL, management: { ...ENROLL.management, tenantId: undefined } },
+			{ ...ENROLL, management: null },
+			{ ...ENROLL, orgId: '' },
+			{ ...ENROLL, serverCaPem: 'x'.repeat(40_000) },
+			{ ...PROVE, challenge: { ...PROVE.challenge, nonce: 'short' } },
+			{ ...PROVE, challenge: { ...PROVE.challenge, expiresAt: 'soon' } },
+			{
+				...ACTIVATE,
+				activation: {
+					...ACTIVATE.activation,
+					trust: { ...ACTIVATE.activation.trust, tenantId: 'other' },
+				},
+			},
+			{
+				...ACTIVATE,
+				activation: {
+					...ACTIVATE.activation,
+					trust: { ...ACTIVATE.activation.trust, keyStorage: 'hsm' },
+				},
+			},
 			null,
 		]) {
 			await expect(invoke('enterprise:requestEnrollment', bad)).rejects.toThrow();
 		}
-		expect(lifecycle.requestEnrollment).toHaveBeenCalledTimes(1);
-		expect(() => validateEnrollmentRequest({ ...ENROLL, extra: 'ignored' })).not.toThrow();
+		expect(lifecycle.requestEnrollment).toHaveBeenCalledTimes(3);
+		// Extra fields (an invitation, a key) never reach the lifecycle.
+		expect(validateEnrollmentRequest({ ...ENROLL, invitation: 'x', privateKeyPem: 'y' })).toEqual(
+			ENROLL
+		);
 	});
 
 	// MRC-11-03: the narrow standing a settings pane reads, projected from the

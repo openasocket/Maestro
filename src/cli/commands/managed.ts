@@ -22,7 +22,7 @@ import type { InstallationInventory } from '../../main/enterprise/inventory';
 import type { ManagedStateView } from '../../main/enterprise/managed-state';
 import type { ManagedSupportMatrix } from '../../main/enterprise/service';
 import type {
-	EndpointEnrollmentResult,
+	EndpointEnrollmentPhaseResultV2,
 	EndpointStatus,
 } from '../../shared/maestro-lib/managed/endpoint-port';
 import type { ManagedSettingLocksView } from '../../shared/managedSettingsLock';
@@ -43,27 +43,20 @@ export interface ManagedOptions {
 }
 
 export interface ManagedEnrollOptions extends ManagedOptions {
-	/** A JSON file holding the enrollment request (see `ENROLLMENT_REQUEST_FIELDS`). */
+	/** A JSON file holding one relayed enrollment phase (see `ENROLLMENT_PHASE_FIELDS`). */
 	file: string;
 	socket?: string;
-	tenant?: string;
-	org?: string;
-	mode?: string;
-	profile?: string;
-	trustRoot?: string;
+	phase?: string;
 }
 
-/** The fields an enrollment request file names; the two last are the secrets the endpoint tooling issued. */
-export const ENROLLMENT_REQUEST_FIELDS: readonly (keyof EnrollmentRequestInput)[] = [
-	'socketPath',
-	'tenantId',
-	'orgId',
-	'mode',
-	'collectionProfile',
-	'trustRootDigest',
-	'invitation',
-	'keyPossessionProof',
-];
+/** The fields each relayed enrollment phase file names (decision D1); the desktop validates their values. */
+export const ENROLLMENT_PHASE_FIELDS: Readonly<
+	Record<EnrollmentRequestInput['phase'], readonly string[]>
+> = {
+	request: ['socketPath', 'management', 'orgId', 'serverCaPem'],
+	prove: ['socketPath', 'management', 'challenge'],
+	activate: ['socketPath', 'management', 'activation'],
+};
 
 const NO_SERVICE_MESSAGE = 'The enterprise enrollment service is not running in this desktop.';
 
@@ -273,12 +266,13 @@ export async function managedPolicyRefresh(options: ManagedOptions): Promise<voi
 }
 
 /**
- * `managed enroll request`: relay an enrollment request to the endpoint. The
- * request is a JSON file so the invitation and the key-possession proof never
- * sit on a command line; `--socket`, `--tenant`, `--org`, `--mode`,
- * `--profile` and `--trust-root` override the file's non-secret fields. The
- * desktop validates the request before the lifecycle sees it; a missing field
- * is named here, a value never is.
+ * `managed enroll request`: relay ONE enrollment phase (decision D1: request,
+ * prove, activate) to the endpoint. The phase is a JSON file holding what the
+ * central console issued (the management, then the possession challenge, then
+ * the activation); `--phase` overrides the file's `phase` and `--socket` its
+ * socket path. Only the phase's own fields are relayed; the desktop validates
+ * them before the lifecycle sees them. A missing field is named here, a value
+ * never is.
  */
 export async function managedEnrollRequest(options: ManagedEnrollOptions): Promise<void> {
 	let raw: unknown;
@@ -297,34 +291,44 @@ export async function managedEnrollRequest(options: ManagedEnrollOptions): Promi
 	if (!isRecord(raw)) {
 		return failCommand('The enrollment request file must hold a JSON object.', options.json);
 	}
-	const overrides: Record<string, string> = {};
-	if (options.socket) overrides.socketPath = resolveCliPath(options.socket);
-	if (options.tenant) overrides.tenantId = options.tenant;
-	if (options.org) overrides.orgId = options.org;
-	if (options.mode) overrides.mode = options.mode;
-	if (options.profile) overrides.collectionProfile = options.profile;
-	if (options.trustRoot) overrides.trustRootDigest = options.trustRoot;
-	const request: Record<string, unknown> = {};
-	for (const field of ENROLLMENT_REQUEST_FIELDS) {
-		const value = overrides[field] ?? raw[field];
+	const phase = options.phase ?? raw.phase;
+	if (phase !== 'request' && phase !== 'prove' && phase !== 'activate') {
+		return failCommand(
+			'The enrollment phase must be request, prove or activate (the file\'s "phase" or --phase).',
+			options.json
+		);
+	}
+	const request: Record<string, unknown> = { phase };
+	for (const field of ENROLLMENT_PHASE_FIELDS[phase]) {
+		const value =
+			field === 'socketPath' && options.socket ? resolveCliPath(options.socket) : raw[field];
 		if (value !== undefined) request[field] = value;
 	}
-	const missing = ENROLLMENT_REQUEST_FIELDS.filter(
-		(field) => typeof request[field] !== 'string' || request[field] === ''
+	const missing = ENROLLMENT_PHASE_FIELDS[phase].filter(
+		(field) => request[field] === undefined || request[field] === ''
 	);
 	if (missing.length) {
-		return failCommand(`The enrollment request is missing: ${missing.join(', ')}.`, options.json);
+		return failCommand(`The ${phase} phase is missing: ${missing.join(', ')}.`, options.json);
 	}
-	const outcome = await askDesktop<LifecycleOutcome<EndpointEnrollmentResult>>(
+	const outcome = await askDesktop<LifecycleOutcome<EndpointEnrollmentPhaseResultV2>>(
 		{ type: 'managed_enroll_request', request },
 		'managed_enroll_request_result',
 		'outcome',
 		options.json
 	);
-	reportOutcome(
-		outcome,
-		options.json,
-		(result: EndpointEnrollmentResult) =>
-			`Enrollment requested: ${result.outcome}, enrollment ${result.enrollmentId}. Approve it with the endpoint tooling, then run \`managed policy refresh\`.`
-	);
+	reportOutcome(outcome, options.json, describeEnrollmentPhase);
+}
+
+/** One line for a relayed phase's result: what the operator takes to the central console next. */
+export function describeEnrollmentPhase(result: EndpointEnrollmentPhaseResultV2): string {
+	switch (result.outcome) {
+		default:
+			return 'Enrollment phase relayed.';
+		case 'enrollment_requested':
+			return `Enrollment requested: request ${result.requestId}. Begin it in the central console with this public key, then relay the possession challenge (phase prove).\n${result.identity.publicKeyPem}`;
+		case 'possession_signed':
+			return `Possession signed: enrollment ${result.enrollmentId}, challenge ${result.challengeId}, signature ${result.signature}. Prove it in the central console, then relay the activation (phase activate).`;
+		case 'enrolled':
+			return `Enrolled: enrollment ${result.enrollmentId} (${result.keyStorage} key). Run \`managed policy refresh\` to attach.`;
+	}
 }

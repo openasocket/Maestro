@@ -67,6 +67,7 @@ function doubleOptions(now: () => number): Double {
 		inbox,
 		registrationRequired: true,
 		capabilities: ['execution', 'telemetry', 'inbox', 'noticeList'],
+		v2Capabilities: ['telemetry', 'inbox', 'noticeList'],
 		now,
 		operations: {
 			execution: (payload) =>
@@ -573,7 +574,7 @@ describe('offline recovery: a daemon speaking another schema version', () => {
 	const now = () => T0;
 
 	beforeAll(async () => {
-		const options = { ...doubleOptions(now), schemaVersion: 2 };
+		const options = { ...doubleOptions(now), schemaVersion: 2, v2SchemaVersion: 3 };
 		booted = await boot('offline-version-', options, { value: null });
 	});
 	afterAll(async () => {
@@ -595,6 +596,13 @@ describe('offline recovery: a daemon speaking another schema version', () => {
 					protocol: LOCAL_ENDPOINT_PROTOCOL,
 					components: [{ id: 'maestro', kind: 'maestro', version: '1.1.0-RC' }],
 					requiredCapabilities: ['attachment'],
+				})
+			).toEqual({ status: 'denied', reason: 'unsupported_version' });
+			expect(
+				await probe.v2!.compatibility({
+					supportedProtocols: [2],
+					supportedCapabilities: ['attachment'],
+					requiredCapabilities: [],
 				})
 			).toEqual({ status: 'denied', reason: 'unsupported_version' });
 		} finally {

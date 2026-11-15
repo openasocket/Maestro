@@ -86,7 +86,8 @@ import {
 	type ManagedWorkflowRef,
 	directDelegationRef,
 } from './types';
-import { endpointWorkflowOwnerPort, type WorkflowOwnerPort } from './workflows';
+import { createEndpointWorkflowV2OwnerPort } from './workflow-lifecycle-v2';
+import type { WorkflowOwnerPort } from './workflows';
 import {
 	createManagedEffectAuthority,
 	type ManagedEffectAuthority,
@@ -352,7 +353,7 @@ export interface ManagedHostAdapter {
 	readonly effects: ManagedEffectAuthority;
 	/**
 	 * The workflow owner producer over this adapter's endpoint socket (the
-	 * endpoint's `workflow` operation, MRC-07-06A), for a host's
+	 * endpoint's v2 workflow lifecycle, handoff item 3), for a host's
 	 * `createWorkflowOwnership` to claim through; null while no socket is
 	 * attached. A port, never a fence: the registry decides every claim, and
 	 * an endpoint serving no such operation answers so by name (CP-03).
@@ -736,6 +737,10 @@ export function createManagedHostAdapter(deps: ManagedHostAdapterDeps): ManagedH
 		}
 	>();
 	let invalidation = 0;
+	const workflowOwnerPort = createEndpointWorkflowV2OwnerPort({
+		endpoint: () => deps.endpoint ?? null,
+		registration: () => deps.status().registrationUse?.reference ?? null,
+	});
 	function workflowNegotiationKey(request: AdmissionRequest, port: PreparedExecutionPort) {
 		const { delegation, workflow } = request.context;
 		const delegated = delegation.principals.length > 0 || delegation.delegation !== null;
@@ -1000,9 +1005,10 @@ export function createManagedHostAdapter(deps: ManagedHostAdapterDeps): ManagedH
 				return { lease, generation: owner.generation, signal: owner.ended.signal, current };
 			},
 		}),
-		// Read per access: a desktop composes the adapter before its socket opens.
+		// Read per access: a desktop composes the adapter before its socket opens. The v2
+		// workflow lifecycle, carrying the registration_use reference of this connection.
 		get workflows() {
-			return deps.endpoint ? endpointWorkflowOwnerPort(deps.endpoint) : null;
+			return workflowOwnerPort();
 		},
 		get telemetry() {
 			return deps.endpoint ? endpointTelemetryPort(deps.endpoint) : null;

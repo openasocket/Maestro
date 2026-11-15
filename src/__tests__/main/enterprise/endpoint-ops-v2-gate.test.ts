@@ -5,8 +5,11 @@
  * What is defended: no v2 operation client sends a byte unless the current
  * connection's v2 attachment negotiated that operation; with it negotiated,
  * the request goes out on the v2 path under the operation's wire name, the
- * inbox request with its v1 `idempotencyKey` unchanged; and the selection
- * list that moves v1 callers onto v2 ships empty.
+ * inbox request with its v1 `idempotencyKey` unchanged; `localControl` and
+ * `command` validate what they send and the receipt they hear, and a
+ * `localControl` selector this registration's purpose cannot carry is never
+ * sent; and the selection holds exactly the passing parity rows, so a caller
+ * moves onto v2 only where the attachment negotiated the operation.
  *
  * The port here is an in-memory double, so nothing here is paired enforcement.
  */
@@ -56,7 +59,42 @@ const REQUESTS: Record<EndpointOperationV2Client, unknown> = {
 	offline: { allowanceId: 'allowance-1' },
 	desktopPolicy: { operation: 'read' },
 	model: { requestId: 'request-1' },
+	localControl: {
+		commandId: 'command-1',
+		targetId: 'desktop-100',
+		expiresAt: '2099-01-01T00:00:00.000Z',
+		policyRevision: 3,
+		precondition: { processEpoch: 'epoch-1', expectedRunId: null },
+		action: { kind: 'report_status' },
+	},
+	command: {
+		command: { signature: 'sig', payload: { commandId: 'command-2', kind: 'cancel_run' } },
+		correlation: {
+			registration: { challengeId: 'chal-1' },
+			requestId: 'request-2',
+			attemptId: 'attempt-1',
+			envelopeDigest: 'd'.repeat(64),
+		},
+	},
 };
+
+/** What the double answers: an echo, or the receipt the two receipt-checked operations need. */
+function reply(operation: string, payload: unknown): unknown {
+	if (operation === 'localControl') return { outcome: 'completed', commandId: 'command-1' };
+	if (operation === 'command') {
+		return {
+			outcome: 'accepted',
+			commandId: 'command-2',
+			runId: 'run-1',
+			processEpoch: 'epoch-1',
+			correlation: (payload as { correlation: unknown }).correlation,
+		};
+	}
+	return { echoed: payload };
+}
+
+/** The parity matrix rows that do not pass, and so are never selected. */
+const NOT_PASSING = ['execution'];
 
 const COMPONENTS = [{ id: 'maestro', kind: 'maestro' as const, version: '1.1.0-RC' }];
 const ATTACH_V1: EndpointAttachmentRequest = {
@@ -74,9 +112,9 @@ const ATTACH_V2: EndpointAttachmentRequestV2 = {
 };
 
 function fakePort(capabilities: readonly string[] | null, withV2 = true) {
-	const invoke = vi.fn(async (_operation: string, payload: unknown) => ({
+	const invoke = vi.fn(async (operation: string, payload: unknown) => ({
 		status: 'ok' as const,
-		payload: { echoed: payload },
+		payload: reply(operation, payload),
 	}));
 	const v1Invoke = vi.fn();
 	const state = (): EndpointConnectionState => ({
@@ -103,13 +141,20 @@ function fakePort(capabilities: readonly string[] | null, withV2 = true) {
 	return { port, invoke, v1Invoke };
 }
 
+/** The client as this process composes it: a runtime_use registration. */
+const runtimeClient = (port: EndpointPort) =>
+	createEndpointOperationsV2Client(port, { registrationPurpose: () => 'runtime_use' });
+
 function callOp(client: EndpointOperationsV2Client, operation: EndpointOperationV2Client) {
 	return (client[operation] as (request: unknown) => Promise<unknown>)(REQUESTS[operation]);
 }
 
 describe('V2_OPERATIONS_SELECTED', () => {
-	it('ships empty, so every existing caller stays on v1', () => {
-		expect(V2_OPERATIONS_SELECTED).toEqual([]);
+	it('holds every v2 operation client, which are the passing parity rows, and never execution', () => {
+		expect([...V2_OPERATIONS_SELECTED].sort()).toEqual(
+			[...LOCAL_ENDPOINT_OPERATION_V2_CLIENTS].sort()
+		);
+		for (const row of NOT_PASSING) expect(V2_OPERATIONS_SELECTED).not.toContain(row);
 	});
 });
 
@@ -132,7 +177,7 @@ describe('createEndpointOperationsV2Client', () => {
 		async (operation) => {
 			const others = LOCAL_ENDPOINT_OPERATION_V2_CLIENTS.filter((op) => op !== operation);
 			const { port, invoke, v1Invoke } = fakePort(['attachment', ...others]);
-			const outcome = await callOp(createEndpointOperationsV2Client(port), operation);
+			const outcome = await callOp(runtimeClient(port), operation);
 			expect(outcome).toMatchObject({ status: 'unavailable', reason: 'not-negotiated' });
 			expect(invoke).not.toHaveBeenCalled();
 			expect(v1Invoke).not.toHaveBeenCalled();
@@ -143,7 +188,7 @@ describe('createEndpointOperationsV2Client', () => {
 		'%s answers not-negotiated on a port with no v2 side',
 		async (operation) => {
 			const { port, invoke, v1Invoke } = fakePort([...LOCAL_ENDPOINT_OPERATION_V2_CLIENTS], false);
-			const outcome = await callOp(createEndpointOperationsV2Client(port), operation);
+			const outcome = await callOp(runtimeClient(port), operation);
 			expect(outcome).toMatchObject({ status: 'unavailable', reason: 'not-negotiated' });
 			expect(invoke).not.toHaveBeenCalled();
 			expect(v1Invoke).not.toHaveBeenCalled();
@@ -154,38 +199,108 @@ describe('createEndpointOperationsV2Client', () => {
 		'%s goes out on v2 under its wire name when negotiated',
 		async (operation) => {
 			const { port, invoke, v1Invoke } = fakePort([operation]);
-			const outcome = await callOp(createEndpointOperationsV2Client(port), operation);
+			const outcome = await callOp(runtimeClient(port), operation);
 			expect(invoke).toHaveBeenCalledTimes(1);
 			expect(invoke).toHaveBeenCalledWith(operation, REQUESTS[operation]);
 			expect(v1Invoke).not.toHaveBeenCalled();
-			expect(outcome).toEqual({ status: 'ok', payload: { echoed: REQUESTS[operation] } });
+			expect(outcome).toEqual({ status: 'ok', payload: reply(operation, REQUESTS[operation]) });
 		}
 	);
 
+	it('localControl refresh_policy needs fleet_management: a runtime_use registration sends nothing', async () => {
+		const { port, invoke } = fakePort(['localControl']);
+		const request = {
+			...(REQUESTS.localControl as object),
+			action: { kind: 'refresh_policy', desiredRevision: 4 },
+		};
+		const outcome = await runtimeClient(port).localControl(request as never);
+		expect(outcome).toMatchObject({ status: 'unavailable', reason: 'not-authorized' });
+		const none = await createEndpointOperationsV2Client(port).localControl(
+			REQUESTS.localControl as never
+		);
+		expect(none).toMatchObject({ status: 'unavailable', reason: 'not-authorized' });
+		expect(invoke).not.toHaveBeenCalled();
+		const fleet = await createEndpointOperationsV2Client(port, {
+			registrationPurpose: () => 'fleet_management',
+		}).localControl(request as never);
+		expect(fleet.status).toBe('ok');
+		expect(invoke).toHaveBeenCalledTimes(1);
+	});
+
+	it('localControl refuses a malformed request before sending, and a cancel that expects another run', async () => {
+		const { port, invoke } = fakePort(['localControl']);
+		const base = REQUESTS.localControl as Record<string, unknown>;
+		for (const request of [
+			{ ...base, commandId: '' },
+			{ ...base, expiresAt: 'soon' },
+			{ ...base, policyRevision: -1 },
+			{ ...base, action: { kind: 'reboot' } },
+			{ ...base, action: { kind: 'cancel_run', runId: 'run-1' } },
+		]) {
+			expect(await runtimeClient(port).localControl(request as never)).toMatchObject({
+				status: 'unavailable',
+				reason: 'malformed',
+			});
+		}
+		expect(invoke).not.toHaveBeenCalled();
+	});
+
+	it('rejects a receipt that is not for the request sent, and passes a denial through', async () => {
+		const { port, invoke } = fakePort(['localControl', 'command']);
+		invoke.mockResolvedValueOnce({
+			status: 'ok',
+			payload: { outcome: 'completed', commandId: 'someone-else' },
+		} as never);
+		expect(await runtimeClient(port).localControl(REQUESTS.localControl as never)).toMatchObject({
+			status: 'unavailable',
+			reason: 'malformed',
+		});
+		invoke.mockResolvedValueOnce({
+			status: 'ok',
+			payload: {
+				...(reply('command', REQUESTS.command) as object),
+				correlation: { requestId: 'other' },
+			},
+		} as never);
+		expect(await runtimeClient(port).command(REQUESTS.command as never)).toMatchObject({
+			status: 'unavailable',
+			reason: 'malformed',
+		});
+		invoke.mockResolvedValueOnce({
+			status: 'ok',
+			payload: { outcome: 'denied', reason: 'policy_denied' },
+		} as never);
+		expect(await runtimeClient(port).command(REQUESTS.command as never)).toEqual({
+			status: 'ok',
+			payload: { outcome: 'denied', reason: 'policy_denied' },
+		});
+	});
+
 	it('carries the inbox idempotencyKey unchanged', async () => {
 		const { port, invoke } = fakePort(['inbox']);
-		await callOp(createEndpointOperationsV2Client(port), 'inbox');
+		await callOp(runtimeClient(port), 'inbox');
 		expect(invoke.mock.calls[0][1]).toMatchObject({ idempotencyKey: 'idem-from-v1-ledger' });
 	});
 
 	it('passes a refusal through unchanged', async () => {
 		const { port, invoke } = fakePort(['budget']);
 		invoke.mockResolvedValueOnce({ status: 'denied', reason: 'policy_denied' } as never);
-		const outcome = await callOp(createEndpointOperationsV2Client(port), 'budget');
+		const outcome = await callOp(runtimeClient(port), 'budget');
 		expect(outcome).toEqual({ status: 'denied', reason: 'policy_denied' });
 	});
 });
 
 describe('selectEndpointOperationPath', () => {
-	it('answers v1 for every operation with the shipped (empty) selection, even when negotiated', () => {
+	it('with the shipped selection, answers v2 for every operation the attachment negotiated and v1 otherwise', () => {
 		const { port } = fakePort([...LOCAL_ENDPOINT_OPERATION_V2_CLIENTS]);
-		const state = vi.fn(port.state);
-		const watched = { ...port, state } as EndpointPort;
 		for (const operation of LOCAL_ENDPOINT_OPERATION_V2_CLIENTS) {
-			expect(selectEndpointOperationPath(watched, operation)).toBe('v1');
+			expect(selectEndpointOperationPath(port, operation)).toBe('v2');
 		}
-		// An empty selection never even reads the connection state.
-		expect(state).not.toHaveBeenCalled();
+		const { port: v1 } = fakePort(null);
+		for (const operation of LOCAL_ENDPOINT_OPERATION_V2_CLIENTS) {
+			expect(selectEndpointOperationPath(v1, operation)).toBe('v1');
+		}
+		expect(selectEndpointOperationPath(port, 'telemetry', [])).toBe('v1');
 	});
 
 	it('answers v2 only when selected AND negotiated', () => {
@@ -213,11 +328,19 @@ describe('the existing v1 callers go through the selection', () => {
 		await endpointTelemetryPort(port, selected).report(EVENT);
 	}
 
-	it('with V2_OPERATIONS_SELECTED empty, every caller uses v1 even when v2 negotiated everything', async () => {
+	it('with the shipped selection, every caller sends on v2 when negotiated, and on v1 when not', async () => {
 		const { port, invoke, v1Invoke } = fakePort([...LOCAL_ENDPOINT_OPERATION_V2_CLIENTS]);
 		await callAll(port);
-		expect(invoke).not.toHaveBeenCalled();
-		expect(v1Invoke.mock.calls).toEqual([
+		expect(v1Invoke).not.toHaveBeenCalled();
+		expect(invoke.mock.calls).toEqual([
+			['noticeList', LIST],
+			['inbox', INBOX],
+			['telemetry', EVENT],
+		]);
+		const legacy = fakePort(null);
+		await callAll(legacy.port);
+		expect(legacy.invoke).not.toHaveBeenCalled();
+		expect(legacy.v1Invoke.mock.calls).toEqual([
 			['noticeList', LIST],
 			['inbox', INBOX],
 			['telemetry', EVENT],
@@ -272,7 +395,7 @@ describe('the selection over the real client and a fake daemon', () => {
 		return { fake, port };
 	}
 
-	it('empty selection: the callers reach /v1/invoke only, never /v2/invoke', async () => {
+	it('a v1 attachment: the callers reach /v1/invoke only, never /v2/invoke', async () => {
 		const { fake, port } = await setUp();
 		expect((await port.attach(ATTACH_V1)).status).toBe('ok');
 		const inbox = endpointInboxPort(port);

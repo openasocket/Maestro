@@ -64,6 +64,13 @@ import {
 	type FakeEndpoint,
 	type FakeEndpointOptions,
 } from '../../../main/enterprise/fakeEndpoint';
+import {
+	ISSUED,
+	projectedRegistrationUse,
+	WORKFLOW_V2_OFFER,
+	workflowV2Producer,
+} from '../../../main/enterprise/workflowV2Producer';
+import type { EndpointRuntimeUseReference } from '../../../../shared/maestro-lib/managed/endpoint-port';
 
 import { managedRecord, NOW } from '../../../main/enterprise/fakeManaged';
 import {
@@ -193,6 +200,42 @@ async function attachPort(fake: FakeEndpoint, supported: string[]): Promise<Endp
 	});
 	expect(attached.status).toBe('ok');
 	return port;
+}
+
+/** As `attachPort`, on protocol 2: the handshake and the v2 attachment on one connection. */
+async function attachPortV2(
+	fake: FakeEndpoint,
+	supported: readonly string[]
+): Promise<EndpointPort> {
+	const port = createLocalEndpointClient({ socketPath: fake.socketPath, timeoutMs: 1_000 });
+	await port.registration.challenge({ runtimeId: 'desktop-100', processEpoch: 'epoch-1' });
+	await port.registration.redeem();
+	const attached = await port.v2!.attach({
+		installationId: 'inst-1',
+		runtimeId: 'desktop-100',
+		processEpoch: 'epoch-1',
+		components: [{ id: 'maestro', kind: 'maestro', version: '1.1.0-RC' }],
+		supportedProtocols: [2],
+		supportedCapabilities: ['attachment', 'compatibility', ...supported],
+		requiredCapabilities: [],
+	});
+	expect(attached.status).toBe('ok');
+	return port;
+}
+
+/** The status a lifecycle reports once the attachment projected a registration_use reference. */
+function withRegistrationUse(
+	status: ManagedEnrollmentStatus,
+	installation: { installationId: string; runtimeId: string; processEpoch: string }
+): ManagedEnrollmentStatus {
+	const projected = projectedRegistrationUse(installation);
+	return {
+		...status,
+		registrationUse: {
+			reference: projected.reference as EndpointRuntimeUseReference,
+			expiresAt: projected.expiresAt,
+		},
+	};
 }
 
 describe('managed host adapter', () => {
@@ -330,52 +373,52 @@ describe('managed host adapter', () => {
 		).toHaveLength(0);
 	});
 
-	it('exposes the workflow owner producer over its endpoint, and none without one (MRC-07-06A)', async () => {
+	it('exposes the v2 workflow lifecycle over its endpoint, never the legacy fence, and none without one (MRC-07-06A, handoff item 3)', async () => {
 		const fake = await endpoint({
-			capabilities: ['execution', 'workflow'],
-			operations: {
-				workflow: (payload) => ({
-					outcome: 'owned',
-					workflowId: (payload as { workflowId: string }).workflowId,
-					ownerId: 'inst-1',
-					ownerEpoch: 1,
-					fencingToken: 'fence-1',
-				}),
-			},
+			capabilities: ['execution'],
+			v2Capabilities: [...WORKFLOW_V2_OFFER],
+			operations: workflowV2Producer({ now: () => T0 }),
 		});
-		const port = await attachedPort(fake, ['attachment', 'execution', 'workflow']);
+		const port = await attachPortV2(fake, WORKFLOW_V2_OFFER);
+		ports.push(port);
 		const view = okView(record(fake.socketPath));
 		const adapter = createManagedHostAdapter({
+			installation: INSTALLATION,
+			identity: { read: () => view },
+			endpoint: port,
+			status: () => withRegistrationUse(standing(port, view), INSTALLATION),
+			now: () => T0,
+		});
+		expect(adapter.workflows?.lifecycle).toBeDefined();
+		expect(adapter.workflows?.lifecycle?.current()).toBe(true);
+		// The legacy v1 `workflow` claim is never sent.
+		const before = fake.calls.length;
+		expect(
+			(
+				await adapter.workflows!.claim({
+					workflowId: 'wf-1',
+					triggerId: 'trig-1',
+					runId: 'run-1',
+					attemptId: 'att-1',
+					ownerId: 'inst-1',
+					ownerEpoch: 0,
+					fencingToken: 'nonce-1',
+					offlineEnabled: false,
+					policyRevision: 3,
+				})
+			).status
+		).toBe('unavailable');
+		expect(fake.calls).toHaveLength(before);
+
+		// Without a projected reference the lifecycle is not offered.
+		const unreferenced = createManagedHostAdapter({
 			installation: INSTALLATION,
 			identity: { read: () => view },
 			endpoint: port,
 			status: () => standing(port, view),
 			now: () => T0,
 		});
-		expect(adapter.workflows).not.toBeNull();
-		// The port is the endpoint's `workflow` operation, answered as the registry sent it.
-		expect(
-			await adapter.workflows!.claim({
-				workflowId: 'wf-1',
-				triggerId: 'trig-1',
-				runId: 'run-1',
-				attemptId: 'att-1',
-				ownerId: 'inst-1',
-				ownerEpoch: 0,
-				fencingToken: 'nonce-1',
-				offlineEnabled: false,
-				policyRevision: 3,
-			})
-		).toEqual({
-			status: 'ok',
-			payload: {
-				outcome: 'owned',
-				workflowId: 'wf-1',
-				ownerId: 'inst-1',
-				ownerEpoch: 1,
-				fencingToken: 'fence-1',
-			},
-		});
+		expect(unreferenced.workflows?.lifecycle).toBeUndefined();
 		const detached = createManagedHostAdapter({
 			installation: INSTALLATION,
 			identity: { read: () => view },
@@ -1217,7 +1260,8 @@ describe('runtime with a host adapter', () => {
 
 	async function start(
 		view: (installationId: string) => ManagedIdentityView,
-		port: EndpointPort | null = null
+		port: EndpointPort | null = null,
+		referenced = false
 	) {
 		let id = 0;
 		const started = await createMaestroRuntime({
@@ -1229,7 +1273,10 @@ describe('runtime with a host adapter', () => {
 						installation,
 						identity: { read: () => view(installation.installationId) },
 						endpoint: port,
-						status: () => standing(port, view(installation.installationId)),
+						status: () => {
+							const status = standing(port, view(installation.installationId));
+							return referenced ? withRegistrationUse(status, installation) : status;
+						},
 					}),
 			},
 			deps: {
@@ -1354,59 +1401,46 @@ describe('runtime with a host adapter', () => {
 		open.splice(0);
 
 		const requests: Array<Record<string, unknown>> = [];
+		const producer = workflowV2Producer({ now: () => T0 });
 		const fake = await startFakeEndpoint({
 			registrationRequired: true,
-			capabilities: ['execution', 'workflow'],
+			capabilities: ['execution'],
+			v2Capabilities: [...WORKFLOW_V2_OFFER],
 			operations: {
-				workflow: (payload) => {
-					const p = payload as Record<string, unknown>;
-					requests.push(p);
-					return {
-						outcome: 'owned',
-						workflowId: p.workflowId,
-						ownerId: p.ownerId,
-						ownerEpoch: 4,
-						fencingToken: 'fence-4',
-					};
+				...producer,
+				workflow_claim: (payload) => {
+					requests.push(payload as Record<string, unknown>);
+					return producer.workflow_claim!(payload);
 				},
 			},
 		});
-		const port = await attachPort(fake, ['attachment', 'execution', 'workflow']);
+		const port = await attachPortV2(fake, WORKFLOW_V2_OFFER);
 		try {
-			const runtime = await start(view, port);
-			expect(runtime.managedHost!.workflows).not.toBeNull();
-			expect(
-				await runtime.claimWorkflowFence(WORKFLOW, { runId: 'req-1', attemptId: 'att-1' })
-			).toEqual({
-				ownerId: runtime.installation.installationId,
-				ownerEpoch: '4',
-				fencingToken: 'fence-4',
-			});
-			// A first claim: epoch 0 and a nonce, as the installation, under the record's policy
-			// generation; the held fence is kept offline because an installed policy is on record.
-			expect(requests).toHaveLength(1);
-			expect(requests[0]).toMatchObject({
-				workflowId: 'runtime-a1-1',
+			const runtime = await start(view, port, true);
+			expect(runtime.managedHost!.workflows?.lifecycle).toBeDefined();
+			const fence = await runtime.claimWorkflowFence(WORKFLOW, {
 				runId: 'req-1',
 				attemptId: 'att-1',
+			});
+			expect(fence).toMatchObject({
 				ownerId: runtime.installation.installationId,
-				ownerEpoch: 0,
+				ownerEpoch: ISSUED.ownerEpoch,
+				fencingToken: ISSUED.fencingToken,
+			});
+			// The claim carries the projected reference, no delegation and no grants,
+			// under the record's policy revision.
+			expect(requests).toHaveLength(1);
+			expect(requests[0]).toMatchObject({
+				registration: { installationId: runtime.installation.installationId },
+				delegation: null,
+				grants: [],
+				runId: 'req-1',
+				attemptId: 'att-1',
 				policyRevision: 3,
-				offlineEnabled: true,
 			});
-			// The next attempt re-claims with what the registry issued.
 			expect(
-				await runtime.claimWorkflowFence(WORKFLOW, { runId: 'req-1', attemptId: 'att-2' })
-			).toEqual({
-				ownerId: runtime.installation.installationId,
-				ownerEpoch: '4',
-				fencingToken: 'fence-4',
-			});
-			expect(requests[1]).toMatchObject({
-				attemptId: 'att-2',
-				ownerEpoch: 4,
-				fencingToken: 'fence-4',
-			});
+				fake.calls.filter((c) => (c.body as { operation?: string }).operation === 'workflow')
+			).toEqual([]);
 			expect(fs.existsSync(path.join(dir, 'maestro-managed-workflows.json'))).toBe(true);
 		} finally {
 			await port.close();

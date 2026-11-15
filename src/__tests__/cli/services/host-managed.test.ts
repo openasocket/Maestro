@@ -50,6 +50,13 @@ import { inProcessContext } from '../../../shared/maestro-lib/managed/operations
 import { fakeAnchor, fakeSeal } from '../../main/enterprise/fakeCustody';
 import { anotherCommand } from '../../main/enterprise/fakeManaged';
 import { startFakeEndpoint, type FakeEndpoint } from '../../main/enterprise/fakeEndpoint';
+import {
+	activatePhase,
+	ENROLLMENT_ID,
+	provePhase,
+	requestPhase,
+	SERVES_RELAYED_ENROLLMENT,
+} from '../../main/enterprise/enrollmentPhases';
 
 const NOW = Date.parse('2026-10-22T12:00:00Z');
 
@@ -176,7 +183,7 @@ describe('composeHostManaged', () => {
 		fs.rmSync(dir, { recursive: true, force: true });
 	});
 
-	let endpointSchemas: typeof import('../../../../vendor/mega-maestro/contracts/dist/local-endpoint.js');
+	let protocolSchemas: typeof import('../../../../vendor/mega-maestro/contracts/dist/protocol.js');
 	beforeAll(async () => {
 		const pin = readPin(path.resolve('vendor/mega-maestro/contracts.pin.json'));
 		const checked = inspectContractsDir({
@@ -184,8 +191,7 @@ describe('composeHostManaged', () => {
 			expectedSha256: pin.payloadDigest,
 		});
 		expect(checked.sourceRevision).toBe(pin.sourceRevision);
-		endpointSchemas =
-			await import('../../../../vendor/mega-maestro/contracts/dist/local-endpoint.js');
+		protocolSchemas = await import('../../../../vendor/mega-maestro/contracts/dist/protocol.js');
 	});
 
 	it('registers, refreshes policy, reconnects and closes through the composed controls (local contract fixture)', async () => {
@@ -234,12 +240,12 @@ describe('composeHostManaged', () => {
 		expect(await composed.control.beginRegistration()).toMatchObject({ status: 'ok' });
 		expect(await composed.control.completeRegistration()).toMatchObject({ status: 'ok' });
 		expect(composed.status()?.authority).toBe('registered');
-		for (const call of fake.calls.filter((c) => c.path === '/v1/invoke')) {
-			const envelope = endpointSchemas.localRequestEnvelope.parse(call.body);
-			if (envelope.operation === 'attachment')
-				endpointSchemas.attachmentRequest.parse(envelope.payload);
-		}
-		endpointSchemas.endpointStatus.parse(composed.status()!.endpoint);
+		// Every envelope is a protocol 2 one the pinned 0.3.0 contract accepts, and nothing went to v1.
+		expect(fake.callsTo('/v1/invoke')).toEqual([]);
+		const sentV2 = fake.callsTo('/v2/invoke');
+		expect(sentV2.length).toBeGreaterThan(0);
+		for (const call of sentV2) protocolSchemas.localRequestEnvelopeV2.parse(call.body);
+		protocolSchemas.localEndpointContractsV2.attachment.response.parse(composed.status()!.endpoint);
 		// Every accepted attachment lists the notices (MCOMP-21-03A); close waits for that listing,
 		// so only calls other than it are counted: none may follow the close.
 		const notListing = () =>
@@ -273,6 +279,7 @@ describe('composeHostManaged', () => {
 		fake = await startFakeEndpoint({
 			registrationRequired: true,
 			capabilities: ['execution', 'inbox', 'noticeList'],
+			v2Capabilities: ['inbox', 'noticeList'],
 			now: () => NOW,
 			operations: {
 				noticeList: () => {
@@ -506,14 +513,8 @@ describe('composeHostManaged', () => {
 		expect(fs.existsSync(path.join(dir, 'maestro-managed-inbox-receipts.json'))).toBe(false);
 	});
 
-	it('relays supported enrollment without promoting the pending record to authority', async () => {
-		fake = await startFakeEndpoint({
-			capabilities: ['enrollment'],
-			now: () => NOW,
-			operations: {
-				enrollment: () => ({ outcome: 'enrollment_pending', enrollmentId: 'enr-local' }),
-			},
-		});
+	it('relays the three enrollment phases in the 0.3.0 contract shapes without promoting the record to authority', async () => {
+		fake = await startFakeEndpoint({ ...SERVES_RELAYED_ENROLLMENT, now: () => NOW });
 		const composed = composeHostManaged({
 			openPort: unixSocketPort,
 			userDataDir: dir,
@@ -524,27 +525,30 @@ describe('composeHostManaged', () => {
 		if (!composed.composed) throw new Error(composed.reason);
 		composed.managed.host!(installation);
 		try {
-			const result = await composed.control.requestEnrollment({
-				socketPath: fake.socketPath,
-				tenantId: 'tenant-1',
-				orgId: 'org-1',
-				mode: 'attended',
-				invitation: 'fixture-invitation',
-				collectionProfile: 'metadata',
-				trustRootDigest: 'a'.repeat(64),
-				keyPossessionProof: 'fixture-proof',
-			});
-			expect(result).toMatchObject({ status: 'ok', value: { enrollmentId: 'enr-local' } });
+			for (const phase of [requestPhase, provePhase, activatePhase]) {
+				const result = await composed.control.requestEnrollment(phase(fake.socketPath));
+				expect(result.status).toBe('ok');
+				// The answer the fake gave is one the contract accepts, and so is every request.
+				if (result.status === 'ok')
+					protocolSchemas.localEndpointContractsV2.enrollment.response.parse(result.value);
+			}
 			expect(composed.identity.read()).toMatchObject({
 				status: 'ok',
-				record: { management: 'enrolling' },
+				record: { management: 'enrolled', enrollmentId: ENROLLMENT_ID },
 			});
+			// Enrolled is not registered: authority waits for this process's own registration.
 			expect(composed.status()?.authority).toBe('none');
-			const request = fake.calls.find(
-				(c) => (c.body as { operation?: string }).operation === 'enrollment'
-			)?.body;
-			const envelope = endpointSchemas.localRequestEnvelope.parse(request);
-			endpointSchemas.enrollmentRequest.parse(envelope.payload);
+			const relayed = fake
+				.callsTo('/v2/invoke')
+				.filter((c) => (c.body as { operation?: string }).operation === 'enrollment');
+			expect(relayed.map((c) => (c.body as { payload: { phase: string } }).payload.phase)).toEqual([
+				'request',
+				'prove',
+				'activate',
+			]);
+			for (const call of fake.callsTo('/v2/invoke'))
+				protocolSchemas.localRequestEnvelopeV2.parse(call.body);
+			expect(fake.callsTo('/v1/invoke')).toEqual([]);
 		} finally {
 			await composed.lifecycle.close();
 		}
@@ -865,12 +869,13 @@ describe('composeHostManaged', () => {
 		await enrolled.lifecycle.attach();
 		const status = enrolled.status();
 		expect(status?.connection).toMatchObject({ attached: true });
-		// Each connection verifies the server: the v2 attachment's own, then the v1 one.
-		expect(native.verified).toEqual([fake.socketPath, fake.socketPath]);
+		// The one connection verifies the server before anything is sent on it.
+		expect(native.verified).toEqual([fake.socketPath]);
 		expect(status?.endpoint).not.toBeNull();
 		// The fake's registration gate is off, but authority is still this process's own registration.
 		expect(status?.authority).toBe('none');
-		expect(fake.calls.some((call) => call.path === '/v1/invoke')).toBe(true);
+		expect(fake.calls.some((call) => call.path === '/v2/invoke')).toBe(true);
+		expect(fake.calls.some((call) => call.path === '/v1/invoke')).toBe(false);
 		// The adapter speaks over the socket the lifecycle opened.
 		expect(adapter.workflows).not.toBeNull();
 
@@ -895,16 +900,9 @@ describe('composeHostManaged', () => {
 		};
 		// Windows, unenrolled: a local pipe name is a valid address, but nothing names its server.
 		const windows = compose('win32');
-		const enrollment = await windows.control.requestEnrollment({
-			socketPath: '\\\\.\\pipe\\mega-maestro-endpoint-a1',
-			tenantId: 'tenant-1',
-			orgId: 'org-1',
-			mode: 'attended',
-			invitation: 'fixture-invitation',
-			collectionProfile: 'metadata',
-			trustRootDigest: 'a'.repeat(64),
-			keyPossessionProof: 'fixture-proof',
-		});
+		const enrollment = await windows.control.requestEnrollment(
+			requestPhase('\\\\.\\pipe\\mega-maestro-endpoint-a1')
+		);
 		expect(enrollment).toMatchObject({ status: 'refused', reason: 'no-endpoint' });
 		expect(enrollment.status === 'refused' && enrollment.message).toMatch(
 			/No native endpoint port is installed for win32/
@@ -926,7 +924,8 @@ describe('composeHostManaged', () => {
 		const linux = compose('linux');
 		await linux.lifecycle.attach();
 		expect(linux.status()?.connection).toMatchObject({ attached: true });
-		expect(fake.calls.some((call) => call.path === '/v1/invoke')).toBe(true);
+		expect(fake.calls.some((call) => call.path === '/v2/invoke')).toBe(true);
+		expect(fake.calls.some((call) => call.path === '/v1/invoke')).toBe(false);
 		await linux.lifecycle.close();
 	});
 });

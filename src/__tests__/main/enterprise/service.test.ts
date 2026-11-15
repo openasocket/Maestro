@@ -35,6 +35,13 @@ import type { LifecycleFact } from '../../../shared/maestro-lib/managed/events';
 import type { Anchor } from '../../../main/utils/keyring-anchor';
 import { fakeAnchor, fakeSeal } from './fakeCustody';
 import { startFakeEndpoint, type FakeEndpoint } from './fakeEndpoint';
+import {
+	ISSUED,
+	projectedRegistrationUse,
+	WORKFLOW_V2_OFFER,
+	workflowV2Producer,
+} from './workflowV2Producer';
+import { requestPhase } from './enrollmentPhases';
 
 const NOW = Date.parse('2026-10-21T12:00:00Z');
 
@@ -529,73 +536,59 @@ describe('enterprise service', () => {
 		triggerEventId: 'time.scheduled:evt-1',
 	};
 
-	it('claims a workflow owner fence through the endpoint workflow operation and holds it across a restart (MRC-07-06)', async () => {
+	it('claims a workflow owner fence through the v2 workflow lifecycle under the projected registration_use reference (MRC-07-06, handoff item 3)', async () => {
 		await fake.close();
+		let installation: { installationId: string; runtimeId: string; processEpoch: string } | null =
+			null;
 		fake = await startFakeEndpoint({
 			registrationRequired: true,
-			capabilities: ['execution', 'workflow'],
+			capabilities: ['execution'],
+			v2Capabilities: [...WORKFLOW_V2_OFFER],
 			now: () => NOW,
 			operations: {
-				workflow: (payload) => {
-					const p = payload as { workflowId: string; ownerId: string };
-					return {
-						outcome: 'owned',
-						workflowId: p.workflowId,
-						ownerId: p.ownerId,
-						ownerEpoch: 2,
-						fencingToken: 'fence-2',
-					};
-				},
+				registration_use: () => projectedRegistrationUse(installation!),
+				...workflowV2Producer({ now: () => NOW }),
 			},
 		});
 		const service = compose();
+		installation = service.installation;
 		await register(service);
+		expect(service.lifecycle.status().registrationUse?.reference).toMatchObject({
+			installationId: service.installation.installationId,
+		});
 
 		const fence = await service.claimWorkflowFence(WORKFLOW, {
 			runId: 'run-1',
 			attemptId: 'att-1',
 		});
-		const claim = fake.calls.find(
-			(c) => (c.body as { operation?: string }).operation === 'workflow'
-		)?.body as { payload: Record<string, unknown> };
-		// The fence names the owner the registry holds it under, the same one the claim was made for.
-		expect(fence).toEqual({
-			ownerId: claim.payload.ownerId,
-			ownerEpoch: '2',
-			fencingToken: 'fence-2',
-		});
-		expect(claim.payload).toMatchObject({
+		const claim = fake
+			.callsTo('/v2/invoke')
+			.find((c) => (c.body as { operation?: string }).operation === 'workflow_claim')?.body as {
+			payload: Record<string, unknown>;
+		};
+		expect(fence).toMatchObject({
 			ownerId: service.installation.installationId,
-			ownerEpoch: 0,
-			policyRevision: 3,
-			offlineEnabled: true,
+			ownerEpoch: ISSUED.ownerEpoch,
+			fencingToken: ISSUED.fencingToken,
+		});
+		// The claim carries the projected reference, no delegation and no grants.
+		expect(claim.payload).toMatchObject({
+			registration: projectedRegistrationUse(service.installation).reference,
+			delegation: null,
+			grants: [],
 			runId: 'run-1',
 			attemptId: 'att-1',
 		});
-		expect(service.workflows.fence(WORKFLOW)).toEqual({
-			ownerId: fence.ownerId,
-			ownerEpoch: '2',
-			fencingToken: 'fence-2',
+		// No legacy v1 owner fence was ever sent.
+		expect(
+			fake.calls.filter((c) => (c.body as { operation?: string }).operation === 'workflow')
+		).toEqual([]);
+		expect(service.workflows.fence(WORKFLOW)).toMatchObject({
+			ownerId: service.installation.installationId,
+			ownerEpoch: ISSUED.ownerEpoch,
+			fencingToken: ISSUED.fencingToken,
 		});
 		expect(fs.existsSync(path.join(dir, 'maestro-managed-workflows.json'))).toBe(true);
-
-		// The process sink claims through the same held ownership (MRC-07-06B):
-		// a re-claim for another attempt confirms the held fence, one record.
-		expect(
-			await service.spawnAuthority.workflowFence?.(WORKFLOW, { runId: 'run-1', attemptId: 'att-2' })
-		).toEqual({ ownerId: fence.ownerId, ownerEpoch: '2', fencingToken: 'fence-2' });
-		expect(service.workflows.held()).toHaveLength(1);
-
-		// A restarted desktop holds the same fence before it asks the endpoint anything.
-		await service.close();
-		services.splice(0);
-		const restarted = compose();
-		await restarted.workflows.load();
-		expect(restarted.workflows.fence(WORKFLOW)).toEqual({
-			ownerId: fence.ownerId,
-			ownerEpoch: '2',
-			fencingToken: 'fence-2',
-		});
 	});
 
 	it('an endpoint that serves no workflow operation answers capability-unsupported and nothing is held', async () => {
@@ -666,6 +659,7 @@ describe('enterprise service', () => {
 		const telemetryFake = await startFakeEndpoint({
 			registrationRequired: true,
 			capabilities: ['execution', 'telemetry'],
+			v2Capabilities: ['telemetry'],
 			now: () => NOW,
 			operations: {
 				telemetry: (payload) => {
@@ -763,6 +757,7 @@ describe('enterprise service', () => {
 		const inboxFake = await startFakeEndpoint({
 			registrationRequired: true,
 			capabilities: ['execution', 'inbox', 'noticeList'],
+			v2Capabilities: ['inbox', 'noticeList'],
 			now: () => NOW,
 			operations: {
 				noticeList: (payload) => {
@@ -1075,16 +1070,9 @@ describe('enterprise service', () => {
 			});
 		// Windows, unenrolled: a valid local pipe name, but no port names the server behind it.
 		const windows = compose(undefined, { openPort: undefined, platform: 'win32' });
-		const enrollment = await windows.lifecycle.requestEnrollment({
-			socketPath: '\\\\.\\pipe\\mega-maestro-endpoint-a1',
-			tenantId: 'tenant-1',
-			orgId: 'org-1',
-			mode: 'attended',
-			invitation: 'fixture-invitation',
-			collectionProfile: 'metadata',
-			trustRootDigest: 'a'.repeat(64),
-			keyPossessionProof: 'fixture-proof',
-		});
+		const enrollment = await windows.lifecycle.requestEnrollment(
+			requestPhase('\\\\.\\pipe\\mega-maestro-endpoint-a1')
+		);
 		expect(enrollment).toMatchObject({ status: 'refused', reason: 'no-endpoint' });
 		expect(enrollment.status === 'refused' && enrollment.message).toMatch(
 			/No native endpoint port is installed for win32/
@@ -1127,8 +1115,8 @@ describe('enterprise service', () => {
 			endpointNative: native,
 		});
 		await verifiedMac.lifecycle.connect();
-		// Each connection verifies the server: the v2 attachment's own, then the v1 one.
-		expect(verified).toEqual([fake.socketPath, fake.socketPath]);
+		// The one connection verifies the server before anything is sent on it.
+		expect(verified).toEqual([fake.socketPath]);
 		expect(fake.calls.length).toBeGreaterThan(0);
 		await verifiedMac.close();
 

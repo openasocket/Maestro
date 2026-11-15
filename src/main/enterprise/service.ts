@@ -54,9 +54,10 @@ import {
 	type ManagedHostAdapter,
 } from '../../shared/maestro-lib/managed/host-adapter';
 import type { ManagedInstallationIdentity } from '../../shared/maestro-lib/managed/types';
+import { V2_OPERATIONS_SELECTED } from '../../shared/maestro-lib/managed/endpoint-port';
+import { createEndpointWorkflowV2OwnerPort } from '../../shared/maestro-lib/managed/workflow-lifecycle-v2';
 import {
 	createWorkflowOwnership,
-	endpointWorkflowOwnerPort,
 	workflowFenceOf,
 	MANAGED_WORKFLOWS_FILE_NAME,
 	type WorkflowFenceAnswer,
@@ -160,7 +161,7 @@ import {
 	type SupportEntry,
 } from '../../shared/maestro-lib/managed/compatibility';
 import type {
-	EndpointEnrollmentResult,
+	EndpointEnrollmentPhaseResultV2,
 	EndpointStatus,
 } from '../../shared/maestro-lib/managed/endpoint-port';
 import { MANAGED_CONTRACT_VERSION } from '../../shared/maestro-lib/managed/types';
@@ -203,11 +204,13 @@ export const ENTERPRISE_SUPPORTED_CAPABILITIES: readonly string[] = [
 ];
 
 /**
- * What this host offers on the v2 attachment (its own connection; see
- * `EnrollmentLifecycleDeps.v2`). `registration_use` and the four workflow
- * custody verbs, nothing required: an endpoint that offers a subset still
- * attaches, and an operation it did not select is never sent. Offering them
- * moves no caller onto v2; `V2_OPERATIONS_SELECTED` does that, and it is empty.
+ * What this host offers on the v2 attachment, the production attachment on
+ * the one connection (see `EnrollmentLifecycleDeps.v2`, handoff item 1):
+ * `registration_use`, the four workflow custody verbs, and every operation in
+ * `V2_OPERATIONS_SELECTED` (handoff item 7). Nothing is required: an endpoint
+ * that offers a subset still attaches, and an operation it did not select is
+ * never sent. Execution is not offered until the endpoint serves it
+ * (GCOMP-15-07, Mega FINISH-10).
  */
 export const ENTERPRISE_SUPPORTED_CAPABILITIES_V2: readonly string[] = [
 	'attachment',
@@ -217,6 +220,7 @@ export const ENTERPRISE_SUPPORTED_CAPABILITIES_V2: readonly string[] = [
 	'workflow_renew',
 	'workflow_settle',
 	'workflow_release',
+	...V2_OPERATIONS_SELECTED,
 ];
 
 /**
@@ -311,9 +315,10 @@ export const NO_INBOX_OUTCOME: InboxActionOutcome = {
 export interface ManagedOperations {
 	/** The narrow standing a settings pane reads (MRC-11-03), with the holds in force. */
 	status(): ManagedStateView;
+	/** One relayed enrollment phase (request, prove, activate; decision D1). */
 	requestEnrollment(
 		input: EnrollmentRequestInput
-	): Promise<LifecycleOutcome<EndpointEnrollmentResult>>;
+	): Promise<LifecycleOutcome<EndpointEnrollmentPhaseResultV2>>;
 	/** An authenticated status update: re-attach over the registered socket. */
 	refreshPolicy(): Promise<LifecycleOutcome<EndpointStatus>>;
 	/** What this installation is and can do (MRC-10-06B): no path, socket or secret. */
@@ -578,7 +583,7 @@ export function createManagedOperations(deps: ManagedOperationsDeps): ManagedOpe
 				policy: deps.policy.status(),
 				agentOptions: deps.policy.agentOptions?.(locks()),
 				custody: deps.identity.custody(),
-				supported: ENTERPRISE_SUPPORTED_CAPABILITIES,
+				supported: ENTERPRISE_SUPPORTED_CAPABILITIES_V2,
 				egress: holds.egress(),
 				update: holds.update(),
 				listeners: holds.listeners(),
@@ -852,8 +857,8 @@ export function createEnterpriseService(deps: EnterpriseServiceDeps): Enterprise
 		installation,
 		components,
 		capabilities: { supported: ENTERPRISE_SUPPORTED_CAPABILITIES, required: [] },
-		// The v2 connection is opened with the raw factory so `port` stays the v1 one.
-		v2: { openPort, supported: ENTERPRISE_SUPPORTED_CAPABILITIES_V2 },
+		// Protocol 2 on the one connection: the attachment every caller reads is v2.
+		v2: { supported: ENTERPRISE_SUPPORTED_CAPABILITIES_V2 },
 		now,
 		// Every accepted attachment lists the notices again (below): what the endpoint
 		// holds for this actor is held here without a click, and the listing is the
@@ -898,12 +903,16 @@ export function createEnterpriseService(deps: EnterpriseServiceDeps): Enterprise
 
 	// The owner fences this installation holds, claimed as the installation
 	// (the owner that outlives this process) under the authority the sealed
-	// record names, through whatever socket is open right now. No record, no
-	// standing to claim under; no socket, an offline-enabled holder keeps what
-	// the registry already issued and nothing else is answered.
+	// record names, through the v2 workflow lifecycle on whatever socket is open
+	// right now, carrying the registration_use reference projected for it. No
+	// record, no standing to claim under; no negotiated lifecycle, nothing is sent.
+	const workflowOwnerPort = createEndpointWorkflowV2OwnerPort({
+		endpoint: () => port,
+		registration: () => lifecycle.status().registrationUse?.reference ?? null,
+	});
 	const workflows = createWorkflowOwnership({
 		file: `${deps.userDataDir}/${MANAGED_WORKFLOWS_FILE_NAME}`,
-		port: () => (port ? endpointWorkflowOwnerPort(port) : null),
+		port: workflowOwnerPort,
 		owner: () => {
 			const view = lifecycle.status().identity;
 			if (view.status !== 'ok' || !view.record) return null;

@@ -94,14 +94,11 @@ describe('Enterprise Preload API', () => {
 		mockInvoke.mockClear();
 
 		const enroll = {
+			phase: 'request' as const,
 			socketPath: '/run/endpoint/runtime.sock',
-			tenantId: 't',
+			management: { origin: 'https://mega.example', tenantId: 't', issuerSha256: 'a'.repeat(64) },
 			orgId: 'o',
-			mode: 'attended' as const,
-			invitation: 'i',
-			collectionProfile: 'metadata' as const,
-			trustRootDigest: 'a'.repeat(64),
-			keyPossessionProof: 'p',
+			serverCaPem: 'pem',
 		};
 		await api.requestEnrollment(enroll);
 		await api.acknowledgeRevocation({ installationId: 'inst-1' });

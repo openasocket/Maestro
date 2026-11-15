@@ -4,9 +4,12 @@
  * injects so that a desktop, a `maestro-cli host` and a TUI drive the same
  * code with their own custody and transport.
  *
- * The wire is the endpoint's `local-endpoint` contract, protocol 1: one
- * `POST /v1/invoke` per operation, a JSON envelope `{ schemaVersion: 1,
- * correlationId, operation, payload }` both ways, a request of at most 1 MiB,
+ * The production wire is protocol 2 (contracts 0.3.0): one `POST /v2/invoke`
+ * per operation, a JSON envelope `{ schemaVersion: 2, correlationId,
+ * operation, payload }` both ways, the registration handshake
+ * (`registration_challenge`, `registration_redeem`) included. The protocol 1
+ * wire (`POST /v1/invoke`) stays in the client until the endpoint retires it,
+ * and no production caller sends on it. A request of at most 1 MiB,
  * an answer of at most 64 KiB, and a per-socket session that begins with an
  * `attachment` and ends with the connection. The endpoint authenticates the
  * OS peer (uid, pid, process birth) on every request and resolves it through
@@ -39,20 +42,24 @@ export const LOCAL_ENDPOINT_PROTOCOL = 1 as const;
 export const LOCAL_ENDPOINT_SCHEMA_VERSION = 1 as const;
 export const LOCAL_ENDPOINT_INVOKE_PATH = '/v1/invoke';
 /**
- * Protocol 2 (contracts 0.2.0): a separately negotiated connection on its own
- * path. A request refused on /v2/invoke is never retried on /v1/invoke, and v1
- * stays the default path until a v2 attachment negotiates protocol 2.
+ * Protocol 2 (contracts 0.3.0): the production protocol, negotiated per
+ * connection on its own path. A request refused on /v2/invoke is never retried
+ * on /v1/invoke.
  */
 export const LOCAL_ENDPOINT_PROTOCOL_V2 = 2 as const;
 export const LOCAL_ENDPOINT_INVOKE_V2_PATH = '/v2/invoke';
-export const LOCAL_ENDPOINT_REGISTRATION_CHALLENGE_PATH = '/v1/registration/challenge';
-export const LOCAL_ENDPOINT_REGISTRATION_REDEEM_PATH = '/v1/registration/redeem';
+/**
+ * The pre-registration handshake (contracts 0.3.0 `localEndpointContractsV2`):
+ * two v2 envelopes on ONE connection, before any attachment. A pending
+ * challenge never moves to another socket.
+ */
+export const LOCAL_ENDPOINT_REGISTRATION_CHALLENGE_OPERATION = 'registration_challenge' as const;
+export const LOCAL_ENDPOINT_REGISTRATION_REDEEM_OPERATION = 'registration_redeem' as const;
 /** Pre-release contract: registration is purpose-bound v2 only, with no v1 fallback. */
 export const LOCAL_ENDPOINT_REGISTRATION_VERSION = 2 as const;
 export const LOCAL_ENDPOINT_REGISTRATION_PURPOSE = 'runtime_use' as const;
 export const LOCAL_ENDPOINT_MAX_REQUEST_BYTES = 1024 * 1024;
 export const LOCAL_ENDPOINT_MAX_RESPONSE_BYTES = 64 * 1024;
-export const LOCAL_ENDPOINT_MAX_REGISTRATION_BYTES = 4096;
 /** The endpoint's own request deadline; a client waits no longer than this plus slack. */
 export const LOCAL_ENDPOINT_TIMEOUT_MS = 5_000;
 
@@ -139,10 +146,13 @@ export type EndpointManagementState = 'unenrolled' | 'enrolling' | 'managed' | '
 export type EndpointConnectivity = 'online' | 'offline' | 'unavailable';
 export type EndpointCollectionProfile = 'metadata' | 'redacted' | 'full' | 'full_vibes';
 
-/** The endpoint's answer to an attachment: what it is to this peer, right now. */
+/**
+ * The endpoint's answer to an attachment: what it is to this peer, right now.
+ * `protocol` is the protocol the attachment negotiated on the connection.
+ */
 export interface EndpointStatus {
 	outcome: 'attached';
-	protocol: typeof LOCAL_ENDPOINT_PROTOCOL;
+	protocol: typeof LOCAL_ENDPOINT_PROTOCOL | typeof LOCAL_ENDPOINT_PROTOCOL_V2;
 	capabilities: readonly string[];
 	management: EndpointManagementState;
 	desiredPolicyRevision: number | null;
@@ -166,6 +176,24 @@ export interface EndpointAttachmentRequestV2 extends Omit<
 /** The endpoint's answer to a v2 attachment: the v1 status at protocol 2, with the negotiated capabilities. */
 export interface EndpointStatusV2 extends Omit<EndpointStatus, 'protocol'> {
 	protocol: typeof LOCAL_ENDPOINT_PROTOCOL_V2;
+}
+
+/**
+ * The v2 `compatibility` request (the contract's `protocolNegotiationRequest`):
+ * availability only, answered before any attachment. Every required
+ * capability must also be supported.
+ */
+export interface EndpointCompatibilityRequestV2 {
+	supportedProtocols: readonly [typeof LOCAL_ENDPOINT_PROTOCOL_V2];
+	supportedCapabilities: readonly string[];
+	requiredCapabilities: readonly string[];
+}
+
+/** The v2 `compatibility` answer (`protocolNegotiationResult` at protocol 2). */
+export interface EndpointCompatibilityResultV2 {
+	outcome: 'negotiated';
+	protocol: typeof LOCAL_ENDPOINT_PROTOCOL_V2;
+	capabilities: readonly string[];
 }
 
 /** What a v2 attachment negotiated on the current connection. */
@@ -215,10 +243,103 @@ export interface EndpointEnrollmentResult {
 	enrollmentId: string;
 }
 
+/** The `registration_redeem` answer: `{ outcome: "registered" }`, with no protocol tag (the v2 envelope carries it). */
 export interface EndpointRegistrationReceipt {
-	protocol: typeof LOCAL_ENDPOINT_PROTOCOL;
 	outcome: 'registered';
 }
+
+// ---------------------------------------------------------------------------
+// Relayed enrollment (contracts 0.3.0, decision D1), field for field
+// ---------------------------------------------------------------------------
+//
+// The endpoint's service custody holds the non-exportable key and signs; the
+// central browser administration runs begin, prove and activate between the
+// phases. Every phase names the installation's approved management origin,
+// tenant and trust, and every result echoes them. No phase takes or returns a
+// bearer, invitation, private key or the challenge nonce's answer.
+
+/** `enrollmentManagementV2`: a canonical HTTPS origin (`new URL(o).origin`), the tenant and the issuer digest. */
+export interface EndpointEnrollmentManagementV2 {
+	origin: string;
+	tenantId: string;
+	issuerSha256: string;
+}
+
+/** `possessionChallenge`: what the operator's central begin issued for the service key to sign. */
+export interface EndpointPossessionChallengeV2 {
+	id: string;
+	enrollmentId: string;
+	/** 43 characters of `[A-Za-z0-9_-]`. */
+	nonce: string;
+	expiresAt: string;
+}
+
+/** `enrollmentActivationV2`: the certificate the operator's central activation issued, and its trust. */
+export interface EndpointEnrollmentActivationV2 {
+	enrollmentId: string;
+	certificatePem: string;
+	trust: {
+		tenantId: string;
+		certificatePem: string;
+		issuerSha256: string;
+		keyStorage: 'software' | 'customer_kms';
+	};
+}
+
+/** `enrollmentPhaseRequestV2`: one relayed phase per request. */
+export type EndpointEnrollmentPhaseRequestV2 =
+	| {
+			phase: 'request';
+			management: EndpointEnrollmentManagementV2;
+			serverCaPem: string;
+			/** The v1 attachment request shape (`attachmentRequest`), `supportedProtocols` [1] as the schema fixes it. */
+			identity: EndpointAttachmentRequest;
+	  }
+	| {
+			phase: 'prove';
+			management: EndpointEnrollmentManagementV2;
+			challenge: EndpointPossessionChallengeV2;
+	  }
+	| {
+			phase: 'activate';
+			management: EndpointEnrollmentManagementV2;
+			activation: EndpointEnrollmentActivationV2;
+	  };
+
+export type EndpointEnrollmentPhase = EndpointEnrollmentPhaseRequestV2['phase'];
+
+/** `enrollmentPhaseResultV2`: the outcome each phase answers, echoing the management it named. */
+export type EndpointEnrollmentPhaseResultV2 =
+	| {
+			outcome: 'enrollment_requested';
+			management: EndpointEnrollmentManagementV2;
+			requestId: string;
+			identity: EndpointAttachmentRequest & {
+				publicKeyPem: string;
+				keyStorage: 'software' | 'platform_non_exportable';
+			};
+	  }
+	| {
+			outcome: 'possession_signed';
+			management: EndpointEnrollmentManagementV2;
+			enrollmentId: string;
+			challengeId: string;
+			/** 86 characters of base64url. */
+			signature: string;
+	  }
+	| {
+			outcome: 'enrolled';
+			management: EndpointEnrollmentManagementV2;
+			enrollmentId: string;
+			keyStorage: 'software' | 'platform_non_exportable';
+	  };
+
+/** The outcome each phase must answer (the contract's `enrollmentOutcomes`). */
+export const ENDPOINT_ENROLLMENT_PHASE_OUTCOMES = Object.freeze({
+	request: 'enrollment_requested',
+	prove: 'possession_signed',
+	activate: 'enrolled',
+} as const);
 
 /**
  * The v2 `registration_use` operation: the enrollment reference this process's
@@ -417,6 +538,8 @@ export const LOCAL_ENDPOINT_OPERATION_V2_CLIENTS = [
 	'offline',
 	'desktopPolicy',
 	'model',
+	'localControl',
+	'command',
 ] as const;
 export type EndpointOperationV2Client = (typeof LOCAL_ENDPOINT_OPERATION_V2_CLIENTS)[number];
 
@@ -569,6 +692,78 @@ export interface EndpointModelResultV2 {
 }
 export type EndpointModelReplyV2 = EndpointModelResultV2 | EndpointDenied;
 
+// ---------------------------------------------------------------------------
+// Local control (decision D2) and signed v2 commands (contracts 0.3.0)
+// ---------------------------------------------------------------------------
+
+/** The local GUI selectors `localControl` carries (the v1 `commandRequest` actions). */
+export type EndpointLocalControlAction =
+	| { kind: 'cancel_run'; runId: string }
+	| { kind: 'refresh_policy'; desiredRevision: number }
+	| { kind: 'report_status' };
+
+export type EndpointLocalControlKind = EndpointLocalControlAction['kind'];
+
+/**
+ * The registration purpose each selector needs (the contract's
+ * `localControlAuthority`): the endpoint authorizes the peer for it on every
+ * call, and this client refuses to send one its own registration cannot carry.
+ */
+export const ENDPOINT_LOCAL_CONTROL_AUTHORITY: Readonly<
+	Record<EndpointLocalControlKind, 'runtime_use' | 'fleet_management'>
+> = Object.freeze({
+	cancel_run: 'runtime_use',
+	report_status: 'runtime_use',
+	refresh_policy: 'fleet_management',
+});
+
+/**
+ * `localControlRequestV2`: the v1 `commandRequest` shape, never a signed body.
+ * A selector that reaches no run sends `expectedRunId: null`; a cancel must
+ * expect the run it names.
+ */
+export interface EndpointLocalControlRequestV2 {
+	commandId: string;
+	targetId: string;
+	expiresAt: string;
+	policyRevision: number;
+	precondition: { processEpoch: string; expectedRunId: string | null };
+	action: EndpointLocalControlAction;
+}
+
+/** The v1 `commandReceipt` `localControl` answers. */
+export interface EndpointLocalControlReceiptV2 {
+	outcome: 'accepted' | 'completed' | 'unknown';
+	commandId: string;
+}
+export type EndpointLocalControlReplyV2 = EndpointLocalControlReceiptV2 | EndpointDenied;
+
+/**
+ * `commandRequestV2`: the signed central delivery embedded unchanged, and its
+ * correlation (`operationAuthorityReferences` plus request, attempt and
+ * envelope digest). The signature is the issuer's; this client never builds
+ * or alters one, and the endpoint verifies it.
+ */
+export interface EndpointCommandRequestV2 {
+	command: Record<string, unknown> & { payload: Record<string, unknown> & { commandId: string } };
+	correlation: Record<string, unknown> & {
+		registration: Record<string, unknown>;
+		requestId: string;
+		attemptId: string;
+		envelopeDigest: string;
+	};
+}
+
+/** `commandReceiptV2`: the outcome, the command, its run and epoch, and the correlation echoed exactly. */
+export interface EndpointCommandReceiptV2 {
+	outcome: 'accepted' | 'completed' | 'unknown';
+	commandId: string;
+	runId: string;
+	processEpoch: string;
+	correlation: EndpointCommandRequestV2['correlation'];
+}
+export type EndpointCommandReplyV2 = EndpointCommandReceiptV2 | EndpointDenied;
+
 /** Each v2 operation client's request and reply, keyed by its wire name. */
 export interface EndpointOperationV2Exchange {
 	noticeList: { request: EndpointNoticeListRequestV2; reply: EndpointNoticeListReplyV2 };
@@ -578,15 +773,31 @@ export interface EndpointOperationV2Exchange {
 	offline: { request: EndpointOfflineRequestV2; reply: EndpointOfflineReplyV2 };
 	desktopPolicy: { request: EndpointDesktopPolicyRequestV2; reply: EndpointDesktopPolicyReplyV2 };
 	model: { request: EndpointModelRequestV2; reply: EndpointModelReplyV2 };
+	localControl: { request: EndpointLocalControlRequestV2; reply: EndpointLocalControlReplyV2 };
+	command: { request: EndpointCommandRequestV2; reply: EndpointCommandReplyV2 };
 }
 
 /**
- * The v2 operations an existing v1 caller is moved onto. EMPTY until Mega's
- * parity matrix shows an operation served on `/v2/invoke`; an operation is
- * added here only with that evidence. `src/main/enterprise/endpoint-ops-v2.ts`
- * re-exports it; this is its one home so the shared callers can read it.
+ * The v2 operations an existing caller is moved onto. Each one is a
+ * **passing** row of Mega's endpoint v2 parity matrix
+ * (`docs/evidence/endpoint-v2/parity-matrix.md`, FINISH-08-06, observed at
+ * Mega `dd9a42b0`); `execution` is not served and is not here. Selection is
+ * not an offer: an operation is still sent only when the attachment on the
+ * current connection negotiated it, and otherwise nothing is sent.
+ * `src/main/enterprise/endpoint-ops-v2.ts` re-exports it; this is its one
+ * home so the shared callers can read it.
  */
-export const V2_OPERATIONS_SELECTED: readonly string[] = [];
+export const V2_OPERATIONS_SELECTED: readonly string[] = [
+	'noticeList',
+	'inbox',
+	'telemetry',
+	'budget',
+	'offline',
+	'desktopPolicy',
+	'model',
+	'localControl',
+	'command',
+];
 
 /** Whether the v2 attachment behind `clientState` negotiated `operation`. False with no v2 attachment. */
 export function v2OperationNegotiated(
@@ -601,10 +812,12 @@ export type EndpointOperationSelectable = Pick<EndpointPort, 'invoke'> &
 	Partial<Pick<EndpointPort, 'v2' | 'state'>>;
 
 /**
- * Which path an existing v1 caller sends `operation` on. `v2` only when the
+ * Which path an existing caller sends `operation` on. `v2` only when the
  * operation is in `selected` (default `V2_OPERATIONS_SELECTED`) AND the v2
- * attachment on the current connection negotiated it; `v1` otherwise. With
- * the selection empty the connection state is not even read.
+ * attachment on the current connection negotiated it; `v1` otherwise. On a
+ * connection attached at protocol 2 the v1 path sends nothing (the client
+ * answers `unavailable` / `not-negotiated`), so a v2 refusal is never
+ * retried as v1.
  */
 export function selectEndpointOperationPath(
 	endpoint: EndpointOperationSelectable,
@@ -948,7 +1161,9 @@ export type EndpointUnavailableReason =
 	/** The native port could not name, or refused, the process serving a new connection. */
 	| 'peer-unverified'
 	/** The v2 attachment on the current connection did not negotiate the operation; nothing was sent. */
-	| 'not-negotiated';
+	| 'not-negotiated'
+	/** This process's registration does not carry the purpose the request needs (`localControl`); nothing was sent. */
+	| 'not-authorized';
 
 /**
  * How one call ended. `denied` is the endpoint's own refusal (its reason),
@@ -1173,6 +1388,14 @@ export interface EndpointPortV2 {
 	attach(req: EndpointAttachmentRequestV2): Promise<EndpointInvokeOutcome<EndpointStatusV2>>;
 	/** Whether the current connection's v2 attachment negotiated `operation`. */
 	negotiated(operation: string): boolean;
+	/**
+	 * The v2 `compatibility` probe (availability only, reachable before an
+	 * attachment): validated before a byte leaves, the answer checked to be a
+	 * protocol 2 negotiation. It records nothing on the connection.
+	 */
+	compatibility(
+		req: EndpointCompatibilityRequestV2
+	): Promise<EndpointInvokeOutcome<EndpointCompatibilityResultV2>>;
 	/** One v2 envelope out, one answer read against it. `attachment` goes through `attach()`. */
 	invoke(operation: string, payload: unknown): Promise<EndpointInvokeOutcome<unknown>>;
 	registration: {
@@ -1257,6 +1480,13 @@ export interface ManagedEnrollmentStatus {
 	/** An open registration challenge the actor must approve, with when it lapses. */
 	pendingApproval: { challengeId: string; expiresAt: string } | null;
 	lastDenial: { at: string; operation: string; reason: LocalEndpointDenialReason } | null;
+	/**
+	 * The `registration_use` reference the endpoint projected on the CURRENT
+	 * connection, with its expiry; null until one is projected, after a new
+	 * connection, and once it lapses. Read from the endpoint only, never
+	 * computed here. Absent on a host that predates protocol 2.
+	 */
+	registrationUse?: { reference: EndpointRuntimeUseReference; expiresAt: string } | null;
 }
 
 /** The custody port a host injects beside the transport. Reads only; writes stay with the enrollment lifecycle. */

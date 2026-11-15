@@ -172,8 +172,12 @@ describe('local endpoint client', () => {
 			expect(challenge.payload.nonce).toHaveLength(43);
 			expect(challenge.payload.challengeDigest).toMatch(/^[a-f0-9]{64}$/);
 		}
-		// Purpose-bound v2 only: the challenge body carries version and purpose, never the v1 shape.
-		expect(fake.calls.find((c) => c.path === '/v1/registration/challenge')?.body).toEqual({
+		// A v2 envelope (contracts 0.3.0): the challenge carries version and purpose, never the v1 shape.
+		const asked = fake
+			.callsTo('/v2/invoke')
+			.find((c) => (c.body as { operation: string }).operation === 'registration_challenge');
+		expect((asked?.body as { schemaVersion: number }).schemaVersion).toBe(2);
+		expect((asked?.body as { payload: unknown }).payload).toEqual({
 			runtimeId: 'desktop-100',
 			processEpoch: 'epoch-1',
 			version: 2,
@@ -182,7 +186,7 @@ describe('local endpoint client', () => {
 		expect(port.state().registration).toBe('challenged');
 		expect(await port.registration.redeem()).toEqual({
 			status: 'ok',
-			payload: { protocol: 1, outcome: 'registered' },
+			payload: { outcome: 'registered' },
 		});
 		expect(port.state().registration).toBe('registered');
 		expect(fake.registered()).toBe(true);
@@ -314,7 +318,7 @@ describe('local endpoint client', () => {
 		});
 		expect(await port.registration.challenge({ runtimeId: 'r', processEpoch: 'e' })).toEqual({
 			status: 'denied',
-			reason: 'unavailable',
+			reason: 'unauthenticated',
 		});
 		expect(port.state()).toMatchObject({ attached: false, registration: 'none' });
 	});

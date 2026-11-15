@@ -46,6 +46,8 @@ export interface FakeEndpointOptions {
 	now?: () => number;
 	/** A daemon that speaks only another schema version refuses every v1 envelope. */
 	schemaVersion?: number;
+	/** The envelope schema version `/v2/invoke` accepts (default 2); another answers `unsupported_version`. */
+	v2SchemaVersion?: number;
 	/** When false, `/v2/invoke` is an unknown path, as on a daemon that predates protocol 2. Default: served. */
 	v2?: boolean;
 	/** The v2 offer beyond attachment and compatibility. Default: none (no live v2 producer). */
@@ -116,6 +118,9 @@ const OPERATIONS_V2 = [
 	'workflow_settle',
 	'workflow_release',
 	'registration_use',
+	'registration_challenge',
+	'registration_redeem',
+	'localControl',
 ];
 
 export async function startFakeEndpoint(options: FakeEndpointOptions = {}): Promise<FakeEndpoint> {
@@ -342,7 +347,7 @@ export async function startFakeEndpoint(options: FakeEndpointOptions = {}): Prom
 				reply(400, deny('invalid_request'), true);
 				return;
 			}
-			if ('schemaVersion' in env && env.schemaVersion !== 2) {
+			if ('schemaVersion' in env && env.schemaVersion !== (live.v2SchemaVersion ?? 2)) {
 				reply(400, deny('unsupported_version'), true);
 				return;
 			}
@@ -375,12 +380,61 @@ export async function startFakeEndpoint(options: FakeEndpointOptions = {}): Prom
 				return;
 			}
 			ids.add(env.correlationId as string);
+			const operation = env.operation as string;
+			const payload = (env.payload ?? {}) as Record<string, unknown>;
+			// The pre-registration handshake (contracts 0.3.0): challenge and redeem are
+			// v2 envelopes on one connection, reachable before any attachment.
+			if (operation === 'registration_challenge') {
+				const keys = Object.keys(payload).sort().join(',');
+				if (
+					handshakes.has(socket) ||
+					keys !== 'processEpoch,purpose,runtimeId,version' ||
+					payload.version !== 2 ||
+					payload.purpose !== 'runtime_use' ||
+					typeof payload.runtimeId !== 'string'
+				) {
+					answer(deny('unavailable'));
+					return;
+				}
+				const handshake = {
+					challengeId: randomUUID(),
+					runtimeId: payload.runtimeId,
+					processEpoch: String(payload.processEpoch),
+				};
+				handshakes.set(socket, handshake);
+				answer({
+					challengeId: handshake.challengeId,
+					nonce: 'n'.repeat(43),
+					challengeDigest: 'c'.repeat(64),
+					version: 2,
+					purpose: 'runtime_use',
+					expiresAt: new Date((live.now?.() ?? Date.now()) + 120_000).toISOString(),
+				});
+				return;
+			}
+			if (operation === 'registration_redeem') {
+				const handshake = handshakes.get(socket);
+				handshakes.delete(socket);
+				if (!handshake || JSON.stringify(payload) !== '{}') {
+					answer(deny('unavailable'));
+					return;
+				}
+				registered = { runtimeId: handshake.runtimeId, processEpoch: handshake.processEpoch };
+				revoked = false;
+				const handler = live.operations?.registration_redeem;
+				answer(handler ? handler(payload) : { outcome: 'registered' });
+				return;
+			}
+			// Relayed enrollment reaches an unenrolled installation before any attachment.
+			if (operation === 'enrollment' && capabilitiesV2().includes('enrollment')) {
+				const handler = live.operations?.enrollment;
+				answer(handler ? handler(payload) : deny('unavailable'));
+				return;
+			}
 			if (live.registrationRequired && (!registered || revoked)) {
 				answer(deny('unauthenticated'));
 				return;
 			}
-			const operation = env.operation as string;
-			const payload = (env.payload ?? {}) as Record<string, unknown>;
 			const list = (value: unknown) =>
 				Array.isArray(value) && value.every((item) => typeof item === 'string')
 					? (value as string[])

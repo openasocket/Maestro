@@ -1,7 +1,7 @@
 /**
  * The v2 workflow lifecycle client: `workflow_claim`, `workflow_renew`,
  * `workflow_settle` and `workflow_release` over the endpoint client's
- * `/v2/invoke` path (contracts 0.2.0 protocol.js, field for field).
+ * `/v2/invoke` path (contracts 0.3.0 protocol.js, field for field).
  *
  * The envelope checks are the v2 path's own: `parseLocalEndpointResponseV2`
  * refuses an answer whose correlationId or operation is not the request's,
@@ -23,7 +23,9 @@
  * answer here is returned before anything reaches it, so it changes nothing
  * there. `endpointWorkflowV2LifecyclePort` presents the client as that
  * store's `WorkflowOwnerLifecyclePort`, so a claim result reaches held state
- * only through it. Nothing here wires the lifecycle into execution.
+ * only through it. `createEndpointWorkflowV2OwnerPort` is the port the
+ * desktop and the host adapter compose. Nothing here wires the lifecycle into
+ * execution.
  */
 
 import {
@@ -43,14 +45,15 @@ import {
 	type EndpointWorkflowSettleRequestV2,
 	type EndpointWorkflowV2Exchange,
 	type EndpointWorkflowV2Operation,
-} from '../../shared/maestro-lib/managed/endpoint-port';
+} from './endpoint-port';
 import {
 	UNISSUED_OWNER_EPOCH,
 	workflowEndpointId,
 	type WorkflowClaimInput,
 	type WorkflowOwnerLifecyclePort,
+	type WorkflowOwnerPort,
 	type WorkflowOwnerStanding,
-} from '../../shared/maestro-lib/managed/workflows';
+} from './workflows';
 
 export interface EndpointWorkflowV2Client {
 	claim(
@@ -402,5 +405,137 @@ export function endpointWorkflowV2LifecyclePort(
 				payload: flatReceipt('released', released.payload.workflowId, released.payload.owner),
 			};
 		},
+	};
+}
+
+// ---------------------------------------------------------------------------
+// The owner port a host composes over its endpoint (handoff item 3)
+// ---------------------------------------------------------------------------
+
+/** What the v2 lifecycle needs negotiated on the current connection before it is offered. */
+export const WORKFLOW_V2_LIFECYCLE_CAPABILITIES = [
+	'workflow_claim',
+	'workflow_renew',
+	'workflow_settle',
+	'workflow_release',
+] as const;
+
+export interface EndpointWorkflowV2OwnerPortDeps {
+	/** The endpoint port every caller reads right now; null while none is open. */
+	endpoint(): Pick<EndpointPort, 'v2' | 'state'> | null;
+	/**
+	 * The `registration_use` reference the endpoint projected for the CURRENT
+	 * connection; null when none is. Read from the endpoint only.
+	 */
+	registration(): EndpointWorkflowV2Authority['registration'] | null;
+	/** Passed to the lifecycle port; absent, a finished effect stays held (no evidence is fabricated). */
+	evidenceDigest?: EndpointWorkflowV2LifecycleDeps['evidenceDigest'];
+	requestedLeaseMs?: number;
+}
+
+/**
+ * The workflow owner port for `createWorkflowOwnership`, over the v2 lifecycle
+ * (`workflow_claim`, `workflow_renew`, `workflow_settle`, `workflow_release`)
+ * and off the legacy v1 `workflow` owner fence: the v1 `claim` sends nothing.
+ * The lifecycle is offered only while the attachment on the current
+ * connection negotiated all four operations and a `registration_use`
+ * reference is projected for it; the requests carry that reference, no
+ * delegation and no grants. One lifecycle port per connection (the store
+ * checks it is still the one it claimed through), aborted when the connection
+ * or the reference changes. Returns `port()` for the store's deps.
+ */
+export function createEndpointWorkflowV2OwnerPort(
+	deps: EndpointWorkflowV2OwnerPortDeps
+): () => WorkflowOwnerPort | null {
+	let held: {
+		endpoint: Pick<EndpointPort, 'v2' | 'state'>;
+		connection: number;
+		registration: string;
+		controller: AbortController;
+		port: WorkflowOwnerPort;
+	} | null = null;
+	// The legacy v1 `workflow` fence is never sent. An attachment (of either
+	// protocol) that did not negotiate the lifecycle is the endpoint's own answer
+	// that it serves no owner operation to this peer (`unsupported_capability`);
+	// anything else (no attachment, no projected reference yet) is not reachable
+	// right now.
+	const notNegotiated: WorkflowOwnerPort['claim'] = async () => ({
+		status: 'denied',
+		reason: 'unsupported_capability',
+	});
+	const notReady: WorkflowOwnerPort['claim'] = async () => ({
+		status: 'unavailable',
+		reason: 'not-negotiated',
+		message:
+			'The v2 workflow lifecycle needs an attachment that negotiated it and a registration_use reference; nothing was sent.',
+	});
+	const offered = (endpoint: Pick<EndpointPort, 'v2' | 'state'>): boolean =>
+		!!endpoint.v2 &&
+		WORKFLOW_V2_LIFECYCLE_CAPABILITIES.every((operation) => endpoint.v2!.negotiated(operation));
+	const drop = () => {
+		held?.controller.abort();
+		held = null;
+	};
+
+	return () => {
+		const endpoint = deps.endpoint();
+		if (!endpoint) {
+			drop();
+			return null;
+		}
+		const registration = deps.registration();
+		const state = endpoint.state();
+		if (state.attached && !state.closed && !offered(endpoint)) {
+			drop();
+			return { claim: notNegotiated };
+		}
+		if (!registration || state.closed || !offered(endpoint)) {
+			drop();
+			return { claim: notReady };
+		}
+		const key = JSON.stringify([registration.challengeId, registration.processEpoch]);
+		if (
+			held &&
+			held.endpoint === endpoint &&
+			held.connection === state.connection &&
+			held.registration === key
+		) {
+			return held.port;
+		}
+		drop();
+		const controller = new AbortController();
+		const connection = state.connection;
+		const current = () => {
+			const now = deps.endpoint();
+			const ref = deps.registration();
+			return (
+				now === endpoint &&
+				!endpoint.state().closed &&
+				endpoint.state().connection === connection &&
+				!!ref &&
+				JSON.stringify([ref.challengeId, ref.processEpoch]) === key &&
+				offered(endpoint)
+			);
+		};
+		const lifecycle = endpointWorkflowV2LifecyclePort(createEndpointWorkflowV2Client(endpoint), {
+			signal: controller.signal,
+			current,
+			authority: () => {
+				const ref = deps.registration();
+				return ref && current()
+					? { registration: structuredClone(ref), delegation: null, grants: [] }
+					: null;
+			},
+			...(deps.evidenceDigest ? { evidenceDigest: deps.evidenceDigest } : {}),
+			...(deps.requestedLeaseMs ? { requestedLeaseMs: deps.requestedLeaseMs } : {}),
+		});
+		held = {
+			endpoint,
+			connection,
+			registration: key,
+			controller,
+			port: { lifecycle, claim: notReady },
+		};
+		return held.port;
 	};
 }

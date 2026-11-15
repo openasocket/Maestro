@@ -8,8 +8,8 @@
  * unmanaged refusal on every write (exit 1, the outcome kept in the JSON), a
  * receipt recorded through the real client under a registered standing with
  * bodies printed only on request, no secret in any output (the enrollment
- * file's invitation and proof are relayed and never printed; a missing field
- * is named, its value never), the exit codes of an absent or older desktop and
+ * phase file is relayed with only its phase's fields, and a missing field is
+ * named, its value never), the exit codes of an absent or older desktop and
  * of one with no service, `open managed-status` and its aliases resolving the
  * registered surface, and exactly the twelve managed message types on the wire.
  */
@@ -57,7 +57,7 @@ import type {
 import { UnsupportedCommandError, withMaestroClient } from '../../../cli/services/maestro-client';
 import { MaestroNotRunningError } from '../../../cli/services/maestro-not-running';
 import {
-	ENROLLMENT_REQUEST_FIELDS,
+	ENROLLMENT_PHASE_FIELDS,
 	managedEnrollRequest,
 	managedInventory,
 	managedLocks,
@@ -155,16 +155,18 @@ const REGISTERED: InboxStanding = {
 const UNREGISTERED: InboxStanding = { standingKey: 'k0', ok: false, reason: NO_ENROLLMENT };
 
 const ENROLL = {
+	phase: 'request',
 	socketPath: '/run/endpoint/runtime.sock',
-	tenantId: 'tenant-1',
+	management: {
+		origin: 'https://mega.example',
+		tenantId: '1b4e28ba-2fa1-4d3b-a3f5-ef19b5a7633b',
+		issuerSha256: 'a'.repeat(64),
+	},
 	orgId: 'org-1',
-	mode: 'attended',
-	collectionProfile: 'metadata',
-	trustRootDigest: 'a'.repeat(64),
-	invitation: 'invite-secret-value',
-	keyPossessionProof: 'proof-secret-value',
+	serverCaPem: '-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n',
 };
-const SECRETS = [ENROLL.invitation, ENROLL.keyPossessionProof];
+/** Never relayed and never printed: a field no phase carries. */
+const SECRETS = ['invite-secret-value', 'key-secret-value'];
 
 /** A doubled endpoint inbox port under a mutable standing; every act it receives is kept. */
 function inboxDouble() {
@@ -450,9 +452,12 @@ describe('maestro-cli managed over the real bridge and facade (MRC2-07-08)', () 
 			message: 'This installation is enrolled already.',
 		});
 		const file = path.join(tmp, 'request.json');
-		fs.writeFileSync(file, JSON.stringify(ENROLL));
+		fs.writeFileSync(
+			file,
+			JSON.stringify({ ...ENROLL, invitation: SECRETS[0], privateKeyPem: SECRETS[1] })
+		);
 		const relayed = await run(() =>
-			managedEnrollRequest({ file, json: true, tenant: 'tenant-2', profile: 'full' })
+			managedEnrollRequest({ file, json: true, socket: '/run/endpoint/other.sock' })
 		);
 		expect(relayed.code).toBe(1);
 		expect(json(relayed.out)).toEqual({
@@ -463,41 +468,48 @@ describe('maestro-cli managed over the real bridge and facade (MRC2-07-08)', () 
 				message: 'This installation is enrolled already.',
 			},
 		});
-		// The request reached the lifecycle whole, the flags over the file's non-secret fields.
+		// Only the phase's own fields reached the lifecycle, the flag over the file's socket.
 		expect(lifecycle.requestEnrollment).toHaveBeenCalledWith({
 			...ENROLL,
-			tenantId: 'tenant-2',
-			collectionProfile: 'full',
+			socketPath: '/run/endpoint/other.sock',
 		});
 		expect(sent.at(-1)).toEqual({
 			type: 'managed_enroll_request',
-			request: { ...ENROLL, tenantId: 'tenant-2', collectionProfile: 'full' },
+			request: { ...ENROLL, socketPath: '/run/endpoint/other.sock' },
 		});
 		const human = await run(() => managedEnrollRequest({ file }));
 		expect(human.code).toBe(1);
 		expect(human.err).toContain('refused (already-enrolled)');
 		for (const secret of SECRETS) {
+			expect(JSON.stringify(sent)).not.toContain(secret);
 			expect(relayed.out + relayed.err).not.toContain(secret);
 			expect(human.out + human.err).not.toContain(secret);
 		}
 
 		const short = path.join(tmp, 'short.json');
-		const { invitation: _i, keyPossessionProof: _p, ...rest } = ENROLL;
+		const { serverCaPem: _pem, orgId: _org, ...rest } = ENROLL;
 		fs.writeFileSync(short, JSON.stringify(rest));
 		const missing = await run(() => managedEnrollRequest({ file: short, json: true }));
 		expect(missing.code).toBe(1);
 		expect(json(missing.out)).toEqual({
 			success: false,
-			error: 'The enrollment request is missing: invitation, keyPossessionProof.',
+			error: 'The request phase is missing: orgId, serverCaPem.',
+		});
+		const noPhase = await run(() =>
+			managedEnrollRequest({ file: short, json: true, phase: 'enroll' })
+		);
+		expect(json(noPhase.out)).toMatchObject({
+			success: false,
+			error: expect.stringContaining('phase'),
 		});
 		const broken = path.join(tmp, 'broken.json');
-		fs.writeFileSync(broken, `{ "invitation": "${ENROLL.invitation}", `);
+		fs.writeFileSync(broken, `{ "invitation": "${SECRETS[0]}", `);
 		const notJson = await run(() => managedEnrollRequest({ file: broken }));
 		expect(notJson.code).toBe(1);
 		expect(notJson.err).toContain(
 			'Could not read the enrollment request file: it is not valid JSON.'
 		);
-		expect(notJson.err).not.toContain(ENROLL.invitation);
+		expect(notJson.err).not.toContain(SECRETS[0]);
 		const absent = await run(() =>
 			managedEnrollRequest({ file: path.join(tmp, 'none.json'), json: true })
 		);
@@ -506,7 +518,9 @@ describe('maestro-cli managed over the real bridge and facade (MRC2-07-08)', () 
 			error: 'Could not read the enrollment request file: ENOENT.',
 		});
 		expect(lifecycle.requestEnrollment).toHaveBeenCalledTimes(2);
-		expect(ENROLLMENT_REQUEST_FIELDS).toEqual(Object.keys(ENROLL));
+		expect(ENROLLMENT_PHASE_FIELDS.request).toEqual(
+			Object.keys(ENROLL).filter((key) => key !== 'phase')
+		);
 	});
 
 	it('maps an absent desktop to exit 3, an older one to exit 4 and one with no service to exit 1', async () => {

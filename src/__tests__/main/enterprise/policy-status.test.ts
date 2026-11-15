@@ -120,7 +120,11 @@ describe('policy status service', () => {
 			status: 'ok',
 			record: { policy: { desiredRevision: 5 } },
 		});
-		expect(fake.calls.filter((c) => c.path === '/v1/registration/challenge')).toHaveLength(1);
+		expect(
+			fake.calls.filter(
+				(c) => (c.body as { operation?: string }).operation === 'registration_challenge'
+			)
+		).toHaveLength(1);
 	});
 
 	it('keeps the installed policy and denies admission when the observation goes stale or the endpoint is lost', async () => {

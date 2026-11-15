@@ -2,15 +2,15 @@
  * The registration bootstrap over the real client, the fake daemon and an
  * identity store with injected custody. What is defended: the registration
  * record carries the approval's challenge digest, not the challenge id; the
- * v2 `registration_use` lookup sends nothing unless the v2 attachment the
- * lifecycle made on its own connection negotiated it; a projected reference writes `enrollmentId` and
+ * v2 `registration_use` lookup sends nothing unless the one v2 attachment
+ * negotiated it, and the attachment itself asks for it when it did (the
+ * production caller); a projected reference writes `enrollmentId` and
  * `processBirthDigest` and keeps the rest of the registration; a denied or
  * malformed reply writes nothing; and a `processBirthDigest` that is not 64
  * lowercase hex is refused.
  *
  * The daemon is a double (`fakeEndpoint.ts`); no OS peer is authenticated and
- * nothing here is paired enforcement. Mega serves `registration_use` in its
- * phase 01; the 0.2.0 pinned contract does not list it.
+ * nothing here is paired enforcement.
  */
 
 import * as fs from 'node:fs';
@@ -45,15 +45,6 @@ const INSTALLATION = {
 const SERVES_ENROLLMENT: FakeEndpointOptions = {
 	capabilities: ['enrollment', 'telemetry'],
 };
-const ENROLL_INPUT = {
-	tenantId: 'tenant-1',
-	orgId: 'org-1',
-	mode: 'attended' as const,
-	invitation: 'invite-token',
-	collectionProfile: 'metadata' as const,
-	trustRootDigest: 'a'.repeat(64),
-	keyPossessionProof: 'proof-from-endpoint-tooling',
-};
 const ENROLLMENT_ID = '7f1c2a4e-5b6d-4e8f-9a0b-1c2d3e4f5a6b';
 const BIRTH_DIGEST = 'b'.repeat(64);
 
@@ -77,7 +68,7 @@ function reference(overrides: Record<string, unknown> = {}) {
 const projected = (overrides: Record<string, unknown> = {}) => ({
 	outcome: 'projected',
 	reference: reference(overrides),
-	expiresAt: '2026-11-13T12:00:00.000Z',
+	expiresAt: '2099-11-13T12:00:00.000Z',
 });
 
 describe('registration bootstrap', () => {
@@ -87,13 +78,11 @@ describe('registration bootstrap', () => {
 	const open: FakeEndpoint[] = [];
 	const lifecycles: EnrollmentLifecycle[] = [];
 	let ports: EndpointPort[];
-	let v2Ports: EndpointPort[];
 
 	beforeEach(() => {
 		dir = fs.mkdtempSync(path.join(os.tmpdir(), 'registration-use-'));
 		holder = { value: null };
 		ports = [];
-		v2Ports = [];
 		identity = createEnterpriseIdentityStore({
 			file: path.join(dir, 'enterprise-identity.bin'),
 			seal: fakeSeal(),
@@ -123,35 +112,22 @@ describe('registration bootstrap', () => {
 			installation: INSTALLATION,
 			components: [{ id: 'maestro', kind: 'maestro', version: '1.1.0-RC' }],
 			capabilities: { supported: ['attachment', 'compatibility', 'enrollment'], required: [] },
-			v2: {
-				openPort: (socketPath) => {
-					const port = createLocalEndpointClient({ socketPath, timeoutMs: 1_000 });
-					v2Ports.push(port);
-					return port;
-				},
-				supported: ENTERPRISE_SUPPORTED_CAPABILITIES_V2,
-			},
+			v2: { supported: ENTERPRISE_SUPPORTED_CAPABILITIES_V2 },
 		});
 		lifecycles.push(created);
 		return created;
 	}
 
-	/** Enroll, then challenge and redeem, so the record holds a registration. */
+	/** An enrolled record, then challenge and redeem, so the record holds a registration. */
 	async function enrolledAndRegistered(fake: FakeEndpoint) {
 		const life = lifecycle();
-		fake.options.operations = {
-			...fake.options.operations,
-			enrollment: () => ({ outcome: 'enrollment_pending', enrollmentId: 'enr-1' }),
-		};
-		const enrolled = await life.requestEnrollment({ ...ENROLL_INPUT, socketPath: fake.socketPath });
-		expect(enrolled.status).toBe('ok');
+		await identity.write(enrolledRecord(fake.socketPath));
 		const begun = await life.beginRegistration();
 		expect(begun.status).toBe('ok');
 		expect((await life.completeRegistration()).status).toBe('ok');
+		// One connection: the handshake, the attachment and every operation after it.
 		expect(ports).toHaveLength(1);
-		// One v2 connection, reused by both attachments (the enrollment's and the registration's).
-		expect(v2Ports).toHaveLength(1);
-		return { life, port: ports[0], v2Port: v2Ports[0] };
+		return { life, port: ports[0] };
 	}
 
 	function record() {
@@ -169,12 +145,7 @@ describe('registration bootstrap', () => {
 	it('stores the approval challenge digest, not the challenge id, on the registration record', async () => {
 		const fake = await endpoint(SERVES_ENROLLMENT);
 		const life = lifecycle();
-		fake.options.operations = {
-			enrollment: () => ({ outcome: 'enrollment_pending', enrollmentId: 'enr-1' }),
-		};
-		expect(
-			(await life.requestEnrollment({ ...ENROLL_INPUT, socketPath: fake.socketPath })).status
-		).toBe('ok');
+		await identity.write(enrolledRecord(fake.socketPath));
 		const begun = await life.beginRegistration();
 		expect(begun.status).toBe('ok');
 		if (begun.status !== 'ok') return;
@@ -195,19 +166,21 @@ describe('registration bootstrap', () => {
 
 	it('returns not-negotiated and sends nothing when the v2 attachment did not negotiate registration_use', async () => {
 		const fake = await endpoint({ ...SERVES_ENROLLMENT, v2Capabilities: [] });
-		const { life, port, v2Port } = await enrolledAndRegistered(fake);
+		const { life, port } = await enrolledAndRegistered(fake);
 		const before = record();
+		const handshake = ['registration_challenge', 'registration_redeem', 'attachment'];
+		expect(v2Calls(fake)).toEqual(handshake);
 
-		// No v2 attachment at all on the v1 connection.
-		const direct = await port.v2!.registration.use();
-		expect(direct).toMatchObject({ status: 'unavailable', reason: 'not-negotiated' });
-		expect(v2Calls(fake)).toEqual(['attachment', 'attachment']);
-
-		// The lifecycle's v2 attachment, which the endpoint answered without selecting it.
-		expect(v2Port.v2!.negotiated('registration_use')).toBe(false);
+		// The one v2 attachment, which the endpoint answered without selecting it.
+		expect(port.v2!.negotiated('registration_use')).toBe(false);
+		expect(await port.v2!.registration.use()).toMatchObject({
+			status: 'unavailable',
+			reason: 'not-negotiated',
+		});
 		const outcome = await life.useRegistration();
 		expect(outcome).toMatchObject({ status: 'unavailable', reason: 'not-negotiated' });
-		expect(v2Calls(fake)).toEqual(['attachment', 'attachment']);
+		expect(life.status().registrationUse).toBeNull();
+		expect(v2Calls(fake)).toEqual(handshake);
 		expect(record()).toEqual(before);
 	});
 
@@ -224,6 +197,16 @@ describe('registration bootstrap', () => {
 			},
 		});
 		const { life } = await enrolledAndRegistered(fake);
+		// The attachment asked for the reference itself: the production caller.
+		expect(v2Calls(fake)).toEqual([
+			'registration_challenge',
+			'registration_redeem',
+			'attachment',
+			'registration_use',
+		]);
+		expect(life.status().registrationUse).toMatchObject({
+			reference: { enrollmentId: ENROLLMENT_ID, processBirthDigest: BIRTH_DIGEST },
+		});
 		const before = record();
 
 		const outcome = await life.useRegistration();
@@ -233,11 +216,11 @@ describe('registration bootstrap', () => {
 				outcome: 'projected',
 				enrollmentId: ENROLLMENT_ID,
 				processBirthDigest: BIRTH_DIGEST,
-				expiresAt: '2026-11-13T12:00:00.000Z',
+				expiresAt: '2099-11-13T12:00:00.000Z',
 			},
 		});
 		expect(received).toEqual({});
-		expect(v2Calls(fake)).toEqual(['attachment', 'attachment', 'registration_use']);
+		expect(v2Calls(fake).slice(-2)).toEqual(['registration_use', 'registration_use']);
 
 		const after = record();
 		expect(after.enrollmentId).toBe(ENROLLMENT_ID);
@@ -335,3 +318,17 @@ describe('registration bootstrap', () => {
 		});
 	});
 });
+
+function enrolledRecord(socketPath: string) {
+	return {
+		installationId: INSTALLATION.installationId,
+		tenantId: 'tenant-1',
+		orgId: 'org-1',
+		enrollmentId: 'enr-1',
+		endpoint: { socketPath, bindingDigest: 'a'.repeat(64), trustRootDigest: 'a'.repeat(64) },
+		management: 'enrolled' as const,
+		registration: null,
+		policy: { desiredRevision: null, appliedRevision: null, observedAt: null },
+		enrolledAt: '2026-10-21T12:00:00.000Z',
+	};
+}

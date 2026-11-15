@@ -808,6 +808,7 @@ describe('full pair: fleet evidence, usage, VIBES, TRACE, governance, commands a
 		fake = await startFakeEndpoint({
 			registrationRequired: true,
 			capabilities: ['execution', 'telemetry', 'inbox', 'noticeList'],
+			v2Capabilities: ['telemetry', 'inbox', 'noticeList'],
 			status: { collectionProfile: 'full_vibes' },
 			now,
 			operations: {
@@ -1165,13 +1166,15 @@ describe('full pair: fleet evidence, usage, VIBES, TRACE, governance, commands a
 		expect(contentDeliveryStanding().available).toBe(false);
 		// Nothing on the wire installed, carried or delivered content: the handshake, attachments, notices and inbox so far; the launch was the producer's, so no execution request left.
 		const handshake = [
-			'/v1/registration/challenge',
-			'/v1/registration/redeem',
+			'registration_challenge',
+			'registration_redeem',
 			'attachment',
 			'noticeList',
 			'inbox',
 		];
 		expect(wireOperations()).toEqual(new Set(handshake));
+		// One protocol 2 connection: nothing went to v1.
+		expect(fake.callsTo('/v1/invoke')).toEqual([]);
 	});
 
 	it('fleet evidence: the run ends under a host revocation and settles its usage as estimated; the pump hands every runtime-family event to the double once under the contract and withholds the inventory by family; canaries stay off the wire and the prompt out of the journal; a resend is a duplicate and another boot is refused', async () => {
@@ -1404,8 +1407,8 @@ describe('full pair: fleet evidence, usage, VIBES, TRACE, governance, commands a
 		const secrets = [process.execPath, dir, 'setInterval', 'synthetic', 'CANARY', 'run-a', 'run-c'];
 		for (const secret of secrets) expect(facts).not.toContain(secret);
 
-		// refresh_policy: one more v1 attachment on the wire, the registration kept. The
-		// lifecycle's v2 attachment runs on its own connection first, so /v2/invoke sees one too.
+		// refresh_policy: one more attachment on the wire, the registration kept. It is a
+		// protocol 2 attachment on the one connection; nothing goes to /v1/invoke.
 		const attachmentsOn = (target: string) =>
 			operations('attachment').filter((call) => call.path === target).length;
 		const attachments = attachmentsOn('/v1/invoke');
@@ -1418,7 +1421,8 @@ describe('full pair: fleet evidence, usage, VIBES, TRACE, governance, commands a
 			status: 'completed',
 			commandId: 'cmd-refresh-policy',
 		});
-		expect(attachmentsOn('/v1/invoke')).toBe(attachments + 1);
+		expect(attachmentsOn('/v1/invoke')).toBe(attachments);
+		expect(attachments).toBe(0);
 		expect(attachmentsOn('/v2/invoke')).toBe(attachmentsV2 + 1);
 		expect(service.lifecycle.status().authority).toBe('registered');
 		for (const kind of ['pause-run', 'resume-run'] as const) {
