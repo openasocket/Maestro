@@ -15,18 +15,18 @@
 	},
 	"archive": {
 		"name": "@mega-maestro/contracts",
-		"version": "0.2.0",
+		"version": "0.3.0",
 		"sourceDirty": false,
-		"path": "artifacts/enterprise/0.2.0/7b292e89321d0a526491c3a9a597ab7cfb84cbffed2b1f9662d5917b093137b7/contracts.tgz",
+		"path": "artifacts/enterprise/0.3.0/71c8aa927803c3facd4be5be6322125b468e1e4754c6f512ec49b119096b6a25/contracts.tgz",
 		"manifest": "artifact.json",
-		"manifestSha256": "6f2579ce56b4490cf7ee1c5f396f657dc221c9ab3bb69a20754f08e1139488b5",
+		"manifestSha256": "e31cbe35e9d9fbbfa05411d3a272516c6f60770565ccb299f28b5f10a38de2c8",
 		"sidecar": "contracts.tgz.sha256",
-		"sha256": "7b292e89321d0a526491c3a9a597ab7cfb84cbffed2b1f9662d5917b093137b7",
-		"integrity": "sha512-eE0TeYrCdE3+dnbqMW4AxYstbW8puNwGnMgSFw7lYqrSehbf14mThMB5Pzow1S3prwfizYA1MTF+E07XaXiTnQ==",
+		"sha256": "71c8aa927803c3facd4be5be6322125b468e1e4754c6f512ec49b119096b6a25",
+		"integrity": "sha512-zXk5U5tZnOfQQsx1A69W3JgDeqlwH+qFMUzOPFsY5O71saJWdk2WIaxIo+GxBC7MwhkP4x2IfaM6pWePBKKqqQ==",
 		"payloadFiles": 48,
-		"publisherPayloadDigest": "f58501db60494d5be9cc0a515a3024f27bcd64e9aea3683d280b858bd201a316",
+		"publisherPayloadDigest": "b7f5eb7dab121a50766be826983afa448ed3ef8be3579d32115a8b22e3fa08da",
 		"publisherPayloadDigestEncoding": "sha256(canonical JSON payloadSha256 map)",
-		"importerPayloadDigest": "14a29a3f8ac5bb86b30163cb8781d4fc87ad6f773e9d4ac57bc68036c11b127c",
+		"importerPayloadDigest": "eefc555c21f32b926ad493414e9b581a1713e945eb96e102b9824d11b573fd09",
 		"importerPayloadDigestEncoding": "sha256(JSON sorted payloadSha256 entry pairs)",
 		"pin": "vendor/mega-maestro/contracts.pin.json",
 		"extractedPackage": "vendor/mega-maestro/contracts"
@@ -337,7 +337,7 @@
 				"behavior": "Pre-release, no v1 fallback. The runtime challenge (endpoint-client.ts registration.challenge) always sends {runtimeId, processEpoch, version: 2, purpose: runtime_use} (constants in endpoint-port.ts). The approval bridge (scripts/mega-maestro-pair.mjs createActorApprovalBridge) accepts only the v2 challenge and forwards challengeId, nonce, challengeDigest, version and purpose unchanged. v1-shaped or incomplete challenges are refused.",
 				"tests": "endpoint-client.test.ts (challenge body asserted), approval-bridge.test.ts (v2 runtime_use and fleet_management approved; v1 and incomplete shapes refused). 766 tests across src/__tests__/integration/mega-maestro and src/__tests__/main/enterprise pass, against the fake endpoint and fake approval service only.",
 				"advertised": false,
-				"note": "Consumer-side only. Still not advertised. Vendored pin is now contracts 0.2.0 (7b292e89). The runtime archive that carries this change is not yet rebuilt. Status stays proposed-not-negotiated until the Mega-side journey and live qualification succeed."
+				"note": "Consumer-side only. Still not advertised. Vendored pin is now contracts 0.3.0 (71c8aa92). The runtime archive that carries this change is not yet rebuilt. Status stays proposed-not-negotiated until the Mega-side journey and live qualification succeed."
 			},
 			"implementationTasks": ["MCOMP-07-01", "MCOMP-13-01"],
 			"pairedVerification": ["MCOMP-14-01"]

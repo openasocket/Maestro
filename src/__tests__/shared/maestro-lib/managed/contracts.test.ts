@@ -123,7 +123,7 @@ function makeArtifact(dir: string, mutate?: (parts: ArtifactParts) => void, foun
 		payload,
 		pkg: {
 			name: '@mega-maestro/contracts',
-			version: '0.2.0',
+			version: '0.3.0',
 			private: true,
 			type: 'module',
 			files: ['dist', 'provenance.json'],
@@ -140,7 +140,7 @@ function makeArtifact(dir: string, mutate?: (parts: ArtifactParts) => void, foun
 		provenance: {
 			formatVersion: 1,
 			name: '@mega-maestro/contracts',
-			version: '0.2.0',
+			version: '0.3.0',
 			sourceRevision: 'a'.repeat(40),
 			sourceDirty: false,
 			inputSha256: { 'package.json': sha256('workspace') },
@@ -254,7 +254,7 @@ describe('import-mega-maestro verifyArtifact', () => {
 			inputSetVersion: 1,
 			inputDigest: 'b'.repeat(64),
 			endpointProtocols: [1, 2],
-			acceptedEndpointProtocols: [1],
+			acceptedEndpointProtocols: [1, 2],
 			contractSchemas: { authority: 'schemas-only', localProtocols: [1, 2], desktopPolicy: 1 },
 		});
 	});
@@ -322,7 +322,13 @@ describe('import-mega-maestro verifyArtifact', () => {
 			setPayload(p, 'dist/protocol.d.ts', ENDPOINT_DTS(2));
 			(p.provenance.contractSchemas as { localProtocols: number[] }).localProtocols = [2];
 		}, true);
-		expect(refusal(onlyV2)).toBe('protocol');
+		expect(refusal(onlyV2)).toBe('accepted');
+		const onlyV3 = fixture((p) => {
+			setPayload(p, 'dist/local-endpoint.d.ts', ENDPOINT_DTS(3));
+			setPayload(p, 'dist/protocol.d.ts', ENDPOINT_DTS(3));
+			(p.provenance.contractSchemas as { localProtocols: number[] }).localProtocols = [3];
+		}, true);
+		expect(refusal(onlyV3)).toBe('protocol');
 	});
 
 	it('accepts a consistent artifact and records what was verified', () => {
@@ -334,7 +340,7 @@ describe('import-mega-maestro verifyArtifact', () => {
 		});
 		expect(record).toMatchObject({
 			name: '@mega-maestro/contracts',
-			version: '0.2.0',
+			version: '0.3.0',
 			sha256: artifact.sha256,
 			sourceDirty: false,
 			endpointProtocols: [1],
@@ -417,14 +423,14 @@ describe('import-mega-maestro verifyArtifact', () => {
 
 	it('refuses package versions, names and formats Maestro was not written against', () => {
 		const versionOut = fixture((p) => {
-			p.provenance.version = '0.3.0';
-			p.pkg.version = '0.3.0';
+			p.provenance.version = '0.4.0';
+			p.pkg.version = '0.4.0';
 		});
 		expect(refusal(versionOut)).toBe('manifest-version');
-		// Pre-release contract: only the version this pin names is accepted, so the prior 0.1.0 is refused too.
+		// Pre-release contract: only the version this pin names is accepted, so the prior 0.2.0 is refused too.
 		const priorVersion = fixture((p) => {
-			p.provenance.version = '0.1.0';
-			p.pkg.version = '0.1.0';
+			p.provenance.version = '0.2.0';
+			p.pkg.version = '0.2.0';
 		});
 		expect(refusal(priorVersion)).toBe('manifest-version');
 		expect(refusal(fixture((p) => (p.provenance.name = '@other/contracts')))).toBe('manifest-name');
@@ -453,8 +459,8 @@ describe('import-mega-maestro verifyArtifact', () => {
 	it('refuses an endpoint protocol it does not speak, read from declarations only', () => {
 		expect(importer.declaredEndpointProtocols(ENDPOINT_DTS(1))).toEqual([1]);
 		expect(importer.declaredEndpointProtocols('nothing here')).toEqual([]);
-		const protocol2 = fixture((p) => setPayload(p, 'dist/local-endpoint.d.ts', ENDPOINT_DTS(2)));
-		expect(refusal(protocol2)).toBe('protocol');
+		const protocol3 = fixture((p) => setPayload(p, 'dist/local-endpoint.d.ts', ENDPOINT_DTS(3)));
+		expect(refusal(protocol3)).toBe('protocol');
 	});
 
 	it('refuses a dirty-source build unless told to, and keeps the flag either way', () => {
@@ -671,7 +677,7 @@ describe('negotiateCompatibility', () => {
 		const outcome = negotiateCompatibility(profile, {
 			library: '>=9.0.0',
 			contractVersions: ['maestro-managed/0'],
-			endpointProtocols: [2, 3],
+			endpointProtocols: [3, 4],
 			transport: 'os-peer',
 			providers: ['grok'],
 			required: ['capabilities.negotiate', 'nope' as never],

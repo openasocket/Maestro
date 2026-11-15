@@ -245,7 +245,7 @@ export function applyCounterpartDenial<K extends string>(
 }
 
 /** The endpoint wire protocols this build accepts. Mirrors the importer's ACCEPTED_ENDPOINT_PROTOCOLS. */
-export const MANAGED_ENDPOINT_PROTOCOLS: readonly number[] = [1];
+export const MANAGED_ENDPOINT_PROTOCOLS: readonly number[] = [1, 2];
 
 /**
  * This build's own managed capability support. Negotiation was the only
