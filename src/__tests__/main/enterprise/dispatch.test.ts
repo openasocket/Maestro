@@ -219,7 +219,7 @@ describe('broker dispatch bridge', () => {
 							},
 						},
 		});
-		// Test-only prepared producer. The real v1 client has no such port.
+		// Test-only prepared producer. The real endpoint client has no such port.
 		Object.defineProperty(port, 'preparedExecution', {
 			configurable: true,
 			value: { ...prepared, version: 1 },

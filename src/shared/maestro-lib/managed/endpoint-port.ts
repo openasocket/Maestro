@@ -50,7 +50,7 @@ export const LOCAL_ENDPOINT_INVOKE_PATH = '/v2/invoke';
  */
 export const LOCAL_ENDPOINT_REGISTRATION_CHALLENGE_OPERATION = 'registration_challenge' as const;
 export const LOCAL_ENDPOINT_REGISTRATION_REDEEM_OPERATION = 'registration_redeem' as const;
-/** Pre-release contract: registration is purpose-bound v2 only, with no v1 fallback. */
+/** Pre-release contract: registration is purpose-bound, version 2 and nothing else. */
 export const LOCAL_ENDPOINT_REGISTRATION_VERSION = 2 as const;
 export const LOCAL_ENDPOINT_REGISTRATION_PURPOSE = 'runtime_use' as const;
 export const LOCAL_ENDPOINT_MAX_REQUEST_BYTES = 1024 * 1024;
@@ -388,7 +388,7 @@ export type EndpointWorkflowOperation = (typeof LOCAL_ENDPOINT_WORKFLOW_OPERATIO
 
 /**
  * The contract's `workflowOwnerReference`. `ownerEpoch` is an opaque
- * identifier string in v2, never v1's numeric epoch. A claim never sends one;
+ * identifier string, never a number. A claim never sends one;
  * the producer returns it, and renew, settle and release echo it.
  */
 export interface EndpointWorkflowOwner {
@@ -841,8 +841,8 @@ export interface EndpointOperationExchange {
  * **passing** row of Mega's endpoint v2 parity matrix
  * (`docs/evidence/endpoint-v2/parity-matrix.md`, FINISH-08-06, observed at
  * Mega `dd9a42b0`), plus `execution` (Mega FINISH-10, handoff item 10),
- * whose only client is `createEndpointExecutionClient` in `./execution`;
- * no v1 caller moves onto it. Selection is not an offer: an operation is
+ * whose only client is `createEndpointExecutionClient` in `./execution`.
+ * Selection is not an offer: an operation is
  * still sent only when the attachment on the current connection negotiated
  * it, and otherwise nothing is sent, so `execution` stays unused until a peer
  * offers it. `src/main/enterprise/endpoint-ops.ts` re-exports it; this is

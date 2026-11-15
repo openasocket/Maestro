@@ -396,8 +396,8 @@ export interface CommandLedgerRecord {
 	detail: string | null;
 	/**
 	 * The v2 delivery that first carried the command (MCOMP-29-01): the envelope digest a later
-	 * delivery must repeat, and the registration challenge it was addressed to. Null for a v1 or
-	 * local command; absent on a record an earlier build wrote, read as null.
+	 * delivery must repeat, and the registration challenge it was addressed to. Null for a local
+	 * command; absent on a record an earlier build wrote, read as null.
 	 */
 	delivery?: CommandDelivery | null;
 }
@@ -455,8 +455,8 @@ const DEFAULT_MAX_COMMANDS = 2_000;
 
 /**
  * Whether a second sight of an id is the same command: the same payload and, when either sight
- * came as a v2 delivery, the same whole envelope. A re-signed envelope or a v1 sight of a v2 id
- * (or the reverse) consumed nothing new and answers as a replay.
+ * came as a signed delivery, the same whole envelope. A re-signed envelope, or a local sight of a
+ * delivered id (or the reverse), consumed nothing new and answers as a replay.
  */
 export function sameDelivery(
 	record: CommandLedgerRecord,
@@ -875,7 +875,7 @@ export function createCommandExecutor(deps: CommandExecutorDeps): CommandExecuto
  * unchanged plus its correlation. Parsing here checks shape and the registration it addresses; it
  * never verifies the signature or the envelope digest (the endpoint port does, before delivery),
  * and nothing in it is authority. Only `pause_run`, `resume_run`, `cancel_run` and
- * `operator_prompt` travel this way: status and refresh stay v1 socket actions.
+ * `operator_prompt` travel this way: status and refresh are `localControl` selectors.
  */
 export interface CommandCorrelationV2 {
 	registration: {

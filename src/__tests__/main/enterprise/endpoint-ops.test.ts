@@ -46,7 +46,7 @@ const REQUESTS: Record<EndpointOperationClient, unknown> = {
 	inbox: {
 		campaignId: 'campaign-1',
 		messageId: 'message-1',
-		idempotencyKey: 'idem-from-v1-ledger',
+		idempotencyKey: 'idem-from-ledger',
 		action: 'delivered',
 	},
 	telemetry: { eventId: 'event-1' },
@@ -264,7 +264,7 @@ describe('createEndpointOperationsClient', () => {
 	it('carries the inbox idempotencyKey unchanged', async () => {
 		const { port, invoke } = fakePort(['inbox']);
 		await callOp(runtimeClient(port), 'inbox');
-		expect(invoke.mock.calls[0][1]).toMatchObject({ idempotencyKey: 'idem-from-v1-ledger' });
+		expect(invoke.mock.calls[0][1]).toMatchObject({ idempotencyKey: 'idem-from-ledger' });
 	});
 
 	it('passes a refusal through unchanged', async () => {
@@ -365,6 +365,6 @@ describe('the callers over the real client and a fake daemon', () => {
 				payload: EVENT,
 			},
 		]);
-		expect(INBOX).toMatchObject({ idempotencyKey: 'idem-from-v1-ledger' });
+		expect(INBOX).toMatchObject({ idempotencyKey: 'idem-from-ledger' });
 	});
 });

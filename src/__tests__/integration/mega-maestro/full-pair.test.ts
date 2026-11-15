@@ -117,7 +117,7 @@ const stepsOf = (run: JourneyRun, id: string) =>
 const outcomeOf = (run: JourneyRun, id: string, step: string) =>
 	run.journeys.find((j) => j.id === id)!.steps.find((s) => s.name === step)?.outcome;
 
-/** The actor a declared producer is bound to: v1 registration carries none (CP-01/CP-04), so the test supplies it. */
+/** The actor a declared producer is bound to: the registration carries none (CP-01/CP-04), so the test supplies it. */
 const PAIR_ACTOR = 'actor-pair';
 
 /**
@@ -1170,7 +1170,6 @@ describe('full pair: fleet evidence, usage, VIBES, TRACE, governance, commands a
 			'inbox',
 		];
 		expect(wireOperations()).toEqual(new Set(handshake));
-		// One protocol 2 connection: nothing went to v1.
 	});
 
 	it('fleet evidence: the run ends under a host revocation and settles its usage as estimated; the pump hands every runtime-family event to the double once under the contract and withholds the inventory by family; canaries stay off the wire and the prompt out of the journal; a resend is a duplicate and another boot is refused', async () => {

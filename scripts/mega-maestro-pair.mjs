@@ -134,7 +134,7 @@ export async function createActorApprovalBridge({ browser, origin, timeoutMs = 3
 		import(pathToFileURL(path.join(contractsDir, 'dist/http-operations.js')).href),
 	]);
 	// Pre-release contract: only the purpose-bound v2 registration (runtimeApprovalInputV2, with
-	// version 2 and purpose). There is no v1 fallback and no backward compatibility.
+	// version 2 and purpose), and nothing else.
 	const expiresAt = wire.runtimeChallengeView.shape.expiresAt;
 	const challengeSchema = wire.runtimeApprovalInputV2.extend({ expiresAt });
 	let used = false;

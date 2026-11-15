@@ -1,8 +1,8 @@
 /**
  * The production attachment is ONE protocol 2 connection (handoff item 1,
  * contracts 0.3.0): the registration handshake (challenge, redeem), the v2
- * attachment and every operation after it share a socket, and no v1 envelope
- * is sent on any other path. The endpoint holds one protocol per socket session.
+ * attachment and every operation after it share a socket, and nothing is sent
+ * on any other path. The endpoint holds one protocol per socket session.
  *
  * What is defended: the attachment offers `registration_use`, the four
  * workflow custody verbs and the selected operations, with nothing required;
@@ -210,7 +210,7 @@ describe('production attachment: one protocol 2 connection', () => {
 		['serves no /v2/invoke path', { v2: false }],
 		['offers no protocol 2 (unsupported_version)', { offered: false }],
 	])(
-		'an endpoint that %s is reported, and nothing is retried on v1',
+		'an endpoint that %s is reported, and nothing is retried',
 		async (_label, options: FakeEndpointOptions) => {
 			const fake = await endpoint(options);
 			const life = await lifecycle(fake.socketPath);

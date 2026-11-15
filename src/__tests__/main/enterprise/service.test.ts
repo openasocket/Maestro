@@ -148,8 +148,8 @@ describe('enterprise service', () => {
 			service = compose(undefined, {
 				effectProducer,
 				openPort: (socketPath) => {
-					// The first port is the v1 one the host reads; the v2 attachment opens its
-					// own connection after it, which is never the host's port.
+					// The first port opened is the host's; any later open is a separate
+					// connection, which is never the host's port.
 					const opened = createLocalEndpointClient({ socketPath, timeoutMs: 1_000 });
 					currentPort ??= opened;
 					if (opened !== currentPort) return opened;
@@ -166,7 +166,7 @@ describe('enterprise service', () => {
 				},
 			});
 			await register(service, recovered);
-			// V1 registration has no actor binding. Supply one only in this declared
+			// The registration has no actor binding. Supply one only in this declared
 			// local custody fixture; the production service must never manufacture it.
 			const enrolled = service.identity.read();
 			if (enrolled.status !== 'ok' || !enrolled.record.registration)
@@ -579,10 +579,6 @@ describe('enterprise service', () => {
 			runId: 'run-1',
 			attemptId: 'att-1',
 		});
-		// No legacy v1 owner fence was ever sent.
-		expect(
-			fake.calls.filter((c) => (c.body as { operation?: string }).operation === 'workflow')
-		).toEqual([]);
 		expect(service.workflows.fence(WORKFLOW)).toMatchObject({
 			ownerId: service.installation.installationId,
 			ownerEpoch: ISSUED.ownerEpoch,
@@ -941,7 +937,7 @@ describe('enterprise service', () => {
 				},
 			});
 			await register(service);
-			// Local custody fixture only: v1 registration carries no actor binding.
+			// Local custody fixture only: the registration carries no actor binding.
 			const enrolled = service.identity.read();
 			if (enrolled.status !== 'ok' || !enrolled.record.registration)
 				throw new Error('expected the local registration fixture');

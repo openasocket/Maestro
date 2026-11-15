@@ -144,7 +144,6 @@ describe('v2 workflow lifecycle client', () => {
 		const signal = new AbortController();
 		signals.push(signal);
 		const client = createEndpointWorkflowClient(port);
-		const v1Claims: unknown[] = [];
 		const ownerPort = {
 			lifecycle: endpointWorkflowLifecyclePort(client, {
 				signal: signal.signal,
@@ -153,10 +152,6 @@ describe('v2 workflow lifecycle client', () => {
 				evidenceDigest: () => 'e'.repeat(64),
 				requestedLeaseMs: 60_000,
 			}),
-			claim: async (request: unknown) => {
-				v1Claims.push(request);
-				return { status: 'unavailable' as const, reason: 'not-attached' as const, message: 'v1' };
-			},
 		};
 		const standing: WorkflowOwnerStanding = {
 			ownerId: 'inst-1',
@@ -169,7 +164,7 @@ describe('v2 workflow lifecycle client', () => {
 			owner: () => standing,
 			now: () => Date.now(),
 		});
-		return { store, v1Claims };
+		return { store };
 	}
 
 	const WORKFLOW = {
@@ -285,7 +280,7 @@ describe('v2 workflow lifecycle client', () => {
 
 	it('a foreign owner on renew never replaces the owner the store holds', async () => {
 		const { fake, port } = await attached();
-		const { store, v1Claims } = ownership(port);
+		const { store } = ownership(port);
 
 		const first = await store.claim({ workflow: WORKFLOW, ...RUN });
 		expect(first.state).toBe('owned');
@@ -324,7 +319,6 @@ describe('v2 workflow lifecycle client', () => {
 		expect(JSON.stringify(store.held())).not.toContain(FOREIGN.ownerEpoch);
 		expect(JSON.stringify(store.held())).not.toContain(FOREIGN.fencingToken);
 		expect(store.fence(WORKFLOW)).toBeNull();
-		expect(v1Claims).toHaveLength(0);
 	});
 
 	it('an answer whose correlationId does not match the request is refused', async () => {

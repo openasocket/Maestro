@@ -18,8 +18,8 @@
  *     exactly. The renderer never builds or alters a signed envelope.
  *
  * The payloads are the contract's (contracts 0.3.0 protocol.js), typed in
- * `src/shared/maestro-lib/managed/endpoint-port.ts`. The inbox request is the
- * v1 request field for field, `idempotencyKey` unchanged (`inboxRequest`).
+ * `src/shared/maestro-lib/managed/endpoint-port.ts`. The inbox request carries
+ * the ledger's `idempotencyKey` unchanged (`inboxRequest`).
  */
 
 import { canonicalJson } from '../../shared/canonicalJson';

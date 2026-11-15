@@ -615,7 +615,7 @@ export interface EnterpriseServiceDeps {
 	/**
 	 * Trusted host injection after authenticated EFFECT/1 negotiation on this port.
 	 * Return the same producer while its connection/generation remains current,
-	 * or null when unavailable. The default v1 client has no effect producer.
+	 * or null when unavailable. The default endpoint client has no effect producer.
 	 */
 	effectProducer?(port: EndpointPort): ManagedEffectProducer | null;
 	/** Trusted host injection after authenticated CONTENT-LOCAL/1 negotiation; the endpoint client has none. */

@@ -210,14 +210,6 @@ describe('pinned public schemas and existing endpoint fixtures', () => {
 				}).success
 			).toBe(false);
 		}
-		expect(
-			endpoint.localRequestEnvelope.safeParse({
-				schemaVersion: 2,
-				correlationId: 'c1',
-				operation: 'execution',
-				payload: request,
-			}).success
-		).toBe(false);
 	});
 
 	it('rejects actor assertions and fleet approval substituted for runtime use', () => {

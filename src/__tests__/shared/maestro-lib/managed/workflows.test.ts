@@ -160,7 +160,7 @@ describe('workflow ownership', () => {
 				expect(invoke.mock.calls.at(-1)?.[2]).toMatchObject({ pending: 'release' });
 			}
 		);
-		it('keeps a lost first claim intent and never falls back to v1', async () => {
+		it('keeps a lost first claim intent and claims nothing without a lifecycle port', async () => {
 			const { invoke, port, store } = producer();
 			invoke.mockResolvedValue({ status: 'unknown', message: 'lost' });
 			expect((await store.claim({ workflow: WORKFLOW, ...RUN })).state).toBe('unknown');

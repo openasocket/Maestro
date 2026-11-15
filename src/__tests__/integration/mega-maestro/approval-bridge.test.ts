@@ -226,7 +226,7 @@ describe('owned actor approval bridge (local contract evidence only)', () => {
 		{ version: undefined },
 		{ nonce: 'bad' },
 		{ expiresAt: '2000-01-01T00:00:00Z' },
-	])('rejects v1-shaped, incomplete or forged challenge fields %j', async (patch) => {
+	])('rejects wrong-version, incomplete or forged challenge fields %j', async (patch) => {
 		const { browser } = browserPort();
 		const bridge = await createActorApprovalBridge({ browser, origin });
 		expect(await bridge.approve({ ...challenge(), ...patch })).toEqual({ outcome: 'denied' });

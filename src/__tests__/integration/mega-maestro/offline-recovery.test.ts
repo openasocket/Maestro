@@ -200,7 +200,7 @@ async function boot(
 
 /**
  * The actor's approval, played by the test and labeled: the double has no
- * approval producer. V1 registration binds no actor (CP-01/CP-04) and a
+ * approval producer. The registration binds no actor (CP-01/CP-04) and a
  * PREPARED/1 host admits only the registered human actor, so this local custody
  * fixture supplies the actor id; the production service never manufactures it.
  */

@@ -240,7 +240,7 @@ describe('composeHostManaged', () => {
 		expect(await composed.control.beginRegistration()).toMatchObject({ status: 'ok' });
 		expect(await composed.control.completeRegistration()).toMatchObject({ status: 'ok' });
 		expect(composed.status()?.authority).toBe('registered');
-		// Every envelope is a protocol 2 one the pinned 0.3.0 contract accepts, and nothing went to v1.
+		// Every envelope is a protocol 2 one the pinned contract accepts.
 		const sentV2 = fake.callsTo('/v2/invoke');
 		expect(sentV2.length).toBeGreaterThan(0);
 		for (const call of sentV2) protocolSchemas.localRequestEnvelopeV2.parse(call.body);
