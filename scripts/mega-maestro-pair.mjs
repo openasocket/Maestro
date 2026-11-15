@@ -126,7 +126,7 @@ export async function createActorApprovalBridge({ browser, origin, timeoutMs = 3
 		pkg.name !== pin.name ||
 		pkg.version !== pin.version ||
 		zod.version !== pin.dependencies.zod ||
-		!pin.acceptedEndpointProtocols.includes(1)
+		!pin.acceptedEndpointProtocols.includes(2)
 	)
 		throw new Error('Approval contracts differ from the pin');
 	const [wire, http] = await Promise.all([

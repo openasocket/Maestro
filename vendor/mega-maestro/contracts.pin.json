@@ -45,7 +45,7 @@
 		]
 	},
 	"endpointProtocols": [1, 2],
-	"acceptedEndpointProtocols": [1, 2],
+	"acceptedEndpointProtocols": [2],
 	"dependencies": {
 		"zod": "4.6.5"
 	},
