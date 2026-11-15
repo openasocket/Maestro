@@ -461,7 +461,7 @@ describe('the packaged runtime archive, as a consumer loads it', () => {
 				versions: {
 					library: lib.MAESTRO_LIB_VERSION,
 					managedContract: lib.MANAGED_CONTRACT_VERSION,
-					endpointProtocol: lib.LOCAL_ENDPOINT_PROTOCOL,
+					endpointProtocol: lib.LOCAL_ENDPOINT_PROTOCOL_V2,
 					nodeRange: lib.MAESTRO_LIB_VERSION_INFO.node,
 				},
 				port,

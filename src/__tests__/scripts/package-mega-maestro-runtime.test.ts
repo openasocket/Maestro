@@ -144,7 +144,7 @@ describe('package-mega-maestro-runtime', () => {
 			app: readJson(path.join(REPO_ROOT, 'package.json')).version,
 			library: MAESTRO_LIB_VERSION,
 			managedContract: MANAGED_CONTRACT_VERSION,
-			endpointProtocol: 1,
+			endpointProtocol: 2,
 			pluginHostApi: HOST_API_VERSION,
 			pluginSdk: readJson(path.join(REPO_ROOT, 'packages/plugin-sdk/package.json')).version,
 			acceptedContracts: { package: '@mega-maestro/contracts' },
