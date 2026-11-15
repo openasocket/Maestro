@@ -1047,7 +1047,7 @@ describe('the packaged runtime artifact as a bootstrap input', () => {
 				app: appVersion,
 				library: MAESTRO_LIB_VERSION,
 				managedContract: MANAGED_CONTRACT_VERSION,
-				endpointProtocol: 1,
+				endpointProtocol: 2,
 			},
 			implementation: {
 				rules: SOURCE_TREE_RULES.id,
