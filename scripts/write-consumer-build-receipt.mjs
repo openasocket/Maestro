@@ -70,6 +70,10 @@ export const DEFAULT_FOCUSED_TESTS = Object.freeze([
 	'src/__tests__/shared/maestro-lib/managed/contract-vectors.test.ts',
 	'src/__tests__/main/enterprise/endpoint-client.test.ts',
 ]);
+/** The suite that observes what the production composition sends (handoff items 1-3, 9). */
+export const RUNTIME_WIRE_TEST = 'src/__tests__/integration/mega-maestro/runtime-wire-v2.test.ts';
+/** The packaged runtime the receipt names; its library version must be this tree's. */
+export const RUNTIME_PIN_FILE = 'Plans/integration-completion/runtime-conformance.json';
 /** Sources whose bytes the receipt names because the checks read them. */
 export const TESTED_SOURCES = Object.freeze([
 	'scripts/import-mega-maestro.mjs',
@@ -88,20 +92,39 @@ export const TESTED_SOURCES = Object.freeze([
 	'package-lock.json',
 	'vitest.config.mts',
 	DEFAULT_PIN_FILE,
+	RUNTIME_WIRE_TEST,
+	RUNTIME_PIN_FILE,
+	'src/__tests__/main/enterprise/workflowV2Producer.ts',
+	'src/main/enterprise/service.ts',
+	'src/main/enterprise/enrollment.ts',
+	'src/shared/maestro-lib/managed/workflow-lifecycle-v2.ts',
+	'src/shared/maestro-lib/version.ts',
 ]);
 /** What Mega's final consumer receipt needs that no build check can see yet. */
 export const NOT_YET_OBSERVED = Object.freeze([
 	{
-		field: 'acceptedEndpointProtocols',
+		field: 'liveEndpointProtocols',
 		reason:
-			'the protocols the runtime actually speaks are a property of live traffic; no endpoint is contacted by a build',
+			'runtimeWire records the protocols this runtime sends to the test double; traffic with a live endpoint is not observed by a build',
 	},
-	{ field: 'grantDigest', reason: 'no execution grant is issued to a build' },
-	{ field: 'chainDigest', reason: 'no delegation chain exists without an execution' },
-	{ field: 'workflowOwner', reason: 'no workflow is claimed by a build' },
+	{
+		field: 'grantDigest',
+		reason:
+			'no execution grant is issued: the v2 workflow claim carries grants [] and execution waits for FINISH-10 (GCOMP-15-07)',
+	},
+	{
+		field: 'chainDigest',
+		reason: 'no delegation chain exists: the v2 workflow claim carries delegation null',
+	},
+	{
+		field: 'workflowOwner',
+		reason:
+			'runtimeWire names the owner the test double issued for the claim; no live endpoint issued an owner',
+	},
 	{
 		field: 'negotiatedWorkflowExecution',
-		reason: 'execution is not offered by the endpoint (GCOMP-15-07) and no negotiation runs here',
+		reason:
+			'execution is not in the v2 operation set until FINISH-10 (GCOMP-15-07); the v1 execution operation is unreachable on a v2-only connection',
 	},
 ]);
 
@@ -229,6 +252,30 @@ export const IN_PROCESS_CHECKS = {
 			localProtocols: parsed,
 			v2Operations,
 			modules,
+		};
+	},
+	runtimePin() {
+		const pin = readJson(RUNTIME_PIN_FILE);
+		const version = /MAESTRO_LIB_VERSION = '([^']+)'/.exec(
+			fs.readFileSync(path.resolve(REPO_ROOT, 'src/shared/maestro-lib/version.ts'), 'utf8')
+		)?.[1];
+		assert.equal(
+			pin.runtime.versions.library,
+			version,
+			'the pinned runtime is not built from this library version'
+		);
+		const dir = path.resolve(REPO_ROOT, pin.runtime.location.directory);
+		const archive = path.join(dir, pin.runtime.archive.file);
+		assert.ok(fs.existsSync(archive), `the pinned runtime archive ${rel(archive)} is absent`);
+		assert.equal(sha256(fs.readFileSync(archive)), pin.runtime.archive.sha256, 'runtime archive');
+		return {
+			artifactId: pin.runtime.artifactId,
+			archive: { path: rel(archive), ...pin.runtime.archive },
+			manifestSha256: pin.runtime.manifestSha256,
+			payloadDigest: pin.runtime.payloadDigest,
+			versions: pin.runtime.versions,
+			implementation: pin.runtime.implementation,
+			pin: { path: RUNTIME_PIN_FILE, sha256: fileSha(RUNTIME_PIN_FILE) },
 		};
 	},
 	exactDependencyVectors() {
@@ -379,12 +426,44 @@ export function runChecks({ manifest, archive, sha256: expected, tests, workDir 
 	) {
 		step({ ...focused, name: 'focused-tests-counted', exitCode: 1 });
 	}
+	const wireFile = path.join(workDir, 'runtime-wire.json');
+	fs.rmSync(wireFile, { force: true });
+	step(
+		runCheck(
+			workDir,
+			'runtime-wire',
+			process.execPath,
+			['node_modules/vitest/vitest.mjs', 'run', RUNTIME_WIRE_TEST],
+			{
+				env: {
+					...process.env,
+					PATH: `${path.dirname(process.execPath)}${path.delimiter}${process.env.PATH ?? ''}`,
+					MAESTRO_WIRE_OBSERVATION: wireFile,
+				},
+			}
+		)
+	);
+	if (!fs.existsSync(wireFile)) step({ ...ran.at(-1), name: 'runtime-wire-observed', exitCode: 1 });
+	const wire = JSON.parse(fs.readFileSync(wireFile, 'utf8'));
+	const runtime = json(step(selfCheck(workDir, 'runtime-pin', 'runtimePin', [])));
 	step(runCheck(workDir, 'typecheck', 'npm', ['run', 'lint']));
 	const after = json(step(selfCheck(workDir, 'snapshot-after', 'snapshot', [])));
 	if (after.digest !== before.digest || after.head !== before.head) {
 		step({ ...ran.at(-1), name: 'snapshot-unchanged', exitCode: 1 });
 	}
-	return { ran, snapshot: after, integrity, schemas, vectors, results, resultsFile, typesFile };
+	return {
+		ran,
+		snapshot: after,
+		integrity,
+		schemas,
+		vectors,
+		results,
+		resultsFile,
+		typesFile,
+		wire,
+		wireFile,
+		runtime,
+	};
 }
 
 function testCounts(results, resultsFile) {
@@ -421,7 +500,8 @@ function producerReceiptOf(file, expected) {
 
 /** The receipt, from what the checks observed. Pure over its inputs. */
 export function buildReceipt({ args, run, recordedAt }) {
-	const { snapshot, integrity, schemas, results, resultsFile, typesFile } = run;
+	const { snapshot, integrity, schemas, results, resultsFile, typesFile, wire, wireFile, runtime } =
+		run;
 	const { files: implementationFiles, ...tree } = snapshot;
 	const toolchain = {
 		node: process.version,
@@ -461,7 +541,7 @@ export function buildReceipt({ args, run, recordedAt }) {
 		recordedAt,
 		writer: { path: SELF, sha256: fileSha(SELF) },
 		standing:
-			'Verified, compiled public contract inputs and locally tested Maestro consumers, re-checked by the receipt writer. This receipt supplies no service, runtime or native application archive, performs no live negotiation and qualifies no external adapter.',
+			'Verified, compiled public contract inputs and locally tested Maestro consumers, re-checked by the receipt writer, with the wire traffic of the production composition observed against a test double and the packaged runtime of this library version named. This receipt performs no live negotiation and qualifies no external adapter.',
 		grants: { authority: 'none', lease: 'none', policy: 'none' },
 		qualification: { paired: false, provider: false, native: false },
 		implementationRevision: tree.commit,
@@ -501,6 +581,14 @@ export function buildReceipt({ args, run, recordedAt }) {
 			extractedFiles: integrity.extractedFiles,
 		},
 		...(producerReceipt ? { producerReceipt } : {}),
+		acceptedEndpointProtocols: wire.acceptedEndpointProtocols,
+		runtime,
+		runtimeWire: {
+			...wire,
+			observation: { path: rel(wireFile), sha256: fileSha(wireFile) },
+			standing:
+				'What this runtime sends, parsed by the pinned contract. The endpoint, owner and epoch are the test double, not a live endpoint or paired enforcement.',
+		},
 		dependencyClosure: {
 			direct: integrity.dependencies,
 			installed: integrity.installed,
@@ -533,7 +621,7 @@ export function buildReceipt({ args, run, recordedAt }) {
 		checks: run.ran.map(({ stdout: _stdout, ...check }) => check),
 		notYetObserved: NOT_YET_OBSERVED,
 		publicationScope:
-			'Local source-development input only. Fields that need live endpoint traffic, an execution grant or a workflow claim are named under notYetObserved and are not recorded.',
+			'Local source-development input only. acceptedEndpointProtocols and runtimeWire are what the runtime sends to a test double; fields that need a live endpoint or an execution grant are named under notYetObserved and are not recorded.',
 	};
 }
 
