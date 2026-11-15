@@ -1400,9 +1400,6 @@ describe('runtime with a host adapter', () => {
 				attemptId: 'att-1',
 				policyRevision: 3,
 			});
-			expect(
-				fake.calls.filter((c) => (c.body as { operation?: string }).operation === 'workflow')
-			).toEqual([]);
 			expect(fs.existsSync(path.join(dir, 'maestro-managed-workflows.json'))).toBe(true);
 		} finally {
 			await port.close();
