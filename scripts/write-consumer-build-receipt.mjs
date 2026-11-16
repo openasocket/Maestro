@@ -259,7 +259,9 @@ export const IN_PROCESS_CHECKS = {
 			assert.ok(modules[name].length > 0, `${name} exports nothing`);
 		}
 		const protocol = await import(pathToFileURL(path.join(dir, 'dist/protocol.js')).href);
-		const parsed = protocol.localProtocolVersion.options.map((schema) => [...schema.values][0]);
+		// 0.4.0 is v2 only, so the version schema is one literal (2) rather than a union of them.
+		const version = protocol.localProtocolVersion;
+		const parsed = (version.options ?? [version]).flatMap((schema) => [...schema.values]);
 		const declared = readPin(path.resolve(REPO_ROOT, DEFAULT_PIN_FILE)).contractSchemas
 			.localProtocols;
 		assert.deepEqual(parsed, declared, 'declared local protocols are not the parsed ones');

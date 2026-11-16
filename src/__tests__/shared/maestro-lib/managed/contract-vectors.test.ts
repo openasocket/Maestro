@@ -137,11 +137,11 @@ describe('check-mega-contract-vectors.mjs', () => {
 			`export const attachmentRequestV2 = z.strictObject({ supportedProtocols: z.tuple([z.literal(${facts.protocol})]), components: z.array(component) });`,
 			`export const executionRequestV2 = z.strictObject({ source: ${names(facts.executionSources)} });`,
 			`export const localRequestEnvelopeV2 = z.strictObject({ operation: ${names(facts.operations)} });`,
+			`export const localControlRequestV2 = z.strictObject({ action: z.discriminatedUnion('kind', [${actions}]) });`,
 		].join('\n');
 		const shared = [
 			`import { z } from 'zod';`,
 			`export const denied = z.strictObject({ reason: ${names(facts.denialReasons)} });`,
-			`export const commandRequest = z.strictObject({ action: z.discriminatedUnion('kind', [${actions}]) });`,
 			`export const localMaximumRequestBytes = ${facts.maxRequestBytes};`,
 			`export const localMaximumResponseBytes = ${facts.maxResponseBytes};`,
 		].join('\n');

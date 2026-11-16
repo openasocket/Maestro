@@ -5,13 +5,13 @@
 		"sourceRevision": "d5143a63931dc87a5f90b3fdb7b58fa3726913b1",
 		"recordedOn": "2026-10-26",
 		"runtimePortSource": "packages/runtime-adapter/src/port.ts",
-		"localEndpointSource": "packages/contracts/src/protocol.ts (envelope, attachment, operations, execution); packages/contracts/src/local-endpoint.ts (local-control selectors, byte bounds)",
+		"localEndpointSource": "packages/contracts/src/protocol.ts (envelope, attachment, operations, execution, local-control selectors); packages/contracts/src/local-endpoint.ts (byte bounds, denial reasons)",
 		"localEndpointRecordedFrom": {
 			"package": "@mega-maestro/contracts",
-			"version": "0.3.0",
-			"sourceRevision": "6db2b152cacf2c470cb5869e492d24e9c02a5b0d",
-			"recordedOn": "2026-11-15",
-			"note": "Protocol 2 only: the operations and envelope are read from protocol.js; the local-control selectors and the byte bounds are read from local-endpoint.js, which the protocol shares. The protocol 1 facts recorded before this are retired with protocol 1 in Maestro."
+			"version": "0.4.0",
+			"sourceRevision": "e439b39e165cef495558ef363972ea10d5a69fb6",
+			"recordedOn": "2026-11-16",
+			"note": "Protocol 2 only (contracts 0.4.0, decision D4): the operations, envelope and local-control selectors (localControlRequestV2) are read from protocol.js; the byte bounds and denial reasons from local-endpoint.js, which the protocol shares. The protocol 1 facts and the v1 commandRequest selectors are retired with protocol 1."
 		}
 	},
 	"runtimePort": {

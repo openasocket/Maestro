@@ -160,7 +160,7 @@ process.stdout.write(JSON.stringify({
 	protocol: literal(p.attachmentRequestV2.shape.supportedProtocols.def.items[0]),
 	operations: options(p.localRequestEnvelopeV2.shape.operation),
 	denialReasons: options(s.denied.shape.reason),
-	commandActions: s.commandRequest.shape.action.options.map((o) => literal(o.shape.kind)),
+	commandActions: p.localControlRequestV2.shape.action.options.map((o) => literal(o.shape.kind)),
 	componentKinds: options(p.attachmentRequestV2.shape.components.element.shape.kind),
 	executionSources: options(p.executionRequestV2.shape.source),
 	maxRequestBytes: s.localMaximumRequestBytes,
