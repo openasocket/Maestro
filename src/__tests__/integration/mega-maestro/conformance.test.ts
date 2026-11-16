@@ -18,7 +18,7 @@ import { pathToFileURL } from 'node:url';
 import coverage from '../../../../Plans/integration-completion/contract-coverage.json';
 import { readPin } from '../../../../scripts/import-mega-maestro.mjs';
 import { inspectContractsDir } from '../../../../scripts/check-mega-contract-vectors.mjs';
-import { createLocalEndpointClient } from '../../../main/enterprise/endpoint-client';
+import { createLocalEndpointClient } from '../../../shared/maestro-lib/managed/endpoint-client';
 import { startFakeEndpoint } from '../../main/enterprise/fakeEndpoint';
 import {
 	effectGranted,

@@ -12,7 +12,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach } from 'vitest';
 
-import { createLocalEndpointClient } from '../../../main/enterprise/endpoint-client';
+import { createLocalEndpointClient } from '../../../shared/maestro-lib/managed/endpoint-client';
 import { createEnrollmentLifecycle } from '../../../main/enterprise/enrollment';
 import { createEnterpriseIdentityStore } from '../../../main/enterprise/identity-store';
 import { createPolicyStatusService } from '../../../main/enterprise/policy-status';
@@ -178,7 +178,7 @@ export function registeredStatus(
 		},
 		endpoint: {
 			outcome: 'attached',
-			protocol: 1,
+			protocol: 2,
 			capabilities: s.capabilities,
 			management: 'managed',
 			desiredPolicyRevision: 3,

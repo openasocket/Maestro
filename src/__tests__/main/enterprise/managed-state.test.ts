@@ -49,7 +49,7 @@ function record(over: Partial<ManagedIdentityRecord> = {}): ManagedIdentityRecor
 function endpoint(over: Partial<EndpointStatus> = {}): EndpointStatus {
 	return {
 		outcome: 'attached',
-		protocol: 1,
+		protocol: 2,
 		capabilities: ['attachment', 'execution'],
 		management: 'managed',
 		desiredPolicyRevision: 3,

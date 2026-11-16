@@ -12,7 +12,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { createLocalEndpointClient } from '../../../main/enterprise/endpoint-client';
+import { createLocalEndpointClient } from '../../../shared/maestro-lib/managed/endpoint-client';
 import {
 	createEnterpriseService,
 	type EnterpriseService,

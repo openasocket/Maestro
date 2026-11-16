@@ -10,7 +10,7 @@
 import * as net from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { createPlatformEndpointClient } from '../../../main/enterprise/endpoint-client';
+import { createPlatformEndpointClient } from '../../../shared/maestro-lib/managed/endpoint-client';
 import {
 	LOCAL_ENDPOINT_PROTOCOL,
 	ENDPOINT_NATIVE_PORT_VERSION,

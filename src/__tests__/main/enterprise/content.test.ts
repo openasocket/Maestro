@@ -75,7 +75,7 @@ function standing(
 		endpoint: attached
 			? {
 					outcome: 'attached',
-					protocol: 1,
+					protocol: 2,
 					capabilities: ['telemetry'],
 					management: 'managed',
 					desiredPolicyRevision: revision,

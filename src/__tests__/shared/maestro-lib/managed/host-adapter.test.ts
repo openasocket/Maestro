@@ -17,7 +17,7 @@ import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { canonicalJson } from '../../../../shared/canonicalJson';
 
-import { createLocalEndpointClient } from '../../../../main/enterprise/endpoint-client';
+import { createLocalEndpointClient } from '../../../../shared/maestro-lib/managed/endpoint-client';
 import { DEFAULT_TAB_DEFAULTS } from '../../../../shared/maestro-lib/agents/rules';
 import {
 	buildDispatchSnapshot,

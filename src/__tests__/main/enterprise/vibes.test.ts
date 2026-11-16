@@ -272,7 +272,7 @@ describe('as content', () => {
 			connection: { connection: 1, registration: 'registered', attached: true },
 			endpoint: {
 				outcome: 'attached',
-				protocol: 1,
+				protocol: 2,
 				capabilities: ['telemetry'],
 				management: 'managed',
 				desiredPolicyRevision: 3,
@@ -365,7 +365,7 @@ describe('bounded VIBES evidence (MRC-10-08)', () => {
 			connection: { connection: 1, registration: 'registered', attached: true },
 			endpoint: {
 				outcome: 'attached',
-				protocol: 1,
+				protocol: 2,
 				capabilities: ['telemetry'],
 				management: 'managed',
 				desiredPolicyRevision: 3,

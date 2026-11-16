@@ -31,8 +31,9 @@
  *   - an idempotency key leaves this client once. A second submission with it
  *     is `unavailable` / `duplicate` and is reconciled, never resent.
  *
- * Nothing composed in the desktop calls this yet; it stays unused until a
- * peer offers `execution`.
+ * Nothing composed in the desktop calls this yet. Its one caller is the live
+ * execution check (`./live-execution-check.ts`), run against a peer that
+ * offers `execution`.
  */
 
 import { canonicalJson } from '../../canonicalJson';

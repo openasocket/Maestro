@@ -23,7 +23,7 @@ import {
 	resolveHostCustody,
 	type HostCustodyRead,
 } from '../../../cli/services/host-managed';
-import { createLocalEndpointClient } from '../../../main/enterprise/endpoint-client';
+import { createLocalEndpointClient } from '../../../shared/maestro-lib/managed/endpoint-client';
 import { createEnterpriseIdentityStore } from '../../../main/enterprise/identity-store';
 import { obscuringSeal } from '../../../main/utils/safe-storage-seal';
 import type { Anchor, AnchorStore } from '../../../main/utils/keyring-anchor';

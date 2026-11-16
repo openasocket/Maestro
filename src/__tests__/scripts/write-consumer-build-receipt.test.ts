@@ -15,7 +15,10 @@ import {
 	DEFAULT_FOCUSED_TESTS,
 	IN_PROCESS_CHECKS,
 	NOT_YET_OBSERVED,
+	LIVE_FIELDS,
+	LIVE_OBSERVATION_SCHEMA,
 	REPO_ROOT,
+	liveObservationOf,
 	main,
 	parse,
 } from '../../../scripts/write-consumer-build-receipt.mjs';
@@ -107,4 +110,76 @@ describe('write-consumer-build-receipt', () => {
 			expect(checked).toMatchObject({ sha256: pin.sha256, payloadDigest: pin.payloadDigest });
 		}
 	);
+
+	describe('a live observation', () => {
+		const runtime = { archive: { sha256: 'b'.repeat(64) }, versions: { library: '0.41.0' } };
+		const integrity = { sha256: 'c'.repeat(64) };
+		const passing = {
+			schema: LIVE_OBSERVATION_SCHEMA,
+			outcome: 'passed',
+			liveNegotiationPerformed: true,
+			host: { platform: 'linux', arch: 'arm64', node: 'v24.21.0', uid: 1001, user: 'maestro' },
+			runtime: {
+				archive: { sha256: 'b'.repeat(64) },
+				library: '0.41.0',
+				endpointProtocol: 2,
+				contracts: { version: '0.4.0', sha256: 'c'.repeat(64) },
+			},
+			liveEndpointProtocols: [2],
+			negotiatedWorkflowExecution: true,
+			grantDigest: '3'.repeat(64),
+			chain: [{ grantId: 'g', digest: '3'.repeat(64) }],
+			chainDigest: { encoding: 'sha256(canonicalJson(delegation.chain))', value: '4'.repeat(64) },
+			workflowOwner: { ownerId: 'o', ownerEpoch: 'e', fencingTokenSha256: '5'.repeat(64) },
+			execution: { receipt: { outcome: 'broker_dispatched' } },
+			settlement: { effect: 'uncertain', outcome: 'recorded' },
+		};
+		const write = (value: unknown) => {
+			const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'live-obs-'));
+			scratch.push(dir);
+			const file = path.join(dir, 'observation.json');
+			fs.writeFileSync(file, JSON.stringify(value));
+			return file;
+		};
+
+		it('records every live field of a passing run from the pinned runtime on Linux', () => {
+			const live = liveObservationOf(write(passing), { runtime, integrity });
+			expect(live).toMatchObject({
+				liveEndpointProtocols: [2],
+				grantDigest: passing.grantDigest,
+				chainDigest: passing.chainDigest,
+				workflowOwner: passing.workflowOwner,
+				negotiatedWorkflowExecution: true,
+			});
+			expect([...LIVE_FIELDS].sort()).toEqual(
+				NOT_YET_OBSERVED.map((entry: { field: string }) => entry.field).sort()
+			);
+			expect(liveObservationOf(undefined, { runtime, integrity })).toBeUndefined();
+		});
+
+		it('refuses a failed run, another platform, another runtime or contracts, and a missing field', () => {
+			for (const [over, problem] of [
+				[{ outcome: 'failed', failure: { step: 'execution' } }, 'outcome is failed at execution'],
+				[{ host: { platform: 'darwin' } }, 'did not run on Linux'],
+				[{ liveNegotiationPerformed: false }, 'no live negotiation'],
+				[
+					{ runtime: { ...passing.runtime, archive: { sha256: 'd'.repeat(64) } } },
+					'pinned runtime archive',
+				],
+				[
+					{ runtime: { ...passing.runtime, contracts: { sha256: 'd'.repeat(64) } } },
+					'these contracts',
+				],
+				[{ liveEndpointProtocols: [1, 2] }, 'not [2]'],
+				[{ grantDigest: null }, 'no grant digest'],
+				[{ chainDigest: null }, 'no chain digest'],
+				[{ workflowOwner: null }, 'no workflow owner'],
+				[{ negotiatedWorkflowExecution: false }, 'not negotiated'],
+			] as const) {
+				expect(() =>
+					liveObservationOf(write({ ...passing, ...over }), { runtime, integrity })
+				).toThrow(problem);
+			}
+		});
+	});
 });

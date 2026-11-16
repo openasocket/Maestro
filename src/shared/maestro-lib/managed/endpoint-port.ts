@@ -15,7 +15,7 @@
  * actor, no token and no registration, and nothing it sends is authority.
  *
  * What is deliberately NOT in this module: `node:http` (the transport is the
- * client's, `src/main/enterprise/endpoint-client.ts`), Electron, and any
+ * client's, `./endpoint-client.ts`), Electron, and any
  * Mega-Maestro package import. The shapes here are Maestro's own transcription
  * of the contract fields it uses, validated structurally; the endpoint
  * re-validates everything with its own schemas and is the authority on them.
@@ -267,12 +267,13 @@ export interface EndpointEnrollmentActivation {
 }
 
 /**
- * The protocol the pinned 0.3.0 enrollment phase request names for its
- * `identity`: the contract types that field with the attachment schema of
- * local-endpoint.js, which admits only protocol 1. It is a fact of the contract,
- * not a wire path: the phase itself travels on `/v2/invoke` like every
- * operation. Moving the field to protocol 2 is a contract change Mega owns; until
- * it lands, Maestro sends what the contract accepts.
+ * The `supportedProtocols` value the pinned 0.3.0 contract fixes for the
+ * `identity` of an enrollment phase request. That field is typed by the
+ * contract's frozen identity vocabulary (local-endpoint.js `attachmentRequest`),
+ * whose literal is 1; it names no wire and no protocol this runtime speaks. The
+ * phase travels on `/v2/invoke` under protocol 2 like every operation. It is
+ * the contract's value, not Maestro's choice: it moves with the pin, and the
+ * v2-only contracts 0.4.0 re-pin removes it.
  */
 export const ENROLLMENT_IDENTITY_PROTOCOL = 1 as const;
 

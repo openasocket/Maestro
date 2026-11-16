@@ -82,7 +82,7 @@ import {
 	type EndpointServerIdentity,
 	type EndpointStatus,
 	type LocalEndpointOperation,
-} from '../../shared/maestro-lib/managed/endpoint-port';
+} from './endpoint-port';
 
 /**
  * The operations a connection may carry before its attachment: the attachment

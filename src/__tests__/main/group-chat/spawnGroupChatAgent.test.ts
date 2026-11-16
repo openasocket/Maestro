@@ -65,7 +65,7 @@ import type { AgentConfig } from '../../../main/agents/definitions';
 import type { IProcessManager } from '../../../main/group-chat/group-chat-moderator';
 import { ProcessManager } from '../../../main/process-manager/ProcessManager';
 import type { ProcessConfig, ProcessSpawnAuthorityPort } from '../../../main/process-manager/types';
-import { createLocalEndpointClient } from '../../../main/enterprise/endpoint-client';
+import { createLocalEndpointClient } from '../../../shared/maestro-lib/managed/endpoint-client';
 import { startFakeEndpoint } from '../enterprise/fakeEndpoint';
 import { fakeSpawnPort } from '../../helpers/managedSpawnPort';
 import {

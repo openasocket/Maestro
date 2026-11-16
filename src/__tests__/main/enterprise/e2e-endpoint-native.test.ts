@@ -7,7 +7,7 @@ import {
 	E2E_FIXTURE_ENDPOINT_SERVER,
 	e2eFixtureEndpointNative,
 } from '../../../main/enterprise/e2e-endpoint-native';
-import { createPlatformEndpointClient } from '../../../main/enterprise/endpoint-client';
+import { createPlatformEndpointClient } from '../../../shared/maestro-lib/managed/endpoint-client';
 import {
 	LOCAL_ENDPOINT_PROTOCOL,
 	endpointNativePortProblem,

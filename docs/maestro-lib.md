@@ -38,7 +38,7 @@ It is not:
 | `windows-shell` | On Windows, the provider is installed as a `.cmd` shim that only starts through cmd.exe, and an argument cannot pass through cmd.exe intact (a line break, a `%NAME%` pair or `^`; for the prompt, only when the provider cannot read it from stdin). See [Windows](#windows). |
 | `launch`        | The launch could not be planned. The message says why.                                                                                                                                                                                                                         |
 
-What each provider supports in maestro-lib `0.40.0`:
+What each provider supports in maestro-lib `0.41.0`:
 
 | Agent id        | Name            | Runs a turn | Resume | Read-only |
 | --------------- | --------------- | ----------- | ------ | --------- |
@@ -491,7 +491,7 @@ if (problems.length > 0) throw new Error(problems.join('; '));
 
 The client interface carries the extension as `MaestroClient.managed`, optional: a host without it is `unsupported`, never "unmanaged, so allowed".
 
-What that adds up to in `0.40.0`, before the release-by-release detail below:
+What that adds up to in `0.41.0`, before the release-by-release detail below:
 
 - **Standalone is untouched.** A program that never passes `managed` to `createMaestroRuntime`, and a `startTurn` with no `admission`, plan and run exactly as the earlier sections describe. Nothing here reads a keyring, opens a socket or asks a peer.
 - **A managed host admits launches, not providers.** `providerRouteSupport(agentId)` is the table: `managed` is `implemented` on the `child-process` route alone (the launch is admitted at the real spawn), and `unsupported` on `pty`, `codex-app-server`, `opencode-server` and `ssh`. What a provider's own tools do once running is not governed. The one route whose effects are enforced is the synthetic harness route, which qualifies no real provider.
@@ -500,7 +500,7 @@ What that adds up to in `0.40.0`, before the release-by-release detail below:
 
 How to enroll a desktop, start a managed host, run the pair harness and recover from a lost daemon is on [Mega-Maestro (Managed Operation)](./mega-maestro), with the producers still missing and who owns them.
 
-The entry also exports the endpoint port (`EndpointPort`, `ManagedIdentityPort`, the protocol-1 envelope helpers and validators in `managed/endpoint-port.ts`) and the host adapter (`createManagedHostAdapter()`, `installationIdentity()`, `projectPolicyStatus()` in `managed/host-adapter.ts`). A host injects its own custody and socket through `createMaestroRuntime({ managed: { host } })`; the library never opens a socket or reads a keyring itself, and `ManagedApi.policy()` answers the adapter's policy projection.
+The entry also exports the endpoint port (`EndpointPort`, `ManagedIdentityPort`, the protocol 2 envelope helpers and validators in `managed/endpoint-port.ts`), the Unix socket client (`createLocalEndpointClient()`, `createPlatformEndpointClient()` in `managed/endpoint-client.ts`) and the host adapter (`createManagedHostAdapter()`, `installationIdentity()`, `projectPolicyStatus()` in `managed/host-adapter.ts`). A host injects its own custody and socket through `createMaestroRuntime({ managed: { host } })`; the library opens no socket a host did not construct and never reads a keyring itself, and `ManagedApi.policy()` answers the adapter's policy projection.
 
 The entry also exports the one qualified synthetic route (`managed/provider-route.ts`): `buildHarnessLaunchSpec()` runs an inline Node program under the Node permission model with exactly the declared inputs readable, its private work directory writable, and the network, child processes and workers refused by the runtime; `syntheticHarnessRouteSupport()` reports that route alone, with its enforcement per effect, and says in so many words that it qualifies no real provider. The route is `unsupported` on Windows and on a Node that does not honor every flag in `HARNESS_REQUIRED_NODE_FLAGS` (`--allow-net` among them: Node 26 does, Node 22.16 does not), and a caller then refuses rather than spawn unconstrained. Every snapshot now carries a `DispatchOperation` (`start`, `input`, `resume`), and a lease an endpoint-backed authority minted carries the broker's `ManagedDecisionReceipt`.
 
@@ -575,6 +575,8 @@ Since `0.37.0` the surface carries what the second upstream/rc merge added (MCOM
 Since `0.38.0` a managed host speaks endpoint protocol 2 only (contracts `0.3.0`): the registration challenge and redeem are v2 envelopes on the connection that then attaches, so the v1 registration path constants are removed and the redeem receipt is `{ outcome: 'registered' }`. `ManagedHostAdapter.workflows` is the v2 workflow lifecycle (`createEndpointWorkflowOwnerPort`): offered only while the attachment negotiated `workflow_claim`, `workflow_renew`, `workflow_settle` and `workflow_release` and a `registration_use` reference is projected, and the v1 `workflow` fence is never sent. `endpoint-port` adds the relayed enrollment phases, the `localControl` and signed `command` shapes and `EndpointPort.compatibility`. Below `1.0` a minor may break, and this one does.
 
 Since `0.40.0` endpoint protocol 2 is the only protocol: the protocol 1 wire, its selection gate and the v1 workflow fence are removed, and the port is one surface (`EndpointPort.invoke`, `.attach`, `.registration`, `.negotiated`). The command service's `receive` answers only v2 `command` deliveries.
+
+Since `0.41.0` the library carries its own endpoint socket client (`createLocalEndpointClient()`, `createPlatformEndpointClient()`), the workflow lifecycle client and the execution client, and `runLiveExecutionCheck()`: one live run of attachment, the registration handshake, `compatibility`, `registration_use`, a delegated `workflow_claim`, `execution` and `workflow_settle`, reported as an observation (`maestro-live-execution-observation/1`). `scripts/live-execution-check.mjs` runs it from a packaged runtime archive with Node alone, and `scripts/write-consumer-build-receipt.mjs --live-observation` records it. The delegation and grants are inputs the central API issued; the check never mints one.
 
 Since `0.39.0` a managed host can submit a run over endpoint protocol 2 (contracts `0.3.0`, `execution` on `/v2/invoke`, payload `runs.submit`). The request copies the registration, the full delegation chain, the grants, the workflow owner and the run lineage from the lease the v2 workflow lifecycle answered, and is sent only while the attachment negotiated `execution` (and `delegation` for a delegated lease), the owner store still holds the lease's fence, the lease is unexpired and the projected registration is the lease's. Only a `dispatchReceiptV2` that answers that request exactly is credited, as a dispatch (`dispatched` or `unknown`), never as a completion. `ENDPOINT_OPERATIONS_OFFERED` includes `execution`; the new unavailable reasons are `stale-authority` and `duplicate`.
 

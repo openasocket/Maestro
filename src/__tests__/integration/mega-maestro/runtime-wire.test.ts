@@ -17,7 +17,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { createLocalEndpointClient } from '../../../main/enterprise/endpoint-client';
+import { createLocalEndpointClient } from '../../../shared/maestro-lib/managed/endpoint-client';
 import { createEnterpriseService } from '../../../main/enterprise/service';
 import { canonicalJson } from '../../../shared/canonicalJson';
 import { fakeAnchor, fakeSeal } from '../../main/enterprise/fakeCustody';

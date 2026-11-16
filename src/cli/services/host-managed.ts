@@ -44,7 +44,7 @@ import {
 	type CommandService,
 	type CommandStatusInventory,
 } from '../../main/enterprise/commands';
-import { createPlatformEndpointClient } from '../../main/enterprise/endpoint-client';
+import { createPlatformEndpointClient } from '../../shared/maestro-lib/managed/endpoint-client';
 import {
 	createEnrollmentLifecycle,
 	type EnrollmentLifecycle,

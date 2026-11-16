@@ -18,6 +18,7 @@
  *
  *   node scripts/write-consumer-build-receipt.mjs --name <name> --manifest <artifact.json>
  *     --archive <contracts.tgz> --sha256 <hex> [--producer-receipt <file>]
+ *     [--live-observation <observation.json>]
  *     [--artifact-id ID] [--task ID] [--test <file>]... [--out-dir DIR | --out FILE.json]
  *     [--work-dir DIR]
  *
@@ -26,7 +27,10 @@
  * and every field in it comes from a check that ran or a file it hashed. A field the
  * build cannot observe (the runtime's accepted endpoint protocols on live traffic,
  * grant and chain digests, workflow owner identity, negotiated workflow execution)
- * is left out and named under `notYetObserved`. It never overwrites a receipt: an
+ * is left out and named under `notYetObserved`, unless `--live-observation` names
+ * a passing observation printed by `scripts/live-execution-check.mjs` on a live
+ * endpoint from the pinned runtime archive (`liveObservationOf` checks it); then
+ * those fields are recorded from it and `liveNegotiationPerformed` is true. It never overwrites a receipt: an
  * existing output file is a refusal. Logs and the input map go to `--work-dir`
  * (default `.maestro/playbooks/Working/receipts/<name>`), named by sha256.
  *
@@ -68,10 +72,20 @@ export const DEFAULT_FOCUSED_TESTS = Object.freeze([
 	'src/__tests__/integration/mega-maestro/conformance.test.ts',
 	'src/__tests__/shared/maestro-lib/managed/contracts.test.ts',
 	'src/__tests__/shared/maestro-lib/managed/contract-vectors.test.ts',
-	'src/__tests__/main/enterprise/endpoint-client.test.ts',
+	'src/__tests__/shared/maestro-lib/managed/endpoint-client.test.ts',
 ]);
 /** The suite that observes what the production composition sends (handoff items 1-3, 9). */
-export const RUNTIME_WIRE_TEST = 'src/__tests__/integration/mega-maestro/runtime-wire-v2.test.ts';
+export const RUNTIME_WIRE_TEST = 'src/__tests__/integration/mega-maestro/runtime-wire.test.ts';
+/** The observation a live run of scripts/live-execution-check.mjs prints. */
+export const LIVE_OBSERVATION_SCHEMA = 'maestro-live-execution-observation/1';
+/** The notYetObserved fields a passing live observation answers. */
+export const LIVE_FIELDS = Object.freeze([
+	'liveEndpointProtocols',
+	'grantDigest',
+	'chainDigest',
+	'workflowOwner',
+	'negotiatedWorkflowExecution',
+]);
 /** The packaged runtime the receipt names; its library version must be this tree's. */
 export const RUNTIME_PIN_FILE = 'Plans/integration-completion/runtime-conformance.json';
 /** Sources whose bytes the receipt names because the checks read them. */
@@ -85,7 +99,7 @@ export const TESTED_SOURCES = Object.freeze([
 	'src/__tests__/integration/mega-maestro/fixtures.ts',
 	'src/__tests__/main/enterprise/fakeEndpoint.ts',
 	DEFAULT_FIXTURE,
-	'src/main/enterprise/endpoint-client.ts',
+	'src/shared/maestro-lib/managed/endpoint-client.ts',
 	'src/shared/maestro-lib/managed/endpoint-port.ts',
 	'src/shared/maestro-lib/managed/host-adapter.ts',
 	'package.json',
@@ -99,6 +113,9 @@ export const TESTED_SOURCES = Object.freeze([
 	'src/main/enterprise/enrollment.ts',
 	'src/shared/maestro-lib/managed/workflow-lifecycle.ts',
 	'src/shared/maestro-lib/version.ts',
+	'src/shared/maestro-lib/managed/execution.ts',
+	'src/shared/maestro-lib/managed/live-execution-check.ts',
+	'scripts/live-execution-check.mjs',
 ]);
 /** What Mega's final consumer receipt needs that no build check can see yet. */
 export const NOT_YET_OBSERVED = Object.freeze([
@@ -498,6 +515,80 @@ function producerReceiptOf(file, expected) {
 	};
 }
 
+/**
+ * A live observation, checked against what this run pinned: it passed, it
+ * negotiated with a live endpoint on Linux, it ran from the pinned runtime
+ * archive built from this library version against the pinned contracts, and
+ * it carries every live field. Anything else refuses the receipt.
+ */
+export function liveObservationOf(file, { runtime, integrity }) {
+	if (!file) return undefined;
+	const text = fs.readFileSync(file, 'utf8');
+	const o = JSON.parse(text);
+	const problems = [];
+	const need = (ok, problem) => {
+		if (!ok) problems.push(problem);
+	};
+	need(o.schema === LIVE_OBSERVATION_SCHEMA, `schema is not ${LIVE_OBSERVATION_SCHEMA}`);
+	need(
+		o.outcome === 'passed',
+		`outcome is ${o.outcome}${o.failure ? ` at ${o.failure.step}` : ''}`
+	);
+	need(o.liveNegotiationPerformed === true, 'no live negotiation was performed');
+	need(o.host?.platform === 'linux', 'the check did not run on Linux');
+	need(
+		o.runtime?.archive?.sha256 === runtime.archive.sha256,
+		'it did not run the pinned runtime archive'
+	);
+	need(
+		o.runtime?.library === runtime.versions.library,
+		'its library is not the pinned runtime library'
+	);
+	need(o.runtime?.endpointProtocol === 2, 'its runtime endpoint protocol is not 2');
+	need(
+		o.runtime?.contracts?.sha256 === integrity.sha256,
+		'its runtime was not built against these contracts'
+	);
+	need(
+		JSON.stringify(o.liveEndpointProtocols) === '[2]',
+		'the live endpoint protocols are not [2]'
+	);
+	need(o.negotiatedWorkflowExecution === true, 'workflow execution was not negotiated');
+	need(/^[a-f0-9]{64}$/.test(o.grantDigest ?? ''), 'no grant digest was observed');
+	need(Array.isArray(o.chain) && o.chain.length > 0, 'no delegation chain was observed');
+	need(/^[a-f0-9]{64}$/.test(o.chainDigest?.value ?? ''), 'no chain digest was observed');
+	need(typeof o.workflowOwner?.ownerId === 'string', 'no workflow owner was observed');
+	need(o.execution?.receipt?.outcome === 'broker_dispatched', 'no dispatch receipt was observed');
+	need(o.settlement?.outcome === 'recorded', 'the settlement was not recorded');
+	if (problems.length > 0)
+		throw new Error(`the live observation ${file} is refused: ${problems.join('; ')}`);
+	return {
+		observation: { path: path.resolve(file), sha256: sha256(Buffer.from(text)) },
+		driver: o.driver,
+		host: o.host,
+		endpoint: o.endpoint,
+		runtime: o.runtime,
+		startedAt: o.startedAt,
+		finishedAt: o.finishedAt,
+		liveEndpointProtocols: o.liveEndpointProtocols,
+		compatibility: o.compatibility,
+		attachment: o.attachment,
+		negotiated: o.negotiated,
+		negotiatedWorkflowExecution: o.negotiatedWorkflowExecution,
+		registration: o.registration,
+		workflowOwner: o.workflowOwner,
+		lease: o.lease,
+		grant: o.grant,
+		grantDigest: o.grantDigest,
+		chain: o.chain,
+		chainDigest: o.chainDigest,
+		execution: o.execution,
+		settlement: o.settlement,
+		release: o.release,
+		steps: o.steps,
+	};
+}
+
 /** The receipt, from what the checks observed. Pure over its inputs. */
 export function buildReceipt({ args, run, recordedAt }) {
 	const { snapshot, integrity, schemas, results, resultsFile, typesFile, wire, wireFile, runtime } =
@@ -530,6 +621,7 @@ export function buildReceipt({ args, run, recordedAt }) {
 	fs.writeFileSync(inputMap, `${JSON.stringify({ schemaVersion: 1, inputs }, null, '\t')}\n`);
 	const sidecar = `${args.archive}.sha256`;
 	const producerReceipt = producerReceiptOf(args.producerReceipt, integrity.sha256);
+	const live = liveObservationOf(args.liveObservation, { runtime, integrity });
 	return {
 		schemaVersion: 1,
 		schema: RECEIPT_SCHEMA,
@@ -540,8 +632,9 @@ export function buildReceipt({ args, run, recordedAt }) {
 		...(args.task ? { task: args.task } : {}),
 		recordedAt,
 		writer: { path: SELF, sha256: fileSha(SELF) },
-		standing:
-			'Verified, compiled public contract inputs and locally tested Maestro consumers, re-checked by the receipt writer, with the wire traffic of the production composition observed against a test double and the packaged runtime of this library version named. This receipt performs no live negotiation and qualifies no external adapter.',
+		standing: live
+			? 'Verified, compiled public contract inputs and locally tested Maestro consumers, re-checked by the receipt writer, with the wire traffic of the production composition observed against a test double, and one live delegated claim, execution and settlement run from the pinned runtime archive against a live endpoint (live). It qualifies no external adapter.'
+			: 'Verified, compiled public contract inputs and locally tested Maestro consumers, re-checked by the receipt writer, with the wire traffic of the production composition observed against a test double and the packaged runtime of this library version named. This receipt performs no live negotiation and qualifies no external adapter.',
 		grants: { authority: 'none', lease: 'none', policy: 'none' },
 		qualification: { paired: false, provider: false, native: false },
 		implementationRevision: tree.commit,
@@ -582,6 +675,16 @@ export function buildReceipt({ args, run, recordedAt }) {
 		},
 		...(producerReceipt ? { producerReceipt } : {}),
 		acceptedEndpointProtocols: wire.acceptedEndpointProtocols,
+		...(live
+			? {
+					liveEndpointProtocols: live.liveEndpointProtocols,
+					grantDigest: live.grantDigest,
+					chainDigest: live.chainDigest,
+					workflowOwner: live.workflowOwner,
+					negotiatedWorkflowExecution: live.negotiatedWorkflowExecution,
+					live,
+				}
+			: {}),
 		runtime,
 		runtimeWire: {
 			...wire,
@@ -611,7 +714,7 @@ export function buildReceipt({ args, run, recordedAt }) {
 			parsedLocalProtocols: schemas.localProtocols,
 			v2Operations: schemas.v2Operations,
 			runtimeModulesLoaded: schemas.modulesLoaded,
-			liveNegotiationPerformed: false,
+			liveNegotiationPerformed: Boolean(live),
 		},
 		tests: {
 			...testCounts(results, resultsFile),
@@ -619,9 +722,12 @@ export function buildReceipt({ args, run, recordedAt }) {
 		},
 		toolchain,
 		checks: run.ran.map(({ stdout: _stdout, ...check }) => check),
-		notYetObserved: NOT_YET_OBSERVED,
-		publicationScope:
-			'Local source-development input only. acceptedEndpointProtocols and runtimeWire are what the runtime sends to a test double; fields that need a live endpoint or an execution grant are named under notYetObserved and are not recorded.',
+		notYetObserved: live
+			? NOT_YET_OBSERVED.filter((entry) => !LIVE_FIELDS.includes(entry.field))
+			: NOT_YET_OBSERVED,
+		publicationScope: live
+			? 'Local source-development input. acceptedEndpointProtocols and runtimeWire are what the runtime sends to a test double; the live fields come from the observation under live, one run against a live endpoint.'
+			: 'Local source-development input only. acceptedEndpointProtocols and runtimeWire are what the runtime sends to a test double; fields that need a live endpoint or an execution grant are named under notYetObserved and are not recorded.',
 	};
 }
 
@@ -634,6 +740,7 @@ export function parse(argv) {
 			archive: { type: 'string' },
 			sha256: { type: 'string' },
 			'producer-receipt': { type: 'string' },
+			'live-observation': { type: 'string' },
 			'artifact-id': { type: 'string', default: 'MAESTRO-CONTRACT-INPUTS-BUILD' },
 			task: { type: 'string' },
 			test: { type: 'string', multiple: true },
@@ -657,6 +764,9 @@ export function parse(argv) {
 		sha256: values.sha256,
 		producerReceipt: values['producer-receipt']
 			? path.resolve(values['producer-receipt'])
+			: undefined,
+		liveObservation: values['live-observation']
+			? path.resolve(values['live-observation'])
 			: undefined,
 		artifactId: values['artifact-id'],
 		task: values.task,

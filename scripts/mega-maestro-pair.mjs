@@ -874,7 +874,7 @@ function stageEndpointFromArtifact(artifactDir, into) {
 }
 
 export const DRIVER_BUNDLE_ENTRIES = {
-	'main/enterprise/endpoint-client.ts': ['createLocalEndpointClient'],
+	'shared/maestro-lib/managed/endpoint-client.ts': ['createLocalEndpointClient'],
 	'main/enterprise/spawn-authority.ts': ['createProcessSpawnAuthority'],
 	'__tests__/integration/mega-maestro/journeys.ts': [
 		'runPairJourneys',

@@ -17,15 +17,19 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
 	createLocalEndpointClient,
 	endpointSocketPathProblem,
-} from '../../../main/enterprise/endpoint-client';
+} from '../../../../shared/maestro-lib/managed/endpoint-client';
 import {
 	LOCAL_ENDPOINT_INVOKE_PATH,
 	LOCAL_ENDPOINT_MAX_REQUEST_BYTES,
 	LOCAL_ENDPOINT_PROTOCOL,
 	type EndpointAttachmentRequest,
 	type EndpointPort,
-} from '../../../shared/maestro-lib/managed/endpoint-port';
-import { startFakeEndpoint, type FakeEndpoint, type FakeEndpointOptions } from './fakeEndpoint';
+} from '../../../../shared/maestro-lib/managed/endpoint-port';
+import {
+	startFakeEndpoint,
+	type FakeEndpoint,
+	type FakeEndpointOptions,
+} from '../../../main/enterprise/fakeEndpoint';
 
 const ATTACH: EndpointAttachmentRequest = {
 	installationId: 'inst-1',

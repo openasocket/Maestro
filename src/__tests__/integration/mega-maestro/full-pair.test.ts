@@ -37,7 +37,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { createCommandService, type CommandService } from '../../../main/enterprise/commands';
 import { NEGOTIATED_V2, typedCommand, wireOf } from '../../main/enterprise/commandWire';
 import { contentDeliveryStanding } from '../../../main/enterprise/content';
-import { createLocalEndpointClient } from '../../../main/enterprise/endpoint-client';
+import { createLocalEndpointClient } from '../../../shared/maestro-lib/managed/endpoint-client';
 import { INVENTORY_DELIVERY } from '../../../main/enterprise/inventory';
 import { createEnterpriseService, type EnterpriseService } from '../../../main/enterprise/service';
 import { createProcessSpawnAuthority } from '../../../main/enterprise/spawn-authority';

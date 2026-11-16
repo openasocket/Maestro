@@ -7,7 +7,7 @@
  * The adapter owns no custody and no transport. It is handed a
  * `ManagedIdentityPort` (reads the sealed record a host keeps; the desktop's
  * is `src/main/enterprise/identity-store.ts`), an `EndpointPort` (the socket
- * client; the desktop's is `src/main/enterprise/endpoint-client.ts`) and a
+ * client; `createLocalEndpointClient` in `./endpoint-client.ts`) and a
  * `status()` that says whether this process holds a registered, attached,
  * managed standing (the enrollment lifecycle's answer). From those it builds:
  *

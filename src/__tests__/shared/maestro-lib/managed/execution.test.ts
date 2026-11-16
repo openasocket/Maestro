@@ -20,7 +20,7 @@ import * as path from 'node:path';
 
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 
-import { createLocalEndpointClient } from '../../../../main/enterprise/endpoint-client';
+import { createLocalEndpointClient } from '../../../../shared/maestro-lib/managed/endpoint-client';
 import {
 	createEndpointExecutionClient,
 	type EndpointExecutionDeps,

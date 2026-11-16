@@ -33,7 +33,7 @@ import {
 	type ProviderRouteCandidate,
 	type SignedProviderRouteQualification,
 } from '../../../shared/maestro-lib/managed/provider-route';
-import { createLocalEndpointClient } from '../../../main/enterprise/endpoint-client';
+import { createLocalEndpointClient } from '../../../shared/maestro-lib/managed/endpoint-client';
 import {
 	buildDispatchSnapshot,
 	createLocalHostAuthority,

@@ -97,7 +97,7 @@ import {
 	type InboxRefresh,
 	type ManagedInboxView,
 } from './inbox';
-import { createPlatformEndpointClient } from './endpoint-client';
+import { createPlatformEndpointClient } from '../../shared/maestro-lib/managed/endpoint-client';
 import { createEnrollmentLifecycle, type EnrollmentLifecycle } from './enrollment';
 import {
 	createEnterpriseIdentityStore,

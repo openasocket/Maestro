@@ -193,8 +193,14 @@ import { MANAGED_CONTRACT_VERSION } from './managed/types';
  * `V2_OPERATIONS_SELECTED`; `EndpointPort` is the one port. `WorkflowOwnerPort` is
  * `{ lifecycle, unserved? }`. The command service's `receive` is the v2 `command` entry.
  * Breaking below 1.0.
+ * 0.41.0: the live execution check. The Unix socket endpoint client moves into the library
+ * (`./managed/endpoint-client`: `createLocalEndpointClient`, `createPlatformEndpointClient`), and
+ * the entry now exports the workflow lifecycle client (`./managed/workflow-lifecycle`), the execution
+ * client (`./managed/execution`) and `runLiveExecutionCheck` (`./managed/live-execution-check`):
+ * one delegated claim, execution and settlement against a live endpoint, reported as an
+ * observation a consumer receipt carries. Additions only.
  */
-export const MAESTRO_LIB_VERSION = '0.40.0';
+export const MAESTRO_LIB_VERSION = '0.41.0';
 
 /** The Node range the built library runs on; `engines.node` of the built package. */
 export const MAESTRO_LIB_NODE_RANGE = '>=20';

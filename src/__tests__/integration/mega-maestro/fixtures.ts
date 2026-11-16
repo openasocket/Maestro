@@ -31,7 +31,7 @@ import * as net from 'node:net';
 import * as path from 'node:path';
 
 import { createBrokerDispatch, type BrokerDispatch } from '../../../main/enterprise/dispatch';
-import { createLocalEndpointClient } from '../../../main/enterprise/endpoint-client';
+import { createLocalEndpointClient } from '../../../shared/maestro-lib/managed/endpoint-client';
 import {
 	buildDispatchSnapshot,
 	createContextVerifier,
