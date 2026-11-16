@@ -284,7 +284,8 @@ export async function startFakeEndpoint(options: FakeEndpointOptions = {}): Prom
 				answer(handler ? handler(payload) : deny('unavailable'));
 				return;
 			}
-			if (live.registrationRequired && (!registered || revoked)) {
+			// `compatibility` is pre-registration, as the daemon's preRegistrationOperations.
+			if (live.registrationRequired && (!registered || revoked) && operation !== 'compatibility') {
 				answer(deny('unauthenticated'));
 				return;
 			}

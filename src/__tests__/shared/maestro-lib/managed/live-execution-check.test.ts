@@ -157,10 +157,10 @@ describe('live execution check', () => {
 		expect(observation.schema).toBe(LIVE_EXECUTION_OBSERVATION_SCHEMA);
 		expect(approvals).toHaveLength(1);
 		expect(sent.map((envelope) => envelope.operation)).toEqual([
+			'compatibility',
 			'attachment',
 			'registration_challenge',
 			'registration_redeem',
-			'compatibility',
 			'attachment',
 			'registration_use',
 			'workflow_claim',

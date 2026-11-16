@@ -5,13 +5,12 @@
  * --live-observation`). It drives the production clients of this library and
  * nothing else:
  *
- *   1. `attachment` (refused before registration on a fresh process);
- *   2. `registration_challenge` (purpose `runtime_use`), the operator's
+ *   1. `compatibility` with `supportedProtocols [2]` (availability only,
+ *      answered before registration);
+ *   2. `attachment` (refused before registration on a fresh process);
+ *   3. `registration_challenge` (purpose `runtime_use`), the operator's
  *      approval, `registration_redeem` on the same connection;
- *   3. `compatibility` with `supportedProtocols [2]` (availability only;
- *      the endpoint answers it only to a registered peer), `attachment`
- *      again;
- *   4. `registration_use`: the projected reference;
+ *   4. `attachment` again, then `registration_use`: the projected reference;
  *   5. `workflow_claim` carrying the delegation the central API issued,
  *      through `createEndpointWorkflowClient`;
  *   6. `execution` (`runs.submit`, `executionRequestV2`) through
@@ -232,29 +231,7 @@ export async function runLiveExecutionCheck(
 		if (canonicalJson(delegation.chain.at(-1)) !== canonicalJson(delegation.grant))
 			refuse('input', 'the delegation chain does not end in its grant');
 
-		// 1. Attach; on a fresh process the endpoint refuses until the actor registers.
-		let status = await port.attach(attachment);
-		observation.steps.push({
-			step: 'attachment',
-			status: status.status,
-			...(status.status === 'ok' ? {} : { detail: describe(status) }),
-		});
-		const registered = status.status === 'ok';
-		if (!registered) {
-			// 2. The registration handshake, on this connection.
-			const approval = record(
-				'registration_challenge',
-				await port.registration.challenge({
-					runtimeId: attachment.runtimeId,
-					processEpoch: attachment.processEpoch,
-				})
-			);
-			if (input.approve && !(await input.approve(approval)))
-				refuse('registration_approval', 'the registration challenge was not approved in time');
-			record('registration_redeem', await port.registration.redeem());
-		}
-
-		// 3. Availability (records nothing on the connection), then the attachment it is used under.
+		// 1. Availability, before any registration or attachment; records nothing on the connection.
 		const compat = record(
 			'compatibility',
 			await port.compatibility({
@@ -269,7 +246,25 @@ export async function runLiveExecutionCheck(
 			capabilities: [...compat.capabilities],
 		};
 		noteProtocol(compat.protocol);
-		if (!registered) {
+
+		// 2-4. Attach; on a fresh process the endpoint refuses until the actor registers.
+		let status = await port.attach(attachment);
+		observation.steps.push({
+			step: 'attachment',
+			status: status.status,
+			...(status.status === 'ok' ? {} : { detail: describe(status) }),
+		});
+		if (status.status !== 'ok') {
+			const approval = record(
+				'registration_challenge',
+				await port.registration.challenge({
+					runtimeId: attachment.runtimeId,
+					processEpoch: attachment.processEpoch,
+				})
+			);
+			if (input.approve && !(await input.approve(approval)))
+				refuse('registration_approval', 'the registration challenge was not approved in time');
+			record('registration_redeem', await port.registration.redeem());
 			status = await port.attach(attachment);
 			record('attachment', status);
 		}
