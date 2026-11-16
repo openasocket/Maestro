@@ -1,7 +1,7 @@
 /**
  * The v2 workflow lifecycle client: `workflow_claim`, `workflow_renew`,
  * `workflow_settle` and `workflow_release` over the endpoint client's
- * `/v2/invoke` path (contracts 0.3.0 protocol.js, field for field).
+ * `/v2/invoke` path (contracts 0.4.0 protocol.js, field for field).
  *
  * The envelope checks are the v2 path's own: `parseLocalEndpointResponse`
  * refuses an answer whose correlationId or operation is not the request's,

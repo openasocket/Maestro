@@ -1,6 +1,6 @@
 /**
  * The production attachment is ONE protocol 2 connection (handoff item 1,
- * contracts 0.3.0): the registration handshake (challenge, redeem), the v2
+ * contracts 0.4.0): the registration handshake (challenge, redeem), the v2
  * attachment and every operation after it share a socket, and nothing is sent
  * on any other path. The endpoint holds one protocol per socket session.
  *

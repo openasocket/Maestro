@@ -66,7 +66,7 @@ import { createHash } from 'node:crypto';
 import { execFile, execFileSync, spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { parseArgs } from 'node:util';
+import { isDeepStrictEqual, parseArgs } from 'node:util';
 import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -106,7 +106,7 @@ const docker = (args, options = {}) =>
 export async function createActorApprovalBridge({ browser, origin, timeoutMs = 30_000 }) {
 	// Snapshot-only consumers do not load contracts or importer dependencies.
 	const { inspectContractsDir } = await import('./check-mega-contract-vectors.mjs');
-	const { readPin } = await import('./import-mega-maestro.mjs');
+	const { readPin, ACCEPTED_ENDPOINT_PROTOCOLS } = await import('./import-mega-maestro.mjs');
 	const base = new URL(origin);
 	if (
 		base.origin !== origin ||
@@ -126,7 +126,10 @@ export async function createActorApprovalBridge({ browser, origin, timeoutMs = 3
 		pkg.name !== pin.name ||
 		pkg.version !== pin.version ||
 		zod.version !== pin.dependencies.zod ||
-		!pin.acceptedEndpointProtocols.includes(2)
+		// Protocol 2 only (decision D4): the pin, the archive and the importer all name [2].
+		!isDeepStrictEqual(ACCEPTED_ENDPOINT_PROTOCOLS, [2]) ||
+		!isDeepStrictEqual(pin.endpointProtocols, [2]) ||
+		!isDeepStrictEqual(pin.acceptedEndpointProtocols, [2])
 	)
 		throw new Error('Approval contracts differ from the pin');
 	const [wire, http] = await Promise.all([
@@ -135,7 +138,7 @@ export async function createActorApprovalBridge({ browser, origin, timeoutMs = 3
 	]);
 	// Pre-release contract: only the purpose-bound v2 registration (runtimeApprovalInputV2, with
 	// version 2 and purpose), and nothing else.
-	const expiresAt = wire.runtimeChallengeView.shape.expiresAt;
+	const expiresAt = wire.runtimeChallengeViewV2.shape.expiresAt;
 	const challengeSchema = wire.runtimeApprovalInputV2.extend({ expiresAt });
 	let used = false;
 	return {

@@ -17,7 +17,7 @@
  *     unchanged; the receipt must name the command and echo the correlation
  *     exactly. The renderer never builds or alters a signed envelope.
  *
- * The payloads are the contract's (contracts 0.3.0 protocol.js), typed in
+ * The payloads are the contract's (contracts 0.4.0 protocol.js), typed in
  * `src/shared/maestro-lib/managed/endpoint-port.ts`. The inbox request carries
  * the ledger's `idempotencyKey` unchanged (`inboxRequest`).
  */

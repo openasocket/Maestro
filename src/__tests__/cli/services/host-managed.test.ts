@@ -516,7 +516,7 @@ describe('composeHostManaged', () => {
 		expect(fs.existsSync(path.join(dir, 'maestro-managed-inbox-receipts.json'))).toBe(false);
 	});
 
-	it('relays the three enrollment phases in the 0.3.0 contract shapes without promoting the record to authority', async () => {
+	it('relays the three enrollment phases in the 0.4.0 contract shapes without promoting the record to authority', async () => {
 		fake = await startFakeEndpoint({ ...SERVES_RELAYED_ENROLLMENT, now: () => NOW });
 		const composed = composeHostManaged({
 			openPort: unixSocketPort,

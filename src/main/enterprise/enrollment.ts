@@ -7,7 +7,7 @@
  * key Maestro never sees. What Maestro does is REQUEST and OBSERVE:
  *
  *   - `requestEnrollment` relays ONE enrollment phase (decision D1, contracts
- *     0.3.0): `request`, then `prove`, then `activate`, with the operator's
+ *     0.4.0): `request`, then `prove`, then `activate`, with the operator's
  *     central begin, prove and activate between them. It sends the phase only
  *     when the v2 `compatibility` probe offers `enrollment`, checks the answer
  *     is the phase's own outcome echoing the management it named, and only
@@ -43,7 +43,6 @@
 import { canonicalJson } from '../../shared/canonicalJson';
 import {
 	ENDPOINT_ENROLLMENT_PHASE_OUTCOMES,
-	ENROLLMENT_IDENTITY_PROTOCOL,
 	LOCAL_ENDPOINT_PROTOCOL,
 	LOCAL_ENDPOINT_REGISTRATION_USE_OPERATION,
 	isEndpointDigest,
@@ -441,10 +440,7 @@ export function createEnrollmentLifecycle(deps: EnrollmentLifecycleDeps): Enroll
 								phase: 'request',
 								management: { ...input.management },
 								serverCaPem: input.serverCaPem,
-								identity: {
-									...attachmentRequest(),
-									supportedProtocols: [ENROLLMENT_IDENTITY_PROTOCOL],
-								},
+								identity: attachmentRequest(),
 							}
 						: input.phase === 'prove'
 							? {

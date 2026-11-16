@@ -123,7 +123,7 @@ function makeArtifact(dir: string, mutate?: (parts: ArtifactParts) => void, foun
 		payload,
 		pkg: {
 			name: '@mega-maestro/contracts',
-			version: '0.3.0',
+			version: '0.4.0',
 			private: true,
 			type: 'module',
 			files: ['dist', 'provenance.json'],
@@ -140,7 +140,7 @@ function makeArtifact(dir: string, mutate?: (parts: ArtifactParts) => void, foun
 		provenance: {
 			formatVersion: 1,
 			name: '@mega-maestro/contracts',
-			version: '0.3.0',
+			version: '0.4.0',
 			sourceRevision: 'a'.repeat(40),
 			sourceDirty: false,
 			inputSha256: { 'package.json': sha256('workspace') },
@@ -160,7 +160,7 @@ function makeArtifact(dir: string, mutate?: (parts: ArtifactParts) => void, foun
 			inputMode: { 'package.json': '100644' },
 			contractSchemas: {
 				authority: 'schemas-only',
-				localProtocols: [1, 2],
+				localProtocols: [2],
 				desktopPolicy: 1,
 				features: ['registration-use-v2', 'workflow-lifecycle'],
 			},
@@ -168,7 +168,7 @@ function makeArtifact(dir: string, mutate?: (parts: ArtifactParts) => void, foun
 		setPayload(
 			parts,
 			'dist/protocol.d.ts',
-			'export declare const protocolNegotiationRequest: z.ZodObject<{ supportedProtocols: z.ZodArray<z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<2>]>>; }>;'
+			'export declare const protocolNegotiationRequest: z.ZodObject<{ supportedProtocols: z.ZodArray<z.ZodLiteral<2>>; }>;'
 		);
 	}
 	mutate?.(parts);
@@ -253,9 +253,9 @@ describe('import-mega-maestro verifyArtifact', () => {
 			implementationRevision: 'a'.repeat(40),
 			inputSetVersion: 1,
 			inputDigest: 'b'.repeat(64),
-			endpointProtocols: [1, 2],
+			endpointProtocols: [2],
 			acceptedEndpointProtocols: [2],
-			contractSchemas: { authority: 'schemas-only', localProtocols: [1, 2], desktopPolicy: 1 },
+			contractSchemas: { authority: 'schemas-only', localProtocols: [2], desktopPolicy: 1 },
 		});
 	});
 
@@ -290,7 +290,7 @@ describe('import-mega-maestro verifyArtifact', () => {
 		{
 			contractSchemas: {
 				authority: 'execution-permit',
-				localProtocols: [1, 2],
+				localProtocols: [2],
 				desktopPolicy: 1,
 				features: [],
 			},
@@ -314,6 +314,7 @@ describe('import-mega-maestro verifyArtifact', () => {
 				fixture((p) => {
 					delete p.payload['dist/protocol.d.ts'];
 					delete (p.provenance.payloadSha256 as Record<string, string>)['dist/protocol.d.ts'];
+					setPayload(p, 'dist/local-endpoint.d.ts', 'export declare const nothing: string;\n');
 				}, true)
 			)
 		).toBe('protocol');
@@ -340,7 +341,7 @@ describe('import-mega-maestro verifyArtifact', () => {
 		});
 		expect(record).toMatchObject({
 			name: '@mega-maestro/contracts',
-			version: '0.3.0',
+			version: '0.4.0',
 			sha256: artifact.sha256,
 			sourceDirty: false,
 			endpointProtocols: [2],
@@ -423,14 +424,14 @@ describe('import-mega-maestro verifyArtifact', () => {
 
 	it('refuses package versions, names and formats Maestro was not written against', () => {
 		const versionOut = fixture((p) => {
-			p.provenance.version = '0.4.0';
-			p.pkg.version = '0.4.0';
+			p.provenance.version = '0.5.0';
+			p.pkg.version = '0.5.0';
 		});
 		expect(refusal(versionOut)).toBe('manifest-version');
-		// Pre-release contract: only the version this pin names is accepted, so the prior 0.2.0 is refused too.
+		// Pre-release contract: only the version this pin names is accepted, so the prior 0.3.0 is refused too.
 		const priorVersion = fixture((p) => {
-			p.provenance.version = '0.2.0';
-			p.pkg.version = '0.2.0';
+			p.provenance.version = '0.3.0';
+			p.pkg.version = '0.3.0';
 		});
 		expect(refusal(priorVersion)).toBe('manifest-version');
 		expect(refusal(fixture((p) => (p.provenance.name = '@other/contracts')))).toBe('manifest-name');
@@ -461,6 +462,16 @@ describe('import-mega-maestro verifyArtifact', () => {
 		expect(importer.declaredEndpointProtocols('nothing here')).toEqual([]);
 		const protocol3 = fixture((p) => setPayload(p, 'dist/local-endpoint.d.ts', ENDPOINT_DTS(3)));
 		expect(refusal(protocol3)).toBe('protocol');
+		// Protocol 2 is the only protocol: an archive that still declares protocol 1 beside it is
+		// refused whole, never imported for the overlap.
+		const withV1 = fixture((p) =>
+			setPayload(
+				p,
+				'dist/local-endpoint.d.ts',
+				'import { z } from "zod";\nexport declare const attachmentRequest: z.ZodObject<{\n    supportedProtocols: z.ZodArray<z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<2>]>>;\n}>;\n'
+			)
+		);
+		expect(refusal(withV1)).toBe('protocol');
 	});
 
 	it('refuses a dirty-source build unless told to, and keeps the flag either way', () => {

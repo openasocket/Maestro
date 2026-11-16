@@ -2,7 +2,7 @@
  * The live execution check (`runLiveExecutionCheck`) over a real Unix socket
  * against the fake daemon in `fakeEndpoint.ts`: the order of the handshake,
  * the delegated claim, the execution and the settlement, every request one
- * the pinned 0.3.0 contract parses, and an observation that carries only what
+ * the pinned 0.4.0 contract parses, and an observation that carries only what
  * was sent or answered. A failing step stops the check and is reported, never
  * papered over.
  *

@@ -1454,7 +1454,7 @@ describe('Auto Run turns: a refused effort, and the fence claimed per attempt', 
 				expect(lifetime.finish).toHaveBeenCalledExactlyOnceWith('applied');
 			});
 
-			it.each(['standalone', 'dormant port', 'legacy fence'] as const)(
+			it.each(['standalone', 'dormant port', 'fence without a lifetime'] as const)(
 				'keeps the original caller signal with a %s',
 				async (mode) => {
 					const { port } = await managedPort();
@@ -1473,7 +1473,7 @@ describe('Auto Run turns: a refused effort, and the fence claimed per attempt', 
 						}
 					).run({ purpose: 'task', prompt: 'work', signal: stop.signal });
 					expect(result.success).toBe(true);
-					expect(fence).toHaveBeenCalledTimes(mode === 'legacy fence' ? 1 : 0);
+					expect(fence).toHaveBeenCalledTimes(mode === 'fence without a lifetime' ? 1 : 0);
 				}
 			);
 

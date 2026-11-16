@@ -4,7 +4,7 @@
  * injects so that a desktop, a `maestro-cli host` and a TUI drive the same
  * code with their own custody and transport.
  *
- * The production wire is protocol 2 (contracts 0.3.0): one `POST /v2/invoke`
+ * The production wire is protocol 2 (contracts 0.4.0): one `POST /v2/invoke`
  * per operation, a JSON envelope `{ schemaVersion: 2, correlationId,
  * operation, payload }` both ways, the registration handshake
  * (`registration_challenge`, `registration_redeem`) included. A request of at most 1 MiB,
@@ -44,7 +44,7 @@ export const LOCAL_ENDPOINT_PROTOCOL = 2 as const;
 export const LOCAL_ENDPOINT_INVOKE_PATH = '/v2/invoke';
 
 /**
- * The pre-registration handshake (contracts 0.3.0 `localEndpointContractsV2`):
+ * The pre-registration handshake (contracts 0.4.0 `localEndpointContractsV2`):
  * two v2 envelopes on ONE connection, before any attachment. A pending
  * challenge never moves to another socket.
  */
@@ -229,7 +229,7 @@ export interface EndpointRegistrationReceipt {
 }
 
 // ---------------------------------------------------------------------------
-// Relayed enrollment (contracts 0.3.0, decision D1), field for field
+// Relayed enrollment (contracts 0.4.0, decision D1), field for field
 // ---------------------------------------------------------------------------
 //
 // The endpoint's service custody holds the non-exportable key and signs; the
@@ -266,29 +266,14 @@ export interface EndpointEnrollmentActivation {
 	};
 }
 
-/**
- * The `supportedProtocols` value the pinned 0.3.0 contract fixes for the
- * `identity` of an enrollment phase request. That field is typed by the
- * contract's frozen identity vocabulary (local-endpoint.js `attachmentRequest`),
- * whose literal is 1; it names no wire and no protocol this runtime speaks. The
- * phase travels on `/v2/invoke` under protocol 2 like every operation. It is
- * the contract's value, not Maestro's choice: it moves with the pin, and the
- * v2-only contracts 0.4.0 re-pin removes it.
- */
-export const ENROLLMENT_IDENTITY_PROTOCOL = 1 as const;
-
-/** The `identity` of a request phase: the attachment the contract fixes for enrollment. */
-export type EndpointEnrollmentIdentity = Omit<EndpointAttachmentRequest, 'supportedProtocols'> & {
-	supportedProtocols: readonly [typeof ENROLLMENT_IDENTITY_PROTOCOL];
-};
-
 /** `enrollmentPhaseRequestV2`: one relayed phase per request. */
 export type EndpointEnrollmentPhaseRequest =
 	| {
 			phase: 'request';
 			management: EndpointEnrollmentManagement;
 			serverCaPem: string;
-			identity: EndpointEnrollmentIdentity;
+			/** The attachment itself: `supportedProtocols` is exactly [2] (contracts 0.4.0). */
+			identity: EndpointAttachmentRequest;
 	  }
 	| {
 			phase: 'prove';
@@ -513,7 +498,7 @@ export interface EndpointWorkflowExchange {
 }
 
 // ---------------------------------------------------------------------------
-// v2 execution (contracts 0.3.0 protocol.js), field for field
+// v2 execution (contracts 0.4.0 protocol.js), field for field
 // ---------------------------------------------------------------------------
 
 /** The envelope operation `/v2/invoke` carries a run submission under. */
@@ -753,7 +738,7 @@ export interface EndpointModelResult {
 export type EndpointModelReply = EndpointModelResult | EndpointDenied;
 
 // ---------------------------------------------------------------------------
-// Local control (decision D2) and signed v2 commands (contracts 0.3.0)
+// Local control (decision D2) and signed v2 commands (contracts 0.4.0)
 // ---------------------------------------------------------------------------
 
 /** The local GUI selectors `localControl` carries (the `commandRequest` actions of local-endpoint.js). */

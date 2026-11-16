@@ -358,7 +358,7 @@ describe('v2 workflow lifecycle client', () => {
 		expect(store.fence(WORKFLOW)).toBeNull();
 	});
 
-	it('the owner port offers the lifecycle only with all four verbs negotiated and a reference, and never sends the legacy fence', async () => {
+	it('the owner port offers the lifecycle only with all four verbs negotiated and a reference, and sends nothing until a claim', async () => {
 		const { fake, port } = await attached();
 		let reference: EndpointWorkflowAuthority['registration'] | null = null;
 		const ownerPort = createEndpointWorkflowOwnerPort({

@@ -1,7 +1,7 @@
 /**
  * The execution client (handoff item 10): one `execution` envelope on the
  * endpoint client's `/v2/invoke` path carrying `runs.submit`, the contract's
- * `executionRequestV2` (contracts 0.3.0 protocol.js, unchanged from 0.2.0),
+ * `executionRequestV2` (contracts 0.4.0 protocol.js, unchanged since 0.2.0),
  * answered by a `dispatchReceiptV2` or a denial.
  *
  * Rules, each enforced here:

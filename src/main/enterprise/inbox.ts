@@ -170,14 +170,14 @@ export function inboxActionProblem(action: unknown): string | null {
 
 /**
  * The lookup this host asks for one action whose answer it never saw: the
- * pinned `deviceInboxRecoveryInput` minus its `registration`, which the
+ * pinned `deviceInboxRecoveryInputV2` minus its `registration`, which the
  * endpoint binds from the authenticated peer as it does for every local
  * operation. No local endpoint operation carries it yet (RECOVERY-LOCAL/1 in
  * `contract-coverage.json`), so no production host composes a port for it and
  * nothing advertises it; the client consumes one when a host hands it over.
  */
 export interface InboxRecoveryRequest {
-	version: 1;
+	version: 2;
 	operation: { idempotencyKey: string; campaignId: string; messageId: string };
 	requestDigest: string;
 }
@@ -191,7 +191,7 @@ export type InboxRecoveryAnswer =
 	| { outcome: 'unavailable' };
 
 /**
- * The pinned `deviceInboxRecoveryResult` for the record asked about, or null.
+ * The pinned `deviceInboxRecoveryResultV2` for the record asked about, or null.
  * A recovered receipt counts only when its custody names this exact action:
  * the message, campaign, key and request digest sent, the state the action
  * records, the tenant, and (when this host knew them) the enrollment, the actor
@@ -201,7 +201,7 @@ export function readInboxRecoveryResult(
 	payload: unknown,
 	record: InboxReceiptRecord
 ): InboxRecoveryAnswer | null {
-	if (!isRecord(payload) || payload.version !== 1) return null;
+	if (!isRecord(payload) || payload.version !== 2) return null;
 	if (payload.outcome === 'unavailable') {
 		return payload.reason === 'receipt_missing_or_unbound' ? { outcome: 'unavailable' } : null;
 	}
@@ -224,6 +224,8 @@ export function readInboxRecoveryResult(
 		!matches(custody.enrollmentId, record.enrollmentId) ||
 		!matches(custody.actorId, record.actorId) ||
 		!isRecord(custody.registration) ||
+		custody.registration.version !== 2 ||
+		custody.registration.purpose !== 'runtime_use' ||
 		custody.registration.challengeId !== record.registrationId ||
 		!isTimestamp(custody.recordedAt)
 	) {
@@ -852,7 +854,7 @@ export function createInboxClient(deps: InboxClientDeps): InboxClient {
 			const result = await serialized(async () => {
 				if (ledger.get(entry.idempotencyKey)?.state !== 'uncertain') return 'skipped' as const;
 				const answer = await port.recover({
-					version: 1,
+					version: 2,
 					operation: {
 						idempotencyKey: entry.idempotencyKey,
 						campaignId: entry.campaignId,

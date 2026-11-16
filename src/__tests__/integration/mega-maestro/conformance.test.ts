@@ -148,6 +148,16 @@ describe('pinned public schemas and existing endpoint fixtures', () => {
 		model: 'unspecified',
 		policyRevision: fixture.host.policyRevision,
 	};
+	/** A `dispatchReceiptV2` minted from a passthrough request fixture. */
+	const dispatchReceipt = (payload: Record<string, unknown>) => ({
+		...brokerReceipt(payload, 'decision-fixture'),
+		protocol: 2,
+		grantId: '6f1c2c1e-0000-4000-8000-0000000000e1',
+		idempotencyKey: 'exec-idem-fixture',
+		authorityDigest: 'f'.repeat(64),
+		ownerGeneration: 1,
+		state: 'dispatched',
+	});
 	beforeAll(async () => {
 		const pin = readPin(path.resolve(coverage.archive.pin));
 		expect(pin.sha256).toBe(coverage.archive.sha256);
@@ -192,9 +202,11 @@ describe('pinned public schemas and existing endpoint fixtures', () => {
 			supportedCapabilities: ['execution'],
 			requiredCapabilities: ['execution'],
 		};
+		// Protocol 2 is the only protocol (contracts 0.4.0): an offer of protocol 1 is not a
+		// protocol offer at all, so it is refused as an invalid request (a refusal vector, K6).
 		expect(
 			protocol.negotiateLocalProtocol(offer, [{ protocol: 1, capabilities: ['execution'] }])
-		).toEqual({ outcome: 'denied', reason: 'unsupported_version' });
+		).toEqual({ outcome: 'denied', reason: 'invalid_request' });
 		expect(protocol.negotiateLocalProtocol(offer, [{ protocol: 2, capabilities: [] }])).toEqual({
 			outcome: 'denied',
 			reason: 'unsupported_capability',
@@ -296,16 +308,15 @@ describe('pinned public schemas and existing endpoint fixtures', () => {
 		fake.options.operations = {
 			execution: (payload) => {
 				fake.dropConnections();
-				return endpoint.dispatchReceipt.parse(
-					brokerReceipt(payload as Record<string, unknown>, 'decision-fixture')
+				return endpoint.dispatchReceiptV2.parse(
+					dispatchReceipt(payload as Record<string, unknown>)
 				);
 			},
 		};
 		try {
 			expect((await port.attach(attach)).status).toBe('ok');
-			expect(
-				await port.invoke('execution', endpoint.executionRequest.parse(request))
-			).toMatchObject({ status: 'unknown' });
+			// The payload is a passthrough fixture: what is checked is that a lost reply stays unknown.
+			expect(await port.invoke('execution', request)).toMatchObject({ status: 'unknown' });
 			// An unknown outcome requires reconciliation, never a second execution call.
 			expect(
 				fake.calls.filter((call) => (call.body as { operation: string }).operation === 'execution')
@@ -317,11 +328,11 @@ describe('pinned public schemas and existing endpoint fixtures', () => {
 	});
 
 	it('distinguishes dispatch receipts from prepared schemas and unavailable effect authority', async () => {
-		const receipt = endpoint.dispatchReceipt.parse(brokerReceipt(request, 'decision-fixture'));
+		const receipt = endpoint.dispatchReceiptV2.parse(dispatchReceipt(request));
 		for (const schema of [
 			execution.executionBinding,
-			execution.executionConsumption,
-			execution.executionCompletion,
+			execution.executionConsumptionV2,
+			execution.executionCompletionV2,
 		]) {
 			expect(schema.safeParse(receipt).success).toBe(false);
 		}

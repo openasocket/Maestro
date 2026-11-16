@@ -86,7 +86,7 @@ const REASONS = [
 	'invalid_request',
 ];
 const deny = (reason: string) => ({ outcome: 'denied', reason });
-/** Every operation the daemon knows by its wire name (contracts 0.3.0 `localEndpointContractsV2`). */
+/** Every operation the daemon knows by its wire name (contracts 0.4.0 `localEndpointContractsV2`). */
 const OPERATIONS = [
 	'attachment',
 	'compatibility',
@@ -235,7 +235,7 @@ export async function startFakeEndpoint(options: FakeEndpointOptions = {}): Prom
 			ids.add(env.correlationId as string);
 			const operation = env.operation as string;
 			const payload = (env.payload ?? {}) as Record<string, unknown>;
-			// The pre-registration handshake (contracts 0.3.0): challenge and redeem are
+			// The pre-registration handshake (contracts 0.4.0): challenge and redeem are
 			// envelopes on one connection, reachable before any attachment.
 			if (operation === 'registration_challenge') {
 				const keys = Object.keys(payload).sort().join(',');
@@ -293,13 +293,21 @@ export async function startFakeEndpoint(options: FakeEndpointOptions = {}): Prom
 				Array.isArray(value) && value.every((item) => typeof item === 'string')
 					? (value as string[])
 					: null;
-			// `negotiateLocalProtocol` against the one offer.
+			// `negotiateLocalProtocol` against the one offer, protocol 2 only (contracts 0.4.0).
 			const negotiate = () => {
 				const protocols = payload.supportedProtocols;
 				const supported = list(payload.supportedCapabilities);
 				const required = list(payload.requiredCapabilities);
-				if (!Array.isArray(protocols) || !supported || !required) return deny('invalid_request');
-				if (!protocols.includes(2) || live.offered === false) return deny('unsupported_version');
+				// As the contract's `protocolOffer`: anything but exactly [2] is not an offer at all.
+				if (
+					!Array.isArray(protocols) ||
+					protocols.length !== 1 ||
+					protocols[0] !== 2 ||
+					!supported ||
+					!required
+				)
+					return deny('invalid_request');
+				if (live.offered === false) return deny('unsupported_version');
 				const selected = capabilities().filter((c) => supported.includes(c));
 				if (required.some((c) => !selected.includes(c))) return deny('unsupported_capability');
 				return { outcome: 'negotiated', protocol: 2, capabilities: selected };

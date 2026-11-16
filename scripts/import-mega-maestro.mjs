@@ -32,7 +32,7 @@ export const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url
 
 /** What this Maestro was written against. Bump deliberately, with the consumer. */
 export const EXPECTED_PACKAGE_NAME = '@mega-maestro/contracts';
-export const ACCEPTED_PACKAGE_VERSIONS = '>=0.3.0 <0.4.0';
+export const ACCEPTED_PACKAGE_VERSIONS = '>=0.4.0 <0.5.0';
 export const ACCEPTED_ENDPOINT_PROTOCOLS = [2];
 export const MANIFEST_FORMAT_VERSION = 1;
 export const PIN_FORMAT_VERSION = 1;
@@ -388,8 +388,10 @@ export function verifyArtifact({
 	) {
 		fail('protocol', 'contractSchemas.localProtocols differs from the declarations');
 	}
+	// Protocol 2 is the only endpoint protocol (decision D4): an archive that declares any
+	// protocol Maestro does not speak is refused whole, never imported for its overlap.
 	const accepted = protocols.filter((p) => ACCEPTED_ENDPOINT_PROTOCOLS.includes(p));
-	if (accepted.length === 0) {
+	if (accepted.length === 0 || accepted.length !== protocols.length) {
 		fail(
 			'protocol',
 			`declared endpoint protocols [${protocols}]; Maestro accepts [${ACCEPTED_ENDPOINT_PROTOCOLS}]`

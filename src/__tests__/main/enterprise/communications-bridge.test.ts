@@ -315,7 +315,7 @@ describe('endpoint communications over the host bridge (MCOMP-29-03)', () => {
 				asked.push(request);
 				return {
 					status: 'ok',
-					payload: { version: 1, outcome: 'unavailable', reason: 'receipt_missing_or_unbound' },
+					payload: { version: 2, outcome: 'unavailable', reason: 'receipt_missing_or_unbound' },
 				};
 			},
 		};

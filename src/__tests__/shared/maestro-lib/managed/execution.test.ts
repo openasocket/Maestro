@@ -138,7 +138,7 @@ describe('v2 execution client', () => {
 
 	beforeAll(async () => {
 		const pin = readPin(path.resolve('vendor/mega-maestro/contracts.pin.json'));
-		expect(pin.version).toBe('0.3.0');
+		expect(pin.version).toBe('0.4.0');
 		inspectContractsDir({
 			contractsDir: path.resolve('vendor/mega-maestro/contracts'),
 			expectedSha256: pin.payloadDigest,

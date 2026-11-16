@@ -15,18 +15,18 @@
 	},
 	"archive": {
 		"name": "@mega-maestro/contracts",
-		"version": "0.3.0",
+		"version": "0.4.0",
 		"sourceDirty": false,
-		"path": "artifacts/enterprise/0.3.0/71c8aa927803c3facd4be5be6322125b468e1e4754c6f512ec49b119096b6a25/contracts.tgz",
+		"path": "artifacts/enterprise/0.4.0/7c8963448e52cbdae2043a1305ce4690667c4e9ae2697ad933278d0a1630f650/contracts.tgz",
 		"manifest": "artifact.json",
-		"manifestSha256": "e31cbe35e9d9fbbfa05411d3a272516c6f60770565ccb299f28b5f10a38de2c8",
+		"manifestSha256": "a24912480824281578307a37e5fbc430dfce724e6088308fdfed9037bd14e647",
 		"sidecar": "contracts.tgz.sha256",
-		"sha256": "71c8aa927803c3facd4be5be6322125b468e1e4754c6f512ec49b119096b6a25",
-		"integrity": "sha512-zXk5U5tZnOfQQsx1A69W3JgDeqlwH+qFMUzOPFsY5O71saJWdk2WIaxIo+GxBC7MwhkP4x2IfaM6pWePBKKqqQ==",
+		"sha256": "7c8963448e52cbdae2043a1305ce4690667c4e9ae2697ad933278d0a1630f650",
+		"integrity": "sha512-MQ0K4GqcvwCqQLKMPNNp/C2AXYHvXGjt0c+TM1VsFkO9M/JV/lO2HCr/ariKYrD4VmXxMQaJcSjZD5M9NgdTTw==",
 		"payloadFiles": 48,
-		"publisherPayloadDigest": "b7f5eb7dab121a50766be826983afa448ed3ef8be3579d32115a8b22e3fa08da",
+		"publisherPayloadDigest": "108eb6f3bd2b3064dee7b82d7cc328561117807ec087d7f4c3c6aef33618ff0c",
 		"publisherPayloadDigestEncoding": "sha256(canonical JSON payloadSha256 map)",
-		"importerPayloadDigest": "eefc555c21f32b926ad493414e9b581a1713e945eb96e102b9824d11b573fd09",
+		"importerPayloadDigest": "6e850b92fe8621dd88b67da02cad173eea04cd0b072ea01ebc74d974fb8da1de",
 		"importerPayloadDigestEncoding": "sha256(JSON sorted payloadSha256 entry pairs)",
 		"pin": "vendor/mega-maestro/contracts.pin.json",
 		"extractedPackage": "vendor/mega-maestro/contracts"
@@ -39,28 +39,29 @@
 		"installedAt": "vendor/mega-maestro/contracts/node_modules",
 		"scriptsEnabled": false,
 		"rootDependenciesChanged": false,
-		"lockSha256": "3d742b654bdb2d702dbd6138ac28eef968a3009515db5dec20d8df97ee5306ae",
+		"lockSha256": "9e10c94f29a6e68218b7a40b6bc72889e84feab2d1cc73fa5c6a3a9b73fbfac8",
 		"zodIntegrity": "sha512-v5l/aFXZQeai4awLbOpSoHecE9UiMrnfx75tEXLjNonXVARxQ5mOeipTjROUchszUNCqnE+hqAMujRsRHsut2Q==",
 		"note": "The archive declares exact Zod 4.6.5, installed in the ignored import directory; root Zod 4.4.3 was not used for schema validation.",
 		"installCommand": "npm install --prefix vendor/mega-maestro/contracts --ignore-scripts --omit=dev --no-audit --no-fund"
 	},
 	"versions": {
-		"acceptedPackageRange": ">=0.1.0 <0.2.0",
+		"acceptedPackageRange": ">=0.4.0 <0.5.0",
 		"manifestFormat": 1,
 		"pinFormat": 1,
 		"published": {
 			"authority": "schemas-only",
-			"localProtocols": [1, 2],
+			"localProtocols": [2],
 			"desktopPolicy": 1,
 			"features": [
 				"registration-use-v2",
 				"delegation-references-v2",
 				"workflow-lifecycle-v2",
+				"workflow-execution-references-v2",
 				"command-correlation-v2",
 				"desktop-authoring-projection-v1"
 			]
 		},
-		"acceptedConsumerEndpointProtocols": [1],
+		"acceptedConsumerEndpointProtocols": [2],
 		"liveNegotiationPerformed": false
 	},
 	"publicExports": [
@@ -146,7 +147,7 @@
 		{
 			"family": "prepared-execution",
 			"module": "./execution",
-			"exports": ["executionBinding", "executionConsumption", "executionCompletion"],
+			"exports": ["executionBinding", "executionConsumptionV2", "executionCompletionV2"],
 			"version": 1,
 			"consumerPort": "src/shared/maestro-lib/managed/host-adapter.ts",
 			"binding": "pending",
@@ -187,7 +188,7 @@
 		{
 			"family": "notices",
 			"module": "./local-endpoint",
-			"exports": ["noticeListResult", "inboxRequest", "deviceInboxRecoveryResult"],
+			"exports": ["noticeListResult", "inboxRequest", "deviceInboxRecoveryResultV2"],
 			"version": 1,
 			"consumerPort": "src/main/enterprise/inbox.ts",
 			"binding": "pending",
@@ -270,12 +271,12 @@
 		},
 		{
 			"family": "headless-host",
-			"module": "./local-endpoint",
-			"exports": ["attachmentRequest", "endpointStatus", "enrollmentRequest", "enrollmentResult"],
-			"version": 1,
+			"module": "./protocol",
+			"exports": ["attachmentRequestV2", "enrollmentPhaseRequestV2", "enrollmentPhaseResultV2"],
+			"version": 2,
 			"consumerPort": "src/cli/services/host-managed.ts",
 			"binding": "local-composition-tested-external-custody-unavailable",
-			"note": "MCOMP-09-05 composes the existing v1 enrollment/registration/attachment transport with protected custody ports, live standing, refresh/reconnect and terminal shutdown. startRuntimeHost composes by default and carries one composition through its lifetime. Plain Node has no protected seal and remains held; v2 runtime_use registration remains pending under REGISTRATION-HTTP/2. Fixture registration is not actor or native qualification.",
+			"note": "MCOMP-09-05 composes enrollment, registration and attachment with protected custody ports, live standing, refresh/reconnect and terminal shutdown. On contracts 0.4.0 (decision D4, v2 only) the transport is the v2 attachment and the relayed enrollment phases (D1) on /v2/invoke; the v1 attachmentRequest, endpointStatus, enrollmentRequest and enrollmentResult exports are gone. startRuntimeHost composes by default and carries one composition through its lifetime. Plain Node has no protected seal and remains held. Fixture registration is not actor or native qualification.",
 			"pairedVerification": ["MCOMP-14-01", "MCOMP-32-01", "MCOMP-34-01"]
 		}
 	],
@@ -444,12 +445,12 @@
 			"id": "RECOVERY-LOCAL/1",
 			"status": "proposed-not-negotiated",
 			"owner": "mega-maestro",
-			"version": "local delivery extension for deviceInboxRecovery schema 1",
-			"operations": "Propose inbox_recover over the local endpoint; central deviceInboxRecoveryInput/Result already exist.",
+			"version": "local delivery extension for deviceInboxRecovery schema 2",
+			"operations": "Propose inbox_recover over the local endpoint; central deviceInboxRecoveryInputV2/ResultV2 already exist.",
 			"missing": "Registration-bound campaign/message/idempotency/requestDigest lookup and receipt custody; missing/unbound returns unavailable. No actor selector or automatic replay of private replies.",
 			"implementationTasks": ["MCOMP-29-02", "MCOMP-29-03"],
 			"pairedVerification": ["MCOMP-30-01"],
-			"localConsumer": "MCOMP-29-02: createInboxClient(...).recover() over an optional InboxClientDeps.recovery port (InboxRecoveryRequest = deviceInboxRecoveryInput minus registration, which the endpoint binds from the authenticated peer). readInboxRecoveryResult() accepts the pinned deviceInboxRecoveryResult only when the custody names the exact action (message, campaign, idempotency key, request digest, action state, tenant, and the enrollment, actor and sending registration challenge this host recorded); recovered settles the uncertain receipt recorded, receipt_missing_or_unbound keeps it uncertain, nothing is resent and a private reply is never replayed. Records of another tenant or enrollment are not asked. No production host composes the port and no capability is advertised; recover() answers unsupported until the operation is published and negotiated."
+			"localConsumer": "MCOMP-29-02: createInboxClient(...).recover() over an optional InboxClientDeps.recovery port (InboxRecoveryRequest = deviceInboxRecoveryInputV2 minus registration, which the endpoint binds from the authenticated peer). readInboxRecoveryResult() accepts the pinned deviceInboxRecoveryResultV2 (a runtime_use registration) only when the custody names the exact action (message, campaign, idempotency key, request digest, action state, tenant, and the enrollment, actor and sending registration challenge this host recorded); recovered settles the uncertain receipt recorded, receipt_missing_or_unbound keeps it uncertain, nothing is resent and a private reply is never replayed. Records of another tenant or enrollment are not asked. No production host composes the port and no capability is advertised; recover() answers unsupported until the operation is published and negotiated."
 		},
 		{
 			"id": "HEADLESS-CUSTODY/1",

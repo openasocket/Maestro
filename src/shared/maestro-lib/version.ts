@@ -199,8 +199,11 @@ import { MANAGED_CONTRACT_VERSION } from './managed/types';
  * client (`./managed/execution`) and `runLiveExecutionCheck` (`./managed/live-execution-check`):
  * one delegated claim, execution and settlement against a live endpoint, reported as an
  * observation a consumer receipt carries. Additions only.
+ * 0.42.0: contracts 0.4.0, v2 only (decision D4). The relayed enrollment `request` phase's
+ * `identity` is the v2 attachment itself (`supportedProtocols` exactly [2]), so
+ * `ENROLLMENT_IDENTITY_PROTOCOL` and `EndpointEnrollmentIdentity` are removed. Breaking below 1.0.
  */
-export const MAESTRO_LIB_VERSION = '0.41.0';
+export const MAESTRO_LIB_VERSION = '0.42.0';
 
 /** The Node range the built library runs on; `engines.node` of the built package. */
 export const MAESTRO_LIB_NODE_RANGE = '>=20';

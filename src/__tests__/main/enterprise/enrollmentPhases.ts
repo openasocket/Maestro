@@ -1,5 +1,5 @@
 /**
- * Relayed enrollment fixtures (decision D1, contracts 0.3.0): the three phase
+ * Relayed enrollment fixtures (decision D1, contracts 0.4.0): the three phase
  * inputs a caller hands `requestEnrollment`, and a fake-endpoint `enrollment`
  * handler that answers each phase as the endpoint does, echoing the
  * management it was named.

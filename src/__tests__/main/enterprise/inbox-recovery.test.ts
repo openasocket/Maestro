@@ -5,7 +5,7 @@
  * `load()`, the next listing resends `delivered` under the same key, and
  * `recover()` asks the endpoint's receipt custody (RECOVERY-LOCAL/1, a
  * proposal: the fixtures here parse under the pinned
- * `deviceInboxRecoveryResult`, but no production host composes the port) about
+ * `deviceInboxRecoveryResultV2`, but no production host composes the port) about
  * every `uncertain` receipt. A recovered receipt settles `recorded` only when
  * its custody names the exact action sent; `receipt_missing_or_unbound` keeps
  * it `uncertain` and nothing is resent, least of all a private reply, whose
@@ -74,7 +74,7 @@ const notice = {
 /** The pinned recovered result for `record`, with any custody field overridden. */
 function recovered(record: InboxReceiptRecord, custody: Record<string, unknown> = {}) {
 	return {
-		version: 1,
+		version: 2,
 		outcome: 'recovered',
 		receipt: {
 			outcome: 'recorded',
@@ -90,12 +90,14 @@ function recovered(record: InboxReceiptRecord, custody: Record<string, unknown> 
 					processBirthDigest: 'c'.repeat(64),
 					runtimeId: INSTALLATION.runtimeId,
 					processEpoch: INSTALLATION.processEpoch,
-					version: 1,
+					version: 2,
+					purpose: 'runtime_use',
 					tenantId: TENANT,
 					orgId: ORG,
 					enrollmentId: ENROLLMENT,
 					installationId: INSTALLATION.installationId,
 					challengeId: CHALLENGE,
+					challengeDigest: 'd'.repeat(64),
 				},
 				actorId: ACTOR,
 				campaignId: record.campaignId,
@@ -107,7 +109,7 @@ function recovered(record: InboxReceiptRecord, custody: Record<string, unknown> 
 		},
 	};
 }
-const MISSING = { version: 1, outcome: 'unavailable', reason: 'receipt_missing_or_unbound' };
+const MISSING = { version: 2, outcome: 'unavailable', reason: 'receipt_missing_or_unbound' };
 
 interface Rig {
 	standing: InboxStanding;
@@ -177,8 +179,8 @@ describe('inbox receipt recovery (RECOVERY-LOCAL/1)', () => {
 		expect(record).toMatchObject({ action: 'delivered', state: 'uncertain' });
 
 		const good = recovered(record);
-		expect(endpoint.deviceInboxRecoveryResult.safeParse(good).success).toBe(true);
-		expect(endpoint.deviceInboxRecoveryResult.safeParse(MISSING).success).toBe(true);
+		expect(endpoint.deviceInboxRecoveryResultV2.safeParse(good).success).toBe(true);
+		expect(endpoint.deviceInboxRecoveryResultV2.safeParse(MISSING).success).toBe(true);
 		expect(readInboxRecoveryResult(good, record)).toEqual({
 			outcome: 'recovered',
 			receipt: { receiptId: 'rcpt-delivered', state: 'delivered' },
@@ -197,13 +199,13 @@ describe('inbox receipt recovery (RECOVERY-LOCAL/1)', () => {
 			{ registration: { ...good.receipt.custody.registration, challengeId: ORG } },
 		]) {
 			const answer = recovered(record, custody);
-			expect(endpoint.deviceInboxRecoveryResult.safeParse(answer).success).toBe(true);
+			expect(endpoint.deviceInboxRecoveryResultV2.safeParse(answer).success).toBe(true);
 			expect(readInboxRecoveryResult(answer, record)).toBeNull();
 		}
 		const wrongState = { ...good, receipt: { ...good.receipt, state: 'read' } };
-		expect(endpoint.deviceInboxRecoveryResult.safeParse(wrongState).success).toBe(true);
+		expect(endpoint.deviceInboxRecoveryResultV2.safeParse(wrongState).success).toBe(true);
 		expect(readInboxRecoveryResult(wrongState, record)).toBeNull();
-		expect(readInboxRecoveryResult({ ...MISSING, version: 2 }, record)).toBeNull();
+		expect(readInboxRecoveryResult({ ...MISSING, version: 1 }, record)).toBeNull();
 		expect(readInboxRecoveryResult({ ...MISSING, reason: 'other' }, record)).toBeNull();
 	});
 

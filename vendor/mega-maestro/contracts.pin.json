@@ -1,17 +1,17 @@
 {
 	"formatVersion": 1,
 	"name": "@mega-maestro/contracts",
-	"version": "0.3.0",
-	"sha256": "71c8aa927803c3facd4be5be6322125b468e1e4754c6f512ec49b119096b6a25",
-	"integrity": "sha512-zXk5U5tZnOfQQsx1A69W3JgDeqlwH+qFMUzOPFsY5O71saJWdk2WIaxIo+GxBC7MwhkP4x2IfaM6pWePBKKqqQ==",
-	"sourceRevision": "6db2b152cacf2c470cb5869e492d24e9c02a5b0d",
+	"version": "0.4.0",
+	"sha256": "7c8963448e52cbdae2043a1305ce4690667c4e9ae2697ad933278d0a1630f650",
+	"integrity": "sha512-MQ0K4GqcvwCqQLKMPNNp/C2AXYHvXGjt0c+TM1VsFkO9M/JV/lO2HCr/ariKYrD4VmXxMQaJcSjZD5M9NgdTTw==",
+	"sourceRevision": "e439b39e165cef495558ef363972ea10d5a69fb6",
 	"sourceDirty": false,
-	"implementationRevision": "6db2b152cacf2c470cb5869e492d24e9c02a5b0d",
+	"implementationRevision": "e439b39e165cef495558ef363972ea10d5a69fb6",
 	"inputSetVersion": 1,
-	"inputDigest": "9a1235916f586a591511d21c0ee04f4b9c689d49f3a67753ddc5e6145a50addc",
+	"inputDigest": "b99d43f5fcee6803b36af73afacea8e53f32f6cc95df70d85cf4655031e25a3e",
 	"contractSchemas": {
 		"authority": "schemas-only",
-		"localProtocols": [1, 2],
+		"localProtocols": [2],
 		"desktopPolicy": 1,
 		"features": [
 			"registration-use-v2",
@@ -28,7 +28,7 @@
 			"path": "/v2/invoke",
 			"envelopeOperation": "execution",
 			"payloadOperation": "runs.submit",
-			"importerRange": ">=0.3.0 <0.4.0",
+			"importerRange": ">=0.4.0 <0.5.0",
 			"capabilityAdvertisement": false
 		},
 		"supersessions": [
@@ -44,7 +44,7 @@
 			}
 		]
 	},
-	"endpointProtocols": [1, 2],
+	"endpointProtocols": [2],
 	"acceptedEndpointProtocols": [2],
 	"dependencies": {
 		"zod": "4.6.5"
@@ -54,7 +54,7 @@
 		"pnpm": "12.4.2"
 	},
 	"payloadFiles": 48,
-	"payloadDigest": "eefc555c21f32b926ad493414e9b581a1713e945eb96e102b9824d11b573fd09",
+	"payloadDigest": "6e850b92fe8621dd88b67da02cad173eea04cd0b072ea01ebc74d974fb8da1de",
 	"exports": [
 		"./assurance",
 		"./commands",

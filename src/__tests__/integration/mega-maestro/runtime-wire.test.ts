@@ -1,6 +1,6 @@
 /**
  * What the production desktop composition (`createEnterpriseService`) puts on
- * the wire, parsed by the pinned 0.3.0 contract (handoff items 1-3, 9): the
+ * the wire, parsed by the pinned 0.4.0 contract (handoff items 1-3, 9): the
  * registration handshake, the protocol 2 attachment, `registration_use` and a
  * v2 workflow claim, all on `/v2/invoke`, every request envelope one
  * `localRequestEnvelopeV2` accepts, and nothing on any other path.
