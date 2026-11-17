@@ -11,7 +11,8 @@
  *     --runtime /maestro/dist/mega-maestro-runtime/<version>/<sha256>/runtime.tgz \
  *     --sha256 <archive sha256> --request <request.json> \
  *     [--socket /var/lib/mega-maestro-endpoint/run/ipc.sock] [--out <file>] \
- *     [--work-dir <dir>] [--approval-timeout-ms 600000] \
+ *     [--identity <identity.json>] [--work-dir <dir>] \
+ *     [--approval-timeout-ms 600000] [--authority-timeout-ms 60000] \
  *     [--effect uncertain|completed|no_effect --evidence-file <file>]
  *
  * Node builtins only: no Electron, no native module, nothing from
@@ -29,9 +30,31 @@
  *   }
  * The delegation and grants are the central API's, issued to this actor.
  *
+ * `--identity` names the ENROLLED installation and runtime
+ * ({ installationId, runtimeId, processEpoch }): the central registration
+ * challenge accepts only the enrolled runtime, and an attachment must name the
+ * enrolled installation. Without it the attachment is `installationIdentity()`
+ * of this host, which only an unenrolled endpoint accepts.
+ *
  * Registration approval is a file handshake in the work dir: on a challenge
  * the check writes `challenge.json` (mode 0600, the challenge the operator
  * approves) and waits for `approval.json` naming the same `challengeId`.
+ *
+ * The delegation a live claim accepts is issued to the REGISTRATION, so it
+ * exists only after the redeem, while `runLiveExecutionCheck` reads its
+ * authority when it starts. So the check runs up to two passes in this
+ * process. The first registers and presents the request file's authority. If
+ * it registered and then failed at `workflow_claim`, the check waits for
+ * `authority.json` in the work dir ({ challengeId, authority: { delegation,
+ * grants } }, naming the first pass's challenge) and runs a second pass on a
+ * new connection with that authority and a fresh trigger, run and attempt. The
+ * observation is the last pass's; `passes` lists each. The endpoint registers
+ * an enrolled runtime once, so a run that fails after its redeem needs a new
+ * operator session.
+ *
+ * Each pass uses ONE idempotency key for its claim, execution, settle and
+ * release: the endpoint admits an execution only under its lease's key and
+ * settles the effect recorded under it.
  *
  * Exit: 0 the check passed, 1 it ran and a step failed (the observation says
  * which), 2 usage or a refused input (nothing was sent).
@@ -91,7 +114,9 @@ export function parse(argv) {
 			socket: { type: 'string', default: DEFAULT_SOCKET },
 			out: { type: 'string' },
 			'work-dir': { type: 'string' },
+			identity: { type: 'string' },
 			'approval-timeout-ms': { type: 'string', default: '600000' },
+			'authority-timeout-ms': { type: 'string', default: '60000' },
 			effect: { type: 'string', default: 'uncertain' },
 			'evidence-file': { type: 'string' },
 		},
@@ -108,6 +133,9 @@ export function parse(argv) {
 	const approvalMs = Number(values['approval-timeout-ms']);
 	if (!Number.isSafeInteger(approvalMs) || approvalMs < 0)
 		throw new Error('--approval-timeout-ms is a whole number of milliseconds');
+	const authorityMs = Number(values['authority-timeout-ms']);
+	if (!Number.isSafeInteger(authorityMs) || authorityMs < 0)
+		throw new Error('--authority-timeout-ms is a whole number of milliseconds');
 	const out = values.out ? path.resolve(values.out) : null;
 	const workDir = values['work-dir'] ? path.resolve(values['work-dir']) : null;
 	for (const [flag, file] of [
@@ -120,10 +148,12 @@ export function parse(argv) {
 		runtime: path.resolve(values.runtime),
 		sha256: values.sha256,
 		request: path.resolve(values.request),
+		identity: values.identity ? path.resolve(values.identity) : null,
 		socket: values.socket,
 		out,
 		workDir,
 		approvalMs,
+		authorityMs,
 		effect: values.effect,
 		evidenceFile: values['evidence-file'] ? path.resolve(values['evidence-file']) : null,
 	};
@@ -157,9 +187,50 @@ export function loadRuntime(archive, expected, workDir) {
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/** The enrolled identity an attachment and challenge must name, from `--identity`. */
+export function readIdentity(file) {
+	const identity = JSON.parse(fs.readFileSync(file, 'utf8'));
+	for (const key of ['installationId', 'runtimeId', 'processEpoch'])
+		if (typeof identity?.[key] !== 'string' || identity[key] === '')
+			throw new Error(`--identity has no ${key}`);
+	return {
+		installationId: identity.installationId,
+		runtimeId: identity.runtimeId,
+		processEpoch: identity.processEpoch,
+	};
+}
+
+/** True when a failed pass registered on this process and then stopped at the claim. */
+export function needsIssuedAuthority(observation) {
+	return (
+		observation.outcome === 'failed' &&
+		observation.failure?.step === 'workflow_claim' &&
+		observation.steps.some((s) => s.step === 'registration_redeem' && s.status === 'ok')
+	);
+}
+
+/** The operator's delegation to this registration: authority.json naming the challenge, bounded. */
+export async function issuedAuthority(workDir, challengeId, timeoutMs, pollMs = 200) {
+	const file = path.join(workDir, 'authority.json');
+	for (const deadline = Date.now() + timeoutMs; ; await wait(pollMs)) {
+		if (fs.existsSync(file)) {
+			const issued = JSON.parse(fs.readFileSync(file, 'utf8'));
+			if (issued?.challengeId !== challengeId)
+				throw new Error(
+					`authority.json names challenge ${issued?.challengeId}, not ${challengeId}`
+				);
+			if (!issued.authority?.delegation || !Array.isArray(issued.authority.grants))
+				throw new Error('authority.json has no authority.delegation and authority.grants');
+			return issued;
+		}
+		if (Date.now() >= deadline) return null;
+	}
+}
+
 /** The approval handshake: challenge.json out (0600), approval.json in, bounded. */
-function fileApproval(workDir, timeoutMs) {
+function fileApproval(workDir, timeoutMs, onChallenge) {
 	return async (challenge) => {
+		onChallenge?.(challenge);
 		const challengeFile = path.join(workDir, 'challenge.json');
 		const approvalFile = path.join(workDir, 'approval.json');
 		fs.writeFileSync(challengeFile, JSON.stringify(challenge), { mode: 0o600 });
@@ -185,12 +256,14 @@ function fileApproval(workDir, timeoutMs) {
 export async function main(argv = process.argv.slice(2)) {
 	let args;
 	let request;
+	let enrolled = null;
 	try {
 		args = parse(argv);
 		request = JSON.parse(fs.readFileSync(args.request, 'utf8'));
 		if (!request?.authority?.delegation || !Array.isArray(request?.authority?.grants))
 			throw new Error('--request has no authority.delegation and authority.grants');
 		if (!request.execution) throw new Error('--request has no execution');
+		if (args.identity) enrolled = readIdentity(args.identity);
 	} catch (error) {
 		process.stderr.write(`${error.message}\n`);
 		return 2;
@@ -206,15 +279,25 @@ export async function main(argv = process.argv.slice(2)) {
 	}
 	const { lib } = runtime;
 	const startedAt = new Date().toISOString();
-	const installation = lib.installationIdentity({
-		hostname: os.hostname(),
-		productionDataDir: workDir,
-		mode: 'live-check',
-		pid: process.pid,
-		startedAt,
-	});
+	const installation =
+		enrolled ??
+		lib.installationIdentity({
+			hostname: os.hostname(),
+			productionDataDir: workDir,
+			mode: 'live-check',
+			pid: process.pid,
+			startedAt,
+		});
+	const attachment = {
+		installationId: installation.installationId,
+		runtimeId: installation.runtimeId,
+		processEpoch: installation.processEpoch,
+		components: [{ id: 'maestro-runtime', kind: 'runtime', version: lib.MAESTRO_LIB_VERSION }],
+		supportedProtocols: [lib.LOCAL_ENDPOINT_PROTOCOL],
+		supportedCapabilities: ['attachment', 'compatibility', ...lib.LIVE_EXECUTION_CAPABILITIES],
+		requiredCapabilities: [],
+	};
 	const workflow = request.workflow ?? {};
-	const runId = workflow.runId ?? `run-${randomUUID()}`;
 	const effect =
 		args.effect === 'uncertain'
 			? { state: 'uncertain', reason: 'recovery_required' }
@@ -223,45 +306,74 @@ export async function main(argv = process.argv.slice(2)) {
 					outcome: args.effect,
 					evidenceDigest: sha256(fs.readFileSync(args.evidenceFile)),
 				};
-	const port = lib.createLocalEndpointClient({ socketPath: args.socket });
-	let observation;
-	try {
-		observation = await lib.runLiveExecutionCheck({
-			port,
-			attachment: {
-				...installation,
-				components: [{ id: 'maestro-runtime', kind: 'runtime', version: lib.MAESTRO_LIB_VERSION }],
-				supportedProtocols: [lib.LOCAL_ENDPOINT_PROTOCOL],
-				supportedCapabilities: ['attachment', 'compatibility', ...lib.LIVE_EXECUTION_CAPABILITIES],
-				requiredCapabilities: [],
-			},
-			authority: request.authority,
-			approve: args.approvalMs > 0 ? fileApproval(workDir, args.approvalMs) : undefined,
-			workflow: {
-				workflowId: workflow.workflowId ?? 'maestro-live-execution-check',
-				workflowVersion: workflow.workflowVersion ?? 'v1',
-				triggerId: workflow.triggerId ?? `trigger-${randomUUID()}`,
-				runId,
-				attemptId: workflow.attemptId ?? `attempt-${randomUUID()}`,
-				rootRunId: workflow.rootRunId ?? runId,
-				parentRunId: workflow.parentRunId ?? null,
-				...(workflow.policyRevision === undefined
-					? {}
-					: { policyRevision: workflow.policyRevision }),
-				requestedLeaseMs: workflow.requestedLeaseMs ?? 120_000,
-			},
-			execution: {
-				requestId: randomUUID(),
-				source: 'headless',
-				resourceIds: [],
-				idempotencyKey: `exec-${randomUUID()}`,
-				...request.execution,
-			},
-			effect,
-			newId: () => `live-${randomUUID()}`,
-		});
-	} finally {
-		await port.close();
+	let challengeId = null;
+	const approve =
+		args.approvalMs > 0
+			? fileApproval(workDir, args.approvalMs, (challenge) => {
+					challengeId = challenge.challengeId;
+				})
+			: undefined;
+	/** One pass on a new connection; the first keeps the request file's run ids, a second gets fresh ones. */
+	const pass = async (authority, first) => {
+		const ids = first ? workflow : {};
+		const runId = ids.runId ?? `run-${randomUUID()}`;
+		// One key for the claim, execution, settle and release of this pass.
+		const key = `live-${randomUUID()}`;
+		const port = lib.createLocalEndpointClient({ socketPath: args.socket });
+		try {
+			return await lib.runLiveExecutionCheck({
+				port,
+				attachment,
+				authority,
+				approve,
+				workflow: {
+					workflowId: workflow.workflowId ?? 'maestro-live-execution-check',
+					workflowVersion: workflow.workflowVersion ?? 'v1',
+					triggerId: ids.triggerId ?? `trigger-${randomUUID()}`,
+					runId,
+					attemptId: ids.attemptId ?? `attempt-${randomUUID()}`,
+					rootRunId: ids.rootRunId ?? runId,
+					parentRunId: ids.parentRunId ?? null,
+					...(workflow.policyRevision === undefined
+						? {}
+						: { policyRevision: workflow.policyRevision }),
+					requestedLeaseMs: workflow.requestedLeaseMs ?? 120_000,
+				},
+				execution: {
+					requestId: randomUUID(),
+					source: 'headless',
+					resourceIds: [],
+					...request.execution,
+					idempotencyKey: key,
+				},
+				effect,
+				newId: () => key,
+			});
+		} finally {
+			await port.close();
+		}
+	};
+	const summary = (n, source, o) => ({
+		pass: n,
+		authority: source,
+		outcome: o.outcome,
+		failure: o.failure ?? null,
+		steps: o.steps,
+	});
+	let observation = await pass(request.authority, true);
+	const passes = [summary(1, 'request', observation)];
+	if (needsIssuedAuthority(observation) && challengeId && args.authorityMs > 0) {
+		let issued = null;
+		try {
+			issued = await issuedAuthority(workDir, challengeId, args.authorityMs);
+			if (!issued) passes.push({ pass: 2, refused: 'no authority.json from the operator in time' });
+		} catch (error) {
+			passes.push({ pass: 2, refused: error.message });
+		}
+		if (issued) {
+			observation = await pass(issued.authority, false);
+			passes.push(summary(2, 'authority.json', observation));
+		}
 	}
 	const report = {
 		...observation,
@@ -274,8 +386,12 @@ export async function main(argv = process.argv.slice(2)) {
 			user: os.userInfo().username,
 		},
 		runtime: runtime.identity,
-		installation,
+		installation: { ...installation, source: enrolled ? 'identity' : 'installationIdentity' },
+		passes,
 		request: { path: args.request, sha256: sha256(fs.readFileSync(args.request)) },
+		...(args.identity
+			? { identity: { path: args.identity, sha256: sha256(fs.readFileSync(args.identity)) } }
+			: {}),
 		startedAt,
 		finishedAt: new Date().toISOString(),
 	};
