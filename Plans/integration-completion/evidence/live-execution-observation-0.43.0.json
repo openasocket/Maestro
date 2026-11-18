@@ -1,0 +1,253 @@
+{
+	"schema": "maestro-live-execution-observation/1",
+	"outcome": "passed",
+	"liveNegotiationPerformed": true,
+	"endpoint": {
+		"socketPath": "/var/lib/mega-maestro-endpoint/run/ipc.sock"
+	},
+	"liveEndpointProtocols": [
+		2
+	],
+	"compatibility": {
+		"protocol": 2,
+		"capabilities": [
+			"attachment",
+			"compatibility",
+			"workflow_claim",
+			"workflow_settle",
+			"workflow_release",
+			"registration_use",
+			"delegation",
+			"execution"
+		]
+	},
+	"attachment": {
+		"protocol": 2,
+		"capabilities": [
+			"attachment",
+			"compatibility",
+			"workflow_claim",
+			"workflow_settle",
+			"workflow_release",
+			"registration_use",
+			"delegation",
+			"execution"
+		],
+		"management": "managed",
+		"appliedPolicyRevision": 2
+	},
+	"negotiated": {
+		"registration_use": true,
+		"workflow_claim": true,
+		"workflow_settle": true,
+		"workflow_release": true,
+		"execution": true,
+		"delegation": true
+	},
+	"negotiatedWorkflowExecution": true,
+	"registration": {
+		"purpose": "runtime_use",
+		"version": 2,
+		"enrollmentId": "2380b429-08af-4185-9a4a-1ed4305fd039",
+		"processBirthDigest": "3fbf485a2635c001f57b29ef44a82de5c4b332771719ba840216bfdd89f886de",
+		"referenceDigest": "df54b0d37209c293ad8e11d1b081373869ac2405d39d76cc44fdd79668602ce4",
+		"expiresAt": "2026-11-18T03:39:34.523Z"
+	},
+	"workflowOwner": {
+		"ownerId": "4c4921c7-b00f-4b45-9c5b-3f43c6e2abbe",
+		"ownerEpoch": "ea0c6c1a49709460e81bdcc40970a719",
+		"fencingTokenSha256": "3d12c592a266f544710306654fedeac83830f1014f5c3dc75a2118b674a87959"
+	},
+	"lease": {
+		"workflowId": "maestro-live-execution-check",
+		"runId": "run-4ea76167-efa7-4923-b1f1-4bd7f8647ae7",
+		"attemptId": "attempt-93f14157-4588-415d-8a66-b04b33710a11",
+		"expiresAt": "2026-11-18T03:39:37.866Z"
+	},
+	"grant": {
+		"grantId": "c195d0fb-f958-453a-a7a9-5925d6fb7f64",
+		"digest": "ccdd8260f4938c51f45fb3d40f59f43d8400aecf3fd553a26d323e74a2e9ff76"
+	},
+	"grantDigest": "ccdd8260f4938c51f45fb3d40f59f43d8400aecf3fd553a26d323e74a2e9ff76",
+	"chain": [
+		{
+			"grantId": "c195d0fb-f958-453a-a7a9-5925d6fb7f64",
+			"digest": "ccdd8260f4938c51f45fb3d40f59f43d8400aecf3fd553a26d323e74a2e9ff76"
+		}
+	],
+	"chainDigest": {
+		"encoding": "sha256(canonicalJson(delegation.chain))",
+		"value": "0cf9618dc87baf75cebeb5ef1f854827c72aa82b3a891de9eaa1012af0cea52e"
+	},
+	"execution": {
+		"requestId": "a5e3a2f6-c9a4-4419-b708-6fb6f743bc77",
+		"idempotencyKey": "live-f74a9201-6cad-4920-89c4-70927751a245",
+		"requestSha256": "9c0687ca11ec89dcb21c14c3c4a8523401038b632883ebc8436759ae3bac4cc9",
+		"dispatch": "dispatched",
+		"receipt": {
+			"outcome": "broker_dispatched",
+			"requestId": "a5e3a2f6-c9a4-4419-b708-6fb6f743bc77",
+			"attemptId": "attempt-93f14157-4588-415d-8a66-b04b33710a11",
+			"runId": "run-4ea76167-efa7-4923-b1f1-4bd7f8647ae7",
+			"decisionId": "4502abfc-800d-401d-9612-9a2a0732faec",
+			"requestDigest": "6153451e48b30e8613d39460b72e4855a3da37637487580efc554c975dec753e",
+			"brokerId": "2380b429-08af-4185-9a4a-1ed4305fd039",
+			"policyRevision": 2,
+			"protocol": 2,
+			"grantId": "4502abfc-800d-401d-9612-9a2a0732faec",
+			"idempotencyKey": "live-f74a9201-6cad-4920-89c4-70927751a245",
+			"authorityDigest": "90a84380a90ae163e718a2cabce6c83ed5cbdd6447e65525ef895031a86c3237",
+			"ownerGeneration": 1,
+			"state": "dispatched"
+		}
+	},
+	"settlement": {
+		"by": "endpoint",
+		"effect": "settled"
+	},
+	"release": {
+		"outcome": "released"
+	},
+	"steps": [
+		{
+			"step": "compatibility",
+			"status": "ok"
+		},
+		{
+			"step": "attachment",
+			"status": "ok"
+		},
+		{
+			"step": "registration_use",
+			"status": "ok"
+		},
+		{
+			"step": "workflow_claim",
+			"status": "ok"
+		},
+		{
+			"step": "execution",
+			"status": "ok"
+		},
+		{
+			"step": "workflow_release",
+			"status": "ok"
+		}
+	],
+	"driver": {
+		"path": "scripts/live-execution-check.mjs",
+		"sha256": "dcef12dc3e42ad194c5466aa0f131ce6d8f203768994445b075f9b5bd602e2f9"
+	},
+	"host": {
+		"platform": "linux",
+		"arch": "arm64",
+		"node": "v24.21.0",
+		"uid": 1000,
+		"user": "maestro"
+	},
+	"runtime": {
+		"archive": {
+			"path": "/maestro/dist/mega-maestro-runtime/0.43.0/c6ebc92b17ab69ec44bfea0a9a86743a7239da77601ae695989274148d0e8b5c/runtime.tgz",
+			"sha256": "c6ebc92b17ab69ec44bfea0a9a86743a7239da77601ae695989274148d0e8b5c",
+			"bytes": 2861513
+		},
+		"library": "0.43.0",
+		"endpointProtocol": 2,
+		"contracts": {
+			"name": "@mega-maestro/contracts",
+			"version": "0.4.0",
+			"sha256": "7c8963448e52cbdae2043a1305ce4690667c4e9ae2697ad933278d0a1630f650"
+		}
+	},
+	"installation": {
+		"installationId": "af84bd32-4568-427a-afbb-321776ff0bf6",
+		"runtimeId": "618ad580-b5af-435b-8208-185f0d5a67f0",
+		"processEpoch": "036ce201-bbad-4c38-b1c2-2bedae8352e5",
+		"source": "identity"
+	},
+	"passes": [
+		{
+			"pass": 1,
+			"authority": "request",
+			"outcome": "failed",
+			"failure": {
+				"step": "workflow_claim",
+				"detail": "denied owner_unfenced"
+			},
+			"steps": [
+				{
+					"step": "compatibility",
+					"status": "ok"
+				},
+				{
+					"step": "attachment",
+					"status": "denied",
+					"detail": "denied unauthenticated"
+				},
+				{
+					"step": "registration_challenge",
+					"status": "ok"
+				},
+				{
+					"step": "registration_redeem",
+					"status": "ok"
+				},
+				{
+					"step": "attachment",
+					"status": "ok"
+				},
+				{
+					"step": "registration_use",
+					"status": "ok"
+				},
+				{
+					"step": "workflow_claim",
+					"status": "denied",
+					"detail": "denied owner_unfenced"
+				}
+			]
+		},
+		{
+			"pass": 2,
+			"authority": "authority.json",
+			"outcome": "passed",
+			"failure": null,
+			"steps": [
+				{
+					"step": "compatibility",
+					"status": "ok"
+				},
+				{
+					"step": "attachment",
+					"status": "ok"
+				},
+				{
+					"step": "registration_use",
+					"status": "ok"
+				},
+				{
+					"step": "workflow_claim",
+					"status": "ok"
+				},
+				{
+					"step": "execution",
+					"status": "ok"
+				},
+				{
+					"step": "workflow_release",
+					"status": "ok"
+				}
+			]
+		}
+	],
+	"request": {
+		"path": "/home/maestro/operator-session/request.json",
+		"sha256": "df0d99b39c88010d6010780f73553461e2c1a4eae97f7bc78809bf438d06418a"
+	},
+	"identity": {
+		"path": "/home/maestro/operator-session/identity.json",
+		"sha256": "10f41f16e26367769070883fe099fd1fa69d5ad170f393b2703a5d4adbb2ac4f"
+	},
+	"startedAt": "2026-11-18T03:37:34.461Z",
+	"finishedAt": "2026-11-18T03:37:40.714Z"
+}
