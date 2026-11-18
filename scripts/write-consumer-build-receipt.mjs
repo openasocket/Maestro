@@ -561,7 +561,17 @@ export function liveObservationOf(file, { runtime, integrity }) {
 	need(/^[a-f0-9]{64}$/.test(o.chainDigest?.value ?? ''), 'no chain digest was observed');
 	need(typeof o.workflowOwner?.ownerId === 'string', 'no workflow owner was observed');
 	need(o.execution?.receipt?.outcome === 'broker_dispatched', 'no dispatch receipt was observed');
-	need(o.settlement?.outcome === 'recorded', 'the settlement was not recorded');
+	// A dispatched effect is settled by the endpoint itself and only released by the
+	// owner; an unknown one is settled uncertain by the owner and stays held.
+	if (o.execution?.receipt?.state === 'unknown')
+		need(
+			o.settlement?.by === 'consumer' && o.settlement?.outcome === 'recorded',
+			'the unknown effect was not settled uncertain'
+		);
+	else {
+		need(o.settlement?.by === 'endpoint', "the dispatched effect is not the endpoint's settlement");
+		need(o.release?.outcome === 'released', 'the owner did not release the settled effect');
+	}
 	if (problems.length > 0)
 		throw new Error(`the live observation ${file} is refused: ${problems.join('; ')}`);
 	return {
@@ -635,7 +645,7 @@ export function buildReceipt({ args, run, recordedAt }) {
 		recordedAt,
 		writer: { path: SELF, sha256: fileSha(SELF) },
 		standing: live
-			? 'Verified, compiled public contract inputs and locally tested Maestro consumers, re-checked by the receipt writer, with the wire traffic of the production composition observed against a test double, and one live delegated claim, execution and settlement run from the pinned runtime archive against a live endpoint (live). It qualifies no external adapter.'
+			? 'Verified, compiled public contract inputs and locally tested Maestro consumers, re-checked by the receipt writer, with the wire traffic of the production composition observed against a test double, and one live delegated claim, execution (settled by the endpoint itself) and release run from the pinned runtime archive against a live endpoint (live). It qualifies no external adapter.'
 			: 'Verified, compiled public contract inputs and locally tested Maestro consumers, re-checked by the receipt writer, with the wire traffic of the production composition observed against a test double and the packaged runtime of this library version named. This receipt performs no live negotiation and qualifies no external adapter.',
 		grants: { authority: 'none', lease: 'none', policy: 'none' },
 		qualification: { paired: false, provider: false, native: false },

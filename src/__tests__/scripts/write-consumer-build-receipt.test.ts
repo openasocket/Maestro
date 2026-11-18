@@ -131,8 +131,9 @@ describe('write-consumer-build-receipt', () => {
 			chain: [{ grantId: 'g', digest: '3'.repeat(64) }],
 			chainDigest: { encoding: 'sha256(canonicalJson(delegation.chain))', value: '4'.repeat(64) },
 			workflowOwner: { ownerId: 'o', ownerEpoch: 'e', fencingTokenSha256: '5'.repeat(64) },
-			execution: { receipt: { outcome: 'broker_dispatched' } },
-			settlement: { effect: 'uncertain', outcome: 'recorded' },
+			execution: { receipt: { outcome: 'broker_dispatched', state: 'dispatched' } },
+			settlement: { by: 'endpoint', effect: 'settled' },
+			release: { outcome: 'released' },
 		};
 		const write = (value: unknown) => {
 			const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'live-obs-'));
@@ -155,6 +156,17 @@ describe('write-consumer-build-receipt', () => {
 				NOT_YET_OBSERVED.map((entry: { field: string }) => entry.field).sort()
 			);
 			expect(liveObservationOf(undefined, { runtime, integrity })).toBeUndefined();
+			// An unknown dispatch is settled uncertain by the owner and stays held.
+			const held = {
+				...passing,
+				execution: { receipt: { outcome: 'broker_dispatched', state: 'unknown' } },
+				settlement: { by: 'consumer', effect: 'uncertain', outcome: 'recorded' },
+				release: null,
+			};
+			expect(liveObservationOf(write(held), { runtime, integrity })).toMatchObject({
+				settlement: held.settlement,
+				release: null,
+			});
 		});
 
 		it('refuses a failed run, another platform, another runtime or contracts, and a missing field', () => {
@@ -175,6 +187,15 @@ describe('write-consumer-build-receipt', () => {
 				[{ chainDigest: null }, 'no chain digest'],
 				[{ workflowOwner: null }, 'no workflow owner'],
 				[{ negotiatedWorkflowExecution: false }, 'not negotiated'],
+				[
+					{ settlement: { by: 'consumer', effect: 'uncertain', outcome: 'recorded' } },
+					"not the endpoint's settlement",
+				],
+				[{ release: null }, 'did not release'],
+				[
+					{ execution: { receipt: { outcome: 'broker_dispatched', state: 'unknown' } } },
+					'not settled uncertain',
+				],
 			] as const) {
 				expect(() =>
 					liveObservationOf(write({ ...passing, ...over }), { runtime, integrity })

@@ -12,8 +12,7 @@
  *     --sha256 <archive sha256> --request <request.json> \
  *     [--socket /var/lib/mega-maestro-endpoint/run/ipc.sock] [--out <file>] \
  *     [--identity <identity.json>] [--work-dir <dir>] \
- *     [--approval-timeout-ms 600000] [--authority-timeout-ms 60000] \
- *     [--effect uncertain|completed|no_effect --evidence-file <file>]
+ *     [--approval-timeout-ms 600000] [--authority-timeout-ms 60000]
  *
  * Node builtins only: no Electron, no native module, nothing from
  * node_modules. Every Maestro module it runs is the archive's
@@ -55,6 +54,10 @@
  * Each pass uses ONE idempotency key for its claim, execution, settle and
  * release: the endpoint admits an execution only under its lease's key and
  * settles the effect recorded under it.
+ *
+ * The check never settles a dispatched effect: the endpoint settles it
+ * centrally before it answers, and the check only releases. An `unknown`
+ * receipt is settled `uncertain` and the owner stays held.
  *
  * Exit: 0 the check passed, 1 it ran and a step failed (the observation says
  * which), 2 usage or a refused input (nothing was sent).
@@ -117,8 +120,6 @@ export function parse(argv) {
 			identity: { type: 'string' },
 			'approval-timeout-ms': { type: 'string', default: '600000' },
 			'authority-timeout-ms': { type: 'string', default: '60000' },
-			effect: { type: 'string', default: 'uncertain' },
-			'evidence-file': { type: 'string' },
 		},
 		strict: true,
 	});
@@ -126,10 +127,6 @@ export function parse(argv) {
 		if (!values[key]) throw new Error(`--${key} is required`);
 	if (!/^[a-f0-9]{64}$/.test(values.sha256))
 		throw new Error('--sha256 is 64 lowercase hex characters');
-	if (!['uncertain', 'completed', 'no_effect'].includes(values.effect))
-		throw new Error('--effect is uncertain, completed or no_effect');
-	if (values.effect !== 'uncertain' && !values['evidence-file'])
-		throw new Error(`--effect ${values.effect} needs --evidence-file (the digest it settles with)`);
 	const approvalMs = Number(values['approval-timeout-ms']);
 	if (!Number.isSafeInteger(approvalMs) || approvalMs < 0)
 		throw new Error('--approval-timeout-ms is a whole number of milliseconds');
@@ -154,8 +151,6 @@ export function parse(argv) {
 		workDir,
 		approvalMs,
 		authorityMs,
-		effect: values.effect,
-		evidenceFile: values['evidence-file'] ? path.resolve(values['evidence-file']) : null,
 	};
 }
 
@@ -298,14 +293,6 @@ export async function main(argv = process.argv.slice(2)) {
 		requiredCapabilities: [],
 	};
 	const workflow = request.workflow ?? {};
-	const effect =
-		args.effect === 'uncertain'
-			? { state: 'uncertain', reason: 'recovery_required' }
-			: {
-					state: 'settled',
-					outcome: args.effect,
-					evidenceDigest: sha256(fs.readFileSync(args.evidenceFile)),
-				};
 	let challengeId = null;
 	const approve =
 		args.approvalMs > 0
@@ -346,7 +333,6 @@ export async function main(argv = process.argv.slice(2)) {
 					...request.execution,
 					idempotencyKey: key,
 				},
-				effect,
 				newId: () => key,
 			});
 		} finally {

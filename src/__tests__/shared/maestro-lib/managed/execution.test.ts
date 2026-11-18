@@ -110,18 +110,21 @@ function broker(state: 'dispatched' | 'unknown' = 'dispatched') {
 	};
 }
 
+const ENDPOINT_GRANT = '6f1c2c1e-0000-4000-8000-0000000000e7';
+
 function receiptFor(request: Payload, over: Payload = {}): Payload {
 	return {
 		outcome: 'broker_dispatched',
 		requestId: request.requestId,
 		attemptId: request.attemptId,
 		runId: request.runId,
-		decisionId: 'decision-1',
+		decisionId: ENDPOINT_GRANT,
 		requestDigest: 'a'.repeat(64),
 		brokerId: 'broker-1',
 		policyRevision: request.policyRevision,
 		protocol: 2,
-		grantId: request.delegation?.grant.grantId ?? request.grants[0].grantId,
+		// Mega's own one-shot execution grant (its decisionId), never the presented grant.
+		grantId: ENDPOINT_GRANT,
 		idempotencyKey: request.idempotencyKey,
 		authorityDigest: 'f'.repeat(64),
 		ownerGeneration: 1,
@@ -231,7 +234,7 @@ describe('v2 execution client', () => {
 			policyRevision: CLAIM.policyRevision,
 		});
 		expect(wire.dispatchReceiptV2.safeParse(outcome.payload.receipt).success).toBe(true);
-		expect(outcome.payload.receipt.grantId).toBe(PRESENTED.grantId);
+		expect(outcome.payload.receipt.grantId).toBe(ENDPOINT_GRANT);
 		// Dispatch is not completion: nothing settled or released.
 		const operations = fake
 			.callsTo(LOCAL_ENDPOINT_INVOKE_PATH)
@@ -345,7 +348,7 @@ describe('v2 execution client', () => {
 			{ attemptId: 'attempt-9' },
 			{ idempotencyKey: 'exec-idem-other' },
 			{ policyRevision: 8 },
-			{ grantId: ROOT.grantId },
+			{ grantId: 'not-a-uuid' },
 			{ protocol: 1 },
 			{ state: 'completed' },
 			{ requestDigest: 'not-a-digest' },

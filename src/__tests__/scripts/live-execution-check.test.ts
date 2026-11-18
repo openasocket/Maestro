@@ -63,18 +63,17 @@ describe('live-execution-check', () => {
 			parse([...base.slice(0, 2), '--sha256', 'A'.repeat(64), ...base.slice(4)])
 		).toThrow('64 lowercase hex');
 		expect(parse(base).socket).toBe(DEFAULT_SOCKET);
-		expect(parse(base).effect).toBe('uncertain');
 	});
 
-	it('writes nothing inside the checkout, and settles only with evidence', () => {
+	it('writes nothing inside the checkout, and takes no effect of its own to settle', () => {
 		expect(() => parse([...base, '--out', path.join(checkout, 'obs.json')])).toThrow(
 			'outside the checkout'
 		);
 		expect(() => parse([...base, '--work-dir', path.join(checkout, 'Plans')])).toThrow(
 			'outside the checkout'
 		);
-		expect(() => parse([...base, '--effect', 'completed'])).toThrow('--evidence-file');
-		expect(() => parse([...base, '--effect', 'teleported'])).toThrow('uncertain, completed');
+		// The endpoint settles a dispatched effect itself; the driver never names one.
+		expect(() => parse([...base, '--effect', 'completed'])).toThrow("Unknown option '--effect'");
 		expect(parse([...base, '--out', path.join(os.tmpdir(), 'obs.json')]).out).toBe(
 			path.join(os.tmpdir(), 'obs.json')
 		);

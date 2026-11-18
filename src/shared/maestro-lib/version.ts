@@ -202,8 +202,15 @@ import { MANAGED_CONTRACT_VERSION } from './managed/types';
  * 0.42.0: contracts 0.4.0, v2 only (decision D4). The relayed enrollment `request` phase's
  * `identity` is the v2 attachment itself (`supportedProtocols` exactly [2]), so
  * `ENROLLMENT_IDENTITY_PROTOCOL` and `EndpointEnrollmentIdentity` are removed. Breaking below 1.0.
+ * 0.43.0: who settles a dispatched effect (Mega FINISH-10-04C4). A `dispatchReceiptV2`'s
+ * `grantId` is the endpoint's own one-shot execution grant (Mega sets it to the `decisionId`), so
+ * the execution client checks it as a UUID and no longer against the presented grant. For a
+ * fenced run the endpoint settles a `dispatched` effect centrally before it answers, so
+ * `runLiveExecutionCheck` sends no `workflow_settle` for it and only releases (`effects_settled`);
+ * an `unknown` receipt is settled `uncertain` and stays held. `LiveExecutionCheckInput.effect`
+ * is removed and `LiveExecutionObservation.settlement` names who settled (`by`). Breaking below 1.0.
  */
-export const MAESTRO_LIB_VERSION = '0.42.0';
+export const MAESTRO_LIB_VERSION = '0.43.0';
 
 /** The Node range the built library runs on; `engines.node` of the built package. */
 export const MAESTRO_LIB_NODE_RANGE = '>=20';

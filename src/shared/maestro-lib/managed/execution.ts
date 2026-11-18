@@ -21,13 +21,21 @@
  *     attempt. Anything else is `unavailable` / `stale-authority`, unsent;
  *   - a receipt is credited only when it is a `dispatchReceiptV2` that
  *     answers this request exactly: request, attempt, run, idempotency key and
- *     policy revision the ones sent, the grant the presented one, and no field
- *     the contract does not name. Anything else is `unavailable` /
- *     `malformed`. The envelope's own correlationId is checked by the client;
+ *     policy revision the ones sent, `grantId` a UUID, and no field the
+ *     contract does not name. Anything else is `unavailable` / `malformed`.
+ *     The envelope's own correlationId is checked by the client;
+ *   - the receipt's `grantId` is the endpoint's own one-shot execution grant
+ *     (Mega sets it to the `decisionId`), the id its later
+ *     `executionConsumptionV2` and `executionCompletionV2` facts carry. It is
+ *     NOT the grant the request presented: the presented delegation is bound
+ *     into `authorityDigest`, which the endpoint computes. So the receipt is
+ *     never matched against a presented grant id;
  *   - dispatch is not completion. A credited receipt says the broker
  *     dispatched (`dispatched`) or could not tell (`unknown`, which needs
- *     reconciliation); this client never settles or releases. The workflow
- *     lifecycle settles once the run's effect is known;
+ *     reconciliation); this client never settles or releases. For a fenced
+ *     run the endpoint itself settles a `dispatched` effect centrally, so its
+ *     owner only releases (`effects_settled`); an `unknown` one is the
+ *     endpoint's to reconcile and its owner may settle it uncertain;
  *   - an idempotency key leaves this client once. A second submission with it
  *     is `unavailable` / `duplicate` and is reconciled, never resent.
  *
@@ -45,7 +53,6 @@ import {
 	isEndpointIdentifier,
 	type EndpointDispatchReceipt,
 	type EndpointExecutionRequest,
-	type EndpointGrantReference,
 	type EndpointInvokeOutcome,
 	type EndpointPort,
 	type EndpointRuntimeUseReference,
@@ -236,13 +243,6 @@ export function buildExecutionRequest(
 	};
 }
 
-/** The grant ids a receipt may name for `request`: the presented delegation grant, else a listed grant. */
-function presentedGrantIds(request: EndpointExecutionRequest): string[] {
-	return request.delegation
-		? [request.delegation.grant.grantId]
-		: request.grants.map((grant: EndpointGrantReference) => grant.grantId);
-}
-
 /** Why `reply` is not the `dispatchReceiptV2` for `request`, or []. A denial never reaches here. */
 export function dispatchReceiptProblems(
 	request: EndpointExecutionRequest,
@@ -260,8 +260,9 @@ export function dispatchReceiptProblems(
 		'policyRevision',
 	] as const)
 		if (reply[key] !== request[key]) problems.push(`${key} is not the one sent`);
-	if (!presentedGrantIds(request).includes(reply.grantId as string))
-		problems.push('grantId is not the grant presented');
+	// The endpoint's own execution grant, never the presented one (see the header).
+	if (typeof reply.grantId !== 'string' || !UUID.test(reply.grantId))
+		problems.push('grantId is not a UUID');
 	for (const key of ['decisionId', 'brokerId'] as const)
 		if (!isEndpointIdentifier(reply[key])) problems.push(`${key} is not an identifier`);
 	for (const key of ['requestDigest', 'authorityDigest'] as const)

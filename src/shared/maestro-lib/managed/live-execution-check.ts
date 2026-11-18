@@ -16,9 +16,14 @@
  *   6. `execution` (`runs.submit`, `executionRequestV2`) through
  *      `createEndpointExecutionClient`, credited only as the correlated
  *      `dispatchReceiptV2`;
- *   7. `workflow_settle` with the effect the caller names, then
- *      `workflow_release` when the effect settled (an uncertain effect keeps
- *      the owner held, as the contract requires).
+ *   7. custody: for a `dispatched` receipt the endpoint has already settled
+ *      the effect centrally (it records the settlement, with its own
+ *      evidence, before it answers `execution`, and the central record
+ *      refuses any settlement after a settled one), so the check sends no
+ *      `workflow_settle` and only `workflow_release` with `effects_settled`.
+ *      For an `unknown` receipt the endpoint has settled nothing and keeps the
+ *      effect for its own reconciliation: the check settles it `uncertain`
+ *      (`recovery_required`) and does not release, so the owner stays held.
  *
  * Every value in the observation is one the endpoint answered or one this
  * check sent; nothing is fabricated. The delegation and grants are inputs,
@@ -93,9 +98,7 @@ export interface LiveExecutionCheckInput {
 	};
 	/** What runs. None of it is authority. */
 	execution: Omit<EndpointExecutionSubmission, 'lease' | 'run'>;
-	/** The effect `workflow_settle` records. Uncertain unless the caller holds completion evidence. */
-	effect: EndpointWorkflowEffect;
-	/** Ids for the settle and release requests. */
+	/** Ids for the claim, settle and release requests. */
 	newId(): string;
 }
 
@@ -149,7 +152,17 @@ export interface LiveExecutionObservation {
 		dispatch: EndpointDispatchReceipt['state'];
 		receipt: EndpointDispatchReceipt;
 	} | null;
-	settlement: { effect: EndpointWorkflowEffect['state']; outcome: string } | null;
+	/**
+	 * Who settled the dispatched effect. `endpoint`: a `dispatched` receipt,
+	 * settled centrally by the endpoint itself; this check sent no settlement
+	 * and does not observe its outcome. `consumer`: an `unknown` receipt, which
+	 * this check settled `uncertain` (`outcome` is the `workflow_settle`
+	 * answer).
+	 */
+	settlement:
+		| { by: 'endpoint'; effect: 'settled' }
+		| { by: 'consumer'; effect: 'uncertain'; outcome: string }
+		| null;
 	release: { outcome: string } | null;
 	steps: LiveExecutionStep[];
 }
@@ -371,21 +384,19 @@ export async function runLiveExecutionCheck(
 			receipt: dispatched.receipt,
 		};
 
-		// 7. Settle what ran; release only an effect that settled.
+		// 7. A dispatched effect is the endpoint's to settle (it already has); an unknown one stays held.
 		const owner = { ...lease.owner };
-		const settled = record(
-			'workflow_settle',
-			await workflows.settle({
-				...context,
-				idempotencyKey: input.newId(),
-				owner,
-				effect: input.effect,
-			})
-		);
-		if (settled.outcome !== 'recorded')
-			return refuse('workflow_settle', `denied ${(settled as { reason: string }).reason}`);
-		observation.settlement = { effect: input.effect.state, outcome: settled.outcome };
-		if (input.effect.state === 'settled') {
+		if (dispatched.dispatch === 'unknown') {
+			const effect: EndpointWorkflowEffect = { state: 'uncertain', reason: 'recovery_required' };
+			const settled = record(
+				'workflow_settle',
+				await workflows.settle({ ...context, idempotencyKey: input.newId(), owner, effect })
+			);
+			if (settled.outcome !== 'recorded')
+				return refuse('workflow_settle', `denied ${(settled as { reason: string }).reason}`);
+			observation.settlement = { by: 'consumer', effect: 'uncertain', outcome: settled.outcome };
+		} else {
+			observation.settlement = { by: 'endpoint', effect: 'settled' };
 			const released = record(
 				'workflow_release',
 				await workflows.release({

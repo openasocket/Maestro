@@ -1,7 +1,7 @@
 /**
  * The live execution check (`runLiveExecutionCheck`) over a real Unix socket
  * against the fake daemon in `fakeEndpoint.ts`: the order of the handshake,
- * the delegated claim, the execution and the settlement, every request one
+ * the delegated claim, the execution and the release, every request one
  * the pinned 0.4.0 contract parses, and an observation that carries only what
  * was sent or answered. A failing step stops the check and is reported, never
  * papered over.
@@ -60,21 +60,23 @@ const PRESENTED = { grantId: '6f1c2c1e-0000-4000-8000-0000000000c3', digest: '3'
 
 type Payload = Record<string, any>;
 
-const receiptFor = (request: Payload): Payload => ({
+const ENDPOINT_GRANT = '6f1c2c1e-0000-4000-8000-0000000000e7';
+const receiptFor = (request: Payload, state = 'dispatched'): Payload => ({
 	outcome: 'broker_dispatched',
 	requestId: request.requestId,
 	attemptId: request.attemptId,
 	runId: request.runId,
-	decisionId: 'decision-1',
+	decisionId: ENDPOINT_GRANT,
 	requestDigest: 'a'.repeat(64),
 	brokerId: 'broker-1',
 	policyRevision: request.policyRevision,
 	protocol: 2,
-	grantId: request.delegation.grant.grantId,
+	// The endpoint's own execution grant: Mega sets it to the decisionId.
+	grantId: ENDPOINT_GRANT,
 	idempotencyKey: request.idempotencyKey,
 	authorityDigest: 'f'.repeat(64),
 	ownerGeneration: 1,
-	state: 'dispatched',
+	state,
 });
 
 describe('live execution check', () => {
@@ -140,7 +142,6 @@ describe('live execution check', () => {
 				resourceIds: [],
 				idempotencyKey: 'exec-live-1',
 			},
-			effect: { state: 'uncertain', reason: 'recovery_required' },
 			newId: () => `id-${++n}`,
 			...over,
 		});
@@ -150,7 +151,7 @@ describe('live execution check', () => {
 		return { fake, observation, sent, approvals };
 	}
 
-	it('registers, negotiates, claims under the delegation, executes and settles, on protocol 2 only', async () => {
+	it('registers, negotiates, claims under the delegation, executes and releases, on protocol 2 only', async () => {
 		const { observation, sent, approvals } = await run();
 		expect(observation.failure).toBeUndefined();
 		expect(observation.outcome).toBe('passed');
@@ -165,7 +166,7 @@ describe('live execution check', () => {
 			'registration_use',
 			'workflow_claim',
 			'execution',
-			'workflow_settle',
+			'workflow_release',
 		]);
 		for (const envelope of sent) {
 			protocol.localRequestEnvelopeV2.parse(envelope);
@@ -201,25 +202,33 @@ describe('live execution check', () => {
 			dispatch: 'dispatched',
 			idempotencyKey: 'exec-live-1',
 		});
-		// An uncertain effect keeps the owner held: nothing is released.
-		expect(observation.settlement).toEqual({ effect: 'uncertain', outcome: 'recorded' });
-		expect(observation.release).toBeNull();
+		expect(observation.execution?.receipt.grantId).toBe(ENDPOINT_GRANT);
+		// The endpoint settled the dispatched effect itself: no settle is sent, the owner releases.
+		expect(observation.settlement).toEqual({ by: 'endpoint', effect: 'settled' });
+		expect(observation.release).toEqual({ outcome: 'released' });
+		const release = sent.find((envelope) => envelope.operation === 'workflow_release')!;
+		expect(release.payload.disposition).toBe('effects_settled');
 		// Neither the nonce nor the fencing token is written.
 		const text = JSON.stringify(observation);
 		expect(text).not.toContain(ISSUED.fencingToken);
 	});
 
-	it('releases an effect that settled with evidence', async () => {
-		const { observation, sent } = await run(
-			{},
-			{ effect: { state: 'settled', outcome: 'completed', evidenceDigest: '9'.repeat(64) } }
-		);
+	it('settles an unknown dispatch uncertain and keeps the owner held', async () => {
+		const { observation, sent } = await run({
+			operations: { execution: (payload) => receiptFor(payload as Payload, 'unknown') },
+		});
 		expect(observation.outcome).toBe('passed');
-		expect(sent.map((envelope) => envelope.operation).slice(-2)).toEqual([
-			'workflow_settle',
-			'workflow_release',
-		]);
-		expect(observation.release).toEqual({ outcome: 'released' });
+		const operations = sent.map((envelope) => envelope.operation);
+		expect(operations.at(-1)).toBe('workflow_settle');
+		expect(operations).not.toContain('workflow_release');
+		const settle = sent.find((envelope) => envelope.operation === 'workflow_settle')!;
+		expect(settle.payload.effect).toEqual({ state: 'uncertain', reason: 'recovery_required' });
+		expect(observation.settlement).toEqual({
+			by: 'consumer',
+			effect: 'uncertain',
+			outcome: 'recorded',
+		});
+		expect(observation.release).toBeNull();
 	});
 
 	it('stops when execution is not offered, sending nothing past the negotiation', async () => {
@@ -232,7 +241,7 @@ describe('live execution check', () => {
 		expect(sent.map((envelope) => envelope.operation)).not.toContain('workflow_claim');
 	});
 
-	it('reports a refused execution and settles nothing', async () => {
+	it('reports a refused execution and settles or releases nothing', async () => {
 		const { observation, sent } = await run({
 			operations: { execution: () => ({ outcome: 'denied', reason: 'policy_denied' }) },
 		});
@@ -242,6 +251,7 @@ describe('live execution check', () => {
 			execution: null,
 		});
 		expect(sent.map((envelope) => envelope.operation)).not.toContain('workflow_settle');
+		expect(sent.map((envelope) => envelope.operation)).not.toContain('workflow_release');
 	});
 
 	it('refuses an unapproved registration and a chain that does not end in its grant', async () => {
