@@ -1,0 +1,228 @@
+{
+	"schemaVersion": 1,
+	"schema": "maestro-build-receipt-set/1",
+	"artifactIds": [
+		"MAESTRO-ACTOR-BRIDGE-BUILD"
+	],
+	"owner": "maestro",
+	"proofClass": "implementation-input",
+	"status": "published",
+	"producerDocument": "MCOMP-07",
+	"task": "MCOMP-07-05 (rebuild against contracts 0.4.0, decision D4)",
+	"recordedAt": "2026-11-18T19:27:30.718Z",
+	"supersedes": {
+		"path": "Plans/integration-completion/evidence/early-build.json",
+		"artifactId": "MAESTRO-ACTOR-BRIDGE-BUILD",
+		"archiveSha256": "a3f1b43f2e9be9251ada1027fa55dedef0382ec920494e274438e42b27a3b198",
+		"reason": "built against contracts 0.1.0 (protocol 1); early-build.json stays immutable and still records the desktop and provider contract BUILDs"
+	},
+	"standing": "One locally compiled and tested consumer BUILD input, packaged by the tracked scripts/package-mega-maestro-actor-bridge.mjs against the contracts 0.4.0 archive. The archive is an immutable local public handoff file at the explicit path; no remote upload or CI qualification is claimed.",
+	"grants": {
+		"authority": "none",
+		"lease": "none",
+		"policy": "none"
+	},
+	"qualification": {
+		"paired": false,
+		"provider": false,
+		"native": false,
+		"liveAuthentication": false
+	},
+	"implementationRevision": "8c8d0bacf975321f42b997b3316a303e5451c718",
+	"observedRevision": "8c8d0bacf975321f42b997b3316a303e5451c718",
+	"artifacts": [
+		{
+			"artifactId": "MAESTRO-ACTOR-BRIDGE-BUILD",
+			"schemaVersion": 1,
+			"owner": "maestro",
+			"proofClass": "implementation-input",
+			"archiveRef": "#/archives/actor",
+			"entry": "scripts/mega-maestro-pair.mjs",
+			"exports": [
+				"createActorApprovalBridge",
+				"watchForChallenge",
+				"inspectProducers"
+			],
+			"implemented": "Pinned browser-session/CSRF approval of the purpose-bound v2 registration challenge (runtimeApprovalInputV2: version 2, purpose runtime_use) only; a v1 challenge is denied before any HTTP. Single-use bounded challenge, cancellation, uncertain POST reconciliation and acknowledgement cleanup. Endpoint redemption is not qualified here.",
+			"remainingMappings": []
+		}
+	],
+	"snapshot": {
+		"rules": "maestro-implementation-tree/1",
+		"implementationDigest": "d20693f54405ba16abfe0017c95d8f34df94b44bfaf3df90cb4a1c9d33fed1da",
+		"implementationFiles": 7381,
+		"implementationDirty": false,
+		"map": "archive source/implementation.json",
+		"inputFiles": 53,
+		"inputMap": "archive source/actor-inputs.json",
+		"toolchain": {
+			"node": "v26.13.1",
+			"platform": "darwin",
+			"arch": "arm64"
+		}
+	},
+	"dependencies": [
+		{
+			"artifactId": "MAESTRO-CONTRACT-INPUTS-BUILD",
+			"path": "Plans/integration-completion/evidence/contract-inputs-build-0.4.0.json",
+			"sha256": "2b56ab0d37256c2849999f288cd6a0eb52eeaef5371cf7d14a0bad043ab7621a",
+			"implementationRevision": "7e8178a4333999c92f7bd30cb8fea0bf5fa32f6e",
+			"inputDigest": "1b0b6dbcf152748c2e8e4672849b58118ceef135e55830ef2eb075b381e3f87f",
+			"archiveSha256": "7c8963448e52cbdae2043a1305ce4690667c4e9ae2697ad933278d0a1630f650",
+			"pin": {
+				"path": "vendor/mega-maestro/contracts.pin.json",
+				"sha256": "85f4e97097c551f62f51a1dbd3d0b092c27e62bc202f76dabac2a852a9f34735"
+			},
+			"protocol": 2,
+			"acceptedEndpointProtocols": [
+				2
+			],
+			"desktopPolicySchema": 1,
+			"dependencyClosure": {
+				"zod": "4.6.5",
+				"lock": {
+					"path": "vendor/mega-maestro/contracts/package-lock.json",
+					"sha256": "9e10c94f29a6e68218b7a40b6bc72889e84feab2d1cc73fa5c6a3a9b73fbfac8"
+				}
+			}
+		}
+	],
+	"archives": {
+		"actor": {
+			"path": "dist/mega-maestro-actor-bridge/1/2d4e3ed84f3924dc141030b382cd68a31724dc0e1dff4ded9caaecd841a16ce4/actor-bridge.tgz",
+			"sha256": "2d4e3ed84f3924dc141030b382cd68a31724dc0e1dff4ded9caaecd841a16ce4",
+			"sha512": "63eae8464e886cf9595f3af5d148b85b2f2b69d9cc3af876003f96c99dbea896221443e43612adcfc6ef7aeec63a5af35aefdde72ddaa54bc1b77fd12e66d946",
+			"bytes": 427811,
+			"sidecar": {
+				"path": "dist/mega-maestro-actor-bridge/1/2d4e3ed84f3924dc141030b382cd68a31724dc0e1dff4ded9caaecd841a16ce4/actor-bridge.tgz.sha256",
+				"sha256": "9db28b7c057baed5813c382196cfe889867bc9bdb1490c80d175b867938ebdfc"
+			},
+			"manifest": {
+				"path": "dist/mega-maestro-actor-bridge/1/2d4e3ed84f3924dc141030b382cd68a31724dc0e1dff4ded9caaecd841a16ce4/artifact.json",
+				"sha256": "2f1b617dbf1c06119c6a7e6aa2c6d96eed7bd9397585d7590b296e573153b3a9"
+			},
+			"payloadFiles": 12,
+			"payloadDigest": "abbf138de45a0d900cdaea8178bb019df11d6bd85bf6429f2289c1e50b8f12ff",
+			"payloadMap": "artifact.json#/payloadSha256; equal to manifest.json inside the archive",
+			"publicContracts": {
+				"path": "../mega-maestro/artifacts/enterprise/0.4.0/7c8963448e52cbdae2043a1305ce4690667c4e9ae2697ad933278d0a1630f650/contracts.tgz",
+				"version": "0.4.0",
+				"sha256": "7c8963448e52cbdae2043a1305ce4690667c4e9ae2697ad933278d0a1630f650",
+				"integrity": "sha512-MQ0K4GqcvwCqQLKMPNNp/C2AXYHvXGjt0c+TM1VsFkO9M/JV/lO2HCr/ariKYrD4VmXxMQaJcSjZD5M9NgdTTw==",
+				"payloadDigest": "6e850b92fe8621dd88b67da02cad173eea04cd0b072ea01ebc74d974fb8da1de",
+				"sourceRevision": "e439b39e165cef495558ef363972ea10d5a69fb6",
+				"acceptedEndpointProtocols": [
+					2
+				],
+				"endpointProtocols": [
+					2
+				],
+				"manifest": {
+					"path": "../mega-maestro/artifacts/enterprise/0.4.0/7c8963448e52cbdae2043a1305ce4690667c4e9ae2697ad933278d0a1630f650/artifact.json",
+					"sha256": "a24912480824281578307a37e5fbc430dfce724e6088308fdfed9037bd14e647"
+				},
+				"sidecar": {
+					"path": "../mega-maestro/artifacts/enterprise/0.4.0/7c8963448e52cbdae2043a1305ce4690667c4e9ae2697ad933278d0a1630f650/contracts.tgz.sha256",
+					"sha256": "b1e9eedba515fefe2c873884829c4fa9d60534be3e48c7c9959cb6078e7ac0a2"
+				},
+				"acceptedEndpointProtocolsRecordedIn": "vendor/mega-maestro/contracts.pin.json (the importer pin, enclosed in the archive as contracts/contracts.pin.json); the 0.4.0 artifact.json declares localProtocols [2] under contractSchemas and does not carry acceptedEndpointProtocols itself"
+			}
+		},
+		"publicContracts": {
+			"path": "../mega-maestro/artifacts/enterprise/0.4.0/7c8963448e52cbdae2043a1305ce4690667c4e9ae2697ad933278d0a1630f650/contracts.tgz",
+			"version": "0.4.0",
+			"sha256": "7c8963448e52cbdae2043a1305ce4690667c4e9ae2697ad933278d0a1630f650",
+			"integrity": "sha512-MQ0K4GqcvwCqQLKMPNNp/C2AXYHvXGjt0c+TM1VsFkO9M/JV/lO2HCr/ariKYrD4VmXxMQaJcSjZD5M9NgdTTw==",
+			"payloadDigest": "6e850b92fe8621dd88b67da02cad173eea04cd0b072ea01ebc74d974fb8da1de",
+			"sourceRevision": "e439b39e165cef495558ef363972ea10d5a69fb6",
+			"acceptedEndpointProtocols": [
+				2
+			],
+			"endpointProtocols": [
+				2
+			],
+			"manifest": {
+				"path": "../mega-maestro/artifacts/enterprise/0.4.0/7c8963448e52cbdae2043a1305ce4690667c4e9ae2697ad933278d0a1630f650/artifact.json",
+				"sha256": "a24912480824281578307a37e5fbc430dfce724e6088308fdfed9037bd14e647"
+			},
+			"sidecar": {
+				"path": "../mega-maestro/artifacts/enterprise/0.4.0/7c8963448e52cbdae2043a1305ce4690667c4e9ae2697ad933278d0a1630f650/contracts.tgz.sha256",
+				"sha256": "b1e9eedba515fefe2c873884829c4fa9d60534be3e48c7c9959cb6078e7ac0a2"
+			},
+			"acceptedEndpointProtocolsRecordedIn": "vendor/mega-maestro/contracts.pin.json (the importer pin, enclosed in the archive as contracts/contracts.pin.json); the 0.4.0 artifact.json declares localProtocols [2] under contractSchemas and does not carry acceptedEndpointProtocols itself"
+		}
+	},
+	"consumerHandoff": {
+		"actorDependencyPlacement": "Extract the actor archive; place the verified contracts 0.4.0 archive and its exact zod closure at vendor/mega-maestro/contracts and the enclosed contracts/contracts.pin.json at vendor/mega-maestro/contracts.pin.json under the extraction root. The compiled bridge checks that pin (endpointProtocols and acceptedEndpointProtocols exactly [2]) before loading schemas.",
+		"reproduce": "node scripts/package-mega-maestro-actor-bridge.mjs --contracts ../mega-maestro/artifacts/enterprise/0.4.0/7c8963448e52cbdae2043a1305ce4690667c4e9ae2697ad933278d0a1630f650/contracts.tgz"
+	},
+	"checks": [
+		{
+			"name": "package",
+			"command": "node scripts/package-mega-maestro-actor-bridge.mjs --contracts ../mega-maestro/artifacts/enterprise/0.4.0/7c8963448e52cbdae2043a1305ce4690667c4e9ae2697ad933278d0a1630f650/contracts.tgz",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/actor-bridge-0.4.0/package.json",
+				"sha256": "2781313c2d423bacf551bbc6979fa6453bb51c2671dacbebbb5f920500387cdb"
+			}
+		},
+		{
+			"name": "package-reproducible",
+			"command": "same command again; equal sha256",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/actor-bridge-0.4.0/package-repeat.json",
+				"sha256": "2781313c2d423bacf551bbc6979fa6453bb51c2671dacbebbb5f920500387cdb"
+			}
+		},
+		{
+			"name": "plain-node-load",
+			"command": "node .maestro/playbooks/Working/actor-bridge-0.4.0/load.mjs <archive> <contracts.tgz>",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/actor-bridge-0.4.0/load.log",
+				"sha256": "1de5c449e1f2804c75600d5d0b262b5307d04dacb087b7973c5310a9f89b5304"
+			},
+			"result": "all tested exports are functions; bridge.input names contracts 7c896344 and protocol 2; a v1 challenge is denied with zero requests"
+		},
+		{
+			"name": "unit",
+			"command": "node node_modules/vitest/vitest.mjs run src/__tests__/integration/mega-maestro/approval-bridge.test.ts src/__tests__/shared/maestro-lib/managed/contracts.test.ts",
+			"exitCode": 0,
+			"passed": 80,
+			"failed": 0,
+			"skipped": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/actor-bridge-0.4.0/unit.log",
+				"sha256": "74df89f1ffa10c6364876ed08700d5d68f8891f98ecdcc1a7dbfc346a913b654"
+			},
+			"report": {
+				"path": ".maestro/playbooks/Working/actor-bridge-0.4.0/tests.json",
+				"sha256": "75207d08e0a735e113b2c05b8a29a8fca70d99f05a6d45723ad94ee66d8f58b5"
+			}
+		},
+		{
+			"name": "eslint",
+			"command": "node node_modules/eslint/bin/eslint.js -c eslint.dashes.config.mjs scripts/package-mega-maestro-actor-bridge.mjs scripts/mega-maestro-pair.mjs",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/actor-bridge-0.4.0/eslint.log",
+				"sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+			}
+		},
+		{
+			"name": "format",
+			"command": "node node_modules/prettier/bin/prettier.cjs --check scripts/package-mega-maestro-actor-bridge.mjs scripts/mega-maestro-pair.mjs",
+			"exitCode": 0,
+			"evidence": {
+				"path": ".maestro/playbooks/Working/actor-bridge-0.4.0/format.log",
+				"sha256": "17aa973d3f004560237d9a95171210b0671deff23d61628eecf7322ff5938f20"
+			}
+		}
+	],
+	"limitations": [
+		"Local BUILD evidence only; the paired actor-policy journey (MEGA-ACTOR-POLICY / PAIR-ACTOR-POLICY-EVIDENCE) remains separate.",
+		"The archive and logs are local ignored artifacts, not uploaded release assets.",
+		"No implementation source changed besides adding the tracked packager."
+	]
+}
