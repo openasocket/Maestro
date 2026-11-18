@@ -131,7 +131,9 @@ export async function packageActorBridge(options) {
 	const { pin, pinBytes } = verifyPinnedContracts(contractsArchive);
 
 	const esbuild = await import('esbuild');
-	const scratch = fs.mkdtempSync(path.join(outDir, '.build-'));
+	// A fixed build folder: its name enters the esbuild metafile, which the archive carries.
+	const scratch = path.join(outDir, '.build');
+	fs.rmSync(scratch, { recursive: true, force: true });
 	try {
 		const result = await esbuild.build({
 			absWorkingDir: REPO_ROOT,
