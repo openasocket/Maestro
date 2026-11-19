@@ -209,8 +209,11 @@ import { MANAGED_CONTRACT_VERSION } from './managed/types';
  * `runLiveExecutionCheck` sends no `workflow_settle` for it and only releases (`effects_settled`);
  * an `unknown` receipt is settled `uncertain` and stays held. `LiveExecutionCheckInput.effect`
  * is removed and `LiveExecutionObservation.settlement` names who settled (`by`). Breaking below 1.0.
+ * 0.44.0: the live execution check renews its lease once, inside its lifetime, before execution
+ * (`workflow_renew`, fenced by the claimed owner). The observation records it as `renew`, and the consumer
+ * receipt writer refuses an observation without one. Additions only.
  */
-export const MAESTRO_LIB_VERSION = '0.43.0';
+export const MAESTRO_LIB_VERSION = '0.44.0';
 
 /** The Node range the built library runs on; `engines.node` of the built package. */
 export const MAESTRO_LIB_NODE_RANGE = '>=20';

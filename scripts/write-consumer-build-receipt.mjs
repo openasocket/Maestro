@@ -560,6 +560,7 @@ export function liveObservationOf(file, { runtime, integrity }) {
 	need(Array.isArray(o.chain) && o.chain.length > 0, 'no delegation chain was observed');
 	need(/^[a-f0-9]{64}$/.test(o.chainDigest?.value ?? ''), 'no chain digest was observed');
 	need(typeof o.workflowOwner?.ownerId === 'string', 'no workflow owner was observed');
+	need(o.renew?.outcome === 'renewed', 'the lease was not renewed inside its lifetime');
 	need(o.execution?.receipt?.outcome === 'broker_dispatched', 'no dispatch receipt was observed');
 	// A dispatched effect is settled by the endpoint itself and only released by the
 	// owner; an unknown one is settled uncertain by the owner and stays held.

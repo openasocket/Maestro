@@ -133,6 +133,7 @@ describe('write-consumer-build-receipt', () => {
 			workflowOwner: { ownerId: 'o', ownerEpoch: 'e', fencingTokenSha256: '5'.repeat(64) },
 			execution: { receipt: { outcome: 'broker_dispatched', state: 'dispatched' } },
 			settlement: { by: 'endpoint', effect: 'settled' },
+			renew: { outcome: 'renewed', expiresAt: '2099-01-01T00:02:00.000Z' },
 			release: { outcome: 'released' },
 		};
 		const write = (value: unknown) => {
@@ -192,6 +193,7 @@ describe('write-consumer-build-receipt', () => {
 					"not the endpoint's settlement",
 				],
 				[{ release: null }, 'did not release'],
+				[{ renew: null }, 'not renewed inside its lifetime'],
 				[
 					{ execution: { receipt: { outcome: 'broker_dispatched', state: 'unknown' } } },
 					'not settled uncertain',

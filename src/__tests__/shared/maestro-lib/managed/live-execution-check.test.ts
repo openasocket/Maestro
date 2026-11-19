@@ -165,6 +165,7 @@ describe('live execution check', () => {
 			'attachment',
 			'registration_use',
 			'workflow_claim',
+			'workflow_renew',
 			'execution',
 			'workflow_release',
 		]);
@@ -203,6 +204,14 @@ describe('live execution check', () => {
 			idempotencyKey: 'exec-live-1',
 		});
 		expect(observation.execution?.receipt.grantId).toBe(ENDPOINT_GRANT);
+		// The lease is renewed once, inside its lifetime, fenced by the claimed owner.
+		const renew = sent.find((envelope) => envelope.operation === 'workflow_renew')!;
+		expect(renew.payload.owner).toEqual(
+			expect.objectContaining({ ownerId: ISSUED.ownerId, ownerEpoch: ISSUED.ownerEpoch })
+		);
+		expect(observation.renew).toEqual(
+			expect.objectContaining({ outcome: 'renewed', expiresAt: expect.any(String) })
+		);
 		// The endpoint settled the dispatched effect itself: no settle is sent, the owner releases.
 		expect(observation.settlement).toEqual({ by: 'endpoint', effect: 'settled' });
 		expect(observation.release).toEqual({ outcome: 'released' });

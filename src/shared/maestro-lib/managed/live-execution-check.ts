@@ -163,6 +163,8 @@ export interface LiveExecutionObservation {
 		| { by: 'endpoint'; effect: 'settled' }
 		| { by: 'consumer'; effect: 'uncertain'; outcome: string }
 		| null;
+	/** The one renew inside the lease, made before execution. `expiresAt` is the renewed lease's. */
+	renew: { outcome: 'renewed'; expiresAt: string } | null;
 	release: { outcome: string } | null;
 	steps: LiveExecutionStep[];
 }
@@ -210,6 +212,7 @@ export async function runLiveExecutionCheck(
 		chainDigest: null,
 		execution: null,
 		settlement: null,
+		renew: null,
 		release: null,
 		steps: [],
 	};
@@ -362,6 +365,20 @@ export async function runLiveExecutionCheck(
 			encoding: 'sha256(canonicalJson(delegation.chain))',
 			value: digestOf(lease.delegation.chain),
 		};
+
+		// 5b. One renew inside the lease, fenced by the owner the claim answered, before execution.
+		const renewed = record(
+			'workflow_renew',
+			await workflows.renew({
+				...context,
+				idempotencyKey: input.newId(),
+				requestedLeaseMs: input.workflow.requestedLeaseMs,
+				owner: { ...lease.owner },
+			})
+		);
+		if (renewed.outcome !== 'renewed')
+			return refuse('workflow_renew', `denied ${(renewed as { reason: string }).reason}`);
+		observation.renew = { outcome: renewed.outcome, expiresAt: renewed.lease.expiresAt };
 
 		// 6. Execution under the lease, fenced by the owner the claim answered.
 		const executions = createEndpointExecutionClient(port, {
