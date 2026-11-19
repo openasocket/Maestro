@@ -76,9 +76,9 @@ export const DEFAULT_LIBRARY_DIR = 'dist/maestro-lib';
 export const DEFAULT_PIN_FILE = 'vendor/mega-maestro/contracts.pin.json';
 export const DEFAULT_SIBLING_DIR = path.resolve(REPO_ROOT, '..', 'mega-maestro');
 export const WORKING_DIR = '.maestro/playbooks/Working';
-/** The endpoint's own Linux harness image (`apps/endpoint/src/broker/linux.ts`), by digest. */
+/** The endpoint's own Linux harness image (`apps/endpoint/src/broker/linux.ts`), by digest: node:26-bookworm-slim, Node 26.13.1. */
 export const DEFAULT_IMAGE =
-	'node@sha256:71bcbb3b215b3fa84b5b167585675072f4c270855e37a599803f1a58141a0716';
+	'node@sha256:5df79989ed685e09f0a98019db4cebfb22fb9df1a53c0161664a011f7ff6b0f1';
 /** The provider the endpoint registers as harness-only (`apps/endpoint/src/providers/registry.ts`). */
 export const SYNTHETIC_ENDPOINT_PROVIDER = 'synthetic-node';
 export const DEFAULT_RUN_TIMEOUT_MS = 180_000;
