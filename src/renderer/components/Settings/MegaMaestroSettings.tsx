@@ -31,6 +31,7 @@ import {
 } from '../../hooks/enterprise/useManagedStatus';
 import type { Theme } from '../../types';
 import { ManagedInbox } from '../Enterprise/ManagedInbox';
+import { EnrollmentPhases } from './MegaMaestroEnrollment';
 import { ManagedStatus, STATUS_COPY } from '../Enterprise/ManagedStatus';
 import { SettingsSectionHeading } from './SettingsSectionHeading';
 import { SectionCard } from './tabs/DisplayTab/components/SectionCard';
@@ -253,6 +254,9 @@ export function MegaMaestroSettings({ theme }: { theme: Theme }) {
 						disabled={busy !== null}
 						onClick={() => void act('completeRegistration')}
 					/>
+				) : null}
+				{!state.enrollment || state.enrollment.management === 'enrolling' ? (
+					<EnrollmentPhases theme={theme} onAnswered={() => void managed.refresh()} />
 				) : null}
 				<ManagedInbox theme={theme} />
 			</>

@@ -17,7 +17,7 @@
 // from a file, relayed once, and never echoed, not even in an error.
 
 import * as fs from 'fs';
-import type { EnrollmentRequestInput, LifecycleOutcome } from '../../main/enterprise/enrollment';
+import type { LifecycleOutcome } from '../../main/enterprise/enrollment';
 import type { InstallationInventory } from '../../main/enterprise/inventory';
 import type { ManagedStateView } from '../../main/enterprise/managed-state';
 import type { ManagedSupportMatrix } from '../../main/enterprise/service';
@@ -28,6 +28,7 @@ import type {
 import type { ManagedSettingLocksView } from '../../shared/managedSettingsLock';
 import { ExitCode, exitWith } from '../exit-codes';
 import { formatSuccess } from '../output/formatter';
+import { ENROLLMENT_PHASE_FIELDS } from '../../shared/enrollmentPhases';
 import { isQuiet } from '../output/verbosity';
 import {
 	errorFrameMessage,
@@ -49,14 +50,7 @@ export interface ManagedEnrollOptions extends ManagedOptions {
 	phase?: string;
 }
 
-/** The fields each relayed enrollment phase file names (decision D1); the desktop validates their values. */
-export const ENROLLMENT_PHASE_FIELDS: Readonly<
-	Record<EnrollmentRequestInput['phase'], readonly string[]>
-> = {
-	request: ['socketPath', 'management', 'orgId', 'serverCaPem'],
-	prove: ['socketPath', 'management', 'challenge'],
-	activate: ['socketPath', 'management', 'activation'],
-};
+export { ENROLLMENT_PHASE_FIELDS } from '../../shared/enrollmentPhases';
 
 const NO_SERVICE_MESSAGE = 'The enterprise enrollment service is not running in this desktop.';
 

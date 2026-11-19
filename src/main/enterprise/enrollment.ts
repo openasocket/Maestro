@@ -48,12 +48,10 @@ import {
 	isEndpointDigest,
 	type EndpointAttachmentRequest,
 	type EndpointComponent,
-	type EndpointEnrollmentActivation,
 	type EndpointEnrollmentManagement,
 	type EndpointEnrollmentPhaseRequest,
 	type EndpointEnrollmentPhaseResult,
 	type EndpointInvokeOutcome,
-	type EndpointPossessionChallenge,
 	type EndpointRuntimeUseReference,
 	type EndpointPort,
 	type EndpointRegistrationApproval,
@@ -84,25 +82,9 @@ export interface EnrollmentLifecycleDeps {
 	onAttached?(status: EndpointStatus): void;
 }
 
-/** What every relayed phase carries besides its own body. */
-interface EnrollmentPhaseCommon {
-	socketPath: string;
-	management: EndpointEnrollmentManagement;
-}
+import type { EnrollmentRequestInput } from '../../shared/enrollmentPhases';
 
-/**
- * One relayed enrollment phase (decision D1). `request` also carries the
- * organization the operator asserts from the central console (the tenant is
- * the management's); the endpoint does not report it over the socket.
- */
-export type EnrollmentRequestInput =
-	| (EnrollmentPhaseCommon & {
-			phase: 'request';
-			orgId: string;
-			serverCaPem: string;
-	  })
-	| (EnrollmentPhaseCommon & { phase: 'prove'; challenge: EndpointPossessionChallenge })
-	| (EnrollmentPhaseCommon & { phase: 'activate'; activation: EndpointEnrollmentActivation });
+export type { EnrollmentRequestInput } from '../../shared/enrollmentPhases';
 
 export type LifecycleRefusal =
 	| 'custody-unprotected'
