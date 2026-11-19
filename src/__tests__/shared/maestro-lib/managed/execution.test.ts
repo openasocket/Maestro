@@ -4,7 +4,7 @@
  * `workflow_claim` round trip through the v2 lifecycle client.
  *
  * What is defended: an allowed run sends the contract's `executionRequestV2`
- * (parsed here with the vendored 0.3.0 schema) carrying the lease's
+ * (parsed here with the vendored 0.4.0 schema) carrying the lease's
  * registration, full delegation chain, grants, workflow owner and lineage
  * unchanged, and credits only the `dispatchReceiptV2` that answers it, as a
  * dispatch and never a completion; a refusal passes through and credits
