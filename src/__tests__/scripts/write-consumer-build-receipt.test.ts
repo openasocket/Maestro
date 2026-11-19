@@ -173,7 +173,7 @@ describe('write-consumer-build-receipt', () => {
 		it('refuses a failed run, another platform, another runtime or contracts, and a missing field', () => {
 			for (const [over, problem] of [
 				[{ outcome: 'failed', failure: { step: 'execution' } }, 'outcome is failed at execution'],
-				[{ host: { platform: 'darwin' } }, 'did not run on Linux'],
+				[{ host: { platform: 'win32' } }, 'did not run on Linux or macOS'],
 				[{ liveNegotiationPerformed: false }, 'no live negotiation'],
 				[
 					{ runtime: { ...passing.runtime, archive: { sha256: 'd'.repeat(64) } } },

@@ -537,7 +537,10 @@ export function liveObservationOf(file, { runtime, integrity }) {
 		`outcome is ${o.outcome}${o.failure ? ` at ${o.failure.step}` : ''}`
 	);
 	need(o.liveNegotiationPerformed === true, 'no live negotiation was performed');
-	need(o.host?.platform === 'linux', 'the check did not run on Linux');
+	need(
+		o.host?.platform === 'linux' || o.host?.platform === 'darwin',
+		'the check did not run on Linux or macOS'
+	);
 	need(
 		o.runtime?.archive?.sha256 === runtime.archive.sha256,
 		'it did not run the pinned runtime archive'
