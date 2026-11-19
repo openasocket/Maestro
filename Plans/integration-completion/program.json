@@ -1739,13 +1739,27 @@
 					"targets": ["Plans/integration-completion/evidence/early-build.json"],
 					"backlog": ["G-02", "G-04", "G-09", "M-06", "PAIR-01", "QUAL-01", "QUAL-02", "QUAL-03"],
 					"requires": [],
-					"produces": [
-						"MAESTRO-ACTOR-BRIDGE-BUILD",
-						"MAESTRO-DESKTOP-CONTRACT-BUILD",
-						"MAESTRO-PROVIDER-CONTRACT-BUILD"
-					],
+					"produces": ["MAESTRO-DESKTOP-CONTRACT-BUILD", "MAESTRO-PROVIDER-CONTRACT-BUILD"],
 					"outcome": "Run the changed-module unit suites, type/build checks and public archive load/contract checks relevant to this phase. Fix failures through separate bounded IMPLEMENT/TEST continuations before retrying. Publish the actual clean implementation snapshot, payload/input hashes, public archives and commands/results in the BUILD receipt. This receipt supplies compiled inputs for the other owner; it grants no execution authority and proves no paired/native/provider support. Every paired, native and real-provider requirement remains in its separate qualification task.",
 					"id": "MCOMP-07-05"
+				},
+				{
+					"label": "Verify and publish the actor bridge built against contracts 0.4.0",
+					"kind": "VERIFY",
+					"targets": ["Plans/integration-completion/evidence/actor-bridge-build-0.4.0.json"],
+					"backlog": ["G-02", "G-09", "PAIR-01"],
+					"requires": ["MAESTRO-CONTRACT-INPUTS-BUILD"],
+					"produces": ["MAESTRO-ACTOR-BRIDGE-BUILD"],
+					"supersedes": {
+						"task": "MCOMP-07-05",
+						"artifactId": "MAESTRO-ACTOR-BRIDGE-BUILD",
+						"path": "Plans/integration-completion/evidence/early-build.json",
+						"archiveSha256": "a3f1b43f2e9be9251ada1027fa55dedef0382ec920494e274438e42b27a3b198",
+						"contracts": "0.1.0",
+						"decision": "D4"
+					},
+					"outcome": "Rebuild the actor approval bridge with the tracked scripts/package-mega-maestro-actor-bridge.mjs against the contracts 0.4.0 archive (7c8963448e52cbdae2043a1305ce4690667c4e9ae2697ad933278d0a1630f650, endpoint protocol 2 only) and publish a new immutable BUILD receipt. early-build.json stays unchanged and still carries MAESTRO-DESKTOP-CONTRACT-BUILD and MAESTRO-PROVIDER-CONTRACT-BUILD. The receipt grants no authority and proves no paired, native or provider support.",
+					"id": "MCOMP-07-06"
 				}
 			],
 			"dependsOn": ["GCOMP-01", "MCOMP-03"],
@@ -1756,7 +1770,7 @@
 			],
 			"id": "MCOMP-07",
 			"path": ".maestro/playbooks/2026-10-29-Maestro-Integration-Completion/MCOMP-07.md",
-			"taskCount": 5,
+			"taskCount": 6,
 			"stage": "S04"
 		},
 		{
@@ -8664,7 +8678,7 @@
 				"MEGA-CONTRACTS-FOUNDATION-BUILD"
 			],
 			"nativeInputs": false,
-			"taskCount": 19
+			"taskCount": 20
 		},
 		{
 			"id": "S05",
@@ -8978,8 +8992,8 @@
 			"taskCount": 1
 		}
 	],
-	"taskCount": 530,
-	"taskCounts": { "IMPLEMENT": 409, "TEST": 61, "VERIFY": 60 },
+	"taskCount": 531,
+	"taskCounts": { "IMPLEMENT": 409, "TEST": 61, "VERIFY": 61 },
 	"artifacts": {
 		"MEGA-CONTRACTS-FOUNDATION-BUILD": {
 			"producerDocument": "GCOMP-01",
@@ -10382,6 +10396,10 @@
 			"date": "2026-11-05",
 			"summary": "Maestro has no Tauri target: its desktop host is Electron. Retired MCOMP-05, MCOMP-06, MCOMP-11 and MCOMP-12 (Tauri host and Tauri service parity), removed the TAURI-HOST-BASELINE and TAURI-SERVICE-PARITY receipts from every task and stage, renamed MAESTRO-TAURI-DESKTOP, -MACOS and -WINDOWS to MAESTRO-DESKTOP-APP, MAESTRO-APP-MACOS and MAESTRO-APP-WINDOWS, and retargeted the src-tauri paths onto the existing Electron modules. Reconciled the two manifest copies. Inserted the GCOMP-01-08D and GCOMP-01-08E continuations (delivery of the draft application closure) and MCOMP-33-00 (upstream refresh).",
 			"retiredDocuments": ["MCOMP-05", "MCOMP-06", "MCOMP-11", "MCOMP-12"]
+		},
+		{
+			"date": "2026-11-19",
+			"summary": "Decision D4: MAESTRO-ACTOR-BRIDGE-BUILD is produced by the new VERIFY task MCOMP-07-06 at Plans/integration-completion/evidence/actor-bridge-build-0.4.0.json (receipt SHA-256 d32979c9d283ce6d90e882c74ac885960b9dce57a892ea728e1a39c938451d29, commit 24c5ee180, actor archive 2d4e3ed84f3924dc141030b382cd68a31724dc0e1dff4ded9caaecd841a16ce4, contracts 0.4.0, protocol 2). MCOMP-07-05 keeps MAESTRO-DESKTOP-CONTRACT-BUILD and MAESTRO-PROVIDER-CONTRACT-BUILD in early-build.json, which is unchanged; its contracts 0.1.0 bridge is superseded. One task added (MCOMP-07 5 to 6, S04 19 to 20, VERIFY 60 to 61); no receipt was edited."
 		}
 	]
 }
