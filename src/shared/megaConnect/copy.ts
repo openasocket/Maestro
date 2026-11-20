@@ -105,6 +105,33 @@ export const MEGA_CONNECT_COPY = {
 	/** The number region's accessible name: the digits one at a time ("4 7"). */
 	largeNumberSpoken: 'Number to pick in your browser: {digits}',
 
+	// PROPOSED: the Troubleshoot tab (MSX-03-03). This tab is the one place
+	// IDs, the request number, the socket path and host details appear. Mega
+	// reviews these in SIMPLE-05 (copy).
+	troubleshootStatusTitle: 'Connect status',
+	troubleshootRowState: 'State',
+	troubleshootRowRequest: 'Request number',
+	troubleshootRowNumber: 'Number to pick',
+	troubleshootRowServerName: 'Server name',
+	troubleshootRowOrg: 'Organization',
+	troubleshootRowTeam: 'Team',
+	troubleshootRowPolicy: 'Policy',
+	troubleshootRowSynced: 'Last synced',
+	troubleshootRowDevice: 'Device',
+	troubleshootRowAccount: 'Account',
+	troubleshootRowEndpointServer: 'Server the endpoint names',
+	troubleshootSocketTitle: 'Endpoint socket',
+	troubleshootSocketInUse: 'In use',
+	troubleshootSocketSource: 'Source',
+	troubleshootSocketStandard: 'standard',
+	troubleshootSocketOverridden: 'overridden',
+	troubleshootSocketUseStandard: 'Use the standard socket',
+	troubleshootRefusalTitle: 'Last refusal',
+	troubleshootRefusalNone: 'No refusal since Maestro started.',
+	troubleshootRefusalCode: 'Code',
+	troubleshootRefusedUnavailable:
+		'The Mega-Maestro endpoint on this computer does not offer Connect yet.',
+
 	// maestro-cli managed connect (MSX-02-04). The CLI prints the indicator
 	// word, then these parts; the number is shown to the person who ran it and
 	// never logged.

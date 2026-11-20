@@ -27,7 +27,12 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Circle, Clock, XCircle, type LucideIcon } from 'lucide-react';
 import type { Theme } from '../../types';
-import type { ConnectResult, ConnectStatusView } from '../../../main/enterprise/connect';
+import type {
+	ConnectRefusal,
+	ConnectResult,
+	ConnectStatusView,
+} from '../../../main/enterprise/connect';
+import type { MegaConnectInputReason } from '../../../shared/megaConnect/input';
 import type { ConnectStartRequest } from '../../../main/preload/enterprise';
 import type { MegaConnectPrefill } from '../../../shared/megaConnect/deepLink';
 import {
@@ -104,20 +109,55 @@ export function forgetLastConnectInput(): void {
 	lastAcceptedInput = null;
 }
 
-function refusalText(result: Extract<ConnectResult<unknown>, { ok: false }>): string | null {
-	switch (result.refusal) {
+/** The last refusal main answered a start or disconnect with, for the Troubleshoot tab. */
+export interface ConnectRefusalRecord {
+	refusal: ConnectRefusal;
+	reason?: MegaConnectInputReason;
+}
+
+/**
+ * The last refusal of this app session, kept in memory only and never
+ * persisted. It holds a code and a rule name, never an input value.
+ */
+let lastRefusal: ConnectRefusalRecord | null = null;
+
+/** The last refusal the card received, or null when none came since Maestro started. */
+export function readLastConnectRefusal(): ConnectRefusalRecord | null {
+	return lastRefusal;
+}
+
+/** Forget the remembered refusal (tests). */
+export function forgetLastConnectRefusal(): void {
+	lastRefusal = null;
+}
+
+/** The plain sentence for a refusal code, from copy.ts. */
+export function connectRefusalSentence(
+	refusal: ConnectRefusal,
+	reason?: MegaConnectInputReason
+): string {
+	switch (refusal) {
 		case 'pin_mismatch':
 			return MEGA_CONNECT_COPY.cliRefusedPinMismatch;
 		case 'invalid_input':
-			return fillMegaConnectCopy('cliRefusedInvalidInput', { reason: result.reason ?? 'empty' });
+			return fillMegaConnectCopy('cliRefusedInvalidInput', { reason: reason ?? 'empty' });
 		case 'open_refused':
 			return MEGA_CONNECT_COPY.cliRefusedOpen;
 		case 'endpoint_failed':
 			return MEGA_CONNECT_COPY.cliRefusedEndpointFailed;
-		default:
-			// endpoint_connect_unavailable: the card itself turns to the unavailable state.
-			return null;
+		case 'endpoint_connect_unavailable':
+			return MEGA_CONNECT_COPY.troubleshootRefusedUnavailable;
 	}
+}
+
+/** Remember `result` as the last refusal, and answer the sentence the card shows (null: none). */
+function noteRefusal(result: Extract<ConnectResult<unknown>, { ok: false }>): string | null {
+	lastRefusal = result.reason
+		? { refusal: result.refusal, reason: result.reason }
+		: { refusal: result.refusal };
+	// endpoint_connect_unavailable: the card itself turns to the unavailable state.
+	if (result.refusal === 'endpoint_connect_unavailable') return null;
+	return connectRefusalSentence(result.refusal, result.reason);
 }
 
 /** The start input for `mode`, or the first field whose shape check fails. */
@@ -257,11 +297,12 @@ export function ConnectCard({ theme }: { theme: Theme }) {
 				kindRef.current = result.value.status.kind;
 				setCurrent(result.value);
 			} else if (result.refusal === 'endpoint_connect_unavailable') {
+				noteRefusal(result);
 				setForm(null);
 				kindRef.current = 'unavailable';
 				setCurrent(UNAVAILABLE);
 			} else {
-				setRefusal(refusalText(result));
+				setRefusal(noteRefusal(result));
 			}
 		} finally {
 			setBusy(false);
@@ -288,7 +329,7 @@ export function ConnectCard({ theme }: { theme: Theme }) {
 				kindRef.current = result.value.status.kind;
 				setCurrent(result.value);
 			} else {
-				setRefusal(refusalText(result));
+				setRefusal(noteRefusal(result));
 			}
 		} finally {
 			setBusy(false);

@@ -10,7 +10,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MegaMaestroModal } from '../../../../renderer/components/MegaMaestro/MegaMaestroModal';
-import { forgetLastConnectInput } from '../../../../renderer/components/MegaMaestro/ConnectCard';
+import {
+	forgetLastConnectInput,
+	forgetLastConnectRefusal,
+} from '../../../../renderer/components/MegaMaestro/ConnectCard';
 import type { MegaConnectStatus } from '../../../../shared/megaConnect/view';
 import type { MegaConnectPrefill } from '../../../../shared/megaConnect/deepLink';
 import { LayerStackProvider } from '../../../../renderer/contexts/LayerStackContext';
@@ -97,7 +100,8 @@ describe('MegaMaestroModal', () => {
 	it('opens on Overview: the standing summary and no technical field', async () => {
 		renderModal();
 		expect(await screen.findByTestId('standing-body')).toBeTruthy();
-		await waitFor(() => expect(megaServerGet).toHaveBeenCalled());
+		// The default view does not even load the technical server settings.
+		expect(megaServerGet).not.toHaveBeenCalled();
 		expect(screen.getByRole('radio', { name: 'Overview' }).getAttribute('aria-checked')).toBe(
 			'true'
 		);
@@ -267,6 +271,8 @@ describe('MegaMaestroModal Connect card', () => {
 
 	beforeEach(() => {
 		forgetLastConnectInput();
+		forgetLastConnectRefusal();
+		megaServerSave.mockReset().mockResolvedValue({ status: 'saved', message: 'Saved.' });
 		statusPush = null;
 		prefillPush = null;
 		connectStatus.mockReset();
@@ -400,7 +406,6 @@ describe('MegaMaestroModal Connect card', () => {
 		});
 		const view = renderModal();
 		await cardIn('browserOpened');
-		await waitFor(() => expect(megaServerGet).toHaveBeenCalled());
 		statusPush!({
 			status: {
 				kind: 'connected',
@@ -555,5 +560,170 @@ describe('MegaMaestroModal Connect card', () => {
 		fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
 		await cardIn('notConnected');
 		expect(screen.getByLabelText('Work email')).toBeTruthy();
+	});
+
+	describe('Troubleshoot panel', () => {
+		function setPlatform(platform: string) {
+			(window as unknown as { maestro: { platform?: string } }).maestro.platform = platform;
+		}
+
+		function rowValue(testId: string, term: string): string | null {
+			const list = screen.getByTestId(testId);
+			const terms = Array.from(list.querySelectorAll('dt'));
+			const dt = terms.find((node) => node.textContent === term);
+			return dt?.nextElementSibling?.textContent ?? null;
+		}
+
+		it('shows the open request as raw rows: state, request number, number and names, IDs included', async () => {
+			const uuid = '123e4567-e89b-12d3-a456-426614174000';
+			connectStatus.mockResolvedValue({
+				status: {
+					kind: 'browserOpened',
+					matchNumber: 47,
+					request: 1042,
+					serverName: 'mega.acme.com',
+				},
+				names: { device: 'alice-mbp', account: uuid, server: 'mega.acme.com' },
+			});
+			await renderTroubleshoot();
+			await waitFor(() => expect(rowValue('mega-ts-status', 'Request number')).toBe('1042'));
+			expect(rowValue('mega-ts-status', 'State')).toBe('Waiting for approval (browserOpened)');
+			expect(rowValue('mega-ts-status', 'Number to pick')).toBe('47');
+			expect(rowValue('mega-ts-status', 'Server name')).toBe('mega.acme.com');
+			expect(rowValue('mega-ts-status', 'Device')).toBe('alice-mbp');
+			// This tab is the one place an ID-shaped value is shown rather than dropped.
+			expect(rowValue('mega-ts-status', 'Account')).toBe(uuid);
+			expect(rowValue('mega-ts-status', 'Server the endpoint names')).toBe('mega.acme.com');
+		});
+
+		it('shows a connected status with its organization, team, policy revision and sync time, and follows pushes', async () => {
+			const digest = 'b'.repeat(64);
+			withStatus({ kind: 'waiting', request: 'REQ-7' });
+			await renderTroubleshoot();
+			await waitFor(() => expect(rowValue('mega-ts-status', 'Request number')).toBe('REQ-7'));
+			statusPush!({
+				status: {
+					kind: 'connected',
+					orgName: 'Acme',
+					teamPath: digest,
+					policy: { name: 'platform-default', revision: 12 },
+					syncedAt: Date.UTC(2026, 10, 20, 9, 30),
+				},
+			});
+			await waitFor(() => expect(rowValue('mega-ts-status', 'Organization')).toBe('Acme'));
+			expect(rowValue('mega-ts-status', 'State')).toBe('Connected (connected)');
+			expect(rowValue('mega-ts-status', 'Team')).toBe(digest);
+			expect(rowValue('mega-ts-status', 'Policy')).toBe('platform-default@12');
+			expect(rowValue('mega-ts-status', 'Last synced')).toBe('2026-11-20T09:30:00.000Z');
+			expect(rowValue('mega-ts-status', 'Request number')).toBeNull();
+		});
+
+		it('shows the unavailable state when no connect bridge is present', async () => {
+			setMaestro({
+				enterprise: { megaServerGet, megaServerSave, megaServerLookup, requestEnrollment },
+			});
+			await renderTroubleshoot();
+			expect(rowValue('mega-ts-status', 'State')).toBe('Unavailable (unavailable)');
+		});
+
+		it('shows the standard socket when none is saved, and Use the standard socket is off', async () => {
+			setPlatform('darwin');
+			megaServerGet.mockResolvedValue({ host: 'mega.example.com', port: 443, endpointSocket: '' });
+			await renderTroubleshoot();
+			await waitFor(() =>
+				expect(rowValue('mega-ts-socket', 'In use')).toBe(
+					'/Library/Application Support/MegaMaestro/Endpoint/run/ipc.sock'
+				)
+			);
+			expect(rowValue('mega-ts-socket', 'Source')).toBe('standard');
+			const useStandard = screen.getByRole('button', { name: 'Use the standard socket' });
+			expect((useStandard as HTMLButtonElement).disabled).toBe(true);
+		});
+
+		it('saves a socket override through the settings path and shows it overridden', async () => {
+			setPlatform('darwin');
+			megaServerGet.mockResolvedValue({ host: 'mega.example.com', port: 443, endpointSocket: '' });
+			await renderTroubleshoot();
+			await waitFor(() => expect(rowValue('mega-ts-socket', 'Source')).toBe('standard'));
+			fireEvent.change(screen.getByLabelText('Local endpoint socket'), {
+				target: { value: '/custom/ipc.sock' },
+			});
+			// Typed but not saved: the socket in use is still the standard one.
+			expect(rowValue('mega-ts-socket', 'Source')).toBe('standard');
+			fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+			await waitFor(() => expect(megaServerSave).toHaveBeenCalledTimes(1));
+			expect(megaServerSave.mock.calls[0][0]).toEqual({
+				host: 'mega.example.com',
+				port: 443,
+				endpointSocket: '/custom/ipc.sock',
+			});
+			await waitFor(() => expect(rowValue('mega-ts-socket', 'Source')).toBe('overridden'));
+			expect(rowValue('mega-ts-socket', 'In use')).toBe('/custom/ipc.sock');
+		});
+
+		it('Use the standard socket clears the override through the settings path', async () => {
+			setPlatform('linux');
+			await renderTroubleshoot();
+			await waitFor(() => expect(rowValue('mega-ts-socket', 'Source')).toBe('overridden'));
+			expect(rowValue('mega-ts-socket', 'In use')).toBe('/var/lib/mega/ipc.sock');
+			fireEvent.click(screen.getByRole('button', { name: 'Use the standard socket' }));
+			await waitFor(() => expect(megaServerSave).toHaveBeenCalledTimes(1));
+			expect(megaServerSave.mock.calls[0][0]).toMatchObject({ endpointSocket: '' });
+			await waitFor(() => expect(rowValue('mega-ts-socket', 'Source')).toBe('standard'));
+			expect(rowValue('mega-ts-socket', 'In use')).toBe(
+				'/var/lib/mega-maestro-endpoint/run/ipc.sock'
+			);
+		});
+
+		it('names the reason when this platform has no standard socket', async () => {
+			setPlatform('win32');
+			megaServerGet.mockResolvedValue({ host: 'mega.example.com', port: 443, endpointSocket: '' });
+			await renderTroubleshoot();
+			await waitFor(() =>
+				expect(rowValue('mega-ts-socket', 'In use')).toMatch(
+					/no standard Mega-Maestro endpoint socket/
+				)
+			);
+			expect(rowValue('mega-ts-socket', 'Source')).toBeNull();
+		});
+
+		it('says there is no refusal when none came', async () => {
+			await renderTroubleshoot();
+			expect(screen.getByTestId('mega-ts-refusal').textContent).toBe(
+				'No refusal since Maestro started.'
+			);
+		});
+
+		it('shows the last refusal of a start with its code and plain sentence', async () => {
+			connectStart.mockResolvedValue({ ok: false, refusal: 'pin_mismatch' });
+			renderModal();
+			await cardIn('notConnected');
+			fireEvent.change(screen.getByLabelText('Work email'), {
+				target: { value: 'alice@acme.com' },
+			});
+			fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
+			await screen.findByText(/not on the server you named/);
+			fireEvent.click(screen.getByRole('radio', { name: 'Troubleshoot' }));
+			expect(rowValue('mega-ts-refusal-code', 'Code')).toBe('pin_mismatch');
+			expect(screen.getByTestId('mega-ts-refusal').textContent).toContain(
+				'The approval page was not on the server you named, so Maestro did not open it.'
+			);
+		});
+
+		it('records an unavailable refusal too, with its own sentence', async () => {
+			connectStart.mockResolvedValue({ ok: false, refusal: 'endpoint_connect_unavailable' });
+			renderModal();
+			await cardIn('notConnected');
+			fireEvent.change(screen.getByLabelText('Work email'), {
+				target: { value: 'alice@acme.com' },
+			});
+			fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
+			await cardIn('unavailable');
+			fireEvent.click(screen.getByRole('radio', { name: 'Troubleshoot' }));
+			expect(rowValue('mega-ts-refusal-code', 'Code')).toBe('endpoint_connect_unavailable');
+			expect(screen.getByTestId('mega-ts-refusal').textContent).toContain(
+				'does not offer Connect yet'
+			);
+		});
 	});
 });

@@ -622,7 +622,7 @@ still missing. Grouped, highest value first:
   terminal, `gist --file`, deep link, reveal in Finder.
 
 6. **The Mega-Maestro window's server address, lookup and approval request.**
-   The window (`MegaMaestro/MegaMaestroModal.tsx`) saves the server (`megaServerSave`), looks it up (`megaServerLookup`: the health route and the local endpoint's compatibility answer), and sends the approval request (`requestEnrollment`, phase request). Each would be a typed message answered from `EnterpriseService.megaServer` and the lifecycle, admitted from a CLI-secret client like `enroll`. Missing: the verbs. The window itself opens through the surface registry (`open managed-status`).
+   The window's Troubleshoot tab (`MegaMaestro/TroubleshootPanel.tsx`) saves the server (`megaServerSave`, which also carries the endpoint socket override and its "Use the standard socket" reset), looks it up (`megaServerLookup`: the health route and the local endpoint's compatibility answer), and sends the approval request (`requestEnrollment`, phase request). Each would be a typed message answered from `EnterpriseService.megaServer` and the lifecycle, admitted from a CLI-secret client like `enroll`. Missing: the verbs. The window itself opens through the surface registry (`open managed-status`).
 
 ## Not mirrored by design
 
