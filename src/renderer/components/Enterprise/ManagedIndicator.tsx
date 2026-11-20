@@ -11,6 +11,13 @@
  * click opens the Mega-Maestro window, which holds the full detail and the
  * server lookup. Nothing here contacts a server: every fact is already in the
  * projection or the saved settings.
+ *
+ * Connect status (MSX-01-08): when a `connectStatus` is supplied, the badge
+ * shows the one word `viewFor()` gives for it (Connected, Waiting for approval,
+ * Not connected, Needs reconnect, Unavailable) beside a status dot, and it shows
+ * even before enrollment, since "Not connected" is the word a person needs
+ * there. The word, not the dot's color, carries the status, and it is in the
+ * accessible name. With no `connectStatus` the badge renders exactly as before.
  */
 
 import { MAESTRO_LIB_VERSION } from '../../../shared/maestro-lib/version';
@@ -22,6 +29,19 @@ import { openUiSurface } from '../../utils/openUiSurface';
 import type { Theme } from '../../types';
 import { MANAGED_STANDING_COPY } from '../../hooks/enterprise/useManagedStatus';
 import { STANDING_TINT } from './ManagedStatus';
+import { viewFor, type MegaConnectStatus } from '../../../shared/megaConnect/view';
+import type { MegaConnectCopyKey } from '../../../shared/megaConnect/copy';
+
+/** The theme color of the dot beside each connect indicator word. */
+export const CONNECT_INDICATOR_TINT: Partial<
+	Record<MegaConnectCopyKey, 'success' | 'warning' | 'error' | 'textDim'>
+> = {
+	indicatorConnected: 'success',
+	indicatorWaiting: 'warning',
+	indicatorNotConnected: 'textDim',
+	indicatorNeedsReconnect: 'error',
+	indicatorUnavailable: 'error',
+};
 
 export const MANAGED_INDICATOR_COPY = {
 	serverNotSet: 'not set',
@@ -69,10 +89,31 @@ export function managedIndicatorLines(
 	return lines;
 }
 
-export function ManagedIndicator({ theme }: { theme: Theme }) {
+export function ManagedIndicator({
+	theme,
+	connectStatus,
+}: {
+	theme: Theme;
+	/** Maestro's connect status; omitted until the connect service feeds it (MSX-02). */
+	connectStatus?: MegaConnectStatus;
+}) {
 	const managed = useManagedStatus();
 	const server = useMegaServerSettings();
 	const state = managed.state;
+	if (connectStatus) {
+		if (!managed.supported) return null;
+		return (
+			<ConnectIndicator
+				theme={theme}
+				status={connectStatus}
+				title={
+					state && state.standing !== 'unenrolled'
+						? managedIndicatorLines(state, server).join('\n')
+						: MANAGED_INDICATOR_COPY.openDetails
+				}
+			/>
+		);
+	}
 	if (!managed.supported || !state || state.standing === 'unenrolled') return null;
 
 	const copy = MANAGED_STANDING_COPY[state.standing];
@@ -89,6 +130,39 @@ export function ManagedIndicator({ theme }: { theme: Theme }) {
 			style={{ color: tint, backgroundColor: `${tint}20` }}
 		>
 			{copy.label}
+		</button>
+	);
+}
+
+function ConnectIndicator({
+	theme,
+	status,
+	title,
+}: {
+	theme: Theme;
+	status: MegaConnectStatus;
+	title: string;
+}) {
+	const view = viewFor(status);
+	const tint = theme.colors[CONNECT_INDICATOR_TINT[view.indicatorKey] ?? 'textDim'];
+	return (
+		<button
+			type="button"
+			data-testid="managed-indicator"
+			data-connect-status={view.kind}
+			onClick={() => openUiSurface('managed-status')}
+			title={title}
+			aria-label={`${view.indicatorWord}. ${MANAGED_INDICATOR_COPY.openDetails}`}
+			className="flex-shrink-0 flex items-center gap-1 px-1.5 py-0.5 rounded text-2xs font-bold transition-colors hover:bg-white/10"
+			style={{ color: tint, backgroundColor: `${tint}20` }}
+		>
+			<span
+				aria-hidden="true"
+				data-testid="managed-indicator-dot"
+				className="inline-block w-1.5 h-1.5 rounded-full"
+				style={{ backgroundColor: tint }}
+			/>
+			<span>{view.indicatorWord}</span>
 		</button>
 	);
 }

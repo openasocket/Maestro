@@ -17,6 +17,7 @@ import { openUiSurface } from '../../../../renderer/utils/openUiSurface';
 import type { ManagedStanding, ManagedStateView } from '../../../../main/enterprise/managed-state';
 import { MAESTRO_LIB_VERSION } from '../../../../shared/maestro-lib/version';
 import { mockTheme } from '../../../helpers/mockTheme';
+import type { MegaConnectStatus } from '../../../../shared/megaConnect/view';
 
 vi.mock('../../../../renderer/hooks/enterprise/useManagedStatus', async (importOriginal) => ({
 	...(await importOriginal<
@@ -143,5 +144,80 @@ describe('ManagedIndicator', () => {
 		expect(badge.getAttribute('title')).toContain('Organization org-acme, tenant tenant-7');
 		fireEvent.click(badge);
 		expect(openUiSurface).toHaveBeenCalledWith('managed-status');
+	});
+});
+
+describe('ManagedIndicator with a connect status', () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+		vi.mocked(useMegaServerSettings).mockReturnValue(SERVER);
+		vi.mocked(useManagedStatus).mockReturnValue(statusOf(stateOf('unenrolled')));
+	});
+
+	const CASES: Array<[MegaConnectStatus, string]> = [
+		[{ kind: 'connected', orgName: 'Acme' }, 'Connected'],
+		[{ kind: 'waiting', request: 1042 }, 'Waiting for approval'],
+		[{ kind: 'browserOpened', matchNumber: 42 }, 'Waiting for approval'],
+		[{ kind: 'managed' }, 'Waiting for approval'],
+		[{ kind: 'notConnected' }, 'Not connected'],
+		[{ kind: 'denied' }, 'Not connected'],
+		[{ kind: 'expired' }, 'Not connected'],
+		[{ kind: 'revoked' }, 'Needs reconnect'],
+		[{ kind: 'grantExpired' }, 'Needs reconnect'],
+		[{ kind: 'unavailable' }, 'Unavailable'],
+	];
+
+	it.each(CASES)('shows one word for %o, with the word in its accessible name', (status, word) => {
+		render(<ManagedIndicator theme={mockTheme} connectStatus={status} />);
+		const badge = screen.getByTestId('managed-indicator');
+		expect(badge).toHaveTextContent(word);
+		expect(badge.textContent).toBe(word);
+		expect(badge.getAttribute('aria-label')).toContain(word);
+		expect(screen.getByTestId('managed-indicator-dot')).toHaveAttribute('aria-hidden', 'true');
+	});
+
+	it('never shows the matching number or the request reference on the badge', () => {
+		render(
+			<ManagedIndicator
+				theme={mockTheme}
+				connectStatus={{ kind: 'browserOpened', matchNumber: 4821, request: 1042 }}
+			/>
+		);
+		const badge = screen.getByTestId('managed-indicator');
+		expect(badge.textContent).not.toMatch(/4821|1042/);
+		expect(badge.getAttribute('aria-label')).not.toMatch(/4821|1042/);
+	});
+
+	it('opens the panel on click, as the standing badge does', () => {
+		render(<ManagedIndicator theme={mockTheme} connectStatus={{ kind: 'notConnected' }} />);
+		fireEvent.click(screen.getByTestId('managed-indicator'));
+		expect(openUiSurface).toHaveBeenCalledWith('managed-status');
+	});
+
+	it('keeps the existing hover facts once enrolled', () => {
+		vi.mocked(useManagedStatus).mockReturnValue(statusOf(stateOf('managed')));
+		render(<ManagedIndicator theme={mockTheme} connectStatus={{ kind: 'connected' }} />);
+		const badge = screen.getByTestId('managed-indicator');
+		expect(badge.getAttribute('title')).toContain('Organization org-acme, tenant tenant-7');
+	});
+
+	it('draws nothing where the managed service is not supported', () => {
+		vi.mocked(useManagedStatus).mockReturnValue(statusOf(undefined, false));
+		const { container } = render(
+			<ManagedIndicator theme={mockTheme} connectStatus={{ kind: 'notConnected' }} />
+		);
+		expect(container).toBeEmptyDOMElement();
+	});
+
+	it('renders exactly as before when no connect status is supplied', () => {
+		vi.mocked(useManagedStatus).mockReturnValue(statusOf(stateOf('managed')));
+		const { container: withoutProp } = render(<ManagedIndicator theme={mockTheme} />);
+		const html = withoutProp.innerHTML;
+		expect(screen.queryByTestId('managed-indicator-dot')).toBeNull();
+		expect(screen.getByTestId('managed-indicator')).toHaveTextContent('Managed');
+		const { container: again } = render(
+			<ManagedIndicator theme={mockTheme} connectStatus={undefined} />
+		);
+		expect(again.innerHTML).toBe(html);
 	});
 });
