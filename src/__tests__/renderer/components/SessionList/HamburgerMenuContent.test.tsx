@@ -71,18 +71,14 @@ describe('HamburgerMenuContent - Mega-Maestro Management', () => {
 		useModalStore.getState().closeModal('settings');
 	});
 
-	it('is always offered, and opens Settings at the Mega-Maestro pane like `open managed-status`', () => {
+	it('is always offered, and opens the Mega-Maestro window like `open managed-status`', () => {
 		const closeMenu = vi.fn();
 		renderMenu(closeMenu);
 
-		fireEvent.click(screen.getByRole('button', { name: /Mega-Maestro Management/ }));
+		fireEvent.click(screen.getByRole('button', { name: /^Mega-Maestro/ }));
 
-		const state = useModalStore.getState();
-		expect(selectModalOpen('settings')(state)).toBe(true);
-		expect(selectModalData('settings')(state)).toMatchObject({
-			tab: 'environment',
-			settingId: 'environment-mega-maestro',
-		});
+		expect(selectModalOpen('megaMaestro')(useModalStore.getState())).toBe(true);
+		expect(selectModalOpen('settings')(useModalStore.getState())).toBe(false);
 		expect(closeMenu).toHaveBeenCalledWith(false);
 	});
 });

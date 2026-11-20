@@ -264,7 +264,7 @@ export function MegaMaestroSettings({ theme }: { theme: Theme }) {
 	}
 
 	return (
-		<div data-setting-id="environment-mega-maestro">
+		<div>
 			<SettingsSectionHeading icon={ShieldCheck} description={COPY.intro}>
 				{COPY.heading}
 			</SettingsSectionHeading>

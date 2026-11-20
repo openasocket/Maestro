@@ -39,40 +39,27 @@ describe('openUiSurface - feedback', () => {
 	});
 });
 
-describe('openUiSurface - managed-status (a section of Settings)', () => {
+describe('openUiSurface - managed-status (the Mega-Maestro window)', () => {
 	beforeEach(() => {
-		useModalStore.getState().closeModal('settings');
+		useModalStore.getState().closeModal('megaMaestro');
 	});
 
 	afterEach(() => {
-		useModalStore.getState().closeModal('settings');
+		useModalStore.getState().closeModal('megaMaestro');
 	});
 
-	it('opens Settings on the Environment tab, scrolled to the Mega-Maestro pane', () => {
+	it('opens its own Mega-Maestro window, not Settings', () => {
 		expect(openUiSurface('managed-status')).toEqual({ ok: true });
-		const state = useModalStore.getState();
-		expect(selectModalOpen('settings')(state)).toBe(true);
-		expect(selectModalData('settings')(state)).toMatchObject({
-			tab: 'environment',
-			settingId: 'environment-mega-maestro',
-		});
-	});
-
-	it('reaches the same pane by its aliases', () => {
-		for (const name of ['mega-maestro', 'enterprise', 'managed-inbox']) {
-			useModalStore.getState().closeModal('settings');
-			expect(openUiSurface(name), name).toEqual({ ok: true });
-			expect(selectModalData('settings')(useModalStore.getState())?.settingId).toBe(
-				'environment-mega-maestro'
-			);
-		}
-	});
-
-	it('refuses a --tab, since the pane has no tabs of its own', () => {
-		const result = openUiSurface('managed-status', 'inbox');
-		expect(result.ok).toBe(false);
-		expect(result.error).toContain('Unknown tab');
+		expect(selectModalOpen('megaMaestro')(useModalStore.getState())).toBe(true);
 		expect(selectModalOpen('settings')(useModalStore.getState())).toBe(false);
+	});
+
+	it('reaches the same window by its aliases', () => {
+		for (const name of ['mega-maestro', 'enterprise', 'managed-inbox', 'mega']) {
+			useModalStore.getState().closeModal('megaMaestro');
+			expect(openUiSurface(name), name).toEqual({ ok: true });
+			expect(selectModalOpen('megaMaestro')(useModalStore.getState())).toBe(true);
+		}
 	});
 });
 

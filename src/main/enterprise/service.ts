@@ -175,6 +175,7 @@ import { heldUpdate } from '../update-checker';
 import { heldEgress, type EgressHold } from '../utils/fetchWithTimeout';
 import type { EnrollmentRequestInput, LifecycleOutcome } from './enrollment';
 import type { InstallationInventory } from './inventory';
+import { createMegaServerService, type MegaServerService } from './mega-server';
 import { heldListeners, type ListenerHold } from './listener-gate';
 import {
 	managedStandingOf,
@@ -673,6 +674,8 @@ export interface LiveRunConstraint {
 
 export interface EnterpriseService {
 	readonly installation: ManagedInstallationIdentity;
+	/** The Mega-Maestro server this desktop talks to: the saved address, its save and its lookup (`mega-server.ts`). */
+	readonly megaServer: MegaServerService;
 	readonly identity: EnterpriseIdentityStore;
 	readonly lifecycle: EnrollmentLifecycle;
 	readonly policy: PolicyStatusService;
@@ -1004,6 +1007,17 @@ export function createEnterpriseService(deps: EnterpriseServiceDeps): Enterprise
 		contractsPin,
 		now,
 	});
+	// The Mega-Maestro server (the saved address, its lookup). The contracts version is the
+	// pin's, read the way the inventory reads it; "absent" leaves it null, never guessed.
+	const megaServer = createMegaServerService({
+		userDataDir: deps.userDataDir,
+		appVersion: deps.appVersion,
+		supportedCapabilities: ENTERPRISE_SUPPORTED_CAPABILITIES,
+		contractsVersion: () => {
+			const pin = contractsPin();
+			return pin.status === 'pinned' ? pin.version : null;
+		},
+	});
 	// The typed command executor over the real sinks (MRC-11-01B): the dispatch
 	// authority a cancel revokes through, the policy status a refresh re-attaches
 	// through, the inventory a report answers with. No prompt port is composed on
@@ -1069,6 +1083,7 @@ export function createEnterpriseService(deps: EnterpriseServiceDeps): Enterprise
 	};
 	return {
 		installation,
+		megaServer,
 		identity,
 		lifecycle,
 		policy,

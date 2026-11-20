@@ -127,20 +127,16 @@ export const UI_SURFACES: UiSurface[] = [
 		click: 'the gear icon in the Left Bar footer',
 	},
 	{
-		// Not a modal of its own: the Mega-Maestro management pane is a section of
-		// Settings > Environment (MRC-11-03A), so opening it is a Settings deep
-		// link that scrolls to the pane. `inbox` already names the Notification
-		// Center above, so the managed notice inbox answers to `managed-inbox`.
+		// The Mega-Maestro window: its own dialog, separate from Settings. It holds the
+		// server address, the lookup, the approval request, and the managed standing.
 		id: 'managed-status',
-		label: 'Mega-Maestro Management',
-		aliases: ['mega-maestro', 'enterprise', 'managed-inbox'],
-		modal: 'settings',
-		settingsSection: { tab: 'environment', settingId: 'environment-mega-maestro' },
+		label: 'Mega-Maestro',
+		aliases: ['mega-maestro', 'enterprise', 'managed-inbox', 'mega'],
+		modal: 'megaMaestro',
 		description:
-			'The managed standing of this desktop, its policy and actor, and the notice inbox (Settings > Environment).',
-		commandPalette: 'Mega-Maestro Management',
-		click:
-			'Mega-Maestro Management in the Left Bar hamburger menu (or the gear icon, then Environment > Mega-Maestro management)',
+			'Connect this desktop to a Mega-Maestro server, look it up, request approval, and see its managed standing and notice inbox.',
+		commandPalette: 'Mega-Maestro',
+		click: 'Mega-Maestro in the Left Bar hamburger menu, or the command palette',
 	},
 	{
 		id: 'usage-dashboard',

@@ -617,6 +617,9 @@ still missing. Grouped, highest value first:
 - **Symphony** contributions; **low value:** devtools, tour, leaderboard, clear
   terminal, `gist --file`, deep link, reveal in Finder.
 
+6. **The Mega-Maestro window's server address, lookup and approval request.**
+   The window (`MegaMaestro/MegaMaestroModal.tsx`) saves the server (`megaServerSave`), looks it up (`megaServerLookup`: the health route and the local endpoint's compatibility answer), and sends the approval request (`requestEnrollment`, phase request). Each would be a typed message answered from `EnterpriseService.megaServer` and the lifecycle, admitted from a CLI-secret client like `enroll`. Missing: the verbs. The window itself opens through the surface registry (`open managed-status`).
+
 ## Not mirrored by design
 
 These are UI actions deliberately left without a CLI verb. Each entry states

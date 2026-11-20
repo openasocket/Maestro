@@ -42,7 +42,6 @@ describe('UI surface registry', () => {
 
 	it('makes every Settings section a deep link into the settings modal, never a modal of its own', () => {
 		const sections = UI_SURFACES.filter((surface) => surface.settingsSection);
-		expect(sections.length).toBeGreaterThan(0);
 		const settingsTabs = surfaceTabIds(resolveUiSurface('settings')!);
 		for (const surface of sections) {
 			expect(surface.modal, surface.id).toBe('settings');
@@ -60,19 +59,15 @@ describe('the managed pane (managed-status)', () => {
 		expect(resolveUiSurface('inbox')?.id).toBe('notification-center');
 	});
 
-	it('deep-links to the Environment tab and the searchable id the pane is marked with', () => {
+	it('opens its own Mega-Maestro window, not a Settings section', () => {
 		const surface = resolveUiSurface('managed-status')!;
-		expect(surface.settingsSection).toEqual({
-			tab: 'environment',
-			settingId: 'environment-mega-maestro',
-		});
-		// The id must be one the settings search already scrolls to, so the CLI
-		// and a search hit land on the same element.
-		expect(ENVIRONMENT_SETTINGS.map((setting) => setting.id)).toContain(
-			surface.settingsSection!.settingId
-		);
-		expect(ENVIRONMENT_SETTINGS.find((s) => s.id === 'environment-mega-maestro')?.tab).toBe(
-			surface.settingsSection!.tab
+		expect(surface.modal).toBe('megaMaestro');
+		expect(surface.settingsSection).toBeUndefined();
+	});
+
+	it('is no longer a Settings search entry', () => {
+		expect(ENVIRONMENT_SETTINGS.map((setting) => setting.id)).not.toContain(
+			'environment-mega-maestro'
 		);
 	});
 
@@ -82,7 +77,7 @@ describe('the managed pane (managed-status)', () => {
 		expect(surface.shortcutId).toBeUndefined();
 		expect(uiSurfaceRefusal(surface, null, {})).toBeNull();
 		const hint = describeSurfaceAccess(surface);
-		expect(hint).toContain('"Mega-Maestro Management"');
+		expect(hint).toContain('"Mega-Maestro"');
 		expect(hint).toContain('hamburger menu');
 		expect(hint).not.toContain('press');
 	});

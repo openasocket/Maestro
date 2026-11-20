@@ -47,16 +47,12 @@ describe('Mega-Maestro Management palette entry', () => {
 		expect(entry!.shortcut).toBeUndefined();
 	});
 
-	it('opens Settings on the Environment tab at the pane, and closes the palette', () => {
+	it('opens the Mega-Maestro window, and closes the palette', () => {
 		const close = vi.fn();
 		const entry = build(close).find((a) => a.id === 'managed-status')!;
 		entry.action();
-		const state = useModalStore.getState();
-		expect(selectModalOpen('settings')(state)).toBe(true);
-		expect(selectModalData('settings')(state)).toMatchObject({
-			tab: 'environment',
-			settingId: 'environment-mega-maestro',
-		});
+		expect(selectModalOpen('megaMaestro')(useModalStore.getState())).toBe(true);
+		expect(selectModalOpen('settings')(useModalStore.getState())).toBe(false);
 		expect(close).toHaveBeenCalledWith(false);
 	});
 });

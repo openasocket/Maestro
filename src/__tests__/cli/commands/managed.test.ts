@@ -556,9 +556,9 @@ describe('maestro-cli managed over the real bridge and facade (MRC2-07-08)', () 
 			expect(json(result.out)).toMatchObject({
 				success: true,
 				surface: 'managed-status',
-				label: 'Mega-Maestro Management',
-				command_palette: 'Mega-Maestro Management',
-				hint: expect.stringContaining('Mega-Maestro Management'),
+				label: 'Mega-Maestro',
+				command_palette: 'Mega-Maestro',
+				hint: expect.stringContaining('Mega-Maestro'),
 			});
 		}
 		expect(opened).toEqual(
@@ -572,7 +572,7 @@ describe('maestro-cli managed over the real bridge and facade (MRC2-07-08)', () 
 			(s) => s.id === 'managed-status'
 		);
 		expect(entry).toMatchObject({
-			aliases: ['mega-maestro', 'enterprise', 'managed-inbox'],
+			aliases: ['mega-maestro', 'enterprise', 'managed-inbox', 'mega'],
 			tabs: [],
 			encore: '',
 		});

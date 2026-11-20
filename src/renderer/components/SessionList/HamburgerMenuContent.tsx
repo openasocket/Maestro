@@ -225,8 +225,7 @@ export function HamburgerMenuContent({
 				</div>
 				<ShortcutHint theme={theme} keys={shortcuts.settings?.keys ?? []} />
 			</button>
-			{/* The Mega-Maestro pane is a section of Settings > Environment, so this
-			    row is a Settings deep link through the surface registry (the same
+			{/* The Mega-Maestro window opens through the surface registry (the same
 			    path as `maestro-cli open managed-status`). */}
 			<button
 				onClick={() => {
@@ -238,7 +237,7 @@ export function HamburgerMenuContent({
 				<ShieldCheck className="w-5 h-5" style={{ color: theme.colors.accent }} />
 				<div className="flex-1">
 					<div className="text-sm font-medium" style={{ color: theme.colors.textMain }}>
-						Mega-Maestro Management
+						Mega-Maestro
 					</div>
 					<div className="text-xs" style={{ color: theme.colors.textDim }}>
 						Managed standing and the notice inbox

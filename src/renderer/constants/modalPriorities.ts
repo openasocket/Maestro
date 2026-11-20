@@ -296,6 +296,8 @@ export const MODAL_PRIORITIES = {
 	GH_LOGIN: 597,
 
 	/** Process monitor modal */
+	/** The Mega-Maestro window (its own dialog, not Settings). */
+	MEGA_MAESTRO: 546,
 	PROCESS_MONITOR: 550,
 
 	/** Document Graph modal */

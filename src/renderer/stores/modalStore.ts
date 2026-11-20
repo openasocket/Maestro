@@ -445,6 +445,7 @@ export type ModalId =
 	| 'logViewer'
 	| 'processMonitor'
 	| 'usageDashboard'
+	| 'megaMaestro'
 	| 'agentRunDashboard'
 	// Confirmations
 	| 'confirm'
@@ -1324,6 +1325,7 @@ export function useModalActions() {
 	const logViewerOpen = useModalStore(selectModalOpen('logViewer'));
 	const processMonitorOpen = useModalStore(selectModalOpen('processMonitor'));
 	const usageDashboardOpen = useModalStore(selectModalOpen('usageDashboard'));
+	const megaMaestroOpen = useModalStore(selectModalOpen('megaMaestro'));
 	const agentRunDashboardOpen = useModalStore(selectModalOpen('agentRunDashboard'));
 	const keyboardMasteryData = useModalStore(selectModalData('keyboardMastery'));
 	const playgroundOpen = useModalStore(selectModalOpen('playground'));
@@ -1445,6 +1447,9 @@ export function useModalActions() {
 
 		// Process Monitor
 		processMonitorOpen,
+
+		// Mega-Maestro window
+		megaMaestroOpen,
 
 		// Usage Dashboard
 		usageDashboardOpen,

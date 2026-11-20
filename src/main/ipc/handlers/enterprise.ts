@@ -53,6 +53,8 @@ import {
 } from '../../enterprise/managed-state';
 import type { PolicyStatusService } from '../../enterprise/policy-status';
 import type { ManagedOperations } from '../../enterprise/service';
+import type { MegaServerService } from '../../enterprise/mega-server';
+import type { MegaServerLookup, MegaServerSettings } from '../../../shared/megaServer';
 import { withIpcErrorLogging } from '../../utils/ipcHandler';
 
 const LOG_CONTEXT = '[Enterprise]';
@@ -71,6 +73,8 @@ export interface EnterpriseHandlerDependencies {
 	 * and `maestro-cli managed` call too; null when no service runs.
 	 */
 	getManaged: () => ManagedOperations | null;
+	/** The Mega-Maestro server settings and lookup (`mega-server.ts`); null when no service runs. */
+	getMegaServer: () => MegaServerService | null;
 	/** The notice and inbox client (MRC-11-04); null when no service runs. */
 	getInbox: () => InboxClient | null;
 	/** The typed runtime command service (MRC-11-05); null when no service runs. Read only: nothing here delivers a command. */
@@ -229,6 +233,21 @@ export function readManagedState(deps: EnterpriseHandlerDependencies): ManagedSt
 	return deps.getManaged()?.status() ?? null;
 }
 
+/** The address the operator typed, shape-checked; the value rules are `megaServerSettingsProblem`. */
+function validateMegaServerSettings(raw: unknown): MegaServerSettings {
+	if (typeof raw !== 'object' || raw === null)
+		throw new Error('The Mega-Maestro server settings must be an object.');
+	const value = raw as Record<string, unknown>;
+	if (typeof value.host !== 'string' || value.host.length > 253)
+		throw new Error('host must be a string of at most 253 characters.');
+	if (typeof value.port !== 'number' || !Number.isFinite(value.port))
+		throw new Error('port must be a number.');
+	const endpointSocket = value.endpointSocket ?? '';
+	if (typeof endpointSocket !== 'string' || endpointSocket.length > 4096)
+		throw new Error('endpointSocket must be a string of at most 4096 characters.');
+	return { host: value.host.trim(), port: value.port, endpointSocket: endpointSocket.trim() };
+}
+
 export function registerEnterpriseHandlers(deps: EnterpriseHandlerDependencies): void {
 	const lifecycle = () => deps.getLifecycle();
 	// Required management is not a local setting: a record the endpoint still
@@ -328,6 +347,43 @@ export function registerEnterpriseHandlers(deps: EnterpriseHandlerDependencies):
 			handlerOpts('managedRun'),
 			async (raw: unknown): Promise<ManagedRunView | null> =>
 				deps.getManaged()?.run(text(raw, 'leaseId', MAX_ID)) ?? null
+		)
+	);
+
+	// The Mega-Maestro server: the saved address, the save of it and a lookup. Nothing here
+	// attaches or registers; approval is the relayed enrollment request.
+	ipcMain.handle(
+		'enterprise:megaServerGet',
+		withIpcErrorLogging(
+			handlerOpts('megaServerGet'),
+			async () => deps.getMegaServer()?.settings() ?? null
+		)
+	);
+
+	ipcMain.handle(
+		'enterprise:megaServerSave',
+		withIpcErrorLogging(handlerOpts('megaServerSave'), async (raw: unknown) => {
+			const settings = validateMegaServerSettings(raw);
+			const service = deps.getMegaServer();
+			if (!service) return { status: 'refused' as const, message: NO_SERVICE_MESSAGE };
+			const problem = service.save(settings);
+			return problem
+				? { status: 'refused' as const, message: problem }
+				: { status: 'saved' as const, message: 'Saved.' };
+		})
+	);
+
+	ipcMain.handle(
+		'enterprise:megaServerLookup',
+		withIpcErrorLogging(
+			handlerOpts('megaServerLookup'),
+			async (raw: unknown): Promise<MegaServerLookup | null> => {
+				const service = deps.getMegaServer();
+				if (!service) return null;
+				return service.lookup(
+					raw === undefined || raw === null ? undefined : validateMegaServerSettings(raw)
+				);
+			}
 		)
 	);
 

@@ -23,6 +23,7 @@ import type {
 	ManagedPolicyStatus,
 } from '../../shared/maestro-lib/managed/host-adapter';
 import type { CommandServiceStatus } from '../enterprise/commands';
+import type { MegaServerLookup, MegaServerSettings } from '../../shared/megaServer';
 import type { ManagedRunView } from '../enterprise/dispatch';
 import type {
 	EnrollmentRequestInput,
@@ -64,6 +65,15 @@ export function createEnterpriseApi() {
 		/** A managed run read back from the dispatch ledger by lease id; null when this host never admitted it. */
 		managedRun: (leaseId: string): Promise<ManagedRunView | null> =>
 			ipcRenderer.invoke('enterprise:managedRun', leaseId),
+		/** The saved Mega-Maestro server address (null when no service runs). */
+		megaServerGet: (): Promise<MegaServerSettings | null> =>
+			ipcRenderer.invoke('enterprise:megaServerGet'),
+		megaServerSave: (
+			settings: MegaServerSettings
+		): Promise<{ status: 'saved' | 'refused'; message: string }> =>
+			ipcRenderer.invoke('enterprise:megaServerSave', settings),
+		megaServerLookup: (settings?: MegaServerSettings): Promise<MegaServerLookup | null> =>
+			ipcRenderer.invoke('enterprise:megaServerLookup', settings ?? null),
 		requestEnrollment: (
 			input: EnrollmentRequestInput
 		): Promise<LifecycleOutcome<EndpointEnrollmentResult>> =>

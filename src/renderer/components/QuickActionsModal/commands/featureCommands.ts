@@ -257,14 +257,14 @@ export function buildFeatureCommands({
 		});
 	}
 
-	// The Mega-Maestro pane is a section of Settings > Environment, present in
+	// The Mega-Maestro window is its own dialog, present in
 	// every build (it reports the managed standing, or that there is none), so
 	// the entry is unconditional and opens through the same surface registry
 	// `maestro-cli open managed-status` uses.
 	commands.push({
 		id: 'managed-status',
-		label: 'Mega-Maestro Management',
-		subtext: 'Managed standing, policy and the notice inbox (Settings > Environment)',
+		label: 'Mega-Maestro',
+		subtext: 'Connect to a Mega-Maestro server, request approval, and see its standing',
 		action: () => {
 			openUiSurface('managed-status');
 			setQuickActionOpen(false);

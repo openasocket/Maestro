@@ -1,4 +1,5 @@
 import { memo, useMemo } from 'react';
+import { MegaMaestroModal } from '../MegaMaestro/MegaMaestroModal';
 import type React from 'react';
 import type { MainPanelHandle } from '../MainPanel/types';
 import { useShallow } from 'zustand/react/shallow';
@@ -485,6 +486,7 @@ export const AppModals = memo(function AppModals(props: AppModalsProps) {
 		updateCheckModalOpen,
 		processMonitorOpen,
 		usageDashboardOpen,
+		megaMaestroOpen,
 		agentRunDashboardOpen,
 		confirmModalOpen,
 		quitConfirmModalOpen,
@@ -524,6 +526,7 @@ export const AppModals = memo(function AppModals(props: AppModalsProps) {
 			updateCheckModalOpen: s.modals.get('updateCheck')?.open ?? false,
 			processMonitorOpen: s.modals.get('processMonitor')?.open ?? false,
 			usageDashboardOpen: s.modals.get('usageDashboard')?.open ?? false,
+			megaMaestroOpen: s.modals.get('megaMaestro')?.open ?? false,
 			agentRunDashboardOpen: s.modals.get('agentRunDashboard')?.open ?? false,
 			confirmModalOpen: s.modals.get('confirm')?.open ?? false,
 			quitConfirmModalOpen: s.modals.get('quitConfirm')?.open ?? false,
@@ -893,6 +896,14 @@ export const AppModals = memo(function AppModals(props: AppModalsProps) {
 
 	return (
 		<>
+			{/* Mega-Maestro window: its own dialog, separate from Settings */}
+			{megaMaestroOpen && (
+				<MegaMaestroModal
+					theme={theme}
+					onClose={() => useModalStore.getState().closeModal('megaMaestro')}
+				/>
+			)}
+
 			{/* Info/Display Modals */}
 			<AppInfoModals
 				theme={theme}
