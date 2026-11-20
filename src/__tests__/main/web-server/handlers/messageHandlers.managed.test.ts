@@ -39,6 +39,8 @@ import {
 	NO_MANAGED_SERVICE_MESSAGE,
 	validateLocalCommand,
 } from '../../../../main/web-server/handlers/messageHandlers/managed';
+import { logger } from '../../../../main/utils/logger';
+import type { ConnectService } from '../../../../main/enterprise/connect';
 import { isRemoteMethodAllowed } from '../../../../main/web-server/handlers/bridgeDenyList';
 import {
 	createManagedOperations,
@@ -577,10 +579,13 @@ describe('managed bridge handlers (MRC2-07-03)', () => {
 		}
 	});
 
-	it('routes exactly the twelve managed message types and admits exactly the intended remote methods', () => {
+	it('routes exactly the fifteen managed message types and admits exactly the intended remote methods', () => {
 		expect([...MANAGED_MESSAGE_TYPES].sort()).toEqual(
 			[
 				'managed_command',
+				'managed_connect_disconnect',
+				'managed_connect_start',
+				'managed_connect_status',
 				'managed_command_status',
 				'managed_enroll_request',
 				'managed_inbox_act',
@@ -623,6 +628,122 @@ describe('managed bridge handlers (MRC2-07-03)', () => {
 			'enterprise:clearIdentity',
 		]) {
 			expect(isRemoteMethodAllowed(method), method).toBe(false);
+		}
+	});
+});
+
+describe('managed connect bridge handlers (MSX-02-03)', () => {
+	const NUMBER = '47';
+	const REQUEST = 'REQ-1042';
+	const APPROVAL_URL = 'https://mega.acme.example/approve/secret-path-canary';
+	const WAITING = {
+		status: { kind: 'waiting', requestNumber: REQUEST, number: NUMBER, approvalUrl: APPROVAL_URL },
+		names: { tenantDisplayName: 'Acme' },
+	};
+	let handler: WebSocketMessageHandler;
+	let connect: { [K in 'start' | 'status' | 'disconnect']: ReturnType<typeof vi.fn> };
+
+	beforeEach(() => {
+		vi.clearAllMocks();
+		handler = new WebSocketMessageHandler();
+		connect = {
+			start: vi.fn(async () => ({ ok: true, value: WAITING })),
+			status: vi.fn(async () => WAITING),
+			disconnect: vi.fn(async () => ({ ok: true, value: { status: { kind: 'notConnected' } } })),
+		};
+		handler.setCallbacks({ getConnect: () => connect as unknown as ConnectService });
+	});
+
+	it('starts, reads the status and disconnects through the connect service, for the CLI and a browser alike', async () => {
+		const input = { kind: 'email', email: 'alice@acme.com' };
+		for (const client of [
+			createClient({ cli: true }),
+			createClient({ user: { id: 'u1', username: 'ada', displayName: 'Ada' } }),
+		]) {
+			expect(await ask(handler, client, { type: 'managed_connect_start', input })).toEqual({
+				type: 'managed_connect_start_result',
+				requestId: 'req-1',
+				success: true,
+				outcome: { ok: true, value: WAITING },
+				timestamp: expect.any(Number),
+			});
+		}
+		expect(connect.start).toHaveBeenCalledTimes(2);
+		expect(connect.start).toHaveBeenCalledWith(input);
+		expect(await ask(handler, createClient(), { type: 'managed_connect_status' })).toMatchObject({
+			type: 'managed_connect_status_result',
+			success: true,
+			view: WAITING,
+		});
+		expect(
+			await ask(handler, createClient({ cli: true }), { type: 'managed_connect_disconnect' })
+		).toMatchObject({
+			type: 'managed_connect_disconnect_result',
+			success: true,
+			outcome: { ok: true, value: { status: { kind: 'notConnected' } } },
+		});
+		expect(connect.disconnect).toHaveBeenCalledTimes(1);
+	});
+
+	it('rejects a malformed input by rule before the service, never echoing the value', async () => {
+		for (const input of [
+			{ kind: 'email', email: 'not-an-email-canary' },
+			{ kind: 'email', email: 42 },
+			{ kind: 'teamCode', teamCode: 'ABCD-EFGH' },
+			{ kind: 'unknown' },
+			'alice@acme.com',
+			undefined,
+		]) {
+			const reply = await ask(handler, createClient({ cli: true }), {
+				type: 'managed_connect_start',
+				input,
+			});
+			expect(reply).toMatchObject({
+				success: true,
+				outcome: { ok: false, refusal: 'invalid_input', reason: expect.any(String) },
+			});
+			expect(JSON.stringify(reply)).not.toContain('not-an-email-canary');
+			expect(JSON.stringify(reply)).not.toContain('ABCD-EFGH');
+		}
+		expect(connect.start).not.toHaveBeenCalled();
+	});
+
+	it('answers endpoint_connect_unavailable and an unavailable status when no service runs', async () => {
+		handler.setCallbacks({ getConnect: () => null });
+		expect(
+			await ask(handler, createClient({ cli: true }), {
+				type: 'managed_connect_start',
+				input: { kind: 'managed' },
+			})
+		).toMatchObject({
+			success: true,
+			outcome: { ok: false, refusal: 'endpoint_connect_unavailable' },
+		});
+		expect(
+			await ask(handler, createClient({ cli: true }), { type: 'managed_connect_status' })
+		).toMatchObject({ success: true, view: { status: { kind: 'unavailable' } } });
+		expect(
+			await ask(handler, createClient({ cli: true }), { type: 'managed_connect_disconnect' })
+		).toMatchObject({
+			success: true,
+			outcome: { ok: false, refusal: 'endpoint_connect_unavailable' },
+		});
+	});
+
+	it('reports a thrown service fault as success: false, and never logs the number, the request or the approval URL', async () => {
+		connect.status.mockRejectedValueOnce(new Error('the service is closed'));
+		expect(
+			await ask(handler, createClient({ cli: true }), { type: 'managed_connect_status' })
+		).toMatchObject({ success: false, error: 'the service is closed' });
+		await ask(handler, createClient({ cli: true }), {
+			type: 'managed_connect_start',
+			input: { kind: 'email', email: 'alice@acme.com' },
+		});
+		const logged = JSON.stringify(
+			Object.values(logger).flatMap((fn) => (fn as ReturnType<typeof vi.fn>).mock.calls)
+		);
+		for (const secret of [REQUEST, APPROVAL_URL, 'secret-path-canary', 'alice@acme.com']) {
+			expect(logged).not.toContain(secret);
 		}
 	});
 });

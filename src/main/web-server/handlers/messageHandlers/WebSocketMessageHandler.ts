@@ -914,6 +914,9 @@ export class WebSocketMessageHandler {
 			case 'managed_command':
 			case 'managed_command_status':
 			case 'managed_run':
+			case 'managed_connect_start':
+			case 'managed_connect_status':
+			case 'managed_connect_disconnect':
 				void handleManagedMessage(this.ctx, client, message);
 				break;
 

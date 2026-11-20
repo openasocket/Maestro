@@ -98,11 +98,11 @@ export interface EnterpriseHandlerDependencies {
 /** The connect push channel; the same name as the status read, as the preload subscribes to it. */
 export const CONNECT_STATUS_CHANNEL = 'enterprise:connectStatus';
 /** A desktop with no service cannot connect: the same refusal a service with no port gives. */
-const NO_CONNECT_SERVICE: ConnectResult<never> = {
+export const NO_CONNECT_SERVICE: ConnectResult<never> = {
 	ok: false,
 	refusal: 'endpoint_connect_unavailable',
 };
-const NO_CONNECT_STATUS: ConnectStatusView = { status: { kind: 'unavailable' } };
+export const NO_CONNECT_STATUS: ConnectStatusView = { status: { kind: 'unavailable' } };
 
 /**
  * The renderer's start input, shape-checked in main before the service sees it

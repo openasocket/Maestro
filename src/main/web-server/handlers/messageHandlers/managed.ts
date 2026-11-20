@@ -4,7 +4,9 @@
  * Handles: managed_status, managed_inventory, managed_support_matrix,
  * managed_locks, managed_policy_refresh, managed_enroll_request,
  * managed_inbox_list, managed_inbox_act, managed_inbox_recover, managed_command,
- * managed_command_status, managed_run. Every one is answered from the one facade the
+ * managed_command_status, managed_run, managed_connect_start,
+ * managed_connect_status, managed_connect_disconnect. Every one but the connect
+ * three is answered from the one facade the
  * Settings > Environment pane and the `enterprise:*` IPC handlers read as
  * well, `EnterpriseService.managed` (`createManagedOperations()` in
  * `src/main/enterprise/service.ts`), so `maestro-cli managed` says the same
@@ -24,6 +26,14 @@
  * handler runs, the facade resolves the actor from that context and refuses
  * a paired device that no registered enterprise actor stands behind, and the
  * reply names the actor so the caller sees whose receipt it was.
+ *
+ * Connect to your organization (MSX-02-03): the three `managed_connect_*`
+ * messages answer from `EnterpriseService.connect`, the service the
+ * `enterprise:connect*` IPC handlers read, with the same validation (the bridge
+ * does not trust the CLI either) and the same answers: a rejected input or a
+ * desktop that cannot connect is a refusal in `outcome`, never a value echoed.
+ * Any client may send them; the approval page opens on this desktop only through
+ * the local-effects hold, attributed to the transport the dispatcher established.
  */
 
 import {
@@ -32,7 +42,13 @@ import {
 	type ManagedOperations,
 } from '../../../enterprise/service';
 import { isManagedCommunicationType } from '../../../../shared/maestro-lib/runtime/server-requests';
-import { validateEnrollmentRequest } from '../../../ipc/handlers/enterprise';
+import {
+	NO_CONNECT_SERVICE,
+	NO_CONNECT_STATUS,
+	validateConnectStart,
+	validateEnrollmentRequest,
+} from '../../../ipc/handlers/enterprise';
+import type { ConnectService } from '../../../enterprise/connect';
 import { logger } from '../../../utils/logger';
 import { LOG_CONTEXT } from './shared';
 import type { WebClient, WebClientMessage, MessageHandlerContext } from './types';
@@ -51,6 +67,9 @@ export const MANAGED_MESSAGE_TYPES = [
 	'managed_command',
 	'managed_command_status',
 	'managed_run',
+	'managed_connect_start',
+	'managed_connect_status',
+	'managed_connect_disconnect',
 ] as const;
 export type ManagedMessageType = (typeof MANAGED_MESSAGE_TYPES)[number];
 
@@ -70,6 +89,13 @@ export const NO_MANAGED_SERVICE_MESSAGE =
 export const MANAGED_CLI_ONLY_MESSAGE =
 	'This managed operation is taken from maestro-cli only; a browser cannot send it.';
 
+/** The connect messages, answered from the connect service rather than the managed facade. */
+const CONNECT_MESSAGE_TYPES: readonly ManagedMessageType[] = [
+	'managed_connect_start',
+	'managed_connect_status',
+	'managed_connect_disconnect',
+];
+
 export function isManagedMessageType(type: string): type is ManagedMessageType {
 	return (MANAGED_MESSAGE_TYPES as readonly string[]).includes(type);
 }
@@ -80,6 +106,29 @@ export function isManagedMessageType(type: string): type is ManagedMessageType {
  * here for the callers that import it from the bridge.
  */
 export { validateLocalCommand } from '../../../enterprise/service';
+
+/**
+ * Answer one connect message. The start input is validated here before the service, which
+ * validates it again; nothing here logs the input, the matching number, the request reference
+ * or the approval URL.
+ */
+async function answerConnect(
+	connect: ConnectService | null,
+	message: WebClientMessage
+): Promise<Record<string, unknown>> {
+	switch (message.type as ManagedMessageType) {
+		case 'managed_connect_start': {
+			const rejected = validateConnectStart(message.input);
+			if (rejected) return { outcome: rejected };
+			return { outcome: connect ? await connect.start(message.input) : NO_CONNECT_SERVICE };
+		}
+		case 'managed_connect_status':
+			return { view: connect ? await connect.status() : NO_CONNECT_STATUS };
+		case 'managed_connect_disconnect':
+			return { outcome: connect ? await connect.disconnect() : NO_CONNECT_SERVICE };
+	}
+	throw new Error(`Unknown connect message ${message.type}.`);
+}
 
 async function answer(
 	managed: ManagedOperations,
@@ -133,6 +182,17 @@ export async function handleManagedMessage(
 		ctx.send(client, { type, requestId: message.requestId, ...payload });
 	if (MANAGED_CLI_ONLY_TYPES.includes(message.type as ManagedMessageType) && client.cli !== true) {
 		reply({ success: false, error: MANAGED_CLI_ONLY_MESSAGE });
+		return;
+	}
+	if (CONNECT_MESSAGE_TYPES.includes(message.type as ManagedMessageType)) {
+		try {
+			reply({
+				success: true,
+				...(await answerConnect(ctx.callbacks.getConnect?.() ?? null, message)),
+			});
+		} catch (error) {
+			reply({ success: false, error: error instanceof Error ? error.message : String(error) });
+		}
 		return;
 	}
 	const managed = ctx.callbacks.getManaged?.() ?? null;

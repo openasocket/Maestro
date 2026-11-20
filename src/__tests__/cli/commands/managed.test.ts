@@ -671,6 +671,15 @@ describe('maestro-cli managed over the real bridge and facade (MRC2-07-08)', () 
 	});
 
 	it('spoke every one of the twelve managed message types and nothing else', () => {
-		expect([...spoken].sort()).toEqual([...MANAGED_MESSAGE_TYPES].sort());
+		// The three managed_connect_* messages (MSX-02-03) get their CLI verbs in MSX-02-04,
+		// which drops this filter so the CLI speaks all fifteen.
+		const pending = [
+			'managed_connect_start',
+			'managed_connect_status',
+			'managed_connect_disconnect',
+		];
+		expect([...spoken].sort()).toEqual(
+			MANAGED_MESSAGE_TYPES.filter((type) => !pending.includes(type)).sort()
+		);
 	});
 });

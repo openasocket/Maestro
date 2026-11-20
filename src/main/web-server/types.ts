@@ -57,6 +57,7 @@ import type {
 import type { MediaOpenMode } from '../../shared/mediaTypes';
 import type { DebugPackageDependencies } from '../debug-package';
 import type { ManagedOperations } from '../enterprise/service';
+import type { ConnectService } from '../enterprise/connect';
 
 // Re-export Theme for convenience
 export type { Theme } from '../../shared/theme-types';
@@ -1006,6 +1007,8 @@ export type NotifyCenterFlashCallback = (params: NotifyCenterFlashParams) => Pro
 export type GetDebugPackageDepsCallback = () => DebugPackageDependencies;
 /** The managed operation facade (`EnterpriseService.managed`), or null when no service runs (MRC2-07-03). */
 export type GetManagedOperationsCallback = () => ManagedOperations | null;
+/** The connect service (`EnterpriseService.connect`, MSX-02-03), or null when no service runs. */
+export type GetConnectServiceCallback = () => ConnectService | null;
 export type ConfigureAutoRunCallback = (
 	sessionId: string,
 	config: {

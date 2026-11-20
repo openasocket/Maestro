@@ -240,6 +240,7 @@ import type {
 	NotifyCenterFlashCallback,
 	GetDebugPackageDepsCallback,
 	GetManagedOperationsCallback,
+	GetConnectServiceCallback,
 	GetMarketplaceManifestCallback,
 	GetMarketplaceDocumentCallback,
 	GetMarketplaceReadmeCallback,
@@ -1248,6 +1249,11 @@ export class WebServer {
 		this.callbackRegistry.setGetManagedCallback(callback);
 	}
 
+	/** The connect service `managed_connect_*` messages answer from (MSX-02-03). */
+	setGetConnectCallback(callback: GetConnectServiceCallback): void {
+		this.callbackRegistry.setGetConnectCallback(callback);
+	}
+
 	setGetMarketplaceManifestCallback(callback: GetMarketplaceManifestCallback): void {
 		this.callbackRegistry.setGetMarketplaceManifestCallback(callback);
 	}
@@ -1888,6 +1894,7 @@ export class WebServer {
 			notifyCenterFlash: async (params) => this.callbackRegistry.notifyCenterFlash(params),
 			getDebugPackageDeps: () => this.callbackRegistry.getDebugPackageDeps(),
 			getManaged: () => this.callbackRegistry.getManaged(),
+			getConnect: () => this.callbackRegistry.getConnect(),
 			getMarketplaceManifest: async (options) =>
 				this.callbackRegistry.getMarketplaceManifest(options),
 			getMarketplaceDocument: async (playbookPath: string, filename: string) =>

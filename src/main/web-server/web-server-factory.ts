@@ -30,6 +30,7 @@ import type { ProcessManager } from '../process-manager';
 import type { SettingsStoreInterface as SettingsStore } from '../stores/types';
 import type { DebugPackageDependencies } from '../debug-package';
 import type { ManagedOperations } from '../enterprise/service';
+import type { ConnectService } from '../enterprise/connect';
 import type { AgentConfigsStore } from '../agents/agent-config-writes';
 import type { CueGraphSession, CueRunResult } from '../../shared/cue/contracts';
 import type { CadenzaPayload } from '../../shared/cadenza-types';
@@ -132,6 +133,9 @@ export interface WebServerFactoryDependencies {
 	 *  bridge messages answer from (MRC2-07-03). Absent or null = the CLI is told
 	 *  no enrollment service runs in this desktop. */
 	getManaged?: () => ManagedOperations | null;
+	/** The connect service (`EnterpriseService.connect`) the `managed_connect_*` bridge
+	 *  messages answer from (MSX-02-03). Absent or null = endpoint_connect_unavailable. */
+	getConnect?: () => ConnectService | null;
 }
 
 // ============================================================================
@@ -414,6 +418,9 @@ export function createWebServerFactory(deps: WebServerFactoryDependencies) {
 		}
 		if (deps.getManaged) {
 			server.setGetManagedCallback(deps.getManaged);
+		}
+		if (deps.getConnect) {
+			server.setGetConnectCallback(deps.getConnect);
 		}
 
 		return server;

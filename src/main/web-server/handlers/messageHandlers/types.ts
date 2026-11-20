@@ -64,6 +64,7 @@ import type {
 } from '../../types';
 import type { DebugPackageDependencies } from '../../../debug-package';
 import type { ManagedOperations } from '../../../enterprise/service';
+import type { ConnectService } from '../../../enterprise/connect';
 import type {
 	CueBundleExportOutcome,
 	CueBundleExportRequest,
@@ -527,6 +528,8 @@ export interface MessageHandlerCallbacks {
 	getDebugPackageDeps: () => DebugPackageDependencies | null;
 	/** The managed operation facade (MRC2-07-03, `EnterpriseService.managed`); `null` when no service runs. */
 	getManaged?: () => ManagedOperations | null;
+	/** The connect service (MSX-02-03, `EnterpriseService.connect`); `null` when no service runs. */
+	getConnect?: () => ConnectService | null;
 	getMarketplaceManifest: (options?: {
 		refresh?: boolean;
 	}) => Promise<MarketplaceManifestResult | null>;

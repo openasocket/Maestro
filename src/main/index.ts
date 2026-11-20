@@ -992,6 +992,8 @@ const createWebServer = createWebServerFactory({
 	// The managed facade the `managed_*` bridge messages answer from (MRC2-07-03):
 	// the same `EnterpriseService.managed` the enterprise:* IPC handlers read.
 	getManaged: () => enterpriseService?.managed ?? null,
+	// Connect to your organization over the bridge (MSX-02-03): the same service the IPC handlers read.
+	getConnect: () => enterpriseService?.connect ?? null,
 	getMainWindow: () => mainWindow,
 	getWindowForSession: resolveWindowForSession,
 	deliverCadenza,

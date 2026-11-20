@@ -164,6 +164,7 @@ import type {
 	NotifyCenterFlashCallback,
 	GetDebugPackageDepsCallback,
 	GetManagedOperationsCallback,
+	GetConnectServiceCallback,
 	NotifyToastParams,
 	NotifyCenterFlashParams,
 	GetMarketplaceManifestCallback,
@@ -323,6 +324,7 @@ export interface WebServerCallbacks {
 	notifyCenterFlash: NotifyCenterFlashCallback | null;
 	getDebugPackageDeps: GetDebugPackageDepsCallback | null;
 	getManaged: GetManagedOperationsCallback | null;
+	getConnect: GetConnectServiceCallback | null;
 	getMarketplaceManifest: GetMarketplaceManifestCallback | null;
 	getMarketplaceDocument: GetMarketplaceDocumentCallback | null;
 	getMarketplaceReadme: GetMarketplaceReadmeCallback | null;
@@ -441,6 +443,7 @@ export class CallbackRegistry {
 		notifyCenterFlash: null,
 		getDebugPackageDeps: null,
 		getManaged: null,
+		getConnect: null,
 		getMarketplaceManifest: null,
 		getMarketplaceDocument: null,
 		getMarketplaceReadme: null,
@@ -1286,6 +1289,10 @@ export class CallbackRegistry {
 		return this.callbacks.getManaged?.() ?? null;
 	}
 
+	getConnect(): ReturnType<GetConnectServiceCallback> {
+		return this.callbacks.getConnect?.() ?? null;
+	}
+
 	async getMarketplaceManifest(options?: {
 		refresh?: boolean;
 	}): Promise<MarketplaceManifestResult | null> {
@@ -1763,6 +1770,10 @@ export class CallbackRegistry {
 
 	setGetManagedCallback(callback: GetManagedOperationsCallback): void {
 		this.callbacks.getManaged = callback;
+	}
+
+	setGetConnectCallback(callback: GetConnectServiceCallback): void {
+		this.callbacks.getConnect = callback;
 	}
 
 	setGetMarketplaceManifestCallback(callback: GetMarketplaceManifestCallback): void {
