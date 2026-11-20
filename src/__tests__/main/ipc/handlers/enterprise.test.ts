@@ -32,6 +32,10 @@ import {
 } from '../../../../main/ipc/handlers/enterprise';
 import { activatePhase, provePhase, requestPhase } from '../../enterprise/enrollmentPhases';
 import { createManagedOperations } from '../../../../main/enterprise/service';
+import {
+	MEGA_ENDPOINT_SOCKET_DEFERRED_REASON,
+	MEGA_ENDPOINT_STANDARD_SOCKETS,
+} from '../../../../shared/megaServer';
 
 const lifecycle = {
 	status: vi.fn(),
@@ -271,6 +275,30 @@ describe('enterprise handlers', () => {
 		expect(validateEnrollmentRequest({ ...ENROLL, invitation: 'x', privateKeyPem: 'y' })).toEqual(
 			ENROLL
 		);
+	});
+
+	// MSX-01-05: an empty socket means the platform's standard endpoint socket.
+	it('resolves an empty enrollment socket to the standard path on darwin and linux, and refuses on win32', () => {
+		const original = process.platform;
+		const setPlatform = (p: string) => Object.defineProperty(process, 'platform', { value: p });
+		try {
+			setPlatform('darwin');
+			expect(validateEnrollmentRequest({ ...ENROLL, socketPath: '' }).socketPath).toBe(
+				MEGA_ENDPOINT_STANDARD_SOCKETS.darwin
+			);
+			setPlatform('linux');
+			expect(validateEnrollmentRequest({ ...ENROLL, socketPath: '' }).socketPath).toBe(
+				MEGA_ENDPOINT_STANDARD_SOCKETS.linux
+			);
+			setPlatform('win32');
+			expect(() => validateEnrollmentRequest({ ...ENROLL, socketPath: '' })).toThrow(
+				MEGA_ENDPOINT_SOCKET_DEFERRED_REASON
+			);
+			// A saved socket still wins on every platform.
+			expect(validateEnrollmentRequest(ENROLL).socketPath).toBe(ENROLL.socketPath);
+		} finally {
+			setPlatform(original);
+		}
 	});
 
 	// MRC-11-03: the narrow standing a settings pane reads, projected from the

@@ -14,6 +14,7 @@ import {
 	megaServerHealthStatus,
 	megaServerHealthUrl,
 	megaServerSettingsProblem,
+	resolveEndpointSocket,
 	type MegaServerLookup,
 	type MegaServerSettings,
 } from '../../shared/megaServer';
@@ -79,6 +80,8 @@ export interface MegaServerLookupDeps {
 	supportedCapabilities: readonly string[];
 	versions: { maestro: string; library: string; contracts: string | null };
 	now?: () => Date;
+	/** The platform whose standard endpoint socket an empty setting means. Defaults to process.platform. */
+	platform?: NodeJS.Platform;
 }
 
 async function defaultFetchHealth(url: string): Promise<{ status: number; body: string }> {
@@ -167,16 +170,14 @@ export async function lookupMegaServer(
 	}
 
 	let endpoint: MegaServerLookup['endpoint'];
-	if (settings.endpointSocket.length === 0) {
-		endpoint = {
-			status: 'unavailable',
-			message: 'No local endpoint socket is set, so none was asked.',
-		};
+	const socket = resolveEndpointSocket(settings.endpointSocket, deps.platform ?? process.platform);
+	if (socket.socketPath === null) {
+		endpoint = { status: 'unavailable', message: socket.reason };
 	} else {
 		try {
 			endpoint = await (
 				deps.probeEndpoint ?? probeEndpointCompatibility(deps.supportedCapabilities)
-			)(settings.endpointSocket);
+			)(socket.socketPath);
 		} catch (error) {
 			endpoint = {
 				status: 'unavailable',

@@ -11,7 +11,7 @@ export interface MegaServerSettings {
 	/** A host name or an IPv4 or IPv6 literal. No scheme, path or credentials. */
 	host: string;
 	port: number;
-	/** The local endpoint socket this desktop attaches through. Empty: none chosen yet. */
+	/** The local endpoint socket this desktop attaches through. Empty: the platform's standard path (resolveEndpointSocket). */
 	endpointSocket: string;
 }
 
@@ -49,7 +49,7 @@ export function megaServerPortProblem(port: number): string | null {
 		: 'The port must be a whole number from 1 to 65535.';
 }
 
-/** Why `socketPath` is not a usable endpoint socket, or null. Empty is allowed (none chosen). */
+/** Why `socketPath` is not a usable endpoint socket, or null. Empty is allowed: it means the standard path. */
 export function megaServerSocketProblem(socketPath: string): string | null {
 	if (socketPath.length === 0) return null;
 	if (
@@ -60,6 +60,39 @@ export function megaServerSocketProblem(socketPath: string): string | null {
 		return 'The endpoint socket must be an absolute path.';
 	if (/[\0\n\r]/.test(socketPath)) return 'The endpoint socket path holds a control character.';
 	return null;
+}
+
+/**
+ * Where the Mega-Maestro endpoint installer puts its client socket. Copied from
+ * the installer plan in mega-maestro apps/endpoint/src/install.ts (darwinRoot and
+ * linuxRoot); keep them in step when Mega moves them.
+ */
+export const MEGA_ENDPOINT_STANDARD_SOCKETS = {
+	darwin: '/Library/Application Support/MegaMaestro/Endpoint/run/ipc.sock',
+	linux: '/var/lib/mega-maestro-endpoint/run/ipc.sock',
+} as const;
+
+export const MEGA_ENDPOINT_SOCKET_DEFERRED_REASON =
+	'This platform has no standard Mega-Maestro endpoint socket yet. Set the socket path in Troubleshoot.';
+
+/** The socket this desktop asks, and whether the person chose it or the platform standard did. */
+export type ResolvedEndpointSocket =
+	| { socketPath: string; source: 'saved' | 'standard' }
+	| { socketPath: null; source: 'deferred'; reason: string };
+
+/**
+ * The endpoint socket to use: a non-empty saved value wins; otherwise the
+ * installer's standard path for darwin or linux. Windows (and any other
+ * platform) has no standard path yet, so it gets a reason, never a guessed path.
+ */
+export function resolveEndpointSocket(
+	savedValue: string,
+	platform: string
+): ResolvedEndpointSocket {
+	if (savedValue.length > 0) return { socketPath: savedValue, source: 'saved' };
+	if (platform === 'darwin' || platform === 'linux')
+		return { socketPath: MEGA_ENDPOINT_STANDARD_SOCKETS[platform], source: 'standard' };
+	return { socketPath: null, source: 'deferred', reason: MEGA_ENDPOINT_SOCKET_DEFERRED_REASON };
 }
 
 /** The first problem with `settings`, or null when they are all valid. */

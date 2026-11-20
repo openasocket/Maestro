@@ -13,6 +13,9 @@ import {
 	megaServerPortProblem,
 	megaServerSettingsProblem,
 	megaServerSocketProblem,
+	MEGA_ENDPOINT_SOCKET_DEFERRED_REASON,
+	MEGA_ENDPOINT_STANDARD_SOCKETS,
+	resolveEndpointSocket,
 } from '../../shared/megaServer';
 
 describe('megaServerHostProblem', () => {
@@ -57,7 +60,7 @@ describe('megaServerPortProblem', () => {
 });
 
 describe('megaServerSocketProblem', () => {
-	it('allows an empty socket, meaning none chosen yet', () => {
+	it('allows an empty socket, meaning the standard path', () => {
 		expect(megaServerSocketProblem('')).toBeNull();
 	});
 
@@ -117,5 +120,40 @@ describe('megaServerHealthStatus', () => {
 	it('is null for a body that is not JSON, or has no status', () => {
 		expect(megaServerHealthStatus('ok')).toBeNull();
 		expect(megaServerHealthStatus('{"up":true}')).toBeNull();
+	});
+});
+
+describe('resolveEndpointSocket', () => {
+	it('lets a non-empty saved value win on every platform', () => {
+		for (const platform of ['darwin', 'linux', 'win32']) {
+			expect(resolveEndpointSocket('/custom/ipc.sock', platform)).toEqual({
+				socketPath: '/custom/ipc.sock',
+				source: 'saved',
+			});
+		}
+	});
+
+	it('uses the installer standard path when empty on darwin and linux', () => {
+		expect(resolveEndpointSocket('', 'darwin')).toEqual({
+			socketPath: '/Library/Application Support/MegaMaestro/Endpoint/run/ipc.sock',
+			source: 'standard',
+		});
+		expect(resolveEndpointSocket('', 'linux')).toEqual({
+			socketPath: '/var/lib/mega-maestro-endpoint/run/ipc.sock',
+			source: 'standard',
+		});
+	});
+
+	it('defers on win32 with a reason, never a guessed path', () => {
+		expect(resolveEndpointSocket('', 'win32')).toEqual({
+			socketPath: null,
+			source: 'deferred',
+			reason: MEGA_ENDPOINT_SOCKET_DEFERRED_REASON,
+		});
+	});
+
+	it('returns standard paths the socket validator accepts', () => {
+		for (const p of Object.values(MEGA_ENDPOINT_STANDARD_SOCKETS))
+			expect(megaServerSocketProblem(p)).toBeNull();
 	});
 });

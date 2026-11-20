@@ -15,8 +15,18 @@ import {
 	createMegaServerStore,
 	lookupMegaServer,
 } from '../../../main/enterprise/mega-server';
-import { MEGA_SERVER_VERSION_NOTE, type MegaServerSettings } from '../../../shared/megaServer';
+import {
+	MEGA_ENDPOINT_SOCKET_DEFERRED_REASON,
+	MEGA_ENDPOINT_STANDARD_SOCKETS,
+	MEGA_SERVER_VERSION_NOTE,
+	type MegaServerSettings,
+} from '../../../shared/megaServer';
 
+// An empty socket now means the standard path, so a lookup always asks an endpoint: never the real one here.
+const NO_ENDPOINT = async () => ({
+	status: 'unavailable' as const,
+	message: 'no endpoint in tests',
+});
 const SERVER: MegaServerSettings = { host: 'mega.example.com', port: 443, endpointSocket: '' };
 const VERSIONS = { maestro: '1.1.1-RC', library: '0.44.0', contracts: '0.4.0' };
 
@@ -100,6 +110,7 @@ describe('lookupMegaServer', () => {
 	it('never invents a server build version, and says why', async () => {
 		const result = await lookupMegaServer(SERVER, {
 			fetchHealth: healthOk,
+			probeEndpoint: NO_ENDPOINT,
 			supportedCapabilities: [],
 			versions: VERSIONS,
 		});
@@ -112,6 +123,7 @@ describe('lookupMegaServer', () => {
 			fetchHealth: async () => {
 				throw new Error('getaddrinfo ENOTFOUND mega.example.com');
 			},
+			probeEndpoint: NO_ENDPOINT,
 			supportedCapabilities: [],
 			versions: VERSIONS,
 		});
@@ -123,6 +135,7 @@ describe('lookupMegaServer', () => {
 	it('reports a server that answers, but not 200, without a health status', async () => {
 		const result = await lookupMegaServer(SERVER, {
 			fetchHealth: async () => ({ status: 503, body: 'down' }),
+			probeEndpoint: NO_ENDPOINT,
 			supportedCapabilities: [],
 			versions: VERSIONS,
 		});
@@ -130,18 +143,56 @@ describe('lookupMegaServer', () => {
 		expect(result.message).toMatch(/HTTP 503/);
 	});
 
-	it('says the endpoint was not asked when no socket is set', async () => {
+	it('asks the standard endpoint socket when none is saved, on darwin and linux', async () => {
+		for (const platform of ['darwin', 'linux'] as const) {
+			const probeEndpoint = vi.fn(async () => ({
+				status: 'negotiated' as const,
+				protocol: 2,
+				capabilities: [],
+			}));
+			await lookupMegaServer(SERVER, {
+				fetchHealth: healthOk,
+				probeEndpoint,
+				supportedCapabilities: [],
+				versions: VERSIONS,
+				platform,
+			});
+			expect(probeEndpoint).toHaveBeenCalledWith(MEGA_ENDPOINT_STANDARD_SOCKETS[platform]);
+		}
+	});
+
+	it('lets a saved socket win over the standard path', async () => {
+		const probeEndpoint = vi.fn(async () => ({
+			status: 'negotiated' as const,
+			protocol: 2,
+			capabilities: [],
+		}));
+		await lookupMegaServer(
+			{ ...SERVER, endpointSocket: '/custom/ipc.sock' },
+			{
+				fetchHealth: healthOk,
+				probeEndpoint,
+				supportedCapabilities: [],
+				versions: VERSIONS,
+				platform: 'darwin',
+			}
+		);
+		expect(probeEndpoint).toHaveBeenCalledWith('/custom/ipc.sock');
+	});
+
+	it('says the endpoint was not asked on win32 when no socket is saved', async () => {
 		const probeEndpoint = vi.fn();
 		const result = await lookupMegaServer(SERVER, {
 			fetchHealth: healthOk,
 			probeEndpoint,
 			supportedCapabilities: [],
 			versions: VERSIONS,
+			platform: 'win32',
 		});
 		expect(probeEndpoint).not.toHaveBeenCalled();
 		expect(result.endpoint).toEqual({
 			status: 'unavailable',
-			message: 'No local endpoint socket is set, so none was asked.',
+			message: MEGA_ENDPOINT_SOCKET_DEFERRED_REASON,
 		});
 	});
 
@@ -164,6 +215,7 @@ describe('lookupMegaServer', () => {
 	it('carries the versions this build runs, with contracts null when none is named', async () => {
 		const result = await lookupMegaServer(SERVER, {
 			fetchHealth: healthOk,
+			probeEndpoint: NO_ENDPOINT,
 			supportedCapabilities: [],
 			versions: { ...VERSIONS, contracts: null },
 		});
@@ -187,6 +239,7 @@ describe('createMegaServerService', () => {
 			supportedCapabilities: ['attachment'],
 			contractsVersion: () => '0.4.0',
 			fetchHealth: async () => ({ status: 200, body: '{"status":"alive"}' }),
+			probeEndpoint: NO_ENDPOINT,
 		});
 		expect(service.save(SERVER)).toBeNull();
 		const result = await service.lookup();

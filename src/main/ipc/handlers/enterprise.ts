@@ -25,6 +25,7 @@ import { ipcMain } from 'electron';
 import * as path from 'path';
 
 import { isEndpointDigest } from '../../../shared/maestro-lib/managed/endpoint-port';
+import { resolveEndpointSocket } from '../../../shared/megaServer';
 import type { EndpointInboxAction } from '../../../shared/maestro-lib/managed/host-adapter';
 import type { CommandService, CommandServiceStatus } from '../../enterprise/commands';
 import type { ManagedRunView } from '../../enterprise/dispatch';
@@ -137,7 +138,13 @@ function managementOrigin(value: unknown): string {
  */
 export function validateEnrollmentRequest(raw: unknown): EnrollmentRequestInput {
 	const input = record(raw, 'The enrollment request');
-	const socketPath = text(input.socketPath, 'socketPath', 103);
+	// An empty socket means this platform's standard endpoint socket (resolveEndpointSocket).
+	const resolved = resolveEndpointSocket(
+		input.socketPath === '' ? '' : text(input.socketPath, 'socketPath', 103),
+		process.platform
+	);
+	if (resolved.socketPath === null) throw new Error(resolved.reason);
+	const socketPath = resolved.socketPath;
 	if (!path.isAbsolute(socketPath))
 		throw new Error('socketPath must be an absolute Unix socket path.');
 	const m = record(input.management, 'management');
