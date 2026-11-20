@@ -289,7 +289,13 @@ export async function main(argv = process.argv.slice(2)) {
 		processEpoch: installation.processEpoch,
 		components: [{ id: 'maestro-runtime', kind: 'runtime', version: lib.MAESTRO_LIB_VERSION }],
 		supportedProtocols: [lib.LOCAL_ENDPOINT_PROTOCOL],
-		supportedCapabilities: ['attachment', 'compatibility', ...lib.LIVE_EXECUTION_CAPABILITIES],
+		// workflow_renew is asked for here because the pinned library's LIVE_EXECUTION_CAPABILITIES omits it, so the endpoint never negotiates the renew step.
+		supportedCapabilities: [
+			'attachment',
+			'compatibility',
+			...lib.LIVE_EXECUTION_CAPABILITIES,
+			'workflow_renew',
+		],
 		requiredCapabilities: [],
 	};
 	const workflow = request.workflow ?? {};
