@@ -29,6 +29,7 @@ import { GhostIconButton } from '../ui/GhostIconButton';
 import { HamburgerDropdown } from './HamburgerDropdown';
 import { NowPlayingIndicator } from '../MediaPlayback/NowPlayingIndicator';
 import { NotificationCenter } from '../NotificationCenter';
+import { ManagedIndicator } from '../Enterprise/ManagedIndicator';
 import {
 	subscribeSidebarReveal,
 	getSidebarRevealToken,
@@ -1565,6 +1566,8 @@ function SessionListInner(props: SessionListProps) {
 									)}
 								</div>
 							)}
+							{/* Mega-Maestro management badge: shown only for an enrolled desktop. */}
+							<ManagedIndicator theme={theme} />
 							{/* Notification Center bell (Encore Feature). App-wide history, so it
 							    lives with the other global indicators, not in an agent's header. */}
 							{notificationCenterEnabled && <NotificationCenter theme={theme} />}
