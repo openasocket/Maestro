@@ -67,6 +67,16 @@ export const MEGA_CONNECT_COPY = {
 		'Maestro cannot reach the Mega-Maestro endpoint on this computer. Use Troubleshoot for details.',
 	connectAgainButton: 'Connect again',
 
+	// PROPOSED: OS notification titles for the transitions a person may miss
+	// while working elsewhere (MSX-01-07). The connected notification reuses
+	// connectedTitle; the other bodies reuse the state copy above. Mega reviews
+	// these in SIMPLE-05 (copy).
+	notifyConnectedBody: 'Maestro now follows your organization policy.',
+	notifyDeniedTitle: 'Request not approved',
+	notifyExpiredTitle: 'Request expired',
+	notifyRevokedTitle: 'Disconnected by your administrator',
+	notifyGrantExpiredTitle: 'Connection expired',
+
 	// The one word the Left Bar indicator shows next to its dot (MSX-01-08).
 	indicatorConnected: 'Connected',
 	indicatorWaiting: 'Waiting for approval',
