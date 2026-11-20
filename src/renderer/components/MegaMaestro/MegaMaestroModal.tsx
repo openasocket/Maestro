@@ -4,7 +4,8 @@
  * of that server and of the local endpoint, the approval request that registers
  * this desktop with the server, and the enrollment and standing that follow.
  *
- * The default view (Overview) shows the standing summary only. Every technical
+ * The default view (Overview) shows the Connect to your organization card
+ * (ConnectCard, MSX-03-01) above the standing summary. Every technical
  * field (server host and port, endpoint socket, the lookup, the approval request
  * and the enrollment cards) lives on the Troubleshoot tab (MSX-01-04). The
  * enrollment cards are the same EnrollmentPhases Settings > Environment renders.
@@ -23,6 +24,7 @@ import { Modal } from '../ui/Modal';
 import { SegmentedControl } from '../ui/SegmentedControl';
 import { MEGA_CONNECT_COPY } from '../../../shared/megaConnect/copy';
 import { MegaMaestroSettings } from '../Settings/MegaMaestroSettings';
+import { ConnectCard } from './ConnectCard';
 import { EnrollmentPhases, describeEnrollmentOutcome } from '../Settings/MegaMaestroEnrollment';
 
 export const MEGA_MAESTRO_COPY = {
@@ -298,9 +300,10 @@ export function MegaMaestroModal({ theme, onClose }: { theme: Theme; onClose: ()
 				/>
 
 				{tab === 'overview' ? (
-					supported ? (
-						<MegaMaestroSettings theme={theme} enrollment={false} />
-					) : null
+					<>
+						<ConnectCard theme={theme} />
+						{supported ? <MegaMaestroSettings theme={theme} enrollment={false} /> : null}
+					</>
 				) : (
 					<>
 						<section aria-labelledby="mega-server-heading" className="space-y-3">

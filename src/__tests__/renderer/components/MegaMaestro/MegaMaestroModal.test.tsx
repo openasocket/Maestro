@@ -10,6 +10,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MegaMaestroModal } from '../../../../renderer/components/MegaMaestro/MegaMaestroModal';
+import { forgetLastConnectInput } from '../../../../renderer/components/MegaMaestro/ConnectCard';
+import type { MegaConnectStatus } from '../../../../shared/megaConnect/view';
+import type { MegaConnectPrefill } from '../../../../shared/megaConnect/deepLink';
 import { LayerStackProvider } from '../../../../renderer/contexts/LayerStackContext';
 import { mockTheme } from '../../../helpers/mockTheme';
 import type { MegaServerLookup } from '../../../../shared/megaServer';
@@ -248,5 +251,309 @@ describe('MegaMaestroModal', () => {
 				'This window needs the desktop app. It cannot reach Mega-Maestro from a browser.'
 			)
 		).toBeTruthy();
+	});
+});
+
+describe('MegaMaestroModal Connect card', () => {
+	let statusPush: ((view: { status: MegaConnectStatus }) => void) | null;
+	let prefillPush: ((prefill: MegaConnectPrefill) => void) | null;
+	const connectStatus = vi.fn();
+	const connectStart = vi.fn();
+	const connectDisconnect = vi.fn();
+
+	function withStatus(status: MegaConnectStatus) {
+		connectStatus.mockResolvedValue({ status });
+	}
+
+	beforeEach(() => {
+		forgetLastConnectInput();
+		statusPush = null;
+		prefillPush = null;
+		connectStatus.mockReset();
+		connectStart.mockReset();
+		connectDisconnect.mockReset();
+		withStatus({ kind: 'notConnected' });
+		megaServerGet.mockReset().mockResolvedValue({
+			host: 'mega.example.com',
+			port: 8443,
+			endpointSocket: '/var/lib/mega/ipc.sock',
+		});
+		setMaestro({
+			enterprise: {
+				megaServerGet,
+				megaServerSave,
+				megaServerLookup,
+				requestEnrollment,
+				connect: {
+					status: connectStatus,
+					start: connectStart,
+					disconnect: connectDisconnect,
+					onStatus: (cb: typeof statusPush) => {
+						statusPush = cb;
+						return () => undefined;
+					},
+					onPrefill: (cb: typeof prefillPush) => {
+						prefillPush = cb;
+						return () => undefined;
+					},
+				},
+			},
+		});
+	});
+
+	afterEach(() => {
+		setMaestro(undefined);
+	});
+
+	async function cardIn(state: string) {
+		await waitFor(() =>
+			expect(screen.getByTestId('mega-connect-card').getAttribute('data-state')).toBe(state)
+		);
+		return screen.getByTestId('mega-connect-card');
+	}
+
+	it('shows the unavailable state before the Mega adapter is bound (no connect bridge)', async () => {
+		setMaestro({
+			enterprise: { megaServerGet, megaServerSave, megaServerLookup, requestEnrollment },
+		});
+		renderModal();
+		await cardIn('unavailable');
+		expect(screen.getByText(/cannot reach the Mega-Maestro endpoint/)).toBeTruthy();
+		expect(screen.queryByRole('textbox')).toBeNull();
+		expect(screen.queryByRole('button', { name: 'Connect' })).toBeNull();
+	});
+
+	it('shows the unavailable state main answers', async () => {
+		withStatus({ kind: 'unavailable' });
+		renderModal();
+		await cardIn('unavailable');
+		expect(screen.getByText(/Use Troubleshoot for details/)).toBeTruthy();
+	});
+
+	const BODIES: Array<[MegaConnectStatus, RegExp, string | null]> = [
+		[{ kind: 'notConnected' }, /Enter your work email/, 'Connect'],
+		[{ kind: 'managed' }, /Your organization manages this Maestro/, null],
+		[{ kind: 'waiting', request: 1042 }, /approve request REQ-1042/, null],
+		[{ kind: 'denied' }, /was not approved/, 'Try again'],
+		[{ kind: 'expired' }, /expired before it was approved/, 'Try again'],
+		[{ kind: 'revoked' }, /administrator disconnected/, 'Connect again'],
+		[{ kind: 'grantExpired' }, /Your connection expired/, 'Connect again'],
+	];
+
+	it.each(BODIES)('renders %o with its copy and action', async (status, body, button) => {
+		withStatus(status);
+		renderModal();
+		await cardIn(status.kind);
+		expect(screen.getByText(body)).toBeTruthy();
+		if (button) expect(screen.getByRole('button', { name: button })).toBeTruthy();
+	});
+
+	it('managed shows its copy with no fields', async () => {
+		withStatus({ kind: 'managed' });
+		renderModal();
+		await cardIn('managed');
+		expect(screen.queryByLabelText('Work email')).toBeNull();
+		expect(screen.queryByRole('textbox')).toBeNull();
+	});
+
+	it('connected shows names, never an ID, and offers Disconnect', async () => {
+		withStatus({
+			kind: 'connected',
+			orgName: 'Acme',
+			teamPath: 'platform/web',
+			policy: { name: 'platform-default', revision: 12 },
+			syncedAt: Date.now(),
+		});
+		renderModal();
+		await cardIn('connected');
+		expect(screen.getByText('Connected to Acme')).toBeTruthy();
+		expect(screen.getByText(/platform\/web · Policy platform-default@12 enforced/)).toBeTruthy();
+		connectDisconnect.mockResolvedValue({ ok: true, value: { status: { kind: 'notConnected' } } });
+		fireEvent.click(screen.getByRole('button', { name: 'Disconnect' }));
+		await cardIn('notConnected');
+		expect(connectDisconnect).toHaveBeenCalledTimes(1);
+	});
+
+	it('browserOpened shows the large number, the request line and Open the browser again', async () => {
+		withStatus({
+			kind: 'browserOpened',
+			matchNumber: 47,
+			request: 1042,
+			serverName: 'mega.acme.com',
+		});
+		renderModal();
+		await cardIn('browserOpened');
+		const number = screen.getByRole('group', { name: 'Number to pick in your browser' });
+		expect(number.textContent).toBe('47');
+		expect(screen.getByText('Request REQ-1042 · mega.acme.com')).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Open the browser again' })).toBeTruthy();
+	});
+
+	it('the default view never shows host, port, socket, IDs or digests', async () => {
+		const uuid = '123e4567-e89b-12d3-a456-426614174000';
+		const digest = 'a'.repeat(64);
+		withStatus({
+			kind: 'browserOpened',
+			matchNumber: 47,
+			request: 1042,
+			serverName: 'mega.acme.com:8443',
+		});
+		const view = renderModal();
+		await cardIn('browserOpened');
+		await waitFor(() => expect(megaServerGet).toHaveBeenCalled());
+		statusPush!({
+			status: {
+				kind: 'connected',
+				orgName: uuid,
+				teamPath: digest,
+				policy: { name: uuid, revision: 3 },
+			},
+		});
+		await cardIn('connected');
+		expect(screen.getByText('Connected')).toBeTruthy();
+		const text = view.container.textContent ?? '';
+		for (const forbidden of [uuid, digest, 'ipc.sock', '8443', 'mega.example.com']) {
+			expect(text).not.toContain(forbidden);
+		}
+		for (const label of TECHNICAL_LABELS) expect(screen.queryByLabelText(label)).toBeNull();
+	});
+
+	it('a status push from main moves the card to the new state', async () => {
+		renderModal();
+		await cardIn('notConnected');
+		statusPush!({ status: { kind: 'waiting' } });
+		await cardIn('waiting');
+		expect(screen.getByText(/approve your request/)).toBeTruthy();
+	});
+
+	it('a malformed email shows the hint and is not sent; a valid one starts with the validated input', async () => {
+		connectStart.mockResolvedValue({
+			ok: true,
+			value: { status: { kind: 'browserOpened', matchNumber: '07', request: 'REQ-9' } },
+		});
+		renderModal();
+		await cardIn('notConnected');
+		const email = screen.getByLabelText('Work email');
+		fireEvent.change(email, { target: { value: 'not-an-email' } });
+		fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
+		expect(await screen.findByText(/like alice@acme.com/)).toBeTruthy();
+		expect(email.getAttribute('aria-invalid')).toBe('true');
+		expect(connectStart).not.toHaveBeenCalled();
+
+		fireEvent.change(email, { target: { value: ' Alice@Acme.com ' } });
+		fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
+		await cardIn('browserOpened');
+		expect(connectStart).toHaveBeenCalledWith({ kind: 'email', email: 'alice@acme.com' });
+		expect(screen.getByRole('group', { name: 'Number to pick in your browser' }).textContent).toBe(
+			'07'
+		);
+
+		// Open the browser again sends the same input: the endpoint answers the same request.
+		fireEvent.click(screen.getByRole('button', { name: 'Open the browser again' }));
+		await waitFor(() => expect(connectStart).toHaveBeenCalledTimes(2));
+		expect(connectStart.mock.calls[1][0]).toEqual(connectStart.mock.calls[0][0]);
+	});
+
+	it('Open the browser again is disabled when this session sent nothing', async () => {
+		withStatus({ kind: 'browserOpened', matchNumber: 12 });
+		renderModal();
+		await cardIn('browserOpened');
+		const again = screen.getByRole('button', { name: 'Open the browser again' });
+		expect((again as HTMLButtonElement).disabled).toBe(true);
+	});
+
+	it('a refused start shows its sentence and stays on the form', async () => {
+		connectStart.mockResolvedValue({ ok: false, refusal: 'pin_mismatch' });
+		renderModal();
+		await cardIn('notConnected');
+		fireEvent.change(screen.getByLabelText('Work email'), {
+			target: { value: 'alice@acme.com' },
+		});
+		fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
+		expect(await screen.findByText(/not on the server you named/)).toBeTruthy();
+		expect(screen.getByTestId('mega-connect-card').getAttribute('data-state')).toBe('notConnected');
+	});
+
+	it('an unavailable refusal turns the card to the unavailable state', async () => {
+		connectStart.mockResolvedValue({ ok: false, refusal: 'endpoint_connect_unavailable' });
+		renderModal();
+		await cardIn('notConnected');
+		fireEvent.change(screen.getByLabelText('Work email'), {
+			target: { value: 'alice@acme.com' },
+		});
+		fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
+		await cardIn('unavailable');
+	});
+
+	it('switches to a join link, then to a team code with its Server field', async () => {
+		connectStart.mockResolvedValue({ ok: true, value: { status: { kind: 'waiting' } } });
+		renderModal();
+		await cardIn('notConnected');
+		fireEvent.click(screen.getByRole('button', { name: 'Use a link or code instead' }));
+		await cardIn('linkOrCode');
+		expect(screen.getByLabelText('Join link')).toBeTruthy();
+		expect(screen.queryByLabelText('Work email')).toBeNull();
+		expect(screen.queryByLabelText('Server')).toBeNull();
+
+		fireEvent.click(screen.getByRole('button', { name: 'Use a team code' }));
+		expect(screen.getByLabelText('Team code')).toBeTruthy();
+		expect(screen.getByLabelText('Server')).toBeTruthy();
+		fireEvent.change(screen.getByLabelText('Team code'), { target: { value: 'acme-web-7k3m' } });
+		fireEvent.change(screen.getByLabelText('Server'), { target: { value: 'Mega.Acme.com' } });
+		fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
+		await waitFor(() =>
+			expect(connectStart).toHaveBeenCalledWith({
+				kind: 'teamCode',
+				teamCode: 'ACME-WEB-7K3M',
+				server: 'mega.acme.com',
+			})
+		);
+
+		// And back to email.
+		statusPush!({ status: { kind: 'notConnected' } });
+		await cardIn('notConnected');
+		fireEvent.click(screen.getByRole('button', { name: 'Use a link or code instead' }));
+		fireEvent.click(screen.getByRole('button', { name: 'Use my work email instead' }));
+		expect(screen.getByLabelText('Work email')).toBeTruthy();
+	});
+
+	it('a join deep link prefills the join link and never starts a connection', async () => {
+		renderModal();
+		await cardIn('notConnected');
+		const code = 'AbCdEfGhIjKlMnOpQrStUv';
+		prefillPush!({ kind: 'join', server: 'mega.acme.com', code });
+		await cardIn('linkOrCode');
+		expect((screen.getByLabelText('Join link') as HTMLInputElement).value).toBe(
+			`https://mega.acme.com/join/${code}`
+		);
+		expect(connectStart).not.toHaveBeenCalled();
+
+		connectStart.mockResolvedValue({ ok: true, value: { status: { kind: 'waiting' } } });
+		fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
+		await waitFor(() =>
+			expect(connectStart).toHaveBeenCalledWith({
+				kind: 'joinLink',
+				joinLink: `https://mega.acme.com/join/${code}`,
+			})
+		);
+	});
+
+	it('a connect deep link prefills the team code and server and never starts a connection', async () => {
+		renderModal();
+		await cardIn('notConnected');
+		prefillPush!({ kind: 'connect', server: 'mega.acme.com', teamCode: 'ACME-WEB-7K3M' });
+		await cardIn('linkOrCode');
+		expect((screen.getByLabelText('Team code') as HTMLInputElement).value).toBe('ACME-WEB-7K3M');
+		expect((screen.getByLabelText('Server') as HTMLInputElement).value).toBe('mega.acme.com');
+		expect(connectStart).not.toHaveBeenCalled();
+	});
+
+	it('Try again after a denial reopens the email form', async () => {
+		withStatus({ kind: 'denied' });
+		renderModal();
+		await cardIn('denied');
+		fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+		await cardIn('notConnected');
+		expect(screen.getByLabelText('Work email')).toBeTruthy();
 	});
 });

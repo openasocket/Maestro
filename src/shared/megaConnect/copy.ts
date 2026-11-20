@@ -91,6 +91,20 @@ export const MEGA_CONNECT_COPY = {
 	panelTabOverview: 'Overview',
 	panelTabTroubleshoot: 'Troubleshoot',
 
+	// PROPOSED: the Connect card (MSX-03-01). Field hints are shown under a
+	// field whose shape check fails; main checks the input again, so a hint is
+	// only a hint. Mega reviews these in SIMPLE-05 (copy).
+	workEmailHint: 'Enter your work email, like alice@acme.com.',
+	joinLinkHint: 'Paste the join link you were sent. It starts with https:// and has /join/ in it.',
+	teamCodeHint: 'Enter the team code, like ACME-WEB-7K3M.',
+	serverHint: 'Enter the server name, like mega.acme.com.',
+	useJoinLinkLink: 'Use a join link',
+	useTeamCodeLink: 'Use a team code',
+	useWorkEmailLink: 'Use my work email instead',
+	connectWorking: 'Connecting...',
+	/** The accessible name of the large number region. */
+	largeNumberLabel: 'Number to pick in your browser',
+
 	// maestro-cli managed connect (MSX-02-04). The CLI prints the indicator
 	// word, then these parts; the number is shown to the person who ran it and
 	// never logged.

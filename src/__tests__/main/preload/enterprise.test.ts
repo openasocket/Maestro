@@ -122,8 +122,14 @@ describe('Enterprise Preload API', () => {
 		]);
 	});
 
-	it('exposes connect to your organization as start, status, disconnect and onStatus', async () => {
-		expect(Object.keys(api.connect).sort()).toEqual(['disconnect', 'onStatus', 'start', 'status']);
+	it('exposes connect to your organization as start, status, disconnect, onStatus and onPrefill', async () => {
+		expect(Object.keys(api.connect).sort()).toEqual([
+			'disconnect',
+			'onPrefill',
+			'onStatus',
+			'start',
+			'status',
+		]);
 		await api.connect.start({ kind: 'email', email: 'alice@acme.com' });
 		await api.connect.status();
 		await api.connect.disconnect();
@@ -141,6 +147,18 @@ describe('Enterprise Preload API', () => {
 		expect(heard).toHaveBeenCalledWith({ status: { kind: 'waiting' } });
 		unsubscribe();
 		expect(mockRemoveListener).toHaveBeenCalledWith('enterprise:connectStatus', handler);
+	});
+
+	it('hears a connect deep link prefill on megaConnect:prefill and unsubscribes', () => {
+		const heard = vi.fn();
+		const unsubscribe = api.connect.onPrefill(heard);
+		expect(mockOn).toHaveBeenCalledWith('megaConnect:prefill', expect.any(Function));
+		const handler = mockOn.mock.calls[0][1] as (event: unknown, prefill: unknown) => void;
+		const prefill = { kind: 'connect', server: 'mega.acme.com', teamCode: 'ACME-WEB-7K3M' };
+		handler({}, prefill);
+		expect(heard).toHaveBeenCalledWith(prefill);
+		unsubscribe();
+		expect(mockRemoveListener).toHaveBeenCalledWith('megaConnect:prefill', handler);
 	});
 
 	it('resolves with what the channel answered', async () => {

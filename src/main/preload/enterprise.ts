@@ -25,6 +25,10 @@ import type {
 import type { CommandServiceStatus } from '../enterprise/commands';
 import type { ConnectResult, ConnectStatusView } from '../enterprise/connect';
 import type { MegaServerLookup, MegaServerSettings } from '../../shared/megaServer';
+import {
+	MEGA_CONNECT_PREFILL_CHANNEL,
+	type MegaConnectPrefill,
+} from '../../shared/megaConnect/deepLink';
 import type { ManagedRunView } from '../enterprise/dispatch';
 import type {
 	EnrollmentRequestInput,
@@ -64,6 +68,17 @@ function createConnectApi() {
 			ipcRenderer.on('enterprise:connectStatus', handler);
 			return () => {
 				ipcRenderer.removeListener('enterprise:connectStatus', handler);
+			};
+		},
+		/**
+		 * Hear a join or connect deep link (MSX-01-06). It only fills the form;
+		 * nothing connects until the person presses Connect (invariant SX3).
+		 */
+		onPrefill: (callback: (prefill: MegaConnectPrefill) => void): (() => void) => {
+			const handler = (_event: unknown, prefill: MegaConnectPrefill) => callback(prefill);
+			ipcRenderer.on(MEGA_CONNECT_PREFILL_CHANNEL, handler);
+			return () => {
+				ipcRenderer.removeListener(MEGA_CONNECT_PREFILL_CHANNEL, handler);
 			};
 		},
 	};
