@@ -73,6 +73,13 @@ export const MEGA_CONNECT_COPY = {
 	indicatorNotConnected: 'Not connected',
 	indicatorNeedsReconnect: 'Needs reconnect',
 	indicatorUnavailable: 'Unavailable',
+
+	// The tabs of the Mega-Maestro window (MSX-01-04). Troubleshoot holds every
+	// technical field: the server host and port, the endpoint socket, the lookup
+	// and the classic enrollment. The default view shows none of them.
+	panelTabsLabel: 'Mega-Maestro view',
+	panelTabOverview: 'Overview',
+	panelTabTroubleshoot: 'Troubleshoot',
 } as const;
 
 export type MegaConnectCopyKey = keyof typeof MEGA_CONNECT_COPY;

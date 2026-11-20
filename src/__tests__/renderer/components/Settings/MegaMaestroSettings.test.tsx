@@ -153,6 +153,16 @@ describe('MegaMaestroSettings', () => {
 		expect(screen.getByText(COPY.detached)).toBeInTheDocument();
 	});
 
+	it('offers the enrollment cards while enrolling, unless the host turns them off', async () => {
+		managedState.mockResolvedValue(view({ enrollment: null }));
+		const { unmount } = render(<MegaMaestroSettings theme={mockTheme} />);
+		expect(await screen.findByText('Enroll this desktop')).toBeInTheDocument();
+		unmount();
+		render(<MegaMaestroSettings theme={mockTheme} enrollment={false} />);
+		expect(await screen.findByTestId('managed-standing')).toBeInTheDocument();
+		expect(screen.queryByText('Enroll this desktop')).not.toBeInTheDocument();
+	});
+
 	it('refreshes the policy, announces the outcome and re-reads the standing', async () => {
 		render(<MegaMaestroSettings theme={mockTheme} />);
 		await screen.findByTestId('managed-standing');

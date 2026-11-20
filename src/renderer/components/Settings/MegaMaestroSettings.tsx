@@ -176,7 +176,18 @@ function ActionButton({
 	);
 }
 
-export function MegaMaestroSettings({ theme }: { theme: Theme }) {
+export function MegaMaestroSettings({
+	theme,
+	enrollment = true,
+}: {
+	theme: Theme;
+	/**
+	 * Whether the pane offers the enrollment cards. Settings keeps them; the
+	 * Mega-Maestro window turns them off here because it shows the same cards
+	 * on its Troubleshoot tab, so its default view holds no enrollment control.
+	 */
+	enrollment?: boolean;
+}) {
 	const managed = useManagedStatus();
 	const [outcome, setOutcome] = useState<ManagedActionResult | null>(null);
 	const [busy, setBusy] = useState<ManagedActionVerb | null>(null);
@@ -255,7 +266,7 @@ export function MegaMaestroSettings({ theme }: { theme: Theme }) {
 						onClick={() => void act('completeRegistration')}
 					/>
 				) : null}
-				{!state.enrollment || state.enrollment.management === 'enrolling' ? (
+				{enrollment && (!state.enrollment || state.enrollment.management === 'enrolling') ? (
 					<EnrollmentPhases theme={theme} onAnswered={() => void managed.refresh()} />
 				) : null}
 				<ManagedInbox theme={theme} />

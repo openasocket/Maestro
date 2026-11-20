@@ -3,6 +3,11 @@
  * what is about Mega-Maestro: the server address this desktop talks to, a lookup
  * of that server and of the local endpoint, the approval request that registers
  * this desktop with the server, and the enrollment and standing that follow.
+ *
+ * The default view (Overview) shows the standing summary only. Every technical
+ * field (server host and port, endpoint socket, the lookup, the approval request
+ * and the enrollment cards) lives on the Troubleshoot tab (MSX-01-04). The
+ * enrollment cards are the same EnrollmentPhases Settings > Environment renders.
  */
 
 import { useEffect, useState } from 'react';
@@ -15,6 +20,8 @@ import {
 import type { Theme } from '../../types';
 import { MODAL_PRIORITIES } from '../../constants/modalPriorities';
 import { Modal } from '../ui/Modal';
+import { SegmentedControl } from '../ui/SegmentedControl';
+import { MEGA_CONNECT_COPY } from '../../../shared/megaConnect/copy';
 import { MegaMaestroSettings } from '../Settings/MegaMaestroSettings';
 import { EnrollmentPhases, describeEnrollmentOutcome } from '../Settings/MegaMaestroEnrollment';
 
@@ -121,6 +128,13 @@ function Button({
 	);
 }
 
+type MegaMaestroTab = 'overview' | 'troubleshoot';
+
+const TAB_OPTIONS = [
+	{ value: 'overview', label: MEGA_CONNECT_COPY.panelTabOverview },
+	{ value: 'troubleshoot', label: MEGA_CONNECT_COPY.panelTabTroubleshoot },
+] as const;
+
 function LookupResult({ lookup, theme }: { lookup: MegaServerLookup; theme: Theme }) {
 	return (
 		<div className="space-y-2 text-sm" aria-live="polite">
@@ -191,6 +205,7 @@ export function MegaMaestroModal({ theme, onClose }: { theme: Theme; onClose: ()
 	const [issuer, setIssuer] = useState('');
 	const [ca, setCa] = useState('');
 	const [requestNote, setRequestNote] = useState<string | null>(null);
+	const [tab, setTab] = useState<MegaMaestroTab>('overview');
 
 	useEffect(() => {
 		if (!supported) return;
@@ -273,128 +288,144 @@ export function MegaMaestroModal({ theme, onClose }: { theme: Theme; onClose: ()
 			<div className="space-y-6 p-4 select-text">
 				<p className="text-sm opacity-80">{MEGA_MAESTRO_COPY.intro}</p>
 				{!supported ? <p className="text-sm">{MEGA_MAESTRO_COPY.unsupported}</p> : null}
+				<SegmentedControl
+					value={tab}
+					onChange={setTab}
+					options={TAB_OPTIONS}
+					theme={theme}
+					ariaLabel={MEGA_CONNECT_COPY.panelTabsLabel}
+					testId="mega-maestro-tab"
+				/>
 
-				<section aria-labelledby="mega-server-heading" className="space-y-3">
-					<h3 id="mega-server-heading" className="font-medium">
-						{MEGA_MAESTRO_COPY.server}
-					</h3>
-					<div className="grid grid-cols-[1fr,120px] gap-3">
-						<Field
-							id="mega-host"
-							label={MEGA_MAESTRO_COPY.host}
-							value={server.host}
-							onChange={(host) => setServer((s) => ({ ...s, host }))}
-							theme={theme}
-						/>
-						<Field
-							id="mega-port"
-							label={MEGA_MAESTRO_COPY.port}
-							value={port}
-							onChange={setPort}
-							theme={theme}
-							type="number"
-						/>
-					</div>
-					<Field
-						id="mega-socket"
-						label={MEGA_MAESTRO_COPY.socket}
-						value={server.endpointSocket}
-						onChange={(endpointSocket) => setServer((s) => ({ ...s, endpointSocket }))}
-						theme={theme}
-						mono
-					/>
-					<p className="text-xs opacity-70">{MEGA_MAESTRO_COPY.socketHelp}</p>
-					<div className="flex gap-2">
-						<Button
-							label={busy === 'save' ? MEGA_MAESTRO_COPY.working : MEGA_MAESTRO_COPY.save}
-							onClick={() => void save()}
-							disabled={!supported || busy !== null}
-							theme={theme}
-						/>
-						<Button
-							label={busy === 'lookup' ? MEGA_MAESTRO_COPY.working : MEGA_MAESTRO_COPY.lookup}
-							onClick={() => void runLookup()}
-							disabled={!supported || busy !== null}
-							theme={theme}
-						/>
-					</div>
-					{status ? (
-						<p role="status" className="text-xs">
-							{status}
-						</p>
-					) : null}
-				</section>
+				{tab === 'overview' ? (
+					supported ? (
+						<MegaMaestroSettings theme={theme} enrollment={false} />
+					) : null
+				) : (
+					<>
+						<section aria-labelledby="mega-server-heading" className="space-y-3">
+							<h3 id="mega-server-heading" className="font-medium">
+								{MEGA_MAESTRO_COPY.server}
+							</h3>
+							<div className="grid grid-cols-[1fr,120px] gap-3">
+								<Field
+									id="mega-host"
+									label={MEGA_MAESTRO_COPY.host}
+									value={server.host}
+									onChange={(host) => setServer((s) => ({ ...s, host }))}
+									theme={theme}
+								/>
+								<Field
+									id="mega-port"
+									label={MEGA_MAESTRO_COPY.port}
+									value={port}
+									onChange={setPort}
+									theme={theme}
+									type="number"
+								/>
+							</div>
+							<Field
+								id="mega-socket"
+								label={MEGA_MAESTRO_COPY.socket}
+								value={server.endpointSocket}
+								onChange={(endpointSocket) => setServer((s) => ({ ...s, endpointSocket }))}
+								theme={theme}
+								mono
+							/>
+							<p className="text-xs opacity-70">{MEGA_MAESTRO_COPY.socketHelp}</p>
+							<div className="flex gap-2">
+								<Button
+									label={busy === 'save' ? MEGA_MAESTRO_COPY.working : MEGA_MAESTRO_COPY.save}
+									onClick={() => void save()}
+									disabled={!supported || busy !== null}
+									theme={theme}
+								/>
+								<Button
+									label={busy === 'lookup' ? MEGA_MAESTRO_COPY.working : MEGA_MAESTRO_COPY.lookup}
+									onClick={() => void runLookup()}
+									disabled={!supported || busy !== null}
+									theme={theme}
+								/>
+							</div>
+							{status ? (
+								<p role="status" className="text-xs">
+									{status}
+								</p>
+							) : null}
+						</section>
 
-				<section aria-labelledby="mega-lookup-heading" className="space-y-2">
-					<h3 id="mega-lookup-heading" className="font-medium">
-						{MEGA_MAESTRO_COPY.lookupTitle}
-					</h3>
-					{lookup ? (
-						<LookupResult lookup={lookup} theme={theme} />
-					) : (
-						<p className="text-xs opacity-70">{MEGA_MAESTRO_COPY.notLookedUp}</p>
-					)}
-				</section>
+						<section aria-labelledby="mega-lookup-heading" className="space-y-2">
+							<h3 id="mega-lookup-heading" className="font-medium">
+								{MEGA_MAESTRO_COPY.lookupTitle}
+							</h3>
+							{lookup ? (
+								<LookupResult lookup={lookup} theme={theme} />
+							) : (
+								<p className="text-xs opacity-70">{MEGA_MAESTRO_COPY.notLookedUp}</p>
+							)}
+						</section>
 
-				<section aria-labelledby="mega-approval-heading" className="space-y-3">
-					<h3 id="mega-approval-heading" className="font-medium">
-						{MEGA_MAESTRO_COPY.approval}
-					</h3>
-					<p className="text-xs opacity-70">{MEGA_MAESTRO_COPY.approvalIntro}</p>
-					<div className="grid grid-cols-2 gap-3">
-						<Field
-							id="mega-org"
-							label={MEGA_MAESTRO_COPY.orgId}
-							value={orgId}
-							onChange={setOrgId}
-							theme={theme}
-						/>
-						<Field
-							id="mega-tenant"
-							label={MEGA_MAESTRO_COPY.tenantId}
-							value={tenantId}
-							onChange={setTenantId}
-							theme={theme}
-						/>
-					</div>
-					<Field
-						id="mega-issuer"
-						label={MEGA_MAESTRO_COPY.issuer}
-						value={issuer}
-						onChange={setIssuer}
-						theme={theme}
-						mono
-					/>
-					<div className="space-y-1">
-						<label htmlFor="mega-ca" className="text-xs font-medium">
-							{MEGA_MAESTRO_COPY.ca}
-						</label>
-						<textarea
-							id="mega-ca"
-							value={ca}
-							rows={5}
-							spellCheck={false}
-							onChange={(event) => setCa(event.target.value)}
-							className="w-full px-2 py-1 rounded border font-mono text-xs"
-							style={FIELD_STYLE(theme)}
-						/>
-					</div>
-					<Button
-						label={busy === 'request' ? MEGA_MAESTRO_COPY.working : MEGA_MAESTRO_COPY.sendRequest}
-						onClick={() => void requestApproval()}
-						disabled={!supported || busy !== null}
-						theme={theme}
-					/>
-					{requestNote ? (
-						<p role="status" className="text-xs">
-							{requestNote}
-						</p>
-					) : null}
-					<p className="text-xs opacity-70">{MEGA_MAESTRO_COPY.steps}</p>
-					{supported ? <EnrollmentPhases theme={theme} onAnswered={() => undefined} /> : null}
-				</section>
-
-				{supported ? <MegaMaestroSettings theme={theme} /> : null}
+						<section aria-labelledby="mega-approval-heading" className="space-y-3">
+							<h3 id="mega-approval-heading" className="font-medium">
+								{MEGA_MAESTRO_COPY.approval}
+							</h3>
+							<p className="text-xs opacity-70">{MEGA_MAESTRO_COPY.approvalIntro}</p>
+							<div className="grid grid-cols-2 gap-3">
+								<Field
+									id="mega-org"
+									label={MEGA_MAESTRO_COPY.orgId}
+									value={orgId}
+									onChange={setOrgId}
+									theme={theme}
+								/>
+								<Field
+									id="mega-tenant"
+									label={MEGA_MAESTRO_COPY.tenantId}
+									value={tenantId}
+									onChange={setTenantId}
+									theme={theme}
+								/>
+							</div>
+							<Field
+								id="mega-issuer"
+								label={MEGA_MAESTRO_COPY.issuer}
+								value={issuer}
+								onChange={setIssuer}
+								theme={theme}
+								mono
+							/>
+							<div className="space-y-1">
+								<label htmlFor="mega-ca" className="text-xs font-medium">
+									{MEGA_MAESTRO_COPY.ca}
+								</label>
+								<textarea
+									id="mega-ca"
+									value={ca}
+									rows={5}
+									spellCheck={false}
+									onChange={(event) => setCa(event.target.value)}
+									className="w-full px-2 py-1 rounded border font-mono text-xs"
+									style={FIELD_STYLE(theme)}
+								/>
+							</div>
+							<Button
+								label={
+									busy === 'request' ? MEGA_MAESTRO_COPY.working : MEGA_MAESTRO_COPY.sendRequest
+								}
+								onClick={() => void requestApproval()}
+								disabled={!supported || busy !== null}
+								theme={theme}
+							/>
+							{requestNote ? (
+								<p role="status" className="text-xs">
+									{requestNote}
+								</p>
+							) : null}
+							<p className="text-xs opacity-70">{MEGA_MAESTRO_COPY.steps}</p>
+							{supported ? <EnrollmentPhases theme={theme} onAnswered={() => undefined} /> : null}
+						</section>
+					</>
+				)}
 			</div>
 		</Modal>
 	);
