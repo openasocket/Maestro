@@ -383,7 +383,7 @@ describe('MegaMaestroModal Connect card', () => {
 		});
 		renderModal();
 		await cardIn('browserOpened');
-		const number = screen.getByRole('group', { name: 'Number to pick in your browser' });
+		const number = screen.getByRole('group', { name: 'Number to pick in your browser: 4 7' });
 		expect(number.textContent).toBe('47');
 		expect(screen.getByText('Request REQ-1042 · mega.acme.com')).toBeTruthy();
 		expect(screen.getByRole('button', { name: 'Open the browser again' })).toBeTruthy();
@@ -410,7 +410,7 @@ describe('MegaMaestroModal Connect card', () => {
 			},
 		});
 		await cardIn('connected');
-		expect(screen.getByText('Connected')).toBeTruthy();
+		expect(screen.getByRole('heading', { name: 'Connected' })).toBeTruthy();
 		const text = view.container.textContent ?? '';
 		for (const forbidden of [uuid, digest, 'ipc.sock', '8443', 'mega.example.com']) {
 			expect(text).not.toContain(forbidden);
@@ -444,7 +444,7 @@ describe('MegaMaestroModal Connect card', () => {
 		fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
 		await cardIn('browserOpened');
 		expect(connectStart).toHaveBeenCalledWith({ kind: 'email', email: 'alice@acme.com' });
-		expect(screen.getByRole('group', { name: 'Number to pick in your browser' }).textContent).toBe(
+		expect(screen.getByRole('group', { name: /^Number to pick in your browser/ }).textContent).toBe(
 			'07'
 		);
 

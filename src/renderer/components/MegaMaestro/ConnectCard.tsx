@@ -13,14 +13,28 @@
  * Field checks here are hints. Main validates every input again before
  * anything leaves the process. A deep link prefill fills the fields and never
  * starts a connection (invariant SX3).
+ *
+ * Accessibility (MSX-03-02): when the browserOpened state appears, focus moves
+ * to the number region, whose accessible name reads the digits one at a time.
+ * A polite live region announces the state word only, once per transition;
+ * a poll that brings the same state changes nothing in it, and the number is
+ * never in it. Later states (waiting) update in place and never move focus.
+ * Each state shows a word and an icon with an accessible name, so color never
+ * carries the state alone, and the waiting pulse runs only when the person
+ * allows motion. Escape is left to the window, which closes as it always has.
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { AlertTriangle, CheckCircle2, Circle, Clock, XCircle, type LucideIcon } from 'lucide-react';
 import type { Theme } from '../../types';
 import type { ConnectResult, ConnectStatusView } from '../../../main/enterprise/connect';
 import type { ConnectStartRequest } from '../../../main/preload/enterprise';
 import type { MegaConnectPrefill } from '../../../shared/megaConnect/deepLink';
-import { MEGA_CONNECT_COPY, fillMegaConnectCopy } from '../../../shared/megaConnect/copy';
+import {
+	MEGA_CONNECT_COPY,
+	fillMegaConnectCopy,
+	type MegaConnectCopyKey,
+} from '../../../shared/megaConnect/copy';
 import {
 	validateJoinLink,
 	validateServerHost,
@@ -49,6 +63,24 @@ const FIELD_HINTS: Record<MegaConnectFieldId, string> = {
 	teamCode: MEGA_CONNECT_COPY.teamCodeHint,
 	server: MEGA_CONNECT_COPY.serverHint,
 };
+
+/** The icon beside each state word. The word, not the icon or its color, carries the state. */
+const STATE_ICONS: Partial<Record<MegaConnectCopyKey, LucideIcon>> = {
+	indicatorConnected: CheckCircle2,
+	indicatorWaiting: Clock,
+	indicatorNotConnected: Circle,
+	indicatorNeedsReconnect: AlertTriangle,
+	indicatorUnavailable: XCircle,
+};
+
+/** A visible focus ring on every control of the card. */
+const FOCUS_RING =
+	'focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-accent';
+
+/** "4 7" for 47: the digits one at a time, so a screen reader never says "forty-seven". */
+export function spokenDigits(value: string): string {
+	return Array.from(value.replace(/\s+/g, '')).join(' ');
+}
 
 const FIELD_TYPES: Record<MegaConnectFieldId, string> = {
 	workEmail: 'email',
@@ -131,7 +163,7 @@ function ActionButton({
 			data-action={action.id}
 			disabled={disabled}
 			onClick={onClick}
-			className="px-3 py-2 rounded border text-sm disabled:opacity-55"
+			className={`px-3 py-2 rounded border text-sm disabled:opacity-55 ${FOCUS_RING}`}
 			style={{
 				borderColor: primary ? theme.colors.accent : theme.colors.border,
 				backgroundColor: primary ? theme.colors.accent : theme.colors.bgActivity,
@@ -152,6 +184,8 @@ export function ConnectCard({ theme }: { theme: Theme }) {
 	const [refusal, setRefusal] = useState<string | null>(null);
 	const [busy, setBusy] = useState(false);
 	const kindRef = useRef<MegaConnectStatus['kind']>(UNAVAILABLE.status.kind);
+	const numberRef = useRef<HTMLDivElement>(null);
+	const focusedKindRef = useRef<MegaConnectStatus['kind'] | null>(null);
 
 	useEffect(() => {
 		if (!api) return;
@@ -196,6 +230,20 @@ export function ConnectCard({ theme }: { theme: Theme }) {
 		: live;
 	const mode: FormMode = shown.kind === 'linkOrCode' ? shown.mode : 'email';
 	const view = viewFor(shown);
+	// The live region and the state line follow main's state, not a form opened over it.
+	const liveView = shown === live ? view : viewFor(live);
+	const StateIcon = STATE_ICONS[liveView.indicatorKey] ?? Circle;
+	const numberShown = view.showLargeNumber && !!view.largeNumber;
+
+	// Focus the number once, on the transition into browserOpened. A poll that
+	// brings browserOpened again, and every later state, leaves focus alone.
+	useLayoutEffect(() => {
+		const previous = focusedKindRef.current;
+		focusedKindRef.current = shown.kind;
+		if (shown.kind === 'browserOpened' && previous !== 'browserOpened' && numberShown) {
+			numberRef.current?.focus();
+		}
+	}, [shown.kind, numberShown]);
 
 	const send = async (input: ConnectStartRequest) => {
 		if (!api || busy) return;
@@ -298,6 +346,21 @@ export function ConnectCard({ theme }: { theme: Theme }) {
 			className="space-y-3 rounded border p-4"
 			style={{ borderColor: theme.colors.border }}
 		>
+			<div className="flex items-center gap-2 text-xs" data-testid="mega-connect-state">
+				<StateIcon
+					role="img"
+					aria-label={liveView.indicatorWord}
+					data-state-icon={liveView.indicatorKey}
+					className={`w-4 h-4 shrink-0${
+						liveView.indicatorKey === 'indicatorWaiting' ? ' motion-safe:animate-pulse' : ''
+					}`}
+				/>
+				<span aria-hidden="true">{liveView.indicatorWord}</span>
+			</div>
+			<p aria-live="polite" role="status" className="sr-only" data-testid="mega-connect-live">
+				{liveView.indicatorWord}
+			</p>
+
 			{view.title ? (
 				<h3 id="mega-connect-title" className="font-medium">
 					{view.title}
@@ -305,14 +368,18 @@ export function ConnectCard({ theme }: { theme: Theme }) {
 			) : null}
 			{view.body ? <p className="text-sm">{view.body}</p> : null}
 
-			{view.showLargeNumber && view.largeNumber ? (
+			{numberShown ? (
 				<div
+					ref={numberRef}
+					tabIndex={-1}
 					role="group"
-					aria-label={MEGA_CONNECT_COPY.largeNumberLabel}
+					aria-label={fillMegaConnectCopy('largeNumberSpoken', {
+						digits: spokenDigits(view.largeNumber!),
+					})}
 					data-testid="mega-connect-number"
-					className="text-5xl font-semibold tracking-widest tabular-nums"
+					className={`text-5xl font-semibold tracking-widest tabular-nums rounded ${FOCUS_RING}`}
 				>
-					{view.largeNumber}
+					<span aria-hidden="true">{view.largeNumber}</span>
 				</div>
 			) : null}
 
@@ -348,7 +415,7 @@ export function ConnectCard({ theme }: { theme: Theme }) {
 										setFields((f) => ({ ...f, [field.id]: value }));
 										if (bad) setInvalid(null);
 									}}
-									className="w-full px-2 py-1 rounded border text-sm"
+									className={`w-full px-2 py-1 rounded border text-sm ${FOCUS_RING}`}
 									style={{
 										borderColor: bad ? theme.colors.error : theme.colors.border,
 										backgroundColor: theme.colors.bgActivity,

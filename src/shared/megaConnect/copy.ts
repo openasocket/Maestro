@@ -102,8 +102,8 @@ export const MEGA_CONNECT_COPY = {
 	useTeamCodeLink: 'Use a team code',
 	useWorkEmailLink: 'Use my work email instead',
 	connectWorking: 'Connecting...',
-	/** The accessible name of the large number region. */
-	largeNumberLabel: 'Number to pick in your browser',
+	/** The number region's accessible name: the digits one at a time ("4 7"). */
+	largeNumberSpoken: 'Number to pick in your browser: {digits}',
 
 	// maestro-cli managed connect (MSX-02-04). The CLI prints the indicator
 	// word, then these parts; the number is shown to the person who ran it and
