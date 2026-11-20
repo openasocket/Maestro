@@ -9,6 +9,8 @@
  *   maestro://session/{sessionId}              - navigate to agent
  *   maestro://session/{sessionId}/tab/{tabId}  - navigate to agent + tab
  *   maestro://group/{groupId}                  - expand group, focus first session
+ *   maestro://join?server={host}&code={code}   - prefill Connect (never connects)
+ *   maestro://connect?server={host}&team={team} - prefill Connect (never connects)
  *
  * Platform behavior:
  *   macOS:         app.on('open-url') delivers the URL
@@ -23,6 +25,11 @@ import { isWebContentsAvailable } from './utils/safe-send';
 import type { ParsedDeepLink } from '../shared/types';
 import { parseMaestroDeepLink } from '../shared/deep-link-urls';
 import { captureException } from './utils/sentry';
+import {
+	MEGA_CONNECT_PREFILL_CHANNEL,
+	megaConnectDeepLinkKind,
+	parseMegaConnectDeepLink,
+} from '../shared/megaConnect/deepLink';
 
 // ============================================================================
 // Constants
@@ -39,6 +46,19 @@ const IPC_CHANNEL = 'app:deepLink';
 let pendingDeepLinkUrl: string | null = null;
 
 // ============================================================================
+// Logging
+// ============================================================================
+
+/**
+ * What a log line may say about a deep link. A join or connect link carries a
+ * join code or a team code, so it is logged by its kind only, never its URL.
+ */
+function deepLinkLogFields(url: string): Record<string, string> {
+	const kind = megaConnectDeepLinkKind(url);
+	return kind === null ? { url } : { link: kind };
+}
+
+// ============================================================================
 // URL Parsing
 // ============================================================================
 
@@ -53,12 +73,15 @@ export function parseDeepLink(url: string): ParsedDeepLink | null {
 	try {
 		const parsed = parseMaestroDeepLink(url);
 		if (!parsed) {
-			logger.warn(`Unrecognized deep link URL: ${url}`, 'DeepLink');
+			logger.warn('Unrecognized deep link URL', 'DeepLink', deepLinkLogFields(url));
 		}
 		return parsed;
 	} catch (error) {
 		void captureException(error);
-		logger.error('Failed to parse deep link URL', 'DeepLink', { url, error: String(error) });
+		logger.error('Failed to parse deep link URL', 'DeepLink', {
+			...deepLinkLogFields(url),
+			error: String(error),
+		});
 		return null;
 	}
 }
@@ -71,6 +94,10 @@ export function parseDeepLink(url: string): ParsedDeepLink | null {
  * Process a deep link URL: parse it, bring window to foreground, and send to renderer.
  */
 function processDeepLink(url: string, getMainWindow: () => BrowserWindow | null): void {
+	if (megaConnectDeepLinkKind(url) !== null) {
+		processConnectDeepLink(url, getMainWindow);
+		return;
+	}
 	logger.info('Processing deep link', 'DeepLink', { url });
 
 	const parsed = parseDeepLink(url);
@@ -95,6 +122,35 @@ function processDeepLink(url: string, getMainWindow: () => BrowserWindow | null)
 	// Send parsed payload to renderer for navigation
 	if (isWebContentsAvailable(win)) {
 		win.webContents.send(IPC_CHANNEL, parsed);
+	}
+}
+
+/**
+ * A join or connect link prefills the Connect form and nothing else: it is
+ * validated here, the window comes forward, and the prefill goes to the
+ * renderer. Nothing on this path connects or enrolls (invariant SX3).
+ */
+function processConnectDeepLink(url: string, getMainWindow: () => BrowserWindow | null): void {
+	const prefill = parseMegaConnectDeepLink(url);
+	if (!prefill) {
+		logger.warn('Rejected connect deep link', 'DeepLink', deepLinkLogFields(url));
+		return;
+	}
+	logger.info('Processing connect deep link', 'DeepLink', { link: prefill.kind });
+
+	const win = getMainWindow();
+	if (!win) {
+		pendingDeepLinkUrl = url;
+		logger.debug('Window not ready, buffering deep link', 'DeepLink');
+		return;
+	}
+
+	if (win.isMinimized()) win.restore();
+	win.show();
+	win.focus();
+
+	if (isWebContentsAvailable(win)) {
+		win.webContents.send(MEGA_CONNECT_PREFILL_CHANNEL, prefill);
 	}
 }
 
@@ -183,7 +239,11 @@ export function setupDeepLinkHandling(getMainWindow: () => BrowserWindow | null)
 	);
 	if (deepLinkArg) {
 		pendingDeepLinkUrl = deepLinkArg;
-		logger.info('Found deep link in process argv (cold start)', 'DeepLink', { url: deepLinkArg });
+		logger.info(
+			'Found deep link in process argv (cold start)',
+			'DeepLink',
+			deepLinkLogFields(deepLinkArg)
+		);
 	}
 
 	return true;
@@ -198,7 +258,7 @@ export function flushPendingDeepLink(getMainWindow: () => BrowserWindow | null):
 
 	const url = pendingDeepLinkUrl;
 	pendingDeepLinkUrl = null;
-	logger.info('Flushing pending deep link', 'DeepLink', { url });
+	logger.info('Flushing pending deep link', 'DeepLink', deepLinkLogFields(url));
 	processDeepLink(url, getMainWindow);
 }
 

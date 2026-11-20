@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+	validateJoinCode,
 	validateJoinLink,
 	validateServerHost,
 	validateTeamCode,
@@ -139,6 +140,24 @@ describe('validateTeamCode', () => {
 		[`ACME-${'A'.repeat(64)}`, 'tooLong'],
 	])('rejects %j as %s without echoing it', (input, reason) => {
 		const result = validateTeamCode(input);
+		expect(reasonOf(result)).toBe(reason);
+		expectNoEcho(input, result);
+	});
+});
+
+describe('validateJoinCode', () => {
+	it('accepts a bare join code as typed', () => {
+		expect(validateJoinCode(` ${CODE} `)).toEqual({ ok: true, value: CODE });
+	});
+
+	it.each([
+		['', 'empty'],
+		['short-code', 'badCode'],
+		['x'.repeat(65), 'badCode'],
+		['has/slash/aaaaaaaaaaaaaaaa', 'badCode'],
+		['codé-aaaaaaaaaaaaaaaaaaaaa', 'notAscii'],
+	])('rejects %j as %s without echoing it', (input, reason) => {
+		const result = validateJoinCode(input);
 		expect(reasonOf(result)).toBe(reason);
 		expectNoEcho(input, result);
 	});

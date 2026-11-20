@@ -48,6 +48,7 @@ export const TEAM_CODE_MAX_LENGTH = 64;
 const ASCII_PRINTABLE = /^[\x21-\x7e]+$/;
 const EMAIL_LOCAL = /^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+$/;
 const DOMAIN_LABEL = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
+const JOIN_CODE = /^[A-Za-z0-9_-]{20,64}$/;
 const JOIN_PATH = /^\/join\/([A-Za-z0-9_-]{20,64})\/?$/;
 const TEAM_CODE = /^[A-Z0-9]+(-[A-Z0-9]+)+$/;
 
@@ -113,6 +114,18 @@ export function validateJoinLink(input: string): MegaConnectInputResult<MegaJoin
 	if (match === null) return fail(url.pathname.startsWith('/join/') ? 'badCode' : 'badPath');
 	url.hash = '';
 	return { ok: true, value: { url: url.toString(), host, code: match[1] } };
+}
+
+/**
+ * A join code on its own (the last segment of a join link, or the code of a
+ * maestro://join deep link): 20 to 64 URL-safe characters, kept as typed.
+ */
+export function validateJoinCode(input: string): MegaConnectInputResult<string> {
+	const code = input.trim();
+	if (code.length === 0) return fail('empty');
+	if (!ASCII_PRINTABLE.test(code)) return fail('notAscii');
+	if (!JOIN_CODE.test(code)) return fail('badCode');
+	return { ok: true, value: code };
 }
 
 /**
