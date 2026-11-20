@@ -34,6 +34,15 @@ It is not:
 
 The standing words (`managed-state.ts`), best to worst: `managed`, `stale`, `unregistered`, `offline`, `denied`, `suspended`, `enrolling`, `revoked`, `retired`, `custody-refused`, `unenrolled`. Only `managed` admits. The record lives in the data directory as `enterprise-identity.bin`, sealed with the key the OS holds for the desktop app and anchored in the keyring so a rolled-back or copied file reads `untrusted`. Beside it: `maestro-managed-binding.json`, `maestro-managed-dispatch-receipts.json`, `maestro-managed-workflows.json`, `maestro-managed-events.json`, the command ledger and `maestro-managed-inbox-receipts.json`.
 
+**The Mega-Maestro window.** Mega-Maestro in the Left Bar hamburger menu or the command palette (`maestro-cli open mega-maestro`) opens a window of its own with two tabs. Overview shows the managed standing in names only: the organization, the team path and the policy, never an ID, a digest, a socket path or a host and port. Troubleshoot is the one place the technical details appear:
+
+- The connect status as raw labelled rows, including the request number and any value shaped like an ID.
+- The local endpoint socket in use, marked `standard` (the platform's own socket, so most people never type one) or `overridden`, with a field to override it and a reset that clears the override. Saves go through the same settings path main validates.
+- The server host and port form with its lookup, and the classic enrollment request and phases described above.
+- The last refusal, with its code and its plain sentence.
+
+Copy the rows from Troubleshoot when you ask an administrator for help; nothing on Overview carries them. In this build the Connect card on Overview reads Unavailable, so enroll with the request on Troubleshoot.
+
 **Headless host.** `maestro-cli host start` composes the same parts when it holds protected custody for the record and prints `Managed: ...` at start; `maestro-cli host status --json` reports `managed` (the attested standing and the SSH route table) or `managedUnavailable` (why none). A plain Node process holds the keyring anchor but not the Electron seal, so a detached host of this build composes nothing and says so. Its bridge is a `runtime-host` listener held over the runtime's own binding before telemetry, Cue or the socket: on an enrolled, enrolled-unavailable or unreadable data directory no listener ceiling is delivered yet, so `host start` serves nothing and says so by name (`{"started":false,"code":"LISTENER_HELD","managed":"unavailable"}` under `--json`, exit 1); standalone it binds 127.0.0.1 as before. `maestro-cli cue engine start` on an enrolled machine has no standing to claim under and refuses every Auto Run as unavailable.
 
 **Library.** A host injects its own custody and socket: `createMaestroRuntime({ managed: { host, workflowFence } })` with `createManagedHostAdapter()`. The library never opens a socket or reads a keyring itself. See [maestro-lib](./maestro-lib#managed-operations).
