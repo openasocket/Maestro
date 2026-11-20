@@ -90,6 +90,19 @@ export const MEGA_CONNECT_COPY = {
 	panelTabsLabel: 'Mega-Maestro view',
 	panelTabOverview: 'Overview',
 	panelTabTroubleshoot: 'Troubleshoot',
+
+	// maestro-cli managed connect (MSX-02-04). The CLI prints the indicator
+	// word, then these parts; the number is shown to the person who ran it and
+	// never logged.
+	cliRequestPart: 'Request {request}.',
+	cliPickNumberPart: 'Pick {number} in the browser.',
+	cliNotRunning:
+		'Maestro desktop is not running. Open Maestro, or use managed configuration on a headless host.',
+	cliRefusedPinMismatch:
+		'The approval page was not on the server you named, so Maestro did not open it.',
+	cliRefusedInvalidInput: 'That input is not valid ({reason}).',
+	cliRefusedOpen: 'A managed policy kept Maestro from opening your browser.',
+	cliRefusedEndpointFailed: 'The Mega-Maestro endpoint could not answer the request.',
 } as const;
 
 export type MegaConnectCopyKey = keyof typeof MEGA_CONNECT_COPY;

@@ -11,7 +11,8 @@
  * phase file is relayed with only its phase's fields, and a missing field is
  * named, its value never), the exit codes of an absent or older desktop and
  * of one with no service, `open managed-status` and its aliases resolving the
- * registered surface, and exactly the twelve managed message types on the wire.
+ * registered surface, the connect verbs over the real connect service with a
+ * doubled port (MSX-02-04), and exactly the fifteen managed message types on the wire.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -58,6 +59,9 @@ import { UnsupportedCommandError, withMaestroClient } from '../../../cli/service
 import { MaestroNotRunningError } from '../../../cli/services/maestro-not-running';
 import {
 	ENROLLMENT_PHASE_FIELDS,
+	managedConnect,
+	managedConnectDisconnect,
+	managedConnectStatus,
 	managedEnrollRequest,
 	managedInventory,
 	managedLocks,
@@ -78,6 +82,10 @@ import { WebSocket } from 'ws';
 import { openModal } from '../../../cli/commands/open-modal';
 import { resolveUiSurface } from '../../../shared/uiSurfaces';
 import { NO_MANAGED_SETTING_LOCKS } from '../../../shared/managedSettingsLock';
+import { createConnectService, type ConnectService } from '../../../main/enterprise/connect';
+import type { ConnectPort } from '../../../shared/megaConnect/port';
+import { MEGA_CONNECT_COPY } from '../../../shared/megaConnect/copy';
+import { logger } from '../../../main/utils/logger';
 
 // ---------------------------------------------------------------------------
 // The desktop: doubled services under the real facade, the real inbox client.
@@ -154,6 +162,8 @@ const REGISTERED: InboxStanding = {
 };
 const UNREGISTERED: InboxStanding = { standingKey: 'k0', ok: false, reason: NO_ENROLLMENT };
 
+const APPROVAL_URL = 'https://mega.acme.com/approve/9f8e7d6c5b4a';
+
 const ENROLL = {
 	phase: 'request',
 	socketPath: '/run/endpoint/runtime.sock',
@@ -216,6 +226,14 @@ const commands = {
 describe('maestro-cli managed over the real bridge and facade (MRC2-07-08)', () => {
 	let handler: WebSocketMessageHandler;
 	let managed: ManagedOperations | null;
+	let connect: ConnectService | null;
+	/** The doubled connect port (test-only); the service over it is the real one. */
+	const port = {
+		start: vi.fn<ConnectPort['start']>(),
+		status: vi.fn<ConnectPort['status']>(),
+		disconnect: vi.fn<ConnectPort['disconnect']>(async () => undefined),
+	};
+	const openExternal = vi.fn(async (_url: string) => undefined);
 	let inbox: ReturnType<typeof inboxDouble>;
 	const sent: Array<Record<string, unknown>> = [];
 	/** Every message type the suite put on the wire; never cleared. */
@@ -272,8 +290,22 @@ describe('maestro-cli managed over the real bridge and facade (MRC2-07-08)', () 
 			inbox: inbox.client,
 			commands: commands as never,
 		});
+		port.start.mockResolvedValue({
+			requestNumber: 1042,
+			approvalUrl: APPROVAL_URL,
+			number: 47,
+			server: 'mega.acme.com',
+		});
+		port.status.mockResolvedValue({ status: { kind: 'waiting', request: 1042 } });
+		connect = createConnectService({
+			port,
+			localEffects: null,
+			notify: vi.fn(),
+			openExternal,
+			setTimer: () => () => undefined,
+		});
 		handler = new WebSocketMessageHandler();
-		handler.setCallbacks({ getManaged: () => managed });
+		handler.setCallbacks({ getManaged: () => managed, getConnect: () => connect });
 		vi.mocked(withMaestroClient).mockImplementation(async (action) =>
 			action({ sendCommand } as never)
 		);
@@ -670,16 +702,171 @@ describe('maestro-cli managed over the real bridge and facade (MRC2-07-08)', () 
 		expect(inbox.d.acts).toEqual([]);
 	});
 
-	it('spoke every one of the twelve managed message types and nothing else', () => {
-		// The three managed_connect_* messages (MSX-02-03) get their CLI verbs in MSX-02-04,
-		// which drops this filter so the CLI speaks all fifteen.
-		const pending = [
-			'managed_connect_start',
+	it('connect starts a request through the real service, opens the approval page and prints the number and request for a person (MSX-02-04)', async () => {
+		const human = await run(() => managedConnect({ email: 'Alice@Acme.com' }));
+		expect(human.code).toBeNull();
+		expect(human.out).toBe('Waiting for approval. Request REQ-1042. Pick 47 in the browser.');
+		expect(sent.at(-1)).toEqual({
+			type: 'managed_connect_start',
+			input: { kind: 'email', email: 'Alice@Acme.com' },
+		});
+		expect(port.start).toHaveBeenCalledWith({ kind: 'email', email: 'alice@acme.com' });
+		expect(openExternal).toHaveBeenCalledWith(APPROVAL_URL);
+
+		const scripted = await run(() =>
+			managedConnect({ teamCode: 'acme-web-7k3m', server: 'mega.acme.com', json: true })
+		);
+		expect(scripted.code).toBeNull();
+		expect(json(scripted.out)).toEqual({
+			success: true,
+			outcome: {
+				ok: true,
+				value: {
+					status: {
+						kind: 'browserOpened',
+						matchNumber: 47,
+						request: 1042,
+						serverName: 'mega.acme.com',
+					},
+					names: { server: 'mega.acme.com' },
+				},
+			},
+		});
+		expect(port.start).toHaveBeenLastCalledWith({
+			kind: 'teamCode',
+			teamCode: 'ACME-WEB-7K3M',
+			server: 'mega.acme.com',
+		});
+		const link = await run(() =>
+			managedConnect({ joinLink: 'https://mega.acme.com/join/abcdefghijklmnopqrstuv' })
+		);
+		expect(link.code).toBeNull();
+		expect(port.start).toHaveBeenLastCalledWith(expect.objectContaining({ kind: 'joinLink' }));
+		expect((await run(() => managedConnect({ managed: true }))).code).toBeNull();
+		expect(port.start).toHaveBeenLastCalledWith({ kind: 'managed' });
+		// The number, the request and the approval URL reach the person, never the log.
+		const logged = JSON.stringify(Object.values(vi.mocked(logger)).map((fn) => fn.mock.calls));
+		expect(logged).not.toContain(APPROVAL_URL);
+		expect(logged).not.toContain('1042');
+		expect(logged).not.toContain('47');
+	});
+
+	it('connect status and disconnect read the Connect card, in plain text and JSON (MSX-02-04)', async () => {
+		const waiting = await run(() => managedConnectStatus({}));
+		expect(waiting.out).toBe('Waiting for approval. Request REQ-1042.');
+		port.status.mockResolvedValue({
+			status: {
+				kind: 'connected',
+				orgName: 'Acme',
+				teamPath: 'platform/web',
+				policy: { name: 'platform-default', revision: 12 },
+			},
+		});
+		const connected = await run(() => managedConnectStatus({}));
+		expect(connected.code).toBeNull();
+		expect(connected.out.split('\n')[0]).toBe('Connected.');
+		expect(connected.out).toContain('Connected to Acme');
+		expect(connected.out).toContain('platform-default@12');
+		const view = json((await run(() => managedConnectStatus({ json: true }))).out);
+		expect(view).toEqual({
+			success: true,
+			view: {
+				status: {
+					kind: 'connected',
+					orgName: 'Acme',
+					teamPath: 'platform/web',
+					policy: { name: 'platform-default', revision: 12 },
+				},
+			},
+		});
+		const off = await run(() => managedConnectDisconnect({}));
+		expect(off.code).toBeNull();
+		expect(off.out).toBe(`Not connected.\n${MEGA_CONNECT_COPY.notConnectedBody}`);
+		expect(port.disconnect).toHaveBeenCalledTimes(1);
+		expect(json((await run(() => managedConnectDisconnect({ json: true }))).out)).toEqual({
+			success: true,
+			outcome: { ok: true, value: { status: { kind: 'notConnected' } } },
+		});
+		expect(sent.map((m) => m.type)).toEqual([
+			'managed_connect_status',
+			'managed_connect_status',
 			'managed_connect_status',
 			'managed_connect_disconnect',
-		];
-		expect([...spoken].sort()).toEqual(
-			MANAGED_MESSAGE_TYPES.filter((type) => !pending.includes(type)).sort()
+			'managed_connect_disconnect',
+		]);
+	});
+
+	it('connect refuses a bad flag set before sending, and reports a refusal by reason, never by value (MSX-02-04)', async () => {
+		for (const options of [
+			{},
+			{ email: 'a@acme.com', managed: true },
+			{ teamCode: 'ACME-WEB-7K3M' },
+			{ email: 'a@acme.com', server: 'mega.acme.com' },
+		]) {
+			const bad = await run(() => managedConnect({ ...options, json: true }));
+			expect(bad.code, JSON.stringify(options)).toBe(2);
+			expect(json(bad.out)).toMatchObject({ success: false, error: expect.any(String) });
+		}
+		expect(sent).toEqual([]);
+
+		const malformed = await run(() => managedConnect({ email: 'not-an-email-secret', json: true }));
+		expect(malformed.code).toBe(1);
+		expect(json(malformed.out)).toEqual({
+			success: false,
+			outcome: { ok: false, refusal: 'invalid_input', reason: 'badEmail' },
+		});
+		const plain = await run(() => managedConnect({ email: 'not-an-email-secret' }));
+		expect(plain.code).toBe(1);
+		expect(plain.err).toContain('That input is not valid (badEmail).');
+		expect(plain.out + plain.err).not.toContain('not-an-email-secret');
+
+		// The endpoint answers a server other than the one named: nothing opens.
+		const pinned = await run(() =>
+			managedConnect({ teamCode: 'ACME-WEB-7K3M', server: 'other.example.com' })
 		);
+		expect(pinned.code).toBe(1);
+		expect(pinned.err).toContain(MEGA_CONNECT_COPY.cliRefusedPinMismatch);
+		expect(openExternal).not.toHaveBeenCalled();
+
+		connect = null;
+		const none = await run(() => managedConnect({ managed: true, json: true }));
+		expect(none.code).toBe(1);
+		expect(json(none.out)).toEqual({
+			success: false,
+			outcome: { ok: false, refusal: 'endpoint_connect_unavailable' },
+		});
+		expect((await run(() => managedConnectDisconnect({}))).err).toContain(
+			MEGA_CONNECT_COPY.unavailableBody
+		);
+		expect((await run(() => managedConnectStatus({}))).out).toBe(
+			`Unavailable.\n${MEGA_CONNECT_COPY.unavailableBody}`
+		);
+	});
+
+	it('connect with no desktop running exits 3 with the connect sentence, in plain text and JSON (MSX-02-04)', async () => {
+		for (const verb of [
+			(json?: boolean) => managedConnect({ email: 'alice@acme.com', json }),
+			(json?: boolean) => managedConnectStatus({ json }),
+			(json?: boolean) => managedConnectDisconnect({ json }),
+		]) {
+			sendCommand.mockRejectedValueOnce(new MaestroNotRunningError('not-running' as never));
+			const plain = await run(() => verb());
+			expect(plain.code).toBe(3);
+			expect(plain.err).toContain(MEGA_CONNECT_COPY.cliNotRunning);
+			sendCommand.mockRejectedValueOnce(new MaestroNotRunningError('not-running' as never));
+			const scripted = await run(() => verb(true));
+			expect(scripted.code).toBe(3);
+			expect(json(scripted.out)).toEqual({
+				success: false,
+				error:
+					'Maestro desktop is not running. Open Maestro, or use managed configuration on a headless host.',
+				code: 'MAESTRO_NOT_RUNNING',
+			});
+		}
+		expect(port.start).not.toHaveBeenCalled();
+	});
+
+	it('spoke every one of the fifteen managed message types and nothing else', () => {
+		expect([...spoken].sort()).toEqual([...MANAGED_MESSAGE_TYPES].sort());
 	});
 });

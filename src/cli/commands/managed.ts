@@ -7,7 +7,8 @@
 // Wire contract (the bridge handlers of MRC2-07-03 answer these; each
 // `<type>_result` carries `success` and the named field):
 //   managed_status (state), managed_inventory (inventory), managed_support_matrix (matrix),
-//   managed_locks (locks), managed_policy_refresh (outcome), managed_enroll_request (outcome)
+//   managed_locks (locks), managed_policy_refresh (outcome), managed_enroll_request (outcome),
+//   managed_connect_start (outcome), managed_connect_status (view), managed_connect_disconnect (outcome)
 // The last one is for CLI-secret clients only: a browser never enrolls. A
 // desktop with no enterprise service answers `success: false` with the
 // service's own line; an older desktop answers the unknown type (exit 4).
@@ -17,6 +18,11 @@
 // from a file, relayed once, and never echoed, not even in an error.
 
 import * as fs from 'fs';
+import type {
+	ConnectRefusal,
+	ConnectResult,
+	ConnectStatusView,
+} from '../../main/enterprise/connect';
 import type { LifecycleOutcome } from '../../main/enterprise/enrollment';
 import type { InstallationInventory } from '../../main/enterprise/inventory';
 import type { ManagedStateView } from '../../main/enterprise/managed-state';
@@ -27,8 +33,11 @@ import type {
 } from '../../shared/maestro-lib/managed/endpoint-port';
 import type { ManagedSettingLocksView } from '../../shared/managedSettingsLock';
 import { ExitCode, exitWith } from '../exit-codes';
-import { formatSuccess } from '../output/formatter';
+import { formatError, formatSuccess } from '../output/formatter';
 import { ENROLLMENT_PHASE_FIELDS } from '../../shared/enrollmentPhases';
+import { fillMegaConnectCopy, MEGA_CONNECT_COPY } from '../../shared/megaConnect/copy';
+import { formatRequestRef, viewFor } from '../../shared/megaConnect/view';
+import { MAESTRO_NOT_RUNNING_CODE, MaestroNotRunningError } from '../services/maestro-not-running';
 import { isQuiet } from '../output/verbosity';
 import {
 	errorFrameMessage,
@@ -61,18 +70,28 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
  * Ask the desktop one managed question and return the answer's `field`. A
  * missing app is exit 3, an old app exit 4, a hung one exit 5; a desktop
  * with no service answers `success: false` and is exit 1 with its own line.
- * Shared with the inbox and command verbs in `managed-inbox.ts`.
+ * Shared with the inbox and command verbs in `managed-inbox.ts`. `notRunningLine`
+ * replaces the sentence of an absent desktop (still exit 3, `MAESTRO_NOT_RUNNING`).
  */
 export async function askDesktop<T>(
 	message: Record<string, unknown>,
 	responseType: string,
 	field: string,
-	json?: boolean
+	json?: boolean,
+	notRunningLine?: string
 ): Promise<T> {
 	let reply: SimpleResult;
 	try {
 		reply = await sendSimpleCommand<SimpleResult>(message, responseType);
 	} catch (error) {
+		if (notRunningLine && error instanceof MaestroNotRunningError) {
+			if (json) {
+				console.log(
+					JSON.stringify({ success: false, error: notRunningLine, code: MAESTRO_NOT_RUNNING_CODE })
+				);
+			} else console.error(formatError(notRunningLine));
+			return exitWith(ExitCode.NotRunning);
+		}
 		return failFromError(error, json);
 	}
 	const frameError = errorFrameMessage(reply);
@@ -325,4 +344,162 @@ export function describeEnrollmentPhase(result: EndpointEnrollmentPhaseResult): 
 		case 'enrolled':
 			return `Enrolled: enrollment ${result.enrollmentId} (${result.keyStorage} key). Run \`managed policy refresh\` to attach.`;
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Connect to your organization (MSX-02-04): the CLI path of the Connect card.
+// The desktop validates every input again (the bridge trusts no client), so
+// the CLI only builds the one input the flags name. The matching number and
+// the request reference are printed for the person who ran the verb; nothing
+// here logs them.
+// ---------------------------------------------------------------------------
+
+export interface ManagedConnectOptions extends ManagedOptions {
+	email?: string;
+	joinLink?: string;
+	teamCode?: string;
+	server?: string;
+	managed?: boolean;
+}
+
+/**
+ * The start input the flags name: exactly one of `--email`, `--join-link`,
+ * `--team-code` (with `--server`) or `--managed`. A usage problem is a line,
+ * never a value the person typed.
+ */
+export function connectInputFromOptions(
+	options: ManagedConnectOptions
+): { ok: true; input: Record<string, unknown> } | { ok: false; error: string } {
+	const chosen = [
+		options.email !== undefined,
+		options.joinLink !== undefined,
+		options.teamCode !== undefined,
+		options.managed === true,
+	].filter(Boolean).length;
+	if (chosen !== 1) {
+		return {
+			ok: false,
+			error: 'Pass exactly one of --email, --join-link, --team-code (with --server) or --managed.',
+		};
+	}
+	if (options.server !== undefined && options.teamCode === undefined) {
+		return { ok: false, error: '--server goes with --team-code only.' };
+	}
+	if (options.email !== undefined)
+		return { ok: true, input: { kind: 'email', email: options.email } };
+	if (options.joinLink !== undefined) {
+		return { ok: true, input: { kind: 'joinLink', joinLink: options.joinLink } };
+	}
+	if (options.teamCode !== undefined) {
+		if (options.server === undefined)
+			return { ok: false, error: '--team-code needs --server <host>.' };
+		return {
+			ok: true,
+			input: { kind: 'teamCode', teamCode: options.teamCode, server: options.server },
+		};
+	}
+	return { ok: true, input: { kind: 'managed' } };
+}
+
+/** One line for a connect status: the indicator word, then the request and the number when known. */
+export function formatConnectStatus(view: ConnectStatusView, now: number = Date.now()): string {
+	const status = view.status;
+	const shown = viewFor(status, now);
+	const first = [`${shown.indicatorWord}.`];
+	if (status.kind === 'browserOpened' || status.kind === 'waiting') {
+		const request = formatRequestRef(status.request);
+		if (request) first.push(fillMegaConnectCopy('cliRequestPart', { request }));
+	}
+	if (shown.largeNumber) {
+		first.push(fillMegaConnectCopy('cliPickNumberPart', { number: shown.largeNumber }));
+	}
+	const lines = [first.join(' ')];
+	if (status.kind === 'connected') {
+		lines.push([shown.title, shown.detail].filter(Boolean).join(MEGA_CONNECT_COPY.detailSeparator));
+	} else if (status.kind !== 'browserOpened' && status.kind !== 'waiting' && shown.body) {
+		lines.push(shown.body);
+	}
+	return lines.join('\n');
+}
+
+/** The sentence for a refusal; the input's reason code, never its value. */
+export function describeConnectRefusal(refusal: ConnectRefusal, reason?: string): string {
+	switch (refusal) {
+		case 'endpoint_connect_unavailable':
+			return MEGA_CONNECT_COPY.unavailableBody;
+		case 'pin_mismatch':
+			return MEGA_CONNECT_COPY.cliRefusedPinMismatch;
+		case 'invalid_input':
+			return fillMegaConnectCopy('cliRefusedInvalidInput', { reason: reason ?? 'invalid' });
+		case 'open_refused':
+			return MEGA_CONNECT_COPY.cliRefusedOpen;
+		case 'endpoint_failed':
+			return MEGA_CONNECT_COPY.cliRefusedEndpointFailed;
+	}
+}
+
+/**
+ * Ask the desktop one connect question. An absent desktop is exit 3 with the
+ * connect sentence (a headless host connects through managed configuration,
+ * not through this verb); every other failure maps as `askDesktop()` does.
+ */
+const askConnect = <T>(
+	message: Record<string, unknown>,
+	responseType: string,
+	field: string,
+	json?: boolean
+): Promise<T> => askDesktop<T>(message, responseType, field, json, MEGA_CONNECT_COPY.cliNotRunning);
+
+/** Print a start or disconnect answer; a refusal is exit 1 with the outcome kept in the JSON. */
+function reportConnect(outcome: ConnectResult<ConnectStatusView>, json?: boolean): void {
+	if (json) {
+		console.log(JSON.stringify({ success: outcome.ok, outcome }));
+		if (!outcome.ok) exitWith(ExitCode.GeneralError);
+		return;
+	}
+	if (outcome.ok) {
+		console.log(formatConnectStatus(outcome.value));
+		return;
+	}
+	failCommand(describeConnectRefusal(outcome.refusal, outcome.reason), json);
+}
+
+/** `managed connect`: start a connect request and open its approval page on this desktop. */
+export async function managedConnect(options: ManagedConnectOptions): Promise<void> {
+	const built = connectInputFromOptions(options);
+	if (!built.ok) {
+		if (options.json) console.log(JSON.stringify({ success: false, error: built.error }));
+		else console.error(formatError(built.error));
+		return exitWith(ExitCode.InvalidUsage);
+	}
+	const outcome = await askConnect<ConnectResult<ConnectStatusView>>(
+		{ type: 'managed_connect_start', input: built.input },
+		'managed_connect_start_result',
+		'outcome',
+		options.json
+	);
+	reportConnect(outcome, options.json);
+}
+
+/** `managed connect status`: the Connect card's status (and the Troubleshoot tab's status rows). */
+export async function managedConnectStatus(options: ManagedOptions): Promise<void> {
+	const view = await askConnect<ConnectStatusView>(
+		{ type: 'managed_connect_status' },
+		'managed_connect_status_result',
+		'view',
+		options.json
+	);
+	if (options.json) console.log(JSON.stringify({ success: true, view }));
+	else console.log(formatConnectStatus(view));
+}
+
+/** `managed connect disconnect`: the Connect card's Disconnect. */
+export async function managedConnectDisconnect(options: ManagedOptions): Promise<void> {
+	const outcome = await askConnect<ConnectResult<ConnectStatusView>>(
+		{ type: 'managed_connect_disconnect' },
+		'managed_connect_disconnect_result',
+		'outcome',
+		options.json
+	);
+	reportConnect(outcome, options.json);
 }

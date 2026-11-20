@@ -224,6 +224,9 @@ import {
 	managedLocks,
 	managedPolicyRefresh,
 	managedEnrollRequest,
+	managedConnect,
+	managedConnectStatus,
+	managedConnectDisconnect,
 } from './commands/managed';
 import {
 	managedInboxList,
@@ -2891,6 +2894,37 @@ managedEnroll
 	.option('--phase <phase>', "Override the file's phase: request, prove or activate")
 	.option('--json', 'Output as JSON (for scripting)')
 	.action((options) => managedEnrollRequest(options));
+
+// Connect to your organization (MSX-02-04): the Connect card's start, status
+// and Disconnect. `managed status` is the standing report; the connect status
+// is `managed connect status`. Subcommands read --json through
+// optsWithGlobals(), since the parent `connect` declares --json too.
+const managedConnectCmd = managed
+	.command('connect')
+	.description(
+		'Connect this desktop to your organization: exactly one of --email, --join-link, --team-code with --server, or --managed; opens the approval page in your browser'
+	)
+	.option('--email <address>', 'Your work email; Maestro finds your organization')
+	.option('--join-link <url>', 'A join link your admin sent (https://<server>/join/<code>)')
+	.option('--team-code <code>', 'A team code (ACME-WEB-7K3M); needs --server')
+	.option('--server <host>', 'The server a team code belongs to')
+	.option('--managed', 'Connect under the managed configuration of this computer')
+	.option('--json', 'Output as JSON (for scripting)')
+	.action((options) => managedConnect(options));
+
+managedConnectCmd
+	.command('status')
+	.description(
+		'Show the connect status the Connect card shows: waiting, connected, denied, and so on'
+	)
+	.option('--json', 'Output as JSON (for scripting)')
+	.action((_options, cmd) => managedConnectStatus(cmd.optsWithGlobals()));
+
+managedConnectCmd
+	.command('disconnect')
+	.description("Disconnect this desktop from your organization (the Connect card's Disconnect)")
+	.option('--json', 'Output as JSON (for scripting)')
+	.action((_options, cmd) => managedConnectDisconnect(cmd.optsWithGlobals()));
 
 managed
 	.command('run <leaseId>')
