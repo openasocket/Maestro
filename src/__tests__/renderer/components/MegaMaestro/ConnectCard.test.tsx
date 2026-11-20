@@ -199,3 +199,147 @@ describe('ConnectCard accessibility', () => {
 		expect(onKeyDown.mock.calls[0][0].defaultPrevented).toBe(false);
 	});
 });
+
+/**
+ * Reconnect after revocation or grant expiry (MSX-03-06). What is defended:
+ * revoked and grantExpired show their copy with Connect again; the press sends
+ * the last input main accepted in this session, once, with no retry loop; a
+ * refused reconnect shows the denied state; the approval number comes back
+ * only for a request the endpoint newly created; with nothing remembered the
+ * press opens the form and sends nothing; nothing is persisted.
+ */
+describe('ConnectCard reconnect', () => {
+	const start = vi.fn();
+	const EMAIL = { kind: 'email', email: 'alice@acme.com' };
+
+	beforeEach(() => {
+		forgetLastConnectInput();
+		statusPush = null;
+		connectStatus.mockReset();
+		start.mockReset();
+		withStatus({ kind: 'notConnected' });
+		localStorage.clear();
+		(window as unknown as { maestro: unknown }).maestro = {
+			enterprise: {
+				connect: {
+					status: connectStatus,
+					start,
+					disconnect: vi.fn(),
+					onStatus: (cb: (next: StatusView) => void) => {
+						statusPush = cb;
+						return () => {
+							statusPush = null;
+						};
+					},
+					onPrefill: () => () => undefined,
+				},
+			},
+		};
+	});
+
+	afterEach(() => {
+		(window as unknown as { maestro: unknown }).maestro = undefined;
+	});
+
+	/** Connect once with a work email, so the session remembers the accepted input and REQ-1042. */
+	async function connectFirst() {
+		start.mockResolvedValueOnce({
+			ok: true,
+			value: { status: { kind: 'browserOpened', matchNumber: 47, request: 1042 } },
+		});
+		render(<ConnectCard theme={mockTheme} />);
+		await cardIn('notConnected');
+		fireEvent.change(screen.getByLabelText('Work email'), {
+			target: { value: 'alice@acme.com' },
+		});
+		fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
+		await cardIn('browserOpened');
+		expect(screen.getByTestId('mega-connect-number')).toBeTruthy();
+		push({ kind: 'connected', orgName: 'Acme' });
+	}
+
+	it.each([
+		[{ kind: 'revoked' } as MegaConnectStatus, /administrator disconnected/],
+		[{ kind: 'grantExpired' } as MegaConnectStatus, /Your connection expired/],
+	])(
+		'%o shows its copy and Connect again resends the accepted input once',
+		async (status, body) => {
+			await connectFirst();
+			push(status);
+			await cardIn(status.kind);
+			expect(screen.getByText(body)).toBeTruthy();
+			start.mockResolvedValueOnce({
+				ok: true,
+				value: { status: { kind: 'browserOpened', matchNumber: 12, request: 1043 } },
+			});
+			fireEvent.click(screen.getByRole('button', { name: 'Connect again' }));
+			await cardIn('browserOpened');
+			expect(start).toHaveBeenCalledTimes(2);
+			expect(start.mock.calls[1][0]).toEqual(EMAIL);
+			// REQ-1043 is a new request, so its number shows.
+			expect(
+				screen.getByRole('group', { name: 'Number to pick in your browser: 1 2' })
+			).toBeTruthy();
+			expect(localStorage.length).toBe(0);
+		}
+	);
+
+	it('one press is one request, even when pressed twice before main answers', async () => {
+		await connectFirst();
+		push({ kind: 'revoked' });
+		await cardIn('revoked');
+		let resolve!: (value: unknown) => void;
+		start.mockReturnValueOnce(new Promise((r) => (resolve = r)));
+		const button = screen.getByRole('button', { name: 'Connect again' });
+		fireEvent.click(button);
+		fireEvent.click(button);
+		expect(start).toHaveBeenCalledTimes(2); // the first connect plus one reconnect
+		await act(async () =>
+			resolve({ ok: true, value: { status: { kind: 'waiting', request: 1043 } } })
+		);
+		await cardIn('waiting');
+		// Nothing retries by itself afterwards.
+		await new Promise((r) => setTimeout(r, 20));
+		expect(start).toHaveBeenCalledTimes(2);
+	});
+
+	it('a refused reconnect shows the denied state', async () => {
+		await connectFirst();
+		push({ kind: 'grantExpired' });
+		await cardIn('grantExpired');
+		start.mockResolvedValueOnce({ ok: false, refusal: 'endpoint_failed' });
+		fireEvent.click(screen.getByRole('button', { name: 'Connect again' }));
+		await cardIn('denied');
+		expect(screen.getByText('Your request was not approved.')).toBeTruthy();
+		expect(start).toHaveBeenCalledTimes(2);
+	});
+
+	it('does not show the number again for the request seen before the press', async () => {
+		await connectFirst();
+		push({ kind: 'revoked' });
+		await cardIn('revoked');
+		start.mockResolvedValueOnce({
+			ok: true,
+			value: { status: { kind: 'browserOpened', matchNumber: 47, request: 1042 } },
+		});
+		fireEvent.click(screen.getByRole('button', { name: 'Connect again' }));
+		await cardIn('browserOpened');
+		expect(screen.queryByTestId('mega-connect-number')).toBeNull();
+		// A browserOpened that names no request is not known to be new either.
+		push({ kind: 'browserOpened', matchNumber: 47 });
+		expect(screen.queryByTestId('mega-connect-number')).toBeNull();
+		// Once the endpoint creates a new request, its number shows.
+		push({ kind: 'browserOpened', matchNumber: 58, request: 1044 });
+		expect(screen.getByRole('group', { name: 'Number to pick in your browser: 5 8' })).toBeTruthy();
+	});
+
+	it('with no remembered input, Connect again opens the form and sends nothing', async () => {
+		withStatus({ kind: 'revoked' });
+		render(<ConnectCard theme={mockTheme} />);
+		await cardIn('revoked');
+		fireEvent.click(screen.getByRole('button', { name: 'Connect again' }));
+		await cardIn('notConnected');
+		expect(screen.getByLabelText('Work email')).toBeTruthy();
+		expect(start).not.toHaveBeenCalled();
+	});
+});

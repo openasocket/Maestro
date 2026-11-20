@@ -22,6 +22,15 @@
  * Each state shows a word and an icon with an accessible name, so color never
  * carries the state alone, and the waiting pulse runs only when the person
  * allows motion. Escape is left to the window, which closes as it always has.
+ *
+ * Reconnect (MSX-03-06): in the revoked and grantExpired states, Connect again
+ * sends the last input main accepted in this app session (memory only, never
+ * persisted) to connect.start once. One press is one request; nothing retries
+ * by itself. A refusal shows the denied state. While that reconnect runs, the
+ * approval number shows only for a request the endpoint newly created: a
+ * browserOpened that names no request, or the request seen before the press,
+ * keeps its number hidden. With nothing remembered (Maestro restarted since
+ * the last connect), Connect again opens the email form instead.
  */
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
@@ -47,6 +56,7 @@ import {
 	validateWorkEmail,
 } from '../../../shared/megaConnect/input';
 import {
+	formatRequestRef,
 	viewFor,
 	type MegaConnectAction,
 	type MegaConnectActionId,
@@ -104,9 +114,42 @@ const FORM_STATES = new Set<MegaConnectStatus['kind']>(['notConnected', 'linkOrC
  */
 let lastAcceptedInput: ConnectStartRequest | null = null;
 
-/** Forget the remembered input (tests, and a disconnect). */
+/**
+ * The last approval request ("REQ-1042") the card saw in this app session,
+ * memory only. A reconnect compares against it so an old request never shows
+ * its number again.
+ */
+let lastSeenRequest: string | null = null;
+
+/** Forget the remembered input and request (tests, and a disconnect). */
 export function forgetLastConnectInput(): void {
 	lastAcceptedInput = null;
+	lastSeenRequest = null;
+}
+
+/** Remember the request `status` names, when it names one. */
+function noteRequest(status: MegaConnectStatus): void {
+	if (status.kind !== 'browserOpened' && status.kind !== 'waiting') return;
+	const request = formatRequestRef(status.request);
+	if (request) lastSeenRequest = request;
+}
+
+/** The approval flow a reconnect runs through; any other state ends the reconnect. */
+const RECONNECT_FLOW = new Set<MegaConnectStatus['kind']>(['browserOpened', 'waiting']);
+
+/** The request seen before a reconnect press; undefined when no reconnect is running. */
+type ReconnectGuard = { before: string | null } | undefined;
+
+/**
+ * `status` with its number removed while a reconnect runs and the
+ * browserOpened it shows is not a request the endpoint newly created.
+ */
+function withoutStaleNumber(status: MegaConnectStatus, guard: ReconnectGuard): MegaConnectStatus {
+	if (!guard || status.kind !== 'browserOpened' || status.matchNumber === undefined) return status;
+	const request = formatRequestRef(status.request);
+	if (request && request !== guard.before) return status;
+	const { matchNumber: _hidden, ...rest } = status;
+	return rest;
 }
 
 /** The last refusal main answered a start or disconnect with, for the Troubleshoot tab. */
@@ -226,6 +269,8 @@ export function ConnectCard({ theme }: { theme: Theme }) {
 	const kindRef = useRef<MegaConnectStatus['kind']>(UNAVAILABLE.status.kind);
 	const numberRef = useRef<HTMLDivElement>(null);
 	const focusedKindRef = useRef<MegaConnectStatus['kind'] | null>(null);
+	const sendingRef = useRef(false);
+	const [reconnectGuard, setReconnectGuard] = useState<ReconnectGuard>(undefined);
 
 	useEffect(() => {
 		if (!api) return;
@@ -235,6 +280,8 @@ export function ConnectCard({ theme }: { theme: Theme }) {
 			// A new state from main closes any form the person opened over the old one.
 			if (kindRef.current !== next.status.kind) setForm(null);
 			kindRef.current = next.status.kind;
+			noteRequest(next.status);
+			if (!RECONNECT_FLOW.has(next.status.kind)) setReconnectGuard(undefined);
 			setCurrent(next);
 		};
 		void api.status().then(take, () => take(UNAVAILABLE));
@@ -261,7 +308,7 @@ export function ConnectCard({ theme }: { theme: Theme }) {
 		};
 	}, [api]);
 
-	const live = current.status;
+	const live = withoutStaleNumber(current.status, reconnectGuard);
 	const formOpen = form !== null && live.kind !== 'unavailable' && live.kind !== 'managed';
 	const shown: MegaConnectStatus = formOpen
 		? form === 'email'
@@ -285,8 +332,10 @@ export function ConnectCard({ theme }: { theme: Theme }) {
 		}
 	}, [shown.kind, numberShown]);
 
-	const send = async (input: ConnectStartRequest) => {
-		if (!api || busy) return;
+	const send = async (input: ConnectStartRequest, reconnect = false) => {
+		// The ref, not `busy`, guards a second press in the same tick: one press, one request.
+		if (!api || sendingRef.current) return;
+		sendingRef.current = true;
 		setBusy(true);
 		setRefusal(null);
 		try {
@@ -295,18 +344,38 @@ export function ConnectCard({ theme }: { theme: Theme }) {
 				lastAcceptedInput = input;
 				setForm(null);
 				kindRef.current = result.value.status.kind;
+				noteRequest(result.value.status);
+				if (!RECONNECT_FLOW.has(result.value.status.kind)) setReconnectGuard(undefined);
 				setCurrent(result.value);
 			} else if (result.refusal === 'endpoint_connect_unavailable') {
 				noteRefusal(result);
 				setForm(null);
+				setReconnectGuard(undefined);
 				kindRef.current = 'unavailable';
 				setCurrent(UNAVAILABLE);
+			} else if (reconnect) {
+				// A refused reconnect shows the denied state; its Try again opens the form.
+				setRefusal(noteRefusal(result));
+				setForm(null);
+				setReconnectGuard(undefined);
+				kindRef.current = 'denied';
+				setCurrent({ status: { kind: 'denied' } });
 			} else {
 				setRefusal(noteRefusal(result));
 			}
 		} finally {
+			sendingRef.current = false;
 			setBusy(false);
 		}
+	};
+
+	const connectAgain = () => {
+		if (!lastAcceptedInput) {
+			openForm('email');
+			return;
+		}
+		setReconnectGuard({ before: lastSeenRequest });
+		void send(lastAcceptedInput, true);
 	};
 
 	const connect = () => {
@@ -356,9 +425,11 @@ export function ConnectCard({ theme }: { theme: Theme }) {
 			case 'disconnect':
 				void disconnect();
 				return;
+			case 'connectAgain':
+				connectAgain();
+				return;
 			case 'reconnect':
 			case 'tryAgain':
-			case 'connectAgain':
 				openForm('email');
 				return;
 		}
