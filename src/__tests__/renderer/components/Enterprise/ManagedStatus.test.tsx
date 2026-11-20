@@ -22,7 +22,9 @@ import {
 	ManagedStatus,
 	STATUS_COPY,
 	STANDING_TINT,
+	connectionNameLines,
 } from '../../../../renderer/components/Enterprise/ManagedStatus';
+import type { MegaConnectStatus } from '../../../../shared/megaConnect/view';
 import { ManagedInbox, INBOX_COPY } from '../../../../renderer/components/Enterprise/ManagedInbox';
 import {
 	MANAGED_STANDING_COPY,
@@ -313,6 +315,105 @@ describe('ManagedStatus', () => {
 			<ManagedStatus theme={mockTheme} status={status(undefined, { error: 'x' })} compact />
 		);
 		expect(container).toBeEmptyDOMElement();
+	});
+});
+
+describe('ManagedStatus names (MSX-03-05)', () => {
+	const UUID = '3f2a9c1e-8b4d-4e6f-9a01-2b3c4d5e6f70';
+	const CONNECTED: MegaConnectStatus = {
+		kind: 'connected',
+		orgName: 'Acme',
+		teamPath: 'platform/web',
+		policy: { name: 'platform-default', revision: 12 },
+		syncedAt: Date.now(),
+	};
+
+	it('names the organization, the team path and the policy with its revision', () => {
+		expect(connectionNameLines(CONNECTED)).toEqual([
+			'Organization: Acme',
+			'Team: platform/web',
+			'Policy: platform-default@12',
+		]);
+	});
+
+	it('drops a line whose name is absent or shaped like an ID, and names nothing unless connected', () => {
+		expect(
+			connectionNameLines({
+				kind: 'connected',
+				orgName: UUID,
+				teamPath: '  ',
+				policy: { name: 'sha256:' + 'a'.repeat(64), revision: 3 },
+			})
+		).toEqual([]);
+		expect(connectionNameLines({ kind: 'connected', teamPath: 'platform/web' })).toEqual([
+			'Team: platform/web',
+		]);
+		expect(connectionNameLines({ kind: 'waiting', request: 1042 })).toEqual([]);
+		expect(connectionNameLines(undefined)).toEqual([]);
+	});
+
+	it('shows the names under the standing, and no ID, server or endpoint line', () => {
+		render(
+			<ManagedStatus
+				theme={mockTheme}
+				status={status(stateOf('managed'))}
+				connectStatus={{ ...CONNECTED, orgName: 'Acme' }}
+			/>
+		);
+		const names = screen.getByTestId('managed-names');
+		expect(names).toHaveTextContent('Organization: Acme');
+		expect(names).toHaveTextContent('Team: platform/web');
+		expect(names).toHaveTextContent('Policy: platform-default@12');
+		const text = document.body.textContent ?? '';
+		expect(text).not.toMatch(
+			/Mega-Maestro server|Endpoint:|socket|Maestro library|tenant|Enrollment/
+		);
+	});
+
+	it('draws no names block when the names are IDs or the desktop is not connected', () => {
+		const { rerender } = render(
+			<ManagedStatus
+				theme={mockTheme}
+				status={status(stateOf('managed'))}
+				connectStatus={{ kind: 'connected', orgName: UUID, teamPath: UUID }}
+			/>
+		);
+		expect(screen.queryByTestId('managed-names')).toBeNull();
+		expect(document.body.textContent).not.toContain(UUID);
+		rerender(
+			<ManagedStatus
+				theme={mockTheme}
+				status={status(stateOf('managed'))}
+				connectStatus={{ kind: 'notConnected' }}
+			/>
+		);
+		expect(screen.queryByTestId('managed-names')).toBeNull();
+	});
+
+	it('follows the live connect status when none is passed', async () => {
+		let push: ((view: { status: MegaConnectStatus }) => void) | null = null;
+		const off = vi.fn();
+		maestro.enterprise = {
+			inboxState,
+			inboxRefresh,
+			inboxAct,
+			connect: {
+				status: vi.fn().mockResolvedValue({ status: { kind: 'notConnected' } }),
+				onStatus: vi.fn((cb) => {
+					push = cb;
+					return off;
+				}),
+			},
+		};
+		const { unmount } = render(
+			<ManagedStatus theme={mockTheme} status={status(stateOf('managed'))} />
+		);
+		await waitFor(() => expect(push).not.toBeNull());
+		expect(screen.queryByTestId('managed-names')).toBeNull();
+		act(() => push!({ status: CONNECTED }));
+		expect(screen.getByTestId('managed-names')).toHaveTextContent('Organization: Acme');
+		unmount();
+		expect(off).toHaveBeenCalled();
 	});
 });
 

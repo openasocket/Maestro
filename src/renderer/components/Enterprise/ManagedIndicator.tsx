@@ -5,12 +5,12 @@
  * Drawn in the Left Bar's indicator band beside the other global indicators.
  * It shows only for an enrolled desktop (the same rule as the compact
  * `<ManagedStatus>` badge): an ordinary unmanaged Maestro keeps its header.
- * Hover shows the facts an admin asks first (the standing and why, the
- * organization, the server saved here, endpoint attachment, the applied policy
- * revision and its freshness, what policy holds, and the library version). A
- * click opens the Mega-Maestro window, which holds the full detail and the
- * server lookup. Nothing here contacts a server: every fact is already in the
- * projection or the saved settings.
+ * Hover shows the facts a person asks first: the standing and why, then the
+ * organization, team path and policy (platform-default@12) as names from the
+ * connect status, and how much policy holds. A name that is absent drops its
+ * line rather than show an ID (MSX-03-05). The saved server, the endpoint
+ * attachment, the IDs and the library version are technical and live in the
+ * Troubleshoot tab of the Mega-Maestro window, which a click opens.
  *
  * Connect status (MSX-01-08): when a `connectStatus` is supplied, the badge
  * shows the one word `viewFor()` gives for it (Connected, Waiting for approval,
@@ -20,15 +20,13 @@
  * accessible name. With no `connectStatus` the badge renders exactly as before.
  */
 
-import { MAESTRO_LIB_VERSION } from '../../../shared/maestro-lib/version';
-import { megaServerOrigin, type MegaServerSettings } from '../../../shared/megaServer';
 import type { ManagedStateView } from '../../../main/enterprise/managed-state';
 import { useManagedStatus } from '../../hooks/enterprise/useManagedStatus';
-import { useMegaServerSettings } from '../../hooks/enterprise/useMegaServerSettings';
+import { useConnectStatus } from '../../hooks/enterprise/useConnectStatus';
 import { openUiSurface } from '../../utils/openUiSurface';
 import type { Theme } from '../../types';
 import { MANAGED_STANDING_COPY } from '../../hooks/enterprise/useManagedStatus';
-import { STANDING_TINT } from './ManagedStatus';
+import { STANDING_TINT, connectionNameLines } from './ManagedStatus';
 import { viewFor, type MegaConnectStatus } from '../../../shared/megaConnect/view';
 import type { MegaConnectCopyKey } from '../../../shared/megaConnect/copy';
 
@@ -44,47 +42,26 @@ export const CONNECT_INDICATOR_TINT: Partial<
 };
 
 export const MANAGED_INDICATOR_COPY = {
-	serverNotSet: 'not set',
-	endpointDetached: 'not attached',
 	noHolds: 'none',
 	openDetails: 'Click to open the Mega-Maestro details.',
 } as const;
 
 /**
- * The lines the hover shows, in the order an admin reads them. Pure: the same
- * projection and saved settings always give the same text.
+ * The lines the hover shows, in the order a person reads them. Pure: the same
+ * projection and connect status always give the same text. Names come from
+ * the connect status only; nothing here prints an ID, a host or a socket.
  */
 export function managedIndicatorLines(
 	state: ManagedStateView,
-	server: MegaServerSettings | null | undefined
+	connect: MegaConnectStatus | null | undefined
 ): string[] {
 	const copy = MANAGED_STANDING_COPY[state.standing];
 	const lines = [`${copy.label}: ${copy.detail}`];
 	if (state.reason) lines.push(state.reason);
-	if (state.enrollment) {
-		lines.push(
-			`Organization ${state.enrollment.orgId}, tenant ${state.enrollment.tenantId}`,
-			`Enrollment ${state.enrollment.enrollmentId ?? 'none'}`
-		);
-	}
-	const serverText =
-		server && server.host.length > 0
-			? megaServerOrigin(server)
-			: MANAGED_INDICATOR_COPY.serverNotSet;
-	lines.push(`Mega-Maestro server: ${serverText}`);
-	lines.push(
-		state.endpoint.attached
-			? `Endpoint: attached (${state.endpoint.connectivity})`
-			: `Endpoint: ${MANAGED_INDICATOR_COPY.endpointDetached}`
-	);
-	const observed = state.policy.observedAt ? `, observed ${state.policy.observedAt}` : '';
-	lines.push(
-		`Policy: revision ${state.policy.appliedRevision ?? 'none'}, ${state.policy.freshness}${observed}`
-	);
+	lines.push(...connectionNameLines(connect));
 	const holds =
 		state.egress.held.length + state.listeners.held.length + (state.update.held ? 1 : 0);
 	lines.push(`Held by policy: ${holds > 0 ? holds : MANAGED_INDICATOR_COPY.noHolds}`);
-	lines.push(`Maestro library ${MAESTRO_LIB_VERSION}`);
 	lines.push(MANAGED_INDICATOR_COPY.openDetails);
 	return lines;
 }
@@ -98,7 +75,9 @@ export function ManagedIndicator({
 	connectStatus?: MegaConnectStatus;
 }) {
 	const managed = useManagedStatus();
-	const server = useMegaServerSettings();
+	const liveConnect = useConnectStatus();
+	// The names follow the status the badge shows, or the live one when none is passed.
+	const connect = connectStatus ?? liveConnect;
 	const state = managed.state;
 	if (connectStatus) {
 		if (!managed.supported) return null;
@@ -108,7 +87,7 @@ export function ManagedIndicator({
 				status={connectStatus}
 				title={
 					state && state.standing !== 'unenrolled'
-						? managedIndicatorLines(state, server).join('\n')
+						? managedIndicatorLines(state, connect).join('\n')
 						: MANAGED_INDICATOR_COPY.openDetails
 				}
 			/>
@@ -118,7 +97,7 @@ export function ManagedIndicator({
 
 	const copy = MANAGED_STANDING_COPY[state.standing];
 	const tint = theme.colors[STANDING_TINT[state.standing]];
-	const lines = managedIndicatorLines(state, server);
+	const lines = managedIndicatorLines(state, connect);
 	return (
 		<button
 			type="button"

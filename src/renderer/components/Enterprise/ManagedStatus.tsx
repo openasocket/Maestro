@@ -27,6 +27,12 @@
  * draws its label and sentence beside them. A held version is never offered
  * as a restart, and there is no install control here: the Update modal owns
  * installing.
+ *
+ * Names (MSX-03-05): the full pane shows the organization, team path and
+ * policy (platform-default@12) as names from the connect status, one line
+ * each, and drops a line whose name is absent rather than show an ID. The
+ * enrollment and organization IDs, the server, the endpoint attachment and the
+ * library version belong to the Troubleshoot tab of the Mega-Maestro window.
  */
 
 import { formatManagedHold, formatRelativeTime } from '../../../shared/formatters';
@@ -41,6 +47,36 @@ import {
 } from '../../hooks/enterprise/useManagedStatus';
 import type { Theme } from '../../types';
 import { MiniBadge } from '../ui/MiniBadge';
+import { connectionNames, type MegaConnectStatus } from '../../../shared/megaConnect/view';
+import { fillMegaConnectCopy } from '../../../shared/megaConnect/copy';
+import { useConnectStatus } from '../../hooks/enterprise/useConnectStatus';
+
+/**
+ * "Organization: Acme", "Team: platform/web", "Policy: platform-default@12"
+ * for a connected status, in that order. A name that is absent or shaped like
+ * an ID drops its line; nothing here ever prints an ID.
+ */
+export function connectionNameLines(status: MegaConnectStatus | null | undefined): string[] {
+	const names = connectionNames(status);
+	const lines: string[] = [];
+	if (names.org) lines.push(fillMegaConnectCopy('statusOrgLine', { org: names.org }));
+	if (names.team) lines.push(fillMegaConnectCopy('statusTeamLine', { team: names.team }));
+	if (names.policy) lines.push(fillMegaConnectCopy('statusPolicyLine', { policy: names.policy }));
+	return lines;
+}
+
+/** The name lines under the standing sentence, or null when none is known. */
+function Names({ status }: { status: MegaConnectStatus | undefined }) {
+	const lines = connectionNameLines(status);
+	if (lines.length === 0) return null;
+	return (
+		<ul className="text-xs select-text" data-testid="managed-names">
+			{lines.map((line) => (
+				<li key={line}>{line}</li>
+			))}
+		</ul>
+	);
+}
 
 export const STATUS_COPY = {
 	standing: 'Standing',
@@ -139,6 +175,11 @@ export interface ManagedStatusProps {
 	};
 	/** The badge alone, for a header; nothing at all for an unmanaged desktop. */
 	compact?: boolean;
+	/**
+	 * The connect status whose names the full pane shows. Omitted, the pane
+	 * follows the live status through `useConnectStatus()`.
+	 */
+	connectStatus?: MegaConnectStatus;
 	testId?: string;
 }
 
@@ -147,8 +188,11 @@ export function ManagedStatus({
 	status,
 	compact = false,
 	testId = 'managed-standing',
+	connectStatus,
 }: ManagedStatusProps) {
 	const { supported, state, error, update } = status;
+	const liveConnect = useConnectStatus();
+	const connect = connectStatus ?? liveConnect;
 	if (!supported || state === undefined || state === null) {
 		if (compact) return null;
 		let sentence: string = STATUS_COPY.reading;
@@ -183,6 +227,7 @@ export function ManagedStatus({
 				<MiniBadge label={copy.label} theme={theme} color={tint} testId={testId} />
 			</div>
 			<p className="text-xs opacity-70">{detail}</p>
+			<Names status={connect} />
 			<Holds state={state} word={update} />
 			<RestartNeeded state={state} word={update} />
 		</>

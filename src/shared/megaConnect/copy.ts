@@ -91,6 +91,13 @@ export const MEGA_CONNECT_COPY = {
 	panelTabOverview: 'Overview',
 	panelTabTroubleshoot: 'Troubleshoot',
 
+	// PROPOSED: the name lines of the Left Bar hover and the standing pane
+	// (MSX-03-05). They only ever receive names from the connect status; a
+	// missing name drops its line. Mega reviews these in SIMPLE-05 (copy).
+	statusOrgLine: 'Organization: {org}',
+	statusTeamLine: 'Team: {team}',
+	statusPolicyLine: 'Policy: {policy}',
+
 	// PROPOSED: the Connect card (MSX-03-01). Field hints are shown under a
 	// field whose shape check fails; main checks the input again, so a hint is
 	// only a hint. Mega reviews these in SIMPLE-05 (copy).

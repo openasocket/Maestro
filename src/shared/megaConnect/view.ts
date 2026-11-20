@@ -136,6 +136,28 @@ export function formatPolicyRef(name: string | undefined, revision?: number): st
 	return label;
 }
 
+/** The names a connected status carries, each null when absent or shaped like an ID. */
+export interface MegaConnectionNames {
+	org: string | null;
+	team: string | null;
+	/** "platform-default@12", or the bare label when no revision is known. */
+	policy: string | null;
+}
+
+/**
+ * The organization, team path and policy names of `status`, for a status line
+ * outside Troubleshoot. Only a connected status names them; a name that is
+ * absent or looks like an ID, digest or path is null, never replaced by an ID.
+ */
+export function connectionNames(status: MegaConnectStatus | null | undefined): MegaConnectionNames {
+	if (!status || status.kind !== 'connected') return { org: null, team: null, policy: null };
+	return {
+		org: displayName(status.orgName),
+		team: displayName(status.teamPath),
+		policy: status.policy ? formatPolicyRef(status.policy.name, status.policy.revision) : null,
+	};
+}
+
 /** "synced 3m ago" for a sync at `date`, measured from `now`. */
 export function formatSyncedAgo(date: Date | number, now: Date | number = Date.now()): string {
 	const at = typeof date === 'number' ? date : date.getTime();
