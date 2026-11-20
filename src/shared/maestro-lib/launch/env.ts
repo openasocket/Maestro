@@ -4,6 +4,7 @@ import { buildExpandedPath, detectNodeVersionManagerBinPaths } from '../../pathU
 import { isWindows } from '../../platformDetection';
 import { DEFAULT_QUERY_SOURCE, QUERY_SOURCE_ENV_VAR, type QuerySource } from '../../querySource';
 import { buildSpawnPath, STANDARD_UNIX_PATHS } from './spawn-path';
+import { KNOWN_FULL_ACCESS_FLAGS } from './access-flags';
 import { isBlankEnvKey, isBlankEnvValue, isSecretEnvKey } from '../../agentEnvironment';
 import {
 	CALLER_AGENT_ID_ENV_VAR,
@@ -932,13 +933,7 @@ export function applyManagedEnvCeiling(
  * `yoloModeArgs` (`--yolo`, `--always-approve`) join them per provider in
  * {@link fullAccessFlagsOf}.
  */
-export const KNOWN_FULL_ACCESS_FLAGS: readonly string[] = [
-	'--dangerously-skip-permissions',
-	'--dangerously-bypass-approvals-and-sandbox',
-	'--skip-permissions-unsafe',
-	'-y',
-	'--allow-all',
-];
+export { KNOWN_FULL_ACCESS_FLAGS } from './access-flags';
 
 /**
  * Value-taking mode flags whose named value asks for full access: Claude's
