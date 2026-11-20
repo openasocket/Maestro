@@ -28,6 +28,12 @@ import { isEndpointDigest } from '../../../shared/maestro-lib/managed/endpoint-p
 import { resolveEndpointSocket } from '../../../shared/megaServer';
 import type { EndpointInboxAction } from '../../../shared/maestro-lib/managed/host-adapter';
 import type { CommandService, CommandServiceStatus } from '../../enterprise/commands';
+import {
+	parseConnectStartInput,
+	type ConnectResult,
+	type ConnectService,
+	type ConnectStatusView,
+} from '../../enterprise/connect';
 import type { ManagedRunView } from '../../enterprise/dispatch';
 import type {
 	EnrollmentLifecycle,
@@ -80,6 +86,32 @@ export interface EnterpriseHandlerDependencies {
 	getInbox: () => InboxClient | null;
 	/** The typed runtime command service (MRC-11-05); null when no service runs. Read only: nothing here delivers a command. */
 	getCommands: () => CommandService | null;
+	/**
+	 * Connect to your organization (`connect.ts`, MSX-02-02): start, status and
+	 * disconnect; null (or absent) when no service runs.
+	 */
+	getConnect?: () => ConnectService | null;
+	/** Pushes each connect status change to the renderers on `enterprise:connectStatus`. */
+	safeSend?: (channel: string, ...args: unknown[]) => void;
+}
+
+/** The connect push channel; the same name as the status read, as the preload subscribes to it. */
+export const CONNECT_STATUS_CHANNEL = 'enterprise:connectStatus';
+/** A desktop with no service cannot connect: the same refusal a service with no port gives. */
+const NO_CONNECT_SERVICE: ConnectResult<never> = {
+	ok: false,
+	refusal: 'endpoint_connect_unavailable',
+};
+const NO_CONNECT_STATUS: ConnectStatusView = { status: { kind: 'unavailable' } };
+
+/**
+ * The renderer's start input, shape-checked in main before the service sees it
+ * (`megaConnect/input.ts` through `parseConnectStartInput`). A rejection names
+ * its rule and never carries the value (a typed email, a join code).
+ */
+export function validateConnectStart(raw: unknown): ConnectResult<never> | null {
+	const parsed = parseConnectStartInput(raw);
+	return parsed.ok ? null : { ok: false, refusal: 'invalid_input', reason: parsed.reason };
 }
 
 function handlerOpts(operation: string) {
@@ -393,6 +425,51 @@ export function registerEnterpriseHandlers(deps: EnterpriseHandlerDependencies):
 			}
 		)
 	);
+
+	// Connect to your organization (MSX-02-02). Every input is validated here before the
+	// service, which validates it again; a refusal is an answer, not a throw. Nothing here
+	// logs the matching number, the request reference, the approval URL or a join code.
+	ipcMain.handle(
+		'enterprise:connectStart',
+		withIpcErrorLogging(
+			handlerOpts('connectStart'),
+			async (raw: unknown): Promise<ConnectResult<ConnectStatusView>> => {
+				const rejected = validateConnectStart(raw);
+				if (rejected) return rejected;
+				return deps.getConnect?.()?.start(raw) ?? NO_CONNECT_SERVICE;
+			}
+		)
+	);
+
+	ipcMain.handle(
+		CONNECT_STATUS_CHANNEL,
+		withIpcErrorLogging(
+			handlerOpts('connectStatus'),
+			async (raw: unknown): Promise<ConnectStatusView> => {
+				if (raw !== undefined && raw !== null)
+					throw new Error('The connect status takes no argument.');
+				return deps.getConnect?.()?.status() ?? NO_CONNECT_STATUS;
+			}
+		)
+	);
+
+	ipcMain.handle(
+		'enterprise:connectDisconnect',
+		withIpcErrorLogging(
+			handlerOpts('connectDisconnect'),
+			async (raw: unknown): Promise<ConnectResult<ConnectStatusView>> => {
+				if (raw !== undefined && raw !== null) throw new Error('Disconnect takes no argument.');
+				return deps.getConnect?.()?.disconnect() ?? NO_CONNECT_SERVICE;
+			}
+		)
+	);
+
+	// Each status change reaches every renderer once; the service owns the poll loop.
+	const connectService = deps.getConnect?.();
+	if (connectService && deps.safeSend) {
+		const send = deps.safeSend;
+		connectService.onChange((view) => send(CONNECT_STATUS_CHANNEL, view));
+	}
 
 	ipcMain.handle(
 		'enterprise:requestEnrollment',

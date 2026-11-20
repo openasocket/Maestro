@@ -34,6 +34,7 @@ import {
 	shell,
 	ipcMain,
 	dialog,
+	Notification,
 	type OpenExternalOptions,
 	type IpcMainInvokeEvent,
 } from 'electron';
@@ -2146,6 +2147,15 @@ app
 					if (!stored || stored.toolType !== provider) return null;
 					const dir = resolveAgentAccountDir(agentId);
 					return dir === undefined ? null : managedAccountRef(provider, dir);
+				},
+				// Connect to your organization (MSX-02-02): the approval page opens under the
+				// local-effects hold, and each announced change is one silent OS notification
+				// carrying copy.ts text only (never the number, a request id or a URL).
+				localEffects: () => localEffectsPolicy,
+				openExternal: (url) => shell.openExternal(url),
+				notify: ({ title, body }) => {
+					if (!Notification.isSupported()) return;
+					new Notification({ title, body, silent: true }).show();
 				},
 			});
 		} catch (error) {

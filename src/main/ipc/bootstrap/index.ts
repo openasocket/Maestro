@@ -138,6 +138,8 @@ export function setupIpcHandlers(deps: IpcBootstrapDependencies): void {
 		getInbox: () => deps.getEnterpriseService()?.inbox ?? null,
 		getCommands: () => deps.getEnterpriseService()?.commands ?? null,
 		getMegaServer: () => deps.getEnterpriseService()?.megaServer ?? null,
+		getConnect: () => deps.getEnterpriseService()?.connect ?? null,
+		safeSend: deps.safeSend,
 	});
 
 	// Computer History - desktop-only, the bridge refuses every

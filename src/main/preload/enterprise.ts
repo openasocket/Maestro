@@ -23,6 +23,7 @@ import type {
 	ManagedPolicyStatus,
 } from '../../shared/maestro-lib/managed/host-adapter';
 import type { CommandServiceStatus } from '../enterprise/commands';
+import type { ConnectResult, ConnectStatusView } from '../enterprise/connect';
 import type { MegaServerLookup, MegaServerSettings } from '../../shared/megaServer';
 import type { ManagedRunView } from '../enterprise/dispatch';
 import type {
@@ -35,6 +36,38 @@ import type { InboxActionOutcome, InboxRefresh, ManagedInboxView } from '../ente
 import type { InstallationInventory } from '../enterprise/inventory';
 import type { ManagedStateView } from '../enterprise/managed-state';
 import type { PolicyRecovery } from '../enterprise/policy-status';
+
+/**
+ * A start input as the renderer sends it; main shape-checks every field again
+ * (`megaConnect/input.ts`), so a renderer check is only a hint.
+ */
+export type ConnectStartRequest =
+	| { kind: 'email'; email: string }
+	| { kind: 'joinLink'; joinLink: string }
+	| { kind: 'teamCode'; teamCode: string; server: string }
+	| { kind: 'managed' };
+
+/** Connect to your organization (MSX-02-02): `window.maestro.enterprise.connect`. */
+function createConnectApi() {
+	return {
+		/** Validate, open a connect request, and open its approval page; a refusal is an answer. */
+		start: (input: ConnectStartRequest): Promise<ConnectResult<ConnectStatusView>> =>
+			ipcRenderer.invoke('enterprise:connectStart', input),
+		/** Ask the endpoint now; `unavailable` until a connect port is bound. */
+		status: (): Promise<ConnectStatusView> => ipcRenderer.invoke('enterprise:connectStatus'),
+		/** Revoke this OS account's grant on this installation. */
+		disconnect: (): Promise<ConnectResult<ConnectStatusView>> =>
+			ipcRenderer.invoke('enterprise:connectDisconnect'),
+		/** Hear every status change main observes; returns the unsubscribe function. */
+		onStatus: (callback: (view: ConnectStatusView) => void): (() => void) => {
+			const handler = (_event: unknown, view: ConnectStatusView) => callback(view);
+			ipcRenderer.on('enterprise:connectStatus', handler);
+			return () => {
+				ipcRenderer.removeListener('enterprise:connectStatus', handler);
+			};
+		},
+	};
+}
 
 export function createEnterpriseApi() {
 	return {
@@ -78,8 +111,11 @@ export function createEnterpriseApi() {
 			input: EnrollmentRequestInput
 		): Promise<LifecycleOutcome<EndpointEnrollmentResult>> =>
 			ipcRenderer.invoke('enterprise:requestEnrollment', input),
-		connect: (): Promise<LifecycleOutcome<EndpointStatus>> =>
+		/** Re-attach the enrolled installation to its endpoint (the lifecycle verb). */
+		connectEndpoint: (): Promise<LifecycleOutcome<EndpointStatus>> =>
 			ipcRenderer.invoke('enterprise:connect'),
+		/** Connect to your organization: start, status, disconnect and the status subscription. */
+		connect: createConnectApi(),
 		/** The approval handoff is shown once; nothing keeps it. */
 		beginRegistration: (): Promise<LifecycleOutcome<RegistrationApprovalHandoff>> =>
 			ipcRenderer.invoke('enterprise:beginRegistration'),

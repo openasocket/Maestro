@@ -176,6 +176,9 @@ import { heldEgress, type EgressHold } from '../utils/fetchWithTimeout';
 import type { EnrollmentRequestInput, LifecycleOutcome } from './enrollment';
 import type { InstallationInventory } from './inventory';
 import { createMegaServerService, type MegaServerService } from './mega-server';
+import { createConnectService, type ConnectService } from './connect';
+import type { LocalEffectAuthority } from './local-effects-policy';
+import type { MegaConnectNotification } from '../../shared/megaConnect/notify';
 import { heldListeners, type ListenerHold } from './listener-gate';
 import {
 	managedStandingOf,
@@ -643,6 +646,15 @@ export interface EnterpriseServiceDeps {
 	 * account concept or the agent's current provider is not the run's. Default: none (null).
 	 */
 	accountRefOf?(agent: { agentId: string; provider: string }): string | null;
+	/**
+	 * Connect to your organization (MSX-02-02): the local-effects authority the
+	 * approval page is opened under. Default: none (the hold applies its own rule).
+	 */
+	localEffects?: () => LocalEffectAuthority | null;
+	/** Delivers one connect notification as an OS notification. Default: nothing is shown. */
+	notify?(notification: MegaConnectNotification): void;
+	/** Opens the approval page outside Maestro, only after the hold allowed it. Default: refused. */
+	openExternal?(url: string): Promise<void>;
 }
 
 /**
@@ -769,6 +781,13 @@ export interface EnterpriseService {
 	 * every answer is printable (nothing sealed or secret is in it).
 	 */
 	readonly managed: ManagedOperations;
+	/**
+	 * Connect to your organization (`connect.ts`, MSX-02-02): start, status and
+	 * disconnect over Maestro's own ConnectPort. No port is bound until the Mega
+	 * adapter exists (MSX-02-08), so start and disconnect answer
+	 * `endpoint_connect_unavailable` and the status is `unavailable`.
+	 */
+	readonly connect: ConnectService;
 	/**
 	 * The workflow owner fences this installation holds (MRC-07-06), claimed
 	 * through the endpoint's workflow owner operation and kept in
@@ -1072,6 +1091,20 @@ export function createEnterpriseService(deps: EnterpriseServiceDeps): Enterprise
 		dispatch,
 		...(deps.holds ? { holds: deps.holds } : {}),
 	});
+	// Connect to your organization: no port is bound yet (the Mega adapter is MSX-02-08), so
+	// the service answers endpoint_connect_unavailable, a real refusal, until one is.
+	const connect = createConnectService({
+		port: () => null,
+		get localEffects() {
+			return deps.localEffects?.() ?? null;
+		},
+		notify: (notification) => deps.notify?.(notification),
+		openExternal: async (url) => {
+			if (!deps.openExternal) throw new Error('No browser hand-off is composed in this host.');
+			await deps.openExternal(url);
+		},
+		now,
+	});
 	// A refresh is where a revocation or suspension is learned: the runs it refuses stop now.
 	const managed: ManagedOperations = {
 		...operations,
@@ -1106,6 +1139,7 @@ export function createEnterpriseService(deps: EnterpriseServiceDeps): Enterprise
 		inbox,
 		commands,
 		managed,
+		connect,
 		workflows,
 		claimWorkflowFence,
 		constrainLiveRuns,
@@ -1145,6 +1179,8 @@ export function createEnterpriseService(deps: EnterpriseServiceDeps): Enterprise
 				// What this boot is, once its standing is known: one event per distinct
 				// inventory, kept by the journal, withheld from the endpoint by name.
 				inventory.record();
+				// The connect status is polled from here on (every 60 s idle, 3 s while a request waits).
+				if (!closing) connect.watch();
 				// From here on a live run is held to the standing between sends, not only at admission.
 				if (liveRunCheckMs > 0 && !closing && !liveRunTimer) {
 					liveRunTimer = setInterval(() => {
@@ -1164,6 +1200,7 @@ export function createEnterpriseService(deps: EnterpriseServiceDeps): Enterprise
 				liveRunTimer = null;
 				stopVibes?.();
 				stopVibes = null;
+				connect.dispose();
 				host.authority.revokeAll('The desktop authority is closing.');
 				// A failed start still needs cleanup; its caller receives the original rejection.
 				await starting?.catch(() => undefined);

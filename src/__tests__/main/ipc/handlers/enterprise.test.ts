@@ -154,6 +154,9 @@ describe('enterprise handlers', () => {
 			'enterprise:commandStatus',
 			'enterprise:completeRegistration',
 			'enterprise:connect',
+			'enterprise:connectDisconnect',
+			'enterprise:connectStart',
+			'enterprise:connectStatus',
 			'enterprise:custody',
 			'enterprise:inboxAct',
 			'enterprise:inboxRefresh',
@@ -492,5 +495,106 @@ describe('enterprise handlers', () => {
 		await expect(invoke('enterprise:clearIdentity', { installationId: 'inst-1' })).rejects.toThrow(
 			'disk is read-only'
 		);
+	});
+});
+
+describe('connect to your organization handlers (MSX-02-02)', () => {
+	const WAITING = {
+		status: { kind: 'browserOpened', matchNumber: 47, request: 1042, serverName: 'mega.acme.com' },
+		names: { server: 'mega.acme.com' },
+	};
+	let listener: ((view: unknown) => void) | null;
+	const connect = {
+		start: vi.fn(),
+		status: vi.fn(),
+		disconnect: vi.fn(),
+		onChange: vi.fn((fn: (view: unknown) => void) => {
+			listener = fn;
+			return () => undefined;
+		}),
+	};
+	const safeSend = vi.fn();
+
+	function register(getConnect: (() => any) | undefined) {
+		registerEnterpriseHandlers({
+			getLifecycle: () => null,
+			getPolicyStatus: () => null,
+			getIdentity: () => null,
+			getManaged: () => null,
+			getInbox: () => null,
+			getCommands: () => null,
+			getMegaServer: () => null,
+			...(getConnect ? { getConnect } : {}),
+			safeSend,
+		});
+	}
+
+	beforeEach(() => {
+		vi.clearAllMocks();
+		registeredHandlers.clear();
+		listener = null;
+	});
+
+	it('validates the start input in main before the service sees it', async () => {
+		register(() => connect);
+		connect.start.mockResolvedValue({ ok: true, value: WAITING });
+		const input = { kind: 'email', email: 'alice@acme.com' };
+		expect(await invoke('enterprise:connectStart', input)).toEqual({ ok: true, value: WAITING });
+		expect(connect.start).toHaveBeenCalledWith(input);
+	});
+
+	it('rejects a malformed email by rule, never echoing the value, and never calls the service', async () => {
+		register(() => connect);
+		for (const raw of [
+			{ kind: 'email', email: 'not-an-email' },
+			{ kind: 'email', email: 42 },
+			{ kind: 'teamCode', teamCode: 'ABCD-EFGH' },
+			{ kind: 'unknown' },
+			'alice@acme.com',
+			null,
+		]) {
+			const answer = await invoke('enterprise:connectStart', raw);
+			expect(answer).toMatchObject({ ok: false, refusal: 'invalid_input' });
+			expect(typeof answer.reason).toBe('string');
+			expect(JSON.stringify(answer)).not.toContain('not-an-email');
+		}
+		expect(connect.start).not.toHaveBeenCalled();
+	});
+
+	it('reads the status and disconnects through the service', async () => {
+		register(() => connect);
+		connect.status.mockResolvedValue(WAITING);
+		connect.disconnect.mockResolvedValue({ ok: true, value: { status: { kind: 'notConnected' } } });
+		expect(await invoke('enterprise:connectStatus')).toEqual(WAITING);
+		expect(await invoke('enterprise:connectDisconnect')).toEqual({
+			ok: true,
+			value: { status: { kind: 'notConnected' } },
+		});
+		await expect(invoke('enterprise:connectStatus', { poll: true })).rejects.toThrow();
+		await expect(invoke('enterprise:connectDisconnect', 'everything')).rejects.toThrow();
+		expect(connect.disconnect).toHaveBeenCalledTimes(1);
+	});
+
+	it('pushes each status change to the renderers on enterprise:connectStatus', () => {
+		register(() => connect);
+		expect(connect.onChange).toHaveBeenCalledTimes(1);
+		listener?.(WAITING);
+		expect(safeSend).toHaveBeenCalledWith('enterprise:connectStatus', WAITING);
+	});
+
+	it('answers unavailable without a service, and still validates first', async () => {
+		register(undefined);
+		expect(await invoke('enterprise:connectStatus')).toEqual({ status: { kind: 'unavailable' } });
+		expect(await invoke('enterprise:connectStart', { kind: 'managed' })).toEqual({
+			ok: false,
+			refusal: 'endpoint_connect_unavailable',
+		});
+		expect(await invoke('enterprise:connectDisconnect')).toEqual({
+			ok: false,
+			refusal: 'endpoint_connect_unavailable',
+		});
+		expect(await invoke('enterprise:connectStart', { kind: 'email', email: '' })).toMatchObject({
+			refusal: 'invalid_input',
+		});
 	});
 });

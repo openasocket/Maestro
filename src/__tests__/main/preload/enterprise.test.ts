@@ -9,10 +9,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mockInvoke = vi.fn();
+const mockOn = vi.fn();
+const mockRemoveListener = vi.fn();
 
 vi.mock('electron', () => ({
 	ipcRenderer: {
 		invoke: (...args: unknown[]) => mockInvoke(...args),
+		on: (...args: unknown[]) => mockOn(...args),
+		removeListener: (...args: unknown[]) => mockRemoveListener(...args),
 	},
 }));
 
@@ -35,6 +39,7 @@ describe('Enterprise Preload API', () => {
 			'commandStatus',
 			'completeRegistration',
 			'connect',
+			'connectEndpoint',
 			'custody',
 			'inboxAct',
 			'inboxRefresh',
@@ -67,7 +72,7 @@ describe('Enterprise Preload API', () => {
 		await api.inboxRefresh();
 		await api.commandStatus();
 		await api.managedRun('lease-1');
-		await api.connect();
+		await api.connectEndpoint();
 		await api.beginRegistration();
 		await api.completeRegistration();
 		await api.refreshPolicy();
@@ -115,6 +120,27 @@ describe('Enterprise Preload API', () => {
 			['enterprise:clearIdentity', { installationId: 'inst-1', acknowledgeUntrusted: true }],
 			['enterprise:inboxAct', { campaignId: 'c', messageId: 'm', action: { kind: 'read' } }],
 		]);
+	});
+
+	it('exposes connect to your organization as start, status, disconnect and onStatus', async () => {
+		expect(Object.keys(api.connect).sort()).toEqual(['disconnect', 'onStatus', 'start', 'status']);
+		await api.connect.start({ kind: 'email', email: 'alice@acme.com' });
+		await api.connect.status();
+		await api.connect.disconnect();
+		expect(mockInvoke.mock.calls).toEqual([
+			['enterprise:connectStart', { kind: 'email', email: 'alice@acme.com' }],
+			['enterprise:connectStatus'],
+			['enterprise:connectDisconnect'],
+		]);
+
+		const heard = vi.fn();
+		const unsubscribe = api.connect.onStatus(heard);
+		expect(mockOn).toHaveBeenCalledWith('enterprise:connectStatus', expect.any(Function));
+		const handler = mockOn.mock.calls[0][1] as (event: unknown, view: unknown) => void;
+		handler({}, { status: { kind: 'waiting' } });
+		expect(heard).toHaveBeenCalledWith({ status: { kind: 'waiting' } });
+		unsubscribe();
+		expect(mockRemoveListener).toHaveBeenCalledWith('enterprise:connectStatus', handler);
 	});
 
 	it('resolves with what the channel answered', async () => {
