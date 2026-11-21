@@ -58,12 +58,15 @@ import {
 	endpointAddressProblem,
 	endpointAttachmentRequestProblems,
 	endpointCompatibilityResultProblems,
+	endpointConnectReplyProblems,
+	endpointConnectRequestProblems,
 	endpointNativePortProblem,
 	endpointRegistrationApprovalProblems,
 	endpointRegistrationUseReplyProblems,
 	endpointServerVerificationProblems,
 	endpointStatusProblems,
 	frameLocalEndpointRequest,
+	isEndpointConnectOperation,
 	isEndpointDenied,
 	isEndpointIdentifier,
 	parseLocalEndpointResponse,
@@ -86,8 +89,10 @@ import {
 
 /**
  * The operations a connection may carry before its attachment: the attachment
- * itself, compatibility, the registration handshake and relayed enrollment. Any
- * other operation waits for the attachment, which the endpoint requires first.
+ * itself, compatibility, the registration handshake, relayed enrollment, and
+ * Connect, which Mega's endpoint routes before any session state (an
+ * unconnected Maestro has none) and gates on its native admission of the
+ * account instead. Any other operation waits for the attachment.
  */
 const PRE_ATTACHMENT_OPERATIONS: readonly LocalEndpointOperation[] = [
 	'attachment',
@@ -95,6 +100,9 @@ const PRE_ATTACHMENT_OPERATIONS: readonly LocalEndpointOperation[] = [
 	'registration_challenge',
 	'registration_redeem',
 	'enrollment',
+	'connect',
+	'connection_status',
+	'disconnect',
 ];
 
 /** The longest Unix socket path every supported kernel accepts (`sun_path` less the terminator). */
@@ -502,7 +510,18 @@ export function createLocalEndpointClient(deps: LocalEndpointClientDeps): Endpoi
 						`This connection is not attached; ${operation} was not sent. attach() first.`
 					);
 				}
-				return invokeEnvelope(operation, payload);
+				if (!isEndpointConnectOperation(operation)) return invokeEnvelope(operation, payload);
+				const problems = endpointConnectRequestProblems(operation, payload);
+				if (problems.length > 0) {
+					return unavailable(
+						'malformed',
+						`The ${operation} request was not sent: ${problems.join('; ')}`
+					);
+				}
+				const outcome = await invokeEnvelope(operation, payload);
+				if (outcome.status !== 'ok') return outcome;
+				const bad = endpointConnectReplyProblems(operation, outcome.payload);
+				return bad.length > 0 ? unavailable('malformed', bad.join('; ')) : outcome;
 			}),
 
 		negotiated: (operation) => negotiated?.capabilities.includes(operation) ?? false,

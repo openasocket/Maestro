@@ -108,6 +108,9 @@ const OPERATIONS = [
 	'workflow_renew',
 	'workflow_settle',
 	'workflow_release',
+	'connect',
+	'connection_status',
+	'disconnect',
 ];
 
 export async function startFakeEndpoint(options: FakeEndpointOptions = {}): Promise<FakeEndpoint> {
@@ -282,6 +285,14 @@ export async function startFakeEndpoint(options: FakeEndpointOptions = {}): Prom
 			if (operation === 'enrollment' && capabilities().includes('enrollment')) {
 				const handler = live.operations?.enrollment;
 				answer(handler ? handler(payload) : deny('unavailable'));
+				return;
+			}
+			// Connect is routed before any session or registration state, as Mega's dispatchV2.
+			if (['connect', 'connection_status', 'disconnect'].includes(operation)) {
+				const handler = live.operations?.[operation];
+				answer(
+					capabilities().includes(operation) && handler ? handler(payload) : deny('unauthenticated')
+				);
 				return;
 			}
 			// `compatibility` is pre-registration, as the daemon's preRegistrationOperations.

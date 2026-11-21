@@ -92,6 +92,8 @@
 		"originExtensions": ["headless"],
 		"denialCodeExtensions": ["context-mismatch", "lease-invalid"],
 		"commandActionExtensions": ["pause_run", "resume_run", "operator_prompt"],
-		"commandActionExtensionsNote": "pause_run and resume_run wait on CP-05; all three are answered unsupported by name"
+		"commandActionExtensionsNote": "pause_run and resume_run wait on CP-05; all three are answered unsupported by name",
+		"operationExtensions": ["connect", "connection_status", "disconnect"],
+		"operationExtensionsNote": "Mega source SIMPLE-03-08P, after the published 0.5.0 archive d3d9604f whose operation map lacks them; the endpoint serves them before any session to an account it admits natively"
 	}
 }

@@ -411,4 +411,171 @@ describe('local endpoint client', () => {
 		).toMatchObject({ status: 'unavailable', reason: 'closed' });
 		expect(fake.calls).toHaveLength(1);
 	});
+	describe('Connect operations', () => {
+		const WAITING = {
+			outcome: 'waiting',
+			requestNumber: 'REQ-1042',
+			approvalUrl: 'https://mega.example.com/connect/r/abc',
+			number: '47',
+			server: 'mega.example.com',
+			tenantDisplayName: 'Acme Inc',
+		};
+		const STATUS = {
+			state: 'connected',
+			stateSeq: 2,
+			stateChangedAt: '2026-11-21T10:00:00.000Z',
+			request: { number: 'REQ-1042', decidedAt: '2026-11-21T10:00:00.000Z' },
+			names: {
+				tenant: { handle: 'acme', displayName: 'Acme Inc' },
+				device: 'alice-mbp',
+				runtime: 'alice-mbp/alice',
+			},
+		};
+
+		it('are sent before any attachment, as the endpoint routes them before session state', async () => {
+			const fake = await endpoint({
+				capabilities: ['connect', 'connection_status', 'disconnect'],
+				registrationRequired: true,
+				operations: {
+					connect: () => WAITING,
+					connection_status: () => STATUS,
+					disconnect: () => ({ outcome: 'disconnected' }),
+				},
+			});
+			const port = client(fake);
+			expect(await port.invoke('connect', { joinLink: 'https://mega.example.com/join/x' })).toEqual(
+				{
+					status: 'ok',
+					payload: WAITING,
+				}
+			);
+			expect(await port.invoke('connection_status', {})).toEqual({ status: 'ok', payload: STATUS });
+			expect(await port.invoke('disconnect', {})).toEqual({
+				status: 'ok',
+				payload: { outcome: 'disconnected' },
+			});
+			expect(port.state().attached).toBe(false);
+			expect(fake.calls.map((c) => (c.body as { operation: string }).operation)).toEqual([
+				'connect',
+				'connection_status',
+				'disconnect',
+			]);
+		});
+
+		it('a refusal and a denial pass through; an unadmitted account is denied', async () => {
+			const fake = await endpoint({
+				capabilities: ['connect'],
+				operations: { connect: () => ({ outcome: 'refused', code: 'pin_mismatch' }) },
+			});
+			const port = client(fake);
+			expect(await port.invoke('connect', { managed: true })).toEqual({
+				status: 'ok',
+				payload: { outcome: 'refused', code: 'pin_mismatch' },
+			});
+			// connection_status is not offered to this account, so the endpoint denies it.
+			expect(await port.invoke('connection_status', {})).toEqual({
+				status: 'denied',
+				reason: 'unauthenticated',
+			});
+		});
+
+		it('does not send a request outside endpointConnectInput, and never echoes its value', async () => {
+			const fake = await endpoint({ capabilities: ['connect', 'connection_status'] });
+			const port = client(fake);
+			for (const bad of [
+				{ email: 'secret-not-an-email' },
+				{ email: 'a@b.example', managed: true },
+				{ teamCode: 'ABCD-EFGH' },
+				{ teamCode: 'ABCD-EFGH', server: 'HTTP://Bad Host' },
+				{ managed: false },
+				null,
+			]) {
+				const outcome = await port.invoke('connect', bad);
+				expect(outcome).toMatchObject({ status: 'unavailable', reason: 'malformed' });
+				if (outcome.status === 'unavailable') expect(outcome.message).not.toMatch(/secret/);
+			}
+			expect(await port.invoke('connection_status', { stray: 1 })).toMatchObject({
+				status: 'unavailable',
+				reason: 'malformed',
+			});
+			expect(fake.calls).toHaveLength(0);
+		});
+
+		it('refuses an answer outside the connect schemas as malformed', async () => {
+			const answers: Record<string, unknown> = {};
+			const fake = await endpoint({
+				capabilities: ['connect', 'connection_status', 'disconnect'],
+				operations: {
+					connect: () => answers.connect,
+					connection_status: () => answers.connection_status,
+					disconnect: () => answers.disconnect,
+				},
+			});
+			const port = client(fake);
+			const malformed = async (
+				operation: 'connect' | 'connection_status' | 'disconnect',
+				answer: unknown,
+				payload: unknown = {}
+			) => {
+				answers[operation] = answer;
+				const outcome = await port.invoke(operation, payload);
+				expect(outcome, JSON.stringify(answer)).toMatchObject({
+					status: 'unavailable',
+					reason: 'malformed',
+				});
+			};
+			const email = { email: 'alice@acme.example' };
+			await malformed(
+				'connect',
+				{ ...WAITING, approvalUrl: 'https://evil.example.net/connect' },
+				email
+			);
+			await malformed(
+				'connect',
+				{ ...WAITING, approvalUrl: 'http://mega.example.com/connect' },
+				email
+			);
+			await malformed(
+				'connect',
+				{ ...WAITING, approvalUrl: 'https://u:p@mega.example.com/c' },
+				email
+			);
+			await malformed('connect', { ...WAITING, number: '7' }, email);
+			await malformed('connect', { ...WAITING, requestNumber: 'REQ-0' }, email);
+			await malformed(
+				'connect',
+				{ ...WAITING, requestId: '1b4e28ba-2fa1-11d2-883f-0016d3cca427' },
+				email
+			);
+			await malformed('connect', { outcome: 'refused', code: 'Bad Code' }, email);
+			await malformed('connection_status', { ...STATUS, state: 'paused' });
+			await malformed('connection_status', { ...STATUS, stateChangedAt: '2026-11-21T10:00:00Z' });
+			await malformed('connection_status', {
+				...STATUS,
+				names: { device: '1b4e28ba-2fa1-11d2-883f-0016d3cca427' },
+			});
+			await malformed('connection_status', { ...STATUS, names: { runtime: 'alice-mbp' } });
+			await malformed('connection_status', { ...STATUS, enrollmentId: 'e-1' });
+			await malformed('disconnect', { outcome: 'disconnected', at: 'now' });
+		});
+
+		it('connect and disconnect are effectful: a lost answer is unknown, a lost status is a timeout', async () => {
+			const fake = await endpoint({
+				capabilities: ['connect', 'connection_status', 'disconnect'],
+				delayMs: 200,
+				operations: {
+					connect: () => WAITING,
+					connection_status: () => STATUS,
+					disconnect: () => ({ outcome: 'disconnected' }),
+				},
+			});
+			const port = client(fake, { timeoutMs: 50 });
+			expect(await port.invoke('connect', { managed: true })).toMatchObject({ status: 'unknown' });
+			expect(await port.invoke('disconnect', {})).toMatchObject({ status: 'unknown' });
+			expect(await port.invoke('connection_status', {})).toMatchObject({
+				status: 'unavailable',
+				reason: 'timeout',
+			});
+		});
+	});
 });

@@ -76,13 +76,17 @@ describe('Maestro enumerations equal the contract vectors', () => {
 			...runtimePort.capabilities.filter((c) => maestro.capabilityExtensions.includes(c)),
 			...runtimePort.resultCodes.filter((c) => maestro.denialCodeExtensions.includes(c)),
 			...localEndpoint.commandActions.filter((a) => maestro.commandActionExtensions.includes(a)),
+			...localEndpoint.operations.filter((o) => maestro.operationExtensions.includes(o)),
 		];
 		expect(overlap).toEqual([]);
 	});
 
 	it('endpoint-port.ts speaks the recorded protocol, operations, reasons, kinds and limits', () => {
 		expect(LOCAL_ENDPOINT_PROTOCOL).toBe(localEndpoint.protocol);
-		expect([...LOCAL_ENDPOINT_OPERATIONS]).toEqual(localEndpoint.operations);
+		expect([...LOCAL_ENDPOINT_OPERATIONS]).toEqual([
+			...localEndpoint.operations,
+			...maestro.operationExtensions,
+		]);
 		expect([...LOCAL_ENDPOINT_DENIAL_REASONS]).toEqual(localEndpoint.denialReasons);
 		expect(LOCAL_ENDPOINT_MAX_REQUEST_BYTES).toBe(localEndpoint.maxRequestBytes);
 		expect(LOCAL_ENDPOINT_MAX_RESPONSE_BYTES).toBe(localEndpoint.maxResponseBytes);

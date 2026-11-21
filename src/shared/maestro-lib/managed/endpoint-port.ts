@@ -79,6 +79,9 @@ export const LOCAL_ENDPOINT_OPERATIONS = [
 	'workflow_renew',
 	'workflow_settle',
 	'workflow_release',
+	'connect',
+	'connection_status',
+	'disconnect',
 ] as const;
 export type LocalEndpointOperation = (typeof LOCAL_ENDPOINT_OPERATIONS)[number];
 
@@ -98,6 +101,8 @@ export const LOCAL_ENDPOINT_EFFECTFUL_OPERATIONS: readonly LocalEndpointOperatio
 	'workflow_renew',
 	'workflow_settle',
 	'workflow_release',
+	'connect',
+	'disconnect',
 ];
 
 export const LOCAL_ENDPOINT_DENIAL_REASONS = [
@@ -1129,6 +1134,301 @@ function parseEnvelopeAnswer(
 	if (!('payload' in raw)) return { ok: false, problem: 'response has no payload' };
 	return { ok: true, payload: raw.payload };
 }
+
+// ---------------------------------------------------------------------------
+// Connect (contracts `/connect`: endpointConnectInput, endpointConnectAnswer,
+// connectionStatus, endpointDisconnectAnswer). The endpoint serves these to an
+// account it admits natively, in any session state, so they need no attachment.
+// Transcribed from Mega source at SIMPLE-03-08P; the published 0.5.0 archive
+// exports `connectionStatus` but not the operation schemas yet.
+// ---------------------------------------------------------------------------
+
+export const LOCAL_ENDPOINT_CONNECT_OPERATIONS = [
+	'connect',
+	'connection_status',
+	'disconnect',
+] as const satisfies readonly LocalEndpointOperation[];
+export type EndpointConnectOperation = (typeof LOCAL_ENDPOINT_CONNECT_OPERATIONS)[number];
+
+/** What the person typed, passed through unchanged: the endpoint does all discovery and pinning. */
+export type EndpointConnectRequest =
+	| { email: string }
+	| { joinLink: string }
+	| { teamCode: string; server: string }
+	| { managed: true };
+
+export type EndpointConnectAnswer =
+	| {
+			outcome: 'waiting';
+			requestNumber: string;
+			approvalUrl: string;
+			number: string;
+			server: string;
+			tenantDisplayName: string;
+	  }
+	| { outcome: 'refused'; code: string };
+
+export type EndpointConnectState =
+	| 'not_connected'
+	| 'waiting'
+	| 'approved'
+	| 'connected'
+	| 'denied'
+	| 'expired'
+	| 'revoked'
+	| 'grant_expired'
+	| 'disconnected';
+
+/** `connection_status`: names only, never an ID or a digest. */
+export interface EndpointConnectionStatus {
+	state: EndpointConnectState;
+	stateSeq: number;
+	stateChangedAt: string;
+	request?: { number: string; decidedAt?: string; decisionReason?: string };
+	names: {
+		tenant?: { handle: string; displayName: string };
+		teamPath?: string;
+		policy?: { name: string; revision: number };
+		device?: string;
+		runtime?: string;
+	};
+	lastRefusalCode?: string;
+}
+
+export interface EndpointDisconnectAnswer {
+	outcome: 'disconnected';
+}
+
+const CONNECTION_STATES: readonly EndpointConnectState[] = [
+	'not_connected',
+	'waiting',
+	'approved',
+	'connected',
+	'denied',
+	'expired',
+	'revoked',
+	'grant_expired',
+	'disconnected',
+];
+const REQUEST_NUMBER = /^REQ-[1-9][0-9]{0,14}$/;
+const MATCH_NUMBER = /^[0-9]{2}$/;
+const REFUSAL_CODE = /^[a-z][a-z0-9_]{0,63}$/;
+const LABEL = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
+const SERVER_HOST =
+	/^(?=.{1,253}(?::|$))[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*(:[1-9][0-9]{0,4})?$/;
+const ISO_MILLIS = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+const IDENTIFIER_SHAPED =
+	/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{32}/i;
+const UNPRINTABLE = /[\p{Cc}\p{Cf}\p{Co}\p{Cn}\p{Cs}\p{Zl}\p{Zp}]/u;
+
+const hasOnlyKeys = (value: Record<string, unknown>, allowed: readonly string[]): boolean =>
+	Object.keys(value).every((key) => allowed.includes(key));
+const isServerHost = (value: unknown): value is string =>
+	typeof value === 'string' && SERVER_HOST.test(value) && Number(value.split(':')[1] ?? 1) <= 65535;
+const isLabel = (value: unknown): value is string =>
+	typeof value === 'string' && value.length <= 63 && LABEL.test(value);
+const isTimestamp = (value: unknown): boolean =>
+	typeof value === 'string' && ISO_MILLIS.test(value) && Number.isFinite(Date.parse(value));
+const isDisplayText = (value: unknown, max: number): value is string =>
+	typeof value === 'string' &&
+	value.length >= 1 &&
+	value.length <= max &&
+	!UNPRINTABLE.test(value) &&
+	value.trim() === value;
+const isNameOnly = (value: string): boolean => !IDENTIFIER_SHAPED.test(value);
+const isPathOf = (value: unknown, parts: number | null): value is string => {
+	if (typeof value !== 'string') return false;
+	const split = value.split('/');
+	return (parts === null ? split.length >= 1 : split.length === parts) && split.every(isLabel);
+};
+const isEmptyObject = (value: unknown): boolean =>
+	isRecord(value) && Object.keys(value).length === 0;
+
+/** Why a Connect request is not one this client will send, or []. Never echoes the value. */
+export function endpointConnectRequestProblems(
+	operation: EndpointConnectOperation,
+	value: unknown
+): string[] {
+	if (operation !== 'connect') return isEmptyObject(value) ? [] : ['request is not {}'];
+	if (!isRecord(value)) return ['request is not an object'];
+	const keys = Object.keys(value).sort().join(',');
+	if (keys === 'email') {
+		const email = value.email;
+		return typeof email === 'string' && email.length <= 254 && /^[^@\s]+@[^@\s]+$/.test(email)
+			? []
+			: ['email is not an email'];
+	}
+	if (keys === 'joinLink') {
+		return typeof value.joinLink === 'string' &&
+			value.joinLink.length >= 1 &&
+			value.joinLink.length <= 2048
+			? []
+			: ['joinLink is not a link'];
+	}
+	if (keys === 'server,teamCode') {
+		const problems: string[] = [];
+		if (typeof value.teamCode !== 'string' || value.teamCode.length === 0)
+			problems.push('teamCode is not a team code');
+		if (!isServerHost(value.server)) problems.push('server is not a host');
+		return problems;
+	}
+	if (keys === 'managed') return value.managed === true ? [] : ['managed is not true'];
+	return ['request is not exactly one of email, joinLink, teamCode with server, or managed'];
+}
+
+/** Why a `connect` answer is not `endpointConnectAnswer`, or []. */
+export function endpointConnectAnswerProblems(value: unknown): string[] {
+	if (!isRecord(value)) return ['answer is not an object'];
+	if (value.outcome === 'refused') {
+		const problems = hasOnlyKeys(value, ['outcome', 'code']) ? [] : ['answer has unknown fields'];
+		if (typeof value.code !== 'string' || !REFUSAL_CODE.test(value.code))
+			problems.push('code is not a refusal code');
+		return problems;
+	}
+	if (value.outcome !== 'waiting') return ['outcome is not waiting or refused'];
+	const problems: string[] = [];
+	if (
+		!hasOnlyKeys(value, [
+			'outcome',
+			'requestNumber',
+			'approvalUrl',
+			'number',
+			'server',
+			'tenantDisplayName',
+		])
+	)
+		problems.push('answer has unknown fields');
+	if (typeof value.requestNumber !== 'string' || !REQUEST_NUMBER.test(value.requestNumber))
+		problems.push('requestNumber is not a request number');
+	if (typeof value.number !== 'string' || !MATCH_NUMBER.test(value.number))
+		problems.push('number is not a matching number');
+	if (!isServerHost(value.server)) problems.push('server is not a host');
+	if (!isDisplayText(value.tenantDisplayName, 128))
+		problems.push('tenantDisplayName is not display text');
+	let url: URL | null = null;
+	if (typeof value.approvalUrl === 'string' && value.approvalUrl.length <= 2048) {
+		try {
+			url = new URL(value.approvalUrl);
+		} catch {
+			url = null;
+		}
+	}
+	if (!url || url.protocol !== 'https:' || url.username !== '' || url.password !== '') {
+		problems.push('approvalUrl is not an https URL without credentials');
+	} else if (url.host !== value.server) {
+		problems.push('approvalUrl is not on the server');
+	}
+	return problems;
+}
+
+/** Why a `connection_status` answer is not `connectionStatus`, or []. */
+export function endpointConnectionStatusProblems(value: unknown): string[] {
+	if (!isRecord(value)) return ['status is not an object'];
+	const problems: string[] = [];
+	if (
+		!hasOnlyKeys(value, [
+			'state',
+			'stateSeq',
+			'stateChangedAt',
+			'request',
+			'names',
+			'lastRefusalCode',
+		])
+	)
+		problems.push('status has unknown fields');
+	if (!CONNECTION_STATES.includes(value.state as EndpointConnectState))
+		problems.push('state is unknown');
+	if (
+		typeof value.stateSeq !== 'number' ||
+		!Number.isSafeInteger(value.stateSeq) ||
+		value.stateSeq < 0
+	)
+		problems.push('stateSeq is not a sequence');
+	if (!isTimestamp(value.stateChangedAt)) problems.push('stateChangedAt is not a timestamp');
+	if (value.request !== undefined) {
+		const request = value.request;
+		if (!isRecord(request) || !hasOnlyKeys(request, ['number', 'decidedAt', 'decisionReason'])) {
+			problems.push('request is not a request');
+		} else {
+			if (typeof request.number !== 'string' || !REQUEST_NUMBER.test(request.number))
+				problems.push('request.number is not a request number');
+			if (request.decidedAt !== undefined && !isTimestamp(request.decidedAt))
+				problems.push('request.decidedAt is not a timestamp');
+			if (
+				request.decisionReason !== undefined &&
+				!(isDisplayText(request.decisionReason, 500) && isNameOnly(request.decisionReason))
+			)
+				problems.push('request.decisionReason is not a name');
+		}
+	}
+	const names = value.names;
+	if (
+		!isRecord(names) ||
+		!hasOnlyKeys(names, ['tenant', 'teamPath', 'policy', 'device', 'runtime'])
+	) {
+		problems.push('names is not a names object');
+	} else {
+		const tenant = names.tenant;
+		if (
+			tenant !== undefined &&
+			!(
+				isRecord(tenant) &&
+				hasOnlyKeys(tenant, ['handle', 'displayName']) &&
+				isLabel(tenant.handle) &&
+				isNameOnly(tenant.handle) &&
+				isDisplayText(tenant.displayName, 128) &&
+				isNameOnly(tenant.displayName)
+			)
+		)
+			problems.push('names.tenant is not a name');
+		if (
+			names.teamPath !== undefined &&
+			!(isPathOf(names.teamPath, null) && isNameOnly(names.teamPath))
+		)
+			problems.push('names.teamPath is not a name');
+		const policy = names.policy;
+		if (
+			policy !== undefined &&
+			!(
+				isRecord(policy) &&
+				hasOnlyKeys(policy, ['name', 'revision']) &&
+				isLabel(policy.name) &&
+				isNameOnly(policy.name) &&
+				typeof policy.revision === 'number' &&
+				Number.isSafeInteger(policy.revision) &&
+				policy.revision >= 1
+			)
+		)
+			problems.push('names.policy is not a name');
+		if (names.device !== undefined && !(isLabel(names.device) && isNameOnly(names.device)))
+			problems.push('names.device is not a name');
+		if (names.runtime !== undefined && !(isPathOf(names.runtime, 2) && isNameOnly(names.runtime)))
+			problems.push('names.runtime is not a name');
+	}
+	if (
+		value.lastRefusalCode !== undefined &&
+		(typeof value.lastRefusalCode !== 'string' || !REFUSAL_CODE.test(value.lastRefusalCode))
+	)
+		problems.push('lastRefusalCode is not a refusal code');
+	return problems;
+}
+
+/** Why an answer to a Connect operation is not its contract shape, or []. */
+export function endpointConnectReplyProblems(
+	operation: EndpointConnectOperation,
+	value: unknown
+): string[] {
+	if (operation === 'connect') return endpointConnectAnswerProblems(value);
+	if (operation === 'connection_status') return endpointConnectionStatusProblems(value);
+	return isRecord(value) && value.outcome === 'disconnected' && Object.keys(value).length === 1
+		? []
+		: ['answer is not { outcome: "disconnected" }'];
+}
+
+export const isEndpointConnectOperation = (
+	operation: string
+): operation is EndpointConnectOperation =>
+	(LOCAL_ENDPOINT_CONNECT_OPERATIONS as readonly string[]).includes(operation);
 
 // ---------------------------------------------------------------------------
 // The ports a host injects
