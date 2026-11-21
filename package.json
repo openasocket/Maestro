@@ -65,7 +65,7 @@
 		"format": "prettier --write \"src/**/*.{ts,tsx}\"",
 		"format:all": "prettier --write .",
 		"format:check": "prettier --check \"src/**/*.{ts,tsx}\"",
-		"format:check:all": "prettier --check .",
+		"format:check:all": "node scripts/format-check-tracked.mjs",
 		"validate:push": "bun run format:check:all && bun run lint && bun run lint:eslint && bun run test",
 		"test": "cross-env NODE_OPTIONS=\"--max-old-space-size=8192 --no-experimental-webstorage\" vitest run",
 		"test:watch": "cross-env NODE_OPTIONS=\"--max-old-space-size=8192 --no-experimental-webstorage\" vitest",
