@@ -157,16 +157,17 @@ describe('parseConnectStartInput', () => {
 		expect(
 			parseConnectStartInput({
 				kind: 'teamCode',
-				teamCode: 'acme-web-7k3m',
+				teamCode: 'acme-web-7k3m0',
 				server: 'Mega.Acme.com',
 			})
 		).toEqual({
 			ok: true,
-			value: { kind: 'teamCode', teamCode: 'ACME-WEB-7K3M', server: 'mega.acme.com' },
+			value: { kind: 'teamCode', teamCode: 'ACME-WEB-7K3M0', server: 'mega.acme.com' },
 		});
 		const link = parseConnectStartInput({
 			kind: 'joinLink',
-			joinLink: 'https://mega.acme.com/join/abcdefghijklmnopqrstuv',
+			joinLink:
+				'https://mega.acme.com/join/0123456789ABCDEFGHJKMNPQRS#pin=abababababababababababababababababababababababababababababababab',
 		});
 		expect(link.ok && link.value.kind === 'joinLink' && link.value.joinLink.host).toBe(
 			'mega.acme.com'
@@ -183,7 +184,7 @@ describe('parseConnectStartInput', () => {
 		expect(JSON.stringify(bad)).not.toContain('not-an-email');
 		expect(parseConnectStartInput(null)).toEqual({ ok: false, reason: 'empty' });
 		expect(parseConnectStartInput({ kind: 'other' })).toEqual({ ok: false, reason: 'empty' });
-		expect(parseConnectStartInput({ kind: 'teamCode', teamCode: 'ACME-WEB-7K3M' })).toEqual({
+		expect(parseConnectStartInput({ kind: 'teamCode', teamCode: 'ACME-WEB-7K3M0' })).toEqual({
 			ok: false,
 			reason: 'empty',
 		});
@@ -259,7 +260,11 @@ describe('createConnectService', () => {
 		});
 		expect(
 			await elsewhere.start(
-				{ kind: 'joinLink', joinLink: 'https://mega.other.com/join/abcdefghijklmnopqrstuv' },
+				{
+					kind: 'joinLink',
+					joinLink:
+						'https://mega.other.com/join/0123456789ABCDEFGHJKMNPQRS#pin=abababababababababababababababababababababababababababababababab',
+				},
 				ACTOR
 			)
 		).toEqual({ ok: false, refusal: 'pin_mismatch' });

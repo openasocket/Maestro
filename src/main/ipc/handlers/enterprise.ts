@@ -105,8 +105,9 @@ export const NO_CONNECT_SERVICE: ConnectResult<never> = {
 export const NO_CONNECT_STATUS: ConnectStatusView = { status: { kind: 'unavailable' } };
 
 /**
- * The renderer's start input, shape-checked in main before the service sees it
- * (`megaConnect/input.ts` through `parseConnectStartInput`). A rejection names
+ * The renderer's (or a bridge client's) start input, validated in main by the
+ * contracts 0.5.0 connect schemas before the service sees it (the connect*
+ * rules in `megaConnect/input.ts` through `parseConnectStartInput`). A rejection names
  * its rule and never carries the value (a typed email, a join code).
  */
 export function validateConnectStart(raw: unknown): ConnectResult<never> | null {

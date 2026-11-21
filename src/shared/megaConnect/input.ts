@@ -3,15 +3,19 @@
  * work email, a join link, a team code, a server host. Pure, so main validates
  * every renderer input with the same rules the panel uses as a hint.
  *
- * These are SHAPE checks only. The authoritative check moves to the contracts
- * 0.5.0 schemas in MSX-02-09; until then main runs these before anything leaves
- * the process.
+ * The validate* functions are SHAPE checks: the renderer's hint. Main decides
+ * with the connect* functions below, which transcribe the contracts 0.5.0
+ * connect schemas (endpointConnectInput: z.email, parseJoinLink, teamCode,
+ * serverHost). They are transcribed, not imported, because no product code
+ * loads the vendored contracts (the house style of endpoint-port.ts); a test
+ * holds them equal to the vendored schemas.
  *
  * A rejection carries a reason code and never the rejected value: a join code
  * or a team code must not reach a log line through an error message.
  */
 
 import { megaServerHostProblem } from '../megaServer';
+import { isServerHost } from '../maestro-lib/managed/endpoint-port';
 
 export type MegaConnectInputReason =
 	| 'empty'
@@ -33,7 +37,7 @@ export type MegaConnectInputResult<T> =
 
 /** A join link that passed its shape check. */
 export interface MegaJoinLink {
-	/** The normalized https URL, without a fragment. */
+	/** The https URL: from validateJoinLink without a fragment; from connectJoinLink the exact text, issuer pin kept. */
 	url: string;
 	/** The server host, lowercased, without brackets. */
 	host: string;
@@ -141,4 +145,99 @@ export function validateTeamCode(input: string): MegaConnectInputResult<string> 
 	const code = typed.toUpperCase();
 	if (code.length < TEAM_CODE_MIN_LENGTH || !TEAM_CODE.test(code)) return fail('badTeamCode');
 	return { ok: true, value: code };
+}
+
+// The contracts 0.5.0 connect schemas, transcribed (see the file comment).
+
+/** zod 4 z.email(), as endpointConnectInput uses it with max(254). */
+const CONTRACT_EMAIL =
+	/^(?:[A-Za-z0-9_'+\-]+\.)*[A-Za-z0-9_'+\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\-]*\.)+[A-Za-z]{2,}$/;
+/** joinCode: 26 Crockford base32 characters, 128 bits, so the first is 0-7. */
+const CONTRACT_JOIN_CODE = /^[0-7][0-9A-HJKMNP-TV-Z]{25}$/;
+/** issuerPin: SHA-256, lowercase hex. */
+const CONTRACT_PIN = /^[a-f0-9]{64}$/;
+const CONTRACT_TEAM_CODE = /^([A-Z0-9]{1,16})-([A-Z0-9]{1,16})-([0-9A-HJKMNP-TV-Z]{4})([0-9A-Z])$/;
+const ALPHABET_36 = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+
+/** The team code check character: Luhn mod 36 over tenant, team and random. */
+function teamCodeCheckCharacter(body: string): string {
+	let sum = 0;
+	let double = true;
+	for (let i = body.length - 1; i >= 0; i -= 1) {
+		let value = ALPHABET_36.indexOf(body[i]);
+		if (double) {
+			value *= 2;
+			value = Math.floor(value / 36) + (value % 36);
+		}
+		sum += value;
+		double = !double;
+	}
+	return ALPHABET_36[(36 - (sum % 36)) % 36];
+}
+
+/** Contracts parseJoinLink: exactly `https://<origin>/join/<code>#pin=<pin>`, or null. */
+function contractJoinLink(text: string): MegaJoinLink | null {
+	if (text.length > JOIN_LINK_MAX_LENGTH) return null;
+	let url: URL;
+	try {
+		url = new URL(text);
+	} catch {
+		return null;
+	}
+	const code = /^\/join\/([^/]+)$/.exec(url.pathname)?.[1];
+	const pin = /^#pin=([^&=]+)$/.exec(url.hash)?.[1];
+	if (
+		url.protocol !== 'https:' ||
+		url.username !== '' ||
+		url.password !== '' ||
+		url.search !== '' ||
+		code === undefined ||
+		pin === undefined ||
+		!CONTRACT_JOIN_CODE.test(code) ||
+		!CONTRACT_PIN.test(pin) ||
+		`${url.origin}/join/${code}#pin=${pin}` !== text
+	)
+		return null;
+	return { url: text, host: url.hostname, code };
+}
+
+/** Main's rule: the contract decides; a rejection names the shape rule it broke, or the fallback. */
+function decide<T>(
+	shape: MegaConnectInputResult<unknown>,
+	value: T | null,
+	fallback: MegaConnectInputReason
+): MegaConnectInputResult<T> {
+	if (value !== null) return { ok: true, value };
+	return fail(shape.ok ? fallback : shape.reason);
+}
+
+/** A work email by the contracts (z.email().max(254)). Trimmed and lowercased. */
+export function connectWorkEmail(input: string): MegaConnectInputResult<string> {
+	const email = input.trim().toLowerCase();
+	const ok = email.length <= WORK_EMAIL_MAX_LENGTH && CONTRACT_EMAIL.test(email);
+	return decide(validateWorkEmail(input), ok ? email : null, 'badEmail');
+}
+
+/**
+ * A join link by the contracts (parseJoinLink): the exact canonical text, its
+ * issuer pin kept, since the endpoint receives it unchanged.
+ */
+export function connectJoinLink(input: string): MegaConnectInputResult<MegaJoinLink> {
+	return decide(validateJoinLink(input), contractJoinLink(input.trim()), 'badCode');
+}
+
+/** A team code by the contracts (teamCode): uppercase, check character right. */
+export function connectTeamCode(input: string): MegaConnectInputResult<string> {
+	const typed = input.trim();
+	// ASCII before uppercasing, as validateTeamCode does.
+	const code = ASCII_PRINTABLE.test(typed) ? typed.toUpperCase() : '';
+	const match = code.length <= 40 ? CONTRACT_TEAM_CODE.exec(code) : null;
+	const ok = match !== null && teamCodeCheckCharacter(match[1] + match[2] + match[3]) === match[4];
+	return decide(validateTeamCode(input), ok ? code : null, 'badTeamCode');
+}
+
+/** A server host by the contracts (serverHost): a lowercase DNS host, optional port. */
+export function connectServerHost(input: string): MegaConnectInputResult<string> {
+	const host = input.trim().toLowerCase();
+	return decide(validateServerHost(input), isServerHost(host) ? host : null, 'badHost');
 }

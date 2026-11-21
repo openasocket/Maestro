@@ -561,6 +561,21 @@ describe('connect to your organization handlers (MSX-02-02)', () => {
 		expect(connect.start).not.toHaveBeenCalled();
 	});
 
+	it('decides by the contracts 0.5.0 schemas, not the shape hint (MSX-02-09)', async () => {
+		register(() => connect);
+		// Each passes the shape hint; the contracts refuse it (check character, missing pin, IPv6 server).
+		for (const raw of [
+			{ kind: 'teamCode', teamCode: 'ACME-WEB-7K3M', server: 'mega.acme.com' },
+			{ kind: 'joinLink', joinLink: 'https://mega.acme.com/join/0123456789ABCDEFGHJKMNPQRS' },
+			{ kind: 'teamCode', teamCode: 'ACME-WEB-7K3M0', server: 'fd00::1' },
+		]) {
+			const answer = await invoke('enterprise:connectStart', raw);
+			expect(answer).toMatchObject({ ok: false, refusal: 'invalid_input' });
+			expect(JSON.stringify(answer)).not.toMatch(/7K3M|0123456789AB|fd00/);
+		}
+		expect(connect.start).not.toHaveBeenCalled();
+	});
+
 	it('reads the status and disconnects through the service', async () => {
 		register(() => connect);
 		connect.status.mockResolvedValue(WAITING);

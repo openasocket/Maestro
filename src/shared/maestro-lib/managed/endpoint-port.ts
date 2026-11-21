@@ -1223,7 +1223,8 @@ const UNPRINTABLE = /[\p{Cc}\p{Cf}\p{Co}\p{Cn}\p{Cs}\p{Zl}\p{Zp}]/u;
 
 const hasOnlyKeys = (value: Record<string, unknown>, allowed: readonly string[]): boolean =>
 	Object.keys(value).every((key) => allowed.includes(key));
-const isServerHost = (value: unknown): value is string =>
+/** The contracts `serverHost`: a lowercase DNS host, optionally with a port. */
+export const isServerHost = (value: unknown): value is string =>
 	typeof value === 'string' && SERVER_HOST.test(value) && Number(value.split(':')[1] ?? 1) <= 65535;
 const isLabel = (value: unknown): value is string =>
 	typeof value === 'string' && value.length <= 63 && LABEL.test(value);

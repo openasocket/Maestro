@@ -1,7 +1,8 @@
 /**
  * The connect service: Connect to your organization, in main.
  *
- * It validates every input with the shape checks in `megaConnect/input.ts`,
+ * It validates every input with the contracts 0.5.0 connect rules in
+ * `megaConnect/input.ts` (the connect* functions),
  * talks to a ConnectPort (Maestro's own boundary, `megaConnect/port.ts`), opens
  * the approval page only through the local-effects hold and only on the server
  * the request went to, polls the status (every 3 seconds while a request is
@@ -19,10 +20,10 @@
 import { logger } from '../utils/logger';
 import { canonicalJson } from '../../shared/canonicalJson';
 import {
-	validateJoinLink,
-	validateServerHost,
-	validateTeamCode,
-	validateWorkEmail,
+	connectJoinLink,
+	connectServerHost,
+	connectTeamCode,
+	connectWorkEmail,
 	type MegaConnectInputReason,
 } from '../../shared/megaConnect/input';
 import {
@@ -112,7 +113,8 @@ function stringField(raw: Record<string, unknown>, key: string): string | null {
 }
 
 /**
- * Shape-check a renderer, bridge or CLI start input into a ConnectStartInput.
+ * Validate a renderer, bridge or CLI start input into a ConnectStartInput by the
+ * contracts 0.5.0 connect schemas (the shape checks are only the renderer hint).
  * Accepts `{kind:'email', email}`, `{kind:'joinLink', joinLink}`,
  * `{kind:'teamCode', teamCode, server}` and `{kind:'managed'}`. A rejection
  * names its rule and never carries the value.
@@ -123,19 +125,19 @@ export function parseConnectStartInput(
 	if (!isRecord(raw)) return { ok: false, reason: 'empty' };
 	switch (raw.kind) {
 		case 'email': {
-			const checked = validateWorkEmail(stringField(raw, 'email') ?? '');
+			const checked = connectWorkEmail(stringField(raw, 'email') ?? '');
 			return checked.ok ? { ok: true, value: { kind: 'email', email: checked.value } } : checked;
 		}
 		case 'joinLink': {
-			const checked = validateJoinLink(stringField(raw, 'joinLink') ?? '');
+			const checked = connectJoinLink(stringField(raw, 'joinLink') ?? '');
 			return checked.ok
 				? { ok: true, value: { kind: 'joinLink', joinLink: checked.value } }
 				: checked;
 		}
 		case 'teamCode': {
-			const code = validateTeamCode(stringField(raw, 'teamCode') ?? '');
+			const code = connectTeamCode(stringField(raw, 'teamCode') ?? '');
 			if (!code.ok) return code;
-			const server = validateServerHost(stringField(raw, 'server') ?? '');
+			const server = connectServerHost(stringField(raw, 'server') ?? '');
 			if (!server.ok) return server;
 			return { ok: true, value: { kind: 'teamCode', teamCode: code.value, server: server.value } };
 		}

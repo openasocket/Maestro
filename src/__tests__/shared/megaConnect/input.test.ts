@@ -1,5 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import {
+	connectJoinLink,
+	connectServerHost,
+	connectTeamCode,
+	connectWorkEmail,
 	validateJoinCode,
 	validateJoinLink,
 	validateServerHost,
@@ -160,5 +164,111 @@ describe('validateJoinCode', () => {
 		const result = validateJoinCode(input);
 		expect(reasonOf(result)).toBe(reason);
 		expectNoEcho(input, result);
+	});
+});
+
+// MSX-02-09: main decides by the contracts 0.5.0 connect schemas.
+const PIN = 'ab'.repeat(32);
+const JOIN_CODE = '0123456789ABCDEFGHJKMNPQRS';
+const LINK = `https://mega.acme.com/join/${JOIN_CODE}#pin=${PIN}`;
+const TEAM = 'ACME-WEB-7K3M0';
+
+let contracts: typeof import('../../../../vendor/mega-maestro/contracts/dist/connect.js');
+let zod: typeof import('../../../../vendor/mega-maestro/contracts/node_modules/zod/index.js');
+beforeAll(async () => {
+	contracts = await import('../../../../vendor/mega-maestro/contracts/dist/connect.js');
+	zod = await import('../../../../vendor/mega-maestro/contracts/node_modules/zod/index.js');
+});
+
+describe('connect* (contracts authority)', () => {
+	it('accepts what the contracts accept, normalized as main sends it', () => {
+		expect(connectWorkEmail(' Alice@Acme.COM ')).toEqual({ ok: true, value: 'alice@acme.com' });
+		expect(connectJoinLink(` ${LINK} `)).toEqual({
+			ok: true,
+			value: { url: LINK, host: 'mega.acme.com', code: JOIN_CODE },
+		});
+		expect(connectTeamCode('acme-web-7k3m0')).toEqual({ ok: true, value: TEAM });
+		expect(connectServerHost('Mega.Acme.com:8443')).toEqual({
+			ok: true,
+			value: 'mega.acme.com:8443',
+		});
+	});
+
+	it.each([
+		['email', 'alice@localhost', 'badEmail'],
+		['email', 'alice', 'badEmail'],
+		['joinLink', `https://mega.acme.com/join/${CODE}`, 'badCode'],
+		['joinLink', `https://mega.acme.com/join/${JOIN_CODE}`, 'badCode'],
+		['joinLink', `https://mega.acme.com/join/${JOIN_CODE}?x=1#pin=${PIN}`, 'badCode'],
+		['joinLink', `http://mega.acme.com/join/${JOIN_CODE}#pin=${PIN}`, 'notHttps'],
+		['teamCode', 'ACME-WEB-7K3M', 'badTeamCode'],
+		['teamCode', 'ACME-WEB-7K3M1', 'badTeamCode'],
+		['server', 'fd00::1', 'badHost'],
+		['server', 'https://mega.acme.com', 'badHost'],
+	])('rejects a %s the contracts refuse (%j) as %s without echoing it', (kind, input, reason) => {
+		const check = {
+			email: connectWorkEmail,
+			joinLink: connectJoinLink,
+			teamCode: connectTeamCode,
+			server: connectServerHost,
+		}[kind as 'email' | 'joinLink' | 'teamCode' | 'server'];
+		const result = check(input);
+		expect(reasonOf(result)).toBe(reason);
+		expectNoEcho(input, result);
+	});
+
+	it('agrees with the vendored 0.5.0 schemas on every case', () => {
+		const email = zod.z.email().max(254);
+		const emails = [
+			'alice@acme.com',
+			"o'brien@eng.acme.co.uk",
+			'alice@localhost',
+			'a@b.c',
+			'a..b@acme.com',
+			`${'a'.repeat(250)}@acme.com`,
+		];
+		for (const value of emails)
+			expect([value, connectWorkEmail(value).ok]).toEqual([value, email.safeParse(value).success]);
+		const links = [
+			LINK,
+			`https://mega.acme.com:8443/join/${JOIN_CODE}#pin=${PIN}`,
+			`https://mega.acme.com:443/join/${JOIN_CODE}#pin=${PIN}`,
+			`https://Mega.acme.com/join/${JOIN_CODE}#pin=${PIN}`,
+			`https://mega.acme.com/join/8${JOIN_CODE.slice(1)}#pin=${PIN}`,
+			`https://mega.acme.com/join/${JOIN_CODE}#pin=${PIN.toUpperCase()}`,
+			`https://u@mega.acme.com/join/${JOIN_CODE}#pin=${PIN}`,
+			`https://mega.acme.com/join/${CODE}`,
+		];
+		for (const value of links)
+			expect([value, connectJoinLink(value).ok]).toEqual([
+				value,
+				contracts.parseJoinLink(value) !== undefined,
+			]);
+		const teams = [
+			TEAM,
+			'ACME-WEB-7K3M',
+			'ACME-WEB-7K3MZ',
+			'A-B-0000' + contracts.teamCodeCheckCharacter('AB0000'),
+			'ACME-WEB-7K3I0',
+		];
+		for (const value of teams)
+			expect([value, connectTeamCode(value).ok]).toEqual([
+				value,
+				contracts.teamCode.safeParse(value).success,
+			]);
+		const hosts = [
+			'mega.acme.com',
+			'mega.acme.com:65535',
+			'mega.acme.com:65536',
+			'mega.acme.com:0',
+			'10.0.0.5',
+			'fd00::1',
+			'-bad.com',
+		];
+		for (const value of hosts)
+			expect([value, connectServerHost(value).ok]).toEqual([
+				value,
+				contracts.serverHost.safeParse(value).success,
+			]);
 	});
 });

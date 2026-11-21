@@ -714,7 +714,7 @@ describe('maestro-cli managed over the real bridge and facade (MRC2-07-08)', () 
 		expect(openExternal).toHaveBeenCalledWith(APPROVAL_URL);
 
 		const scripted = await run(() =>
-			managedConnect({ teamCode: 'acme-web-7k3m', server: 'mega.acme.com', json: true })
+			managedConnect({ teamCode: 'acme-web-7k3m0', server: 'mega.acme.com', json: true })
 		);
 		expect(scripted.code).toBeNull();
 		expect(json(scripted.out)).toEqual({
@@ -734,11 +734,14 @@ describe('maestro-cli managed over the real bridge and facade (MRC2-07-08)', () 
 		});
 		expect(port.start).toHaveBeenLastCalledWith({
 			kind: 'teamCode',
-			teamCode: 'ACME-WEB-7K3M',
+			teamCode: 'ACME-WEB-7K3M0',
 			server: 'mega.acme.com',
 		});
 		const link = await run(() =>
-			managedConnect({ joinLink: 'https://mega.acme.com/join/abcdefghijklmnopqrstuv' })
+			managedConnect({
+				joinLink:
+					'https://mega.acme.com/join/0123456789ABCDEFGHJKMNPQRS#pin=abababababababababababababababababababababababababababababababab',
+			})
 		);
 		expect(link.code).toBeNull();
 		expect(port.start).toHaveBeenLastCalledWith(expect.objectContaining({ kind: 'joinLink' }));
@@ -800,7 +803,7 @@ describe('maestro-cli managed over the real bridge and facade (MRC2-07-08)', () 
 		for (const options of [
 			{},
 			{ email: 'a@acme.com', managed: true },
-			{ teamCode: 'ACME-WEB-7K3M' },
+			{ teamCode: 'ACME-WEB-7K3M0' },
 			{ email: 'a@acme.com', server: 'mega.acme.com' },
 		]) {
 			const bad = await run(() => managedConnect({ ...options, json: true }));
@@ -822,7 +825,7 @@ describe('maestro-cli managed over the real bridge and facade (MRC2-07-08)', () 
 
 		// The endpoint answers a server other than the one named: nothing opens.
 		const pinned = await run(() =>
-			managedConnect({ teamCode: 'ACME-WEB-7K3M', server: 'other.example.com' })
+			managedConnect({ teamCode: 'ACME-WEB-7K3M0', server: 'other.example.com' })
 		);
 		expect(pinned.code).toBe(1);
 		expect(pinned.err).toContain(MEGA_CONNECT_COPY.cliRefusedPinMismatch);
