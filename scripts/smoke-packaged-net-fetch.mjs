@@ -1,6 +1,7 @@
 /**
  * Smoke-test the actual Electron package, not the development node_modules.
  * Usage: node scripts/smoke-packaged-net-fetch.mjs <extracted-deb>/opt/Maestro
+ *        node scripts/smoke-packaged-net-fetch.mjs <path>/Maestro.app (macOS)
  * Makes one unauthenticated GET to Discord's public REST API; HTTP 401 proves
  * the connection reached Discord without using a user token.
  */
@@ -14,8 +15,14 @@ if (!packageRoot) {
 	process.exit(2);
 }
 
-const electron = join(packageRoot, 'maestro');
-const asar = join(packageRoot, 'resources', 'app.asar');
+// A macOS .app bundle keeps the binary and app.asar under Contents; the Linux layout is flat.
+const isBundle = packageRoot.endsWith('.app');
+const electron = isBundle
+	? join(packageRoot, 'Contents', 'MacOS', 'Maestro')
+	: join(packageRoot, 'maestro');
+const asar = isBundle
+	? join(packageRoot, 'Contents', 'Resources', 'app.asar')
+	: join(packageRoot, 'resources', 'app.asar');
 if (!existsSync(electron) || !existsSync(asar)) {
 	throw new Error(`Packaged Electron or app.asar missing under ${packageRoot}`);
 }
