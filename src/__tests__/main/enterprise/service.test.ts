@@ -904,6 +904,57 @@ describe('enterprise service', () => {
 		expect(fs.readFileSync(file, 'utf8')).toBe('{ not json');
 	});
 
+	it('binds the Connect adapter on the first ask, not at boot, on the socket this account resolves (MSX-02-08)', async () => {
+		const connectFake = await startFakeEndpoint({
+			capabilities: ['connect', 'connection_status'],
+			operations: {
+				connection_status: () => ({
+					state: 'connected',
+					stateSeq: 1,
+					stateChangedAt: '2026-10-21T12:00:00.000Z',
+					names: { tenant: { handle: 'acme', displayName: 'Acme' }, device: 'alice-mbp' },
+				}),
+			},
+		});
+		try {
+			const asked: string[] = [];
+			const service = compose(undefined, {
+				openPort: (socketPath) => {
+					asked.push(socketPath);
+					return createLocalEndpointClient({
+						socketPath: connectFake.socketPath,
+						timeoutMs: 1_000,
+					});
+				},
+			});
+			await service.start();
+			expect(service.connect.current().status.kind).toBe('unavailable');
+			expect(asked).toEqual([]);
+			expect(await service.connect.status()).toEqual({
+				status: { kind: 'connected', orgName: 'Acme' },
+				names: { device: 'alice-mbp' },
+			});
+			expect(asked).toEqual(['/Library/Application Support/MegaMaestro/Endpoint/run/ipc.sock']);
+			await service.connect.status();
+			expect(asked).toHaveLength(1);
+			await service.close();
+		} finally {
+			await connectFake.close();
+		}
+	});
+
+	it('keeps Connect unavailable when the endpoint does not advertise it (MSX-02-08)', async () => {
+		const service = compose(undefined, {
+			openPort: () => createLocalEndpointClient({ socketPath: fake.socketPath, timeoutMs: 1_000 }),
+		});
+		await service.start();
+		expect(await service.connect.status()).toEqual({ status: { kind: 'unavailable' } });
+		expect(await service.connect.start({ kind: 'managed' })).toEqual({
+			ok: false,
+			refusal: 'endpoint_connect_unavailable',
+		});
+	});
+
 	it('an unenrolled desktop has no standing to claim a workflow under', async () => {
 		const service = compose();
 		await service.start();

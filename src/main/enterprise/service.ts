@@ -177,7 +177,9 @@ import type { EnrollmentRequestInput, LifecycleOutcome } from './enrollment';
 import type { InstallationInventory } from './inventory';
 import { createMegaServerService, type MegaServerService } from './mega-server';
 import { createConnectService, type ConnectService } from './connect';
-import type { LocalEffectAuthority } from './local-effects-policy';
+import { bindEndpointConnectPort, type BoundConnectPort } from './connect-endpoint';
+import { resolveEndpointSocket } from '../../shared/megaServer';
+import { callingLocalEffectActor, type LocalEffectAuthority } from './local-effects-policy';
 import type { MegaConnectNotification } from '../../shared/megaConnect/notify';
 import { heldListeners, type ListenerHold } from './listener-gate';
 import {
@@ -1091,10 +1093,30 @@ export function createEnterpriseService(deps: EnterpriseServiceDeps): Enterprise
 		dispatch,
 		...(deps.holds ? { holds: deps.holds } : {}),
 	});
-	// Connect to your organization: no port is bound yet (the Mega adapter is MSX-02-08), so
-	// the service answers endpoint_connect_unavailable, a real refusal, until one is.
-	const connect = createConnectService({
-		port: () => null,
+	// Connect to your organization: the Mega adapter is bound only when the endpoint advertises
+	// the connect operations; until then the service answers endpoint_connect_unavailable. The
+	// bind waits for a person's start, status or disconnect, so an unenrolled desktop opens no
+	// socket at boot (the idle poll reads the unbound port as unavailable and asks nothing).
+	let connectPort: BoundConnectPort | null = null;
+	let connectBinding: Promise<void> | null = null;
+	const bindConnect = (): Promise<void> => {
+		if (connectPort || closing) return Promise.resolve();
+		// Its own pre-attachment connection on this account's socket; a miss is retried next ask.
+		connectBinding ??= bindEndpointConnectPort({
+			socket: resolveEndpointSocket(
+				megaServer.settings().endpointSocket,
+				deps.platform ?? process.platform
+			),
+			openPort,
+		}).then(async (bound) => {
+			connectBinding = null;
+			if (closing) await bound?.close();
+			else connectPort = bound;
+		});
+		return connectBinding;
+	};
+	const connectService = createConnectService({
+		port: () => connectPort?.port ?? null,
 		get localEffects() {
 			return deps.localEffects?.() ?? null;
 		},
@@ -1105,6 +1127,23 @@ export function createEnterpriseService(deps: EnterpriseServiceDeps): Enterprise
 		},
 		now,
 	});
+	const connect: ConnectService = {
+		...connectService,
+		start: async (raw, actor) => {
+			// Read the calling transport before any await, so the hold binds that actor.
+			const effectActor = actor ?? callingLocalEffectActor();
+			await bindConnect();
+			return connectService.start(raw, effectActor);
+		},
+		status: async () => {
+			await bindConnect();
+			return connectService.status();
+		},
+		disconnect: async () => {
+			await bindConnect();
+			return connectService.disconnect();
+		},
+	};
 	// A refresh is where a revocation or suspension is learned: the runs it refuses stop now.
 	const managed: ManagedOperations = {
 		...operations,
@@ -1208,6 +1247,9 @@ export function createEnterpriseService(deps: EnterpriseServiceDeps): Enterprise
 				telemetry.stop();
 				await telemetry.drain();
 				await lifecycle.close();
+				await connectBinding;
+				await connectPort?.close();
+				connectPort = null;
 				await dispatch.flush();
 				// What the journal recorded of the last spawns and exits, before the process goes.
 				if (eventJournalAttached) await eventJournal.flush();
