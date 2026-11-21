@@ -1,0 +1,60 @@
+{
+  "schema": "maestro-macos-app-build/1",
+  "artifactId": "MAESTRO-MACOS-APP-BUILD",
+  "recordedAt": "2026-11-21T07:01:56.607Z",
+  "platform": "darwin",
+  "arch": "arm64",
+  "head": "ab0196dc2c3e4909a6301edaa3ef153d7a8be931",
+  "buildHead": "7ffa46b85465e8a99f34974d34b942ec8f67f7ab",
+  "headDelta": "scripts/smoke-packaged-net-fetch.mjs only (ab0196dc2c); the app build does not include scripts/",
+  "commands": [
+    {
+      "cmd": "CSC_IDENTITY_AUTO_DISCOVERY=false node scripts/set-version.mjs npm run build",
+      "exit": 0
+    },
+    {
+      "cmd": "npm run build:computer-history",
+      "exit": 0
+    },
+    {
+      "cmd": "CSC_IDENTITY_AUTO_DISCOVERY=false node scripts/set-version.mjs electron-builder --mac (playbook form: exit 127, electron-builder not on PATH)",
+      "exit": 127
+    },
+    {
+      "cmd": "electron-builder --mac with node_modules/.bin on PATH: EACCES on two read-only release/*.blockmap files from a Nov 9 build",
+      "exit": 1
+    },
+    {
+      "cmd": "electron-builder --mac --config.directories.output=dist/macos-044 (CSC_IDENTITY_AUTO_DISCOVERY=false, node_modules/.bin on PATH)",
+      "exit": 0
+    }
+  ],
+  "archives": [
+    {
+      "path": "dist/macos-044/maestro-1.1.1-RC-arm64-mac.dmg",
+      "sha256": "ae87eda8b3061d6faf8cca661dde7425b3efe4c586ce753684901963fc53b93a"
+    },
+    {
+      "path": "dist/macos-044/maestro-1.1.1-RC-arm64-mac.zip",
+      "sha256": "8d34e4c7843cd75c71e8ea31d1aa4f217f0a587c9afcbc7828efa1c8fd3c3b67"
+    }
+  ],
+  "runtimePin": {
+    "file": "Plans/integration-completion/runtime-conformance.json",
+    "library": "0.44.0",
+    "archiveSha256": "90d12bc7f31d38786caa5a97a1578389ca3d7c3c4c79a618009da7d0168be0fc"
+  },
+  "libraryVersionInBundle": "0.44.0",
+  "smoke": {
+    "cmd": "node scripts/smoke-packaged-net-fetch.mjs dist/macos-044/mac-arm64/Maestro.app",
+    "exit": 0,
+    "discordStatus": 401,
+    "hostApi": "1.31.0",
+    "undici": "7.29.1"
+  },
+  "notes": [
+    "app not launched as a GUI; the smoke test runs the packaged binary as Node (ELECTRON_RUN_AS_NODE)",
+    "unsigned build by design (CSC_IDENTITY_AUTO_DISCOVERY=false)",
+    "release/ left untouched; its stale blockmaps are read-only"
+  ]
+}
