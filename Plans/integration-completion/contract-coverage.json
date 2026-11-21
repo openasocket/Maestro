@@ -15,18 +15,18 @@
 	},
 	"archive": {
 		"name": "@mega-maestro/contracts",
-		"version": "0.4.0",
+		"version": "0.5.0",
 		"sourceDirty": false,
-		"path": "artifacts/enterprise/0.4.0/7c8963448e52cbdae2043a1305ce4690667c4e9ae2697ad933278d0a1630f650/contracts.tgz",
+		"path": "artifacts/enterprise/0.5.0/d3d9604f683de677b1847a91c4976f5c23c8a6f515ca1be27319e4d004c1810f/contracts.tgz",
 		"manifest": "artifact.json",
-		"manifestSha256": "a24912480824281578307a37e5fbc430dfce724e6088308fdfed9037bd14e647",
+		"manifestSha256": "eaa5336609f259459957a4a9d400ccd70efc4e6ee185ecf99308dea1e32846ae",
 		"sidecar": "contracts.tgz.sha256",
-		"sha256": "7c8963448e52cbdae2043a1305ce4690667c4e9ae2697ad933278d0a1630f650",
-		"integrity": "sha512-MQ0K4GqcvwCqQLKMPNNp/C2AXYHvXGjt0c+TM1VsFkO9M/JV/lO2HCr/ariKYrD4VmXxMQaJcSjZD5M9NgdTTw==",
-		"payloadFiles": 48,
-		"publisherPayloadDigest": "108eb6f3bd2b3064dee7b82d7cc328561117807ec087d7f4c3c6aef33618ff0c",
+		"sha256": "d3d9604f683de677b1847a91c4976f5c23c8a6f515ca1be27319e4d004c1810f",
+		"integrity": "sha512-POIuJzajeAsAJOS31j4hrIIi152GYEe2W6ZgnJ9Q5UXdqVj5bo0lAUF/4AtgiCYYSfxRQcCTPJBStvbAx1zVHg==",
+		"payloadFiles": 56,
+		"publisherPayloadDigest": "69b25de3498d96e81ef6034756027ead76c0b7cfe11a1b0d9aa5c16f9f208b66",
 		"publisherPayloadDigestEncoding": "sha256(canonical JSON payloadSha256 map)",
-		"importerPayloadDigest": "6e850b92fe8621dd88b67da02cad173eea04cd0b072ea01ebc74d974fb8da1de",
+		"importerPayloadDigest": "78f85525e2089aade7a1e926e8d6ee985ac5b6233baceab962af2113927a076b",
 		"importerPayloadDigestEncoding": "sha256(JSON sorted payloadSha256 entry pairs)",
 		"pin": "vendor/mega-maestro/contracts.pin.json",
 		"extractedPackage": "vendor/mega-maestro/contracts"
@@ -45,7 +45,7 @@
 		"installCommand": "npm install --prefix vendor/mega-maestro/contracts --ignore-scripts --omit=dev --no-audit --no-fund"
 	},
 	"versions": {
-		"acceptedPackageRange": ">=0.4.0 <0.5.0",
+		"acceptedPackageRange": ">=0.5.0 <0.6.0",
 		"manifestFormat": 1,
 		"pinFormat": 1,
 		"published": {

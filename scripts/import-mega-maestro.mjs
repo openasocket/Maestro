@@ -32,7 +32,7 @@ export const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url
 
 /** What this Maestro was written against. Bump deliberately, with the consumer. */
 export const EXPECTED_PACKAGE_NAME = '@mega-maestro/contracts';
-export const ACCEPTED_PACKAGE_VERSIONS = '>=0.4.0 <0.5.0';
+export const ACCEPTED_PACKAGE_VERSIONS = '>=0.5.0 <0.6.0';
 export const ACCEPTED_ENDPOINT_PROTOCOLS = [2];
 export const MANIFEST_FORMAT_VERSION = 1;
 export const PIN_FORMAT_VERSION = 1;
