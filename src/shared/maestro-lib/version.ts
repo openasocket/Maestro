@@ -212,8 +212,14 @@ import { MANAGED_CONTRACT_VERSION } from './managed/types';
  * 0.44.0: the live execution check renews its lease once, inside its lifetime, before execution
  * (`workflow_renew`, fenced by the claimed owner). The observation records it as `renew`, and the consumer
  * receipt writer refuses an observation without one. Additions only.
+ * 0.45.0: the simplified connect (contracts 0.5.0). `EndpointPort` speaks `connect`, `connection_status` and
+ * `disconnect` before any attachment, parsed with the 0.5.0 connect schemas
+ * (`LOCAL_ENDPOINT_CONNECT_OPERATIONS`, `endpointConnectRequestProblems` and siblings). A silent attach
+ * the endpoint renews under a grant is reported by the projected `registration_use` reference, with no
+ * challenge, and the live execution check's observation records the registration `mode` (`challenge`
+ * or `grant`). The permission flag vocabulary moves to `launch/access-flags.ts` (re-exported). Additions only.
  */
-export const MAESTRO_LIB_VERSION = '0.44.0';
+export const MAESTRO_LIB_VERSION = '0.45.0';
 
 /** The Node range the built library runs on; `engines.node` of the built package. */
 export const MAESTRO_LIB_NODE_RANGE = '>=20';
