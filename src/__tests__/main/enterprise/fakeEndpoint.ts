@@ -33,6 +33,13 @@ export interface FakeEndpointOptions {
 	capabilities?: readonly string[];
 	/** When true, every invoke on an unregistered process answers `unauthenticated`. */
 	registrationRequired?: boolean;
+	/**
+	 * Mega's silent renewal (SIMPLE-04-03): an attachment from a process the daemon
+	 * holds no live registration for is registered right there when this answers
+	 * true (a live grant for the account), else refused `unauthenticated`. No
+	 * challenge runs and the runtime never sees a grant id.
+	 */
+	renewal?: (attachment: Record<string, unknown>) => boolean;
 	/** Stands in for the kernel's answer about the peer. */
 	peerAuthenticated?: boolean;
 	/** Milliseconds to hold every answer. */
@@ -294,6 +301,24 @@ export async function startFakeEndpoint(options: FakeEndpointOptions = {}): Prom
 					capabilities().includes(operation) && handler ? handler(payload) : deny('unauthenticated')
 				);
 				return;
+			}
+			if (
+				operation === 'attachment' &&
+				live.renewal &&
+				(!registered ||
+					revoked ||
+					payload.runtimeId !== registered.runtimeId ||
+					payload.processEpoch !== registered.processEpoch)
+			) {
+				if (!live.renewal(payload)) {
+					answer(deny('unauthenticated'));
+					return;
+				}
+				registered = {
+					runtimeId: String(payload.runtimeId),
+					processEpoch: String(payload.processEpoch),
+				};
+				revoked = false;
 			}
 			// `compatibility` is pre-registration, as the daemon's preRegistrationOperations.
 			if (live.registrationRequired && (!registered || revoked) && operation !== 'compatibility') {

@@ -10,6 +10,13 @@
  * negotiated; a subset offer still attaches, and an operation the attachment
  * did not negotiate is never sent.
  *
+ * Under a grant (SIMPLE-04-03, MSX-04-01) the endpoint renews the process inside
+ * the attachment: no challenge and no approval handoff run, the projected
+ * reference becomes the record's registration in this OS account's own data
+ * directory, a refused renewal is the attachment's denial and is never followed
+ * by a challenge of our own, and a CLI host with no desktop objects attaches the
+ * same way.
+ *
  * The daemon is a double (`fakeEndpoint.ts`); no OS peer is authenticated and
  * nothing here is paired enforcement.
  */
@@ -20,6 +27,8 @@ import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createLocalEndpointClient } from '../../../shared/maestro-lib/managed/endpoint-client';
+import { composeHostManaged } from '../../../cli/services/host-managed';
+import { installationIdentity } from '../../../shared/maestro-lib/managed/host-adapter';
 import {
 	createEnrollmentLifecycle,
 	type EnrollmentLifecycle,
@@ -235,5 +244,254 @@ describe('production attachment: one protocol 2 connection', () => {
 		expect(new Set(operationsOn(fake, LOCAL_ENDPOINT_INVOKE_PATH))).toEqual(
 			new Set(['registration_challenge', 'registration_redeem', 'attachment'])
 		);
+	});
+});
+
+describe('silent attach under a grant', () => {
+	let root: string;
+	const open: FakeEndpoint[] = [];
+	const closers: Array<() => Promise<void>> = [];
+
+	beforeEach(() => {
+		root = fs.mkdtempSync(path.join(os.tmpdir(), 'grant-attach-'));
+	});
+	afterEach(async () => {
+		for (const close of closers.splice(0)) await close();
+		for (const fake of open.splice(0)) await fake.close();
+		fs.rmSync(root, { recursive: true, force: true });
+	});
+
+	/** A daemon that renews under a grant for the runtimes `covered` names, and projects their reference. */
+	async function grantEndpoint(covered: (runtimeId: unknown) => boolean): Promise<FakeEndpoint> {
+		const fake = await startFakeEndpoint({
+			registrationRequired: true,
+			renewal: (attachment) => covered(attachment.runtimeId),
+			capabilities: ['registration_use'],
+			operations: { registration_use: () => PROJECTED },
+			now: () => NOW,
+		});
+		open.push(fake);
+		return fake;
+	}
+
+	/** One OS account: its own data directory, its own sealed record, its own lifecycle. */
+	async function account(
+		name: string,
+		socketPath: string,
+		installation = INSTALLATION,
+		registration: Record<string, unknown> | null = null
+	) {
+		const dataDir = path.join(root, name);
+		fs.mkdirSync(dataDir);
+		const store = createEnterpriseIdentityStore({
+			file: path.join(dataDir, 'enterprise-identity.bin'),
+			seal: fakeSeal(),
+			anchor: fakeAnchor({ value: null as Anchor | null }),
+			platform: 'darwin',
+			now: () => NOW,
+		});
+		await store.write({
+			installationId: installation.installationId,
+			tenantId: 'tenant-1',
+			orgId: 'org-1',
+			enrollmentId: 'enr-1',
+			endpoint: { socketPath, bindingDigest: 'a'.repeat(64), trustRootDigest: 'a'.repeat(64) },
+			management: 'enrolled',
+			registration: registration as never,
+			policy: { desiredRevision: null, appliedRevision: null, observedAt: null },
+			enrolledAt: '2026-10-21T12:00:00.000Z',
+		});
+		const life = createEnrollmentLifecycle({
+			identity: store,
+			openPort: (target) => createLocalEndpointClient({ socketPath: target, timeoutMs: 1_000 }),
+			installation,
+			components: [{ id: 'maestro', kind: 'maestro', version: '1.1.0-RC' }],
+			capabilities: { supported: ENTERPRISE_SUPPORTED_CAPABILITIES, required: [] },
+			now: () => NOW,
+		});
+		closers.push(() => life.close());
+		const record = () => {
+			const read = store.read();
+			if (read.status !== 'ok') throw new Error('no record');
+			return read.record;
+		};
+		return { life, record };
+	}
+
+	it('attaches with no challenge and records the projected registration', async () => {
+		const fake = await grantEndpoint(() => true);
+		const { life, record } = await account('alice', fake.socketPath);
+
+		expect(await life.connect()).toMatchObject({ status: 'ok' });
+		expect(operationsOn(fake, LOCAL_ENDPOINT_INVOKE_PATH)).toEqual([
+			'attachment',
+			'registration_use',
+		]);
+		const status = life.status();
+		expect(status).toMatchObject({
+			authority: 'registered',
+			reason: null,
+			pendingApproval: null,
+			connection: { attached: true, registration: 'registered' },
+		});
+		expect(record().registration).toEqual({
+			challengeId: 'chal-1',
+			actorId: null,
+			runtimeId: INSTALLATION.runtimeId,
+			processEpoch: INSTALLATION.processEpoch,
+			bindingDigest: 'a'.repeat(64),
+			processBirthDigest: 'b'.repeat(64),
+			challengeDigest: 'c'.repeat(64),
+			expiresAt: PROJECTED.expiresAt,
+			registeredAt: new Date(NOW).toISOString(),
+		});
+		expect(record().enrollmentId).toBe(PROJECTED.reference.enrollmentId);
+	});
+
+	it('with no grant, the attachment is refused and the challenge runs only when asked', async () => {
+		const fake = await grantEndpoint(() => false);
+		const { life, record } = await account('alice', fake.socketPath);
+
+		expect(await life.connect()).toEqual({
+			status: 'denied',
+			reason: 'unauthenticated',
+			operation: 'attachment',
+		});
+		expect(operationsOn(fake, LOCAL_ENDPOINT_INVOKE_PATH)).toEqual(['attachment']);
+		expect((await life.beginRegistration()).status).toBe('ok');
+		expect((await life.completeRegistration()).status).toBe('ok');
+		expect(operationsOn(fake, LOCAL_ENDPOINT_INVOKE_PATH)).toEqual([
+			'attachment',
+			'registration_challenge',
+			'registration_redeem',
+			'attachment',
+			'registration_use',
+		]);
+		expect(life.status().authority).toBe('registered');
+		expect(record().registration?.challengeDigest).toBe('c'.repeat(64));
+	});
+
+	it('a refused renewal is the denied outcome, recorded, and never followed by a challenge', async () => {
+		const fake = await grantEndpoint(() => false);
+		const previous = {
+			challengeId: 'chal-0',
+			actorId: null,
+			runtimeId: 'desktop-99',
+			processEpoch: 'epoch-0',
+			bindingDigest: 'a'.repeat(64),
+			processBirthDigest: 'd'.repeat(64),
+			challengeDigest: 'e'.repeat(64),
+			expiresAt: '2026-11-13T11:00:00.000Z',
+			registeredAt: '2026-11-13T10:55:00.000Z',
+		};
+		const { life, record } = await account('alice', fake.socketPath, INSTALLATION, previous);
+
+		for (let i = 0; i < 3; i++) {
+			expect(await life.connect()).toEqual({
+				status: 'denied',
+				reason: 'unauthenticated',
+				operation: 'attachment',
+			});
+		}
+		expect(operationsOn(fake, LOCAL_ENDPOINT_INVOKE_PATH)).toEqual([
+			'attachment',
+			'attachment',
+			'attachment',
+		]);
+		expect(life.status()).toMatchObject({
+			authority: 'none',
+			pendingApproval: null,
+			lastDenial: { operation: 'attachment', reason: 'unauthenticated' },
+		});
+		expect(record().registration).toEqual(previous);
+	});
+
+	it("a second OS account never uses the first account's grant", async () => {
+		const bob = {
+			installationId: INSTALLATION.installationId,
+			runtimeId: 'desktop-200',
+			processEpoch: 'epoch-9',
+		};
+		const fake = await grantEndpoint((runtimeId) => runtimeId === INSTALLATION.runtimeId);
+		const alice = await account('alice', fake.socketPath);
+		const second = await account('bob', fake.socketPath, bob);
+
+		expect(await alice.life.connect()).toMatchObject({ status: 'ok' });
+		expect(await second.life.connect()).toMatchObject({
+			status: 'denied',
+			reason: 'unauthenticated',
+		});
+		expect(alice.record().registration?.challengeId).toBe('chal-1');
+		expect(second.record().registration).toBeNull();
+		expect(second.life.status()).toMatchObject({ authority: 'none', registrationUse: null });
+		// Each account's custody is its own file in its own data directory.
+		expect(fs.readdirSync(path.join(root, 'bob'))).toEqual(
+			fs.readdirSync(path.join(root, 'alice'))
+		);
+		expect(operationsOn(fake, LOCAL_ENDPOINT_INVOKE_PATH)).not.toContain('registration_challenge');
+	});
+
+	it('a CLI host with no desktop objects attaches silently under a grant', async () => {
+		const installation = installationIdentity({
+			hostname: 'testhost',
+			productionDataDir: '/data/prod',
+			mode: 'host',
+			pid: 4242,
+			startedAt: '2026-11-13T11:59:00.000Z',
+		});
+		const reference = { ...PROJECTED.reference, ...installation };
+		const fake = await startFakeEndpoint({
+			registrationRequired: true,
+			renewal: () => true,
+			capabilities: ['registration_use'],
+			operations: { registration_use: () => ({ ...PROJECTED, reference }) },
+			now: () => NOW,
+		});
+		open.push(fake);
+		const holder = { value: null as Anchor | null };
+		const dataDir = path.join(root, 'host');
+		fs.mkdirSync(dataDir);
+		await createEnterpriseIdentityStore({
+			file: path.join(dataDir, 'enterprise-identity.bin'),
+			seal: fakeSeal(),
+			anchor: fakeAnchor(holder),
+			platform: 'darwin',
+			now: () => NOW,
+		}).write({
+			installationId: installation.installationId,
+			tenantId: 'tenant-1',
+			orgId: 'org-1',
+			enrollmentId: 'enr-1',
+			endpoint: {
+				socketPath: fake.socketPath,
+				bindingDigest: 'a'.repeat(64),
+				trustRootDigest: null,
+			},
+			management: 'enrolled',
+			registration: null,
+			policy: { desiredRevision: null, appliedRevision: null, observedAt: null },
+			enrolledAt: new Date(NOW).toISOString(),
+		});
+		const composed = composeHostManaged({
+			openPort: (socketPath) => createLocalEndpointClient({ socketPath }),
+			userDataDir: dataDir,
+			version: '1.1.0',
+			custody: { ok: true, seal: fakeSeal(), anchor: fakeAnchor(holder) },
+			platform: 'darwin',
+			now: () => NOW,
+		});
+		if (!composed.composed) throw new Error(composed.reason);
+		closers.push(() => composed.lifecycle.close());
+		composed.managed.host!(installation);
+
+		await composed.lifecycle.attach();
+		expect(composed.status()).toMatchObject({
+			authority: 'registered',
+			connection: { registration: 'registered' },
+			identity: {
+				record: { registration: { challengeId: 'chal-1', runtimeId: installation.runtimeId } },
+			},
+		});
+		expect(operationsOn(fake, LOCAL_ENDPOINT_INVOKE_PATH)).not.toContain('registration_challenge');
 	});
 });

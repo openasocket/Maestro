@@ -281,6 +281,42 @@ describe('registration bootstrap', () => {
 		expect(record()).toEqual(before);
 	});
 
+	it.each([
+		['another epoch', { processEpoch: 'epoch-2' }],
+		['another runtime', { runtimeId: 'desktop-101' }],
+		['another installation', { installationId: 'inst-2' }],
+		['another binding', { bindingDigest: 'f'.repeat(64) }],
+	])(
+		'a silent attach adopts no reference that names %s, and stays unregistered',
+		async (_label, overrides) => {
+			const fake = await endpoint({
+				registrationRequired: true,
+				renewal: () => true,
+				capabilities: ['registration_use'],
+				operations: { registration_use: () => projected(overrides) },
+			});
+			const life = lifecycle();
+			await identity.write(enrolledRecord(fake.socketPath));
+			expect(await life.connect()).toMatchObject({ status: 'ok' });
+			expect(record().registration).toBeNull();
+			expect(life.status().connection?.registration).toBe('none');
+			expect(v2Calls(fake)).toEqual(['attachment', 'registration_use']);
+		}
+	);
+
+	it('a redeem here keeps its own registration when the reattach projects the reference', async () => {
+		const fake = await endpoint({
+			...SERVES_ENROLLMENT,
+			capabilities: ['registration_use'],
+			operations: { registration_use: () => projected() },
+		});
+		const { life } = await enrolledAndRegistered(fake);
+		// The challenge id is the fake's own, not the projected reference's.
+		expect(record().registration?.challengeId).not.toBe('chal-1');
+		expect(record().registration?.processBirthDigest).toBe(BIRTH_DIGEST);
+		expect(life.status().authority).toBe('registered');
+	});
+
 	describe('endpointRegistrationUseReplyProblems', () => {
 		it('accepts a projected reference and a denial', () => {
 			expect(endpointRegistrationUseReplyProblems(projected())).toEqual([]);

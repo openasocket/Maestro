@@ -20,6 +20,14 @@
  *     the caller once and is neither persisted nor logged. A redeem whose
  *     answer was lost is recovered by reattaching with the existing claim and
  *     asking `registration_use`, never by registering again.
+ *   - A silent attach under a grant (SIMPLE-04-03): the endpoint renews a
+ *     process its grant covers inside the attachment itself, so no challenge
+ *     and no approval handoff run here. The `registration_use` reference it
+ *     projects for THIS installation, runtime, epoch and binding becomes the
+ *     record's registration (custody in this OS account's own data
+ *     directory; the endpoint never hands out a grant id). A refused renewal
+ *     is the attachment's own `denied` outcome; nothing here challenges
+ *     again on its own.
  *   - `connect` attaches (after a registration, when the endpoint requires
  *     one) and projects what the endpoint answered onto the record: the
  *     management state it reports and the policy revisions it holds. With
@@ -55,11 +63,14 @@ import {
 	type EndpointRuntimeUseReference,
 	type EndpointPort,
 	type EndpointRegistrationApproval,
+	type EndpointRegistrationUseReply,
 	type EndpointUnavailableReason,
 	type EndpointStatus,
 	type LocalEndpointDenialReason,
 	type ManagedEnrollmentStatus,
 	type ManagedIdentityManagement,
+	type ManagedIdentityRecord,
+	type ManagedIdentityRegistration,
 } from '../../shared/maestro-lib/managed/endpoint-port';
 import type { ManagedInstallationIdentity } from '../../shared/maestro-lib/managed/types';
 import { type EnterpriseIdentityStore, publicEnterpriseIdentity } from './identity-store';
@@ -234,11 +245,60 @@ export function createEnrollmentLifecycle(deps: EnrollmentLifecycleDeps): Enroll
 		return relay('attachment', await p.attach(attachmentRequest()));
 	}
 
+	/** Whether `reference` names this process: its installation, runtime and epoch. */
+	function namesThisProcess(reference: EndpointRuntimeUseReference): boolean {
+		return (
+			reference.installationId === deps.installation.installationId &&
+			reference.runtimeId === deps.installation.runtimeId &&
+			reference.processEpoch === deps.installation.processEpoch
+		);
+	}
+
+	/**
+	 * The registration a silent attach under a grant leaves on the record: the
+	 * endpoint registered this process at the attachment, so the record holds no
+	 * registration for it yet. Null when the record already holds this process's
+	 * registration (a redeem here wrote it) or the reference is not this
+	 * process's under the record's own binding.
+	 */
+	function silentRegistration(
+		record: ManagedIdentityRecord,
+		reply: Extract<EndpointRegistrationUseReply, { outcome: 'projected' }>
+	): ManagedIdentityRegistration | null {
+		const own = record.registration;
+		if (
+			own &&
+			own.runtimeId === deps.installation.runtimeId &&
+			own.processEpoch === deps.installation.processEpoch
+		)
+			return null;
+		const reference = reply.reference;
+		if (
+			record.installationId !== deps.installation.installationId ||
+			!namesThisProcess(reference) ||
+			reference.bindingDigest !== record.endpoint.bindingDigest
+		)
+			return null;
+		return {
+			challengeId: reference.challengeId,
+			actorId: null,
+			runtimeId: reference.runtimeId,
+			processEpoch: reference.processEpoch,
+			bindingDigest: reference.bindingDigest,
+			processBirthDigest: reference.processBirthDigest,
+			challengeDigest: reference.challengeDigest,
+			expiresAt: reply.expiresAt,
+			registeredAt: new Date(now()).toISOString(),
+		};
+	}
+
 	/**
 	 * `registration_use` on `p`: on `projected`, the reference is kept for this
 	 * connection and its `enrollmentId` and `processBirthDigest` are written onto
-	 * the record (every other field kept). Never computed here; a denial writes
-	 * nothing. Sends nothing unless the attachment on `p` negotiated it.
+	 * the record (every other field kept); after a silent attach under a grant the
+	 * reference becomes the record's registration (`silentRegistration`). Never
+	 * computed here; a denial writes nothing. Sends nothing unless the attachment
+	 * on `p` negotiated it.
 	 */
 	async function projectRegistrationUse(
 		p: EndpointPort
@@ -258,7 +318,11 @@ export function createEnrollmentLifecycle(deps: EnrollmentLifecycleDeps): Enroll
 		};
 		// Re-read inside the step: the write keeps whatever the record holds now.
 		const latest = deps.identity.read();
-		if (latest.status === 'ok' && latest.record.registration) {
+		const silent = latest.status === 'ok' ? silentRegistration(latest.record, reply) : null;
+		if (latest.status === 'ok' && silent) {
+			pendingApproval = null;
+			await deps.identity.write({ ...latest.record, enrollmentId, registration: silent });
+		} else if (latest.status === 'ok' && latest.record.registration) {
 			await deps.identity.write({
 				...latest.record,
 				enrollmentId,
@@ -321,7 +385,18 @@ export function createEnrollmentLifecycle(deps: EnrollmentLifecycleDeps): Enroll
 	const lifecycle: EnrollmentLifecycle = {
 		status() {
 			const identity = publicEnterpriseIdentity(deps.identity.read());
-			const connection = port?.state() ?? null;
+			const observed = port?.state() ?? null;
+			const use = currentRegistrationUse();
+			// After a silent attach under a grant the port never saw a redeem; the
+			// endpoint's own reference for this process is what says it is registered.
+			const connection =
+				observed &&
+				observed.registration !== 'registered' &&
+				use &&
+				namesThisProcess(use.reference) &&
+				use.reference.bindingDigest === identity.record?.endpoint.bindingDigest
+					? { ...observed, registration: 'registered' as const }
+					: observed;
 			let reason: string | null = null;
 			if (identity.status !== 'ok')
 				reason = identity.message ?? 'This installation holds no enrollment.';

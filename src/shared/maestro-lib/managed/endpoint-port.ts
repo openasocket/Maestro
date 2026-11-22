@@ -1744,6 +1744,11 @@ export interface ManagedIdentityView {
  */
 export interface ManagedEnrollmentStatus {
 	identity: ManagedIdentityView;
+	/**
+	 * The port's state; `registration` reads `registered` also after a silent
+	 * attach under a grant, when the endpoint projected this process's own
+	 * `registration_use` reference on the current connection (no redeem ran here).
+	 */
 	connection: EndpointConnectionState | null;
 	endpoint: EndpointStatus | null;
 	authority: 'none' | 'registered';
