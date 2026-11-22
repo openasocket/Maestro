@@ -36,6 +36,7 @@ import {
 	projectedRegistrationUse,
 	workflowProducer,
 } from '../../../main/enterprise/workflowProducer';
+import { registrationMode } from '../../../../../scripts/live-execution-check.mjs';
 
 const OFFER = [
 	'registration_use',
@@ -154,6 +155,7 @@ describe('live execution check', () => {
 	it('registers, negotiates, claims under the delegation, executes and releases, on protocol 2 only', async () => {
 		const { observation, sent, approvals } = await run();
 		expect(observation.failure).toBeUndefined();
+		expect(registrationMode(observation)).toBe('challenge');
 		expect(observation.outcome).toBe('passed');
 		expect(observation.schema).toBe(LIVE_EXECUTION_OBSERVATION_SCHEMA);
 		expect(approvals).toHaveLength(1);
@@ -220,6 +222,18 @@ describe('live execution check', () => {
 		// Neither the nonce nor the fencing token is written.
 		const text = JSON.stringify(observation);
 		expect(text).not.toContain(ISSUED.fencingToken);
+	});
+
+	it('attaches silently under a grant: no challenge, no approval, and the driver reports grant mode', async () => {
+		// Mega renews a grant-backed registration inside the first attachment (SIMPLE-04-03).
+		const { observation, sent, approvals } = await run({ renewal: () => true });
+		expect(observation.outcome).toBe('passed');
+		expect(approvals).toHaveLength(0);
+		const operations = sent.map((envelope) => envelope.operation);
+		expect(operations.slice(0, 3)).toEqual(['compatibility', 'attachment', 'registration_use']);
+		expect(operations).not.toContain('registration_challenge');
+		expect(operations).not.toContain('registration_redeem');
+		expect(registrationMode(observation)).toBe('grant');
 	});
 
 	it('settles an unknown dispatch uncertain and keeps the owner held', async () => {

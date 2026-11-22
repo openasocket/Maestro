@@ -38,6 +38,11 @@
  * Registration approval is a file handshake in the work dir: on a challenge
  * the check writes `challenge.json` (mode 0600, the challenge the operator
  * approves) and waits for `approval.json` naming the same `challengeId`.
+ * Under a runtime grant there is no challenge: the endpoint renews the
+ * registration inside the first `attachment` (Mega SIMPLE-04-03), no
+ * `challenge.json` is written, and the observation's `registration.mode` is
+ * `grant` (`challenge` for a first registration). The endpoint hands the
+ * runtime no grant ID, so the observation names none.
  *
  * The delegation a live claim accepts is issued to the REGISTRATION, so it
  * exists only after the redeem, while `runLiveExecutionCheck` reads its
@@ -204,6 +209,16 @@ export function needsIssuedAuthority(observation) {
 	);
 }
 
+/**
+ * How this pass registered: `challenge` when it ran the challenge, `grant` when
+ * the endpoint attached it with no challenge (a silent renewal under a grant),
+ * null when no registration was projected.
+ */
+export function registrationMode(observation) {
+	if (!observation.registration) return null;
+	return observation.steps.some((s) => s.step === 'registration_challenge') ? 'challenge' : 'grant';
+}
+
 /** The operator's delegation to this registration: authority.json naming the challenge, bounded. */
 export async function issuedAuthority(workDir, challengeId, timeoutMs, pollMs = 200) {
 	const file = path.join(workDir, 'authority.json');
@@ -350,6 +365,7 @@ export async function main(argv = process.argv.slice(2)) {
 		authority: source,
 		outcome: o.outcome,
 		failure: o.failure ?? null,
+		registration: registrationMode(o),
 		steps: o.steps,
 	});
 	let observation = await pass(request.authority, true);
@@ -367,8 +383,10 @@ export async function main(argv = process.argv.slice(2)) {
 			passes.push(summary(2, 'authority.json', observation));
 		}
 	}
+	const mode = registrationMode(observation);
 	const report = {
 		...observation,
+		registration: observation.registration ? { ...observation.registration, mode } : null,
 		driver: { path: OBSERVATION_DRIVER, sha256: sha256(fs.readFileSync(SELF)) },
 		host: {
 			platform: process.platform,

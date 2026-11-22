@@ -23,6 +23,7 @@ import {
 	needsIssuedAuthority,
 	parse,
 	readIdentity,
+	registrationMode,
 } from '../../../scripts/live-execution-check.mjs';
 
 const SHA = 'a'.repeat(64);
@@ -157,7 +158,7 @@ exports.runLiveExecutionCheck = async (input) => {
 		return { outcome: 'failed', failure: { step: 'workflow_claim', detail: 'denied' },
 			steps: [{ step: 'registration_redeem', status: 'ok' }, { step: 'workflow_claim', status: 'denied' }] };
 	}
-	return { outcome: 'passed', steps: [{ step: 'workflow_claim', status: 'ok' }] };
+	return { outcome: 'passed', registration: { purpose: 'runtime_use' }, steps: [{ step: 'workflow_claim', status: 'ok' }] };
 };`;
 		const archive = path.join(pkg, 'runtime.tgz');
 		fs.writeFileSync(
@@ -236,12 +237,31 @@ exports.runLiveExecutionCheck = async (input) => {
 		const report = JSON.parse(fs.readFileSync(out, 'utf8'));
 		expect(report.outcome).toBe('passed');
 		expect(report.installation.source).toBe('identity');
+		// The last pass ran no challenge step, so the report names grant mode.
+		expect(report.registration).toEqual({ purpose: 'runtime_use', mode: 'grant' });
 		expect(
 			report.passes.map((p: { pass: number; outcome: string }) => [p.pass, p.outcome])
 		).toEqual([
 			[1, 'failed'],
 			[2, 'passed'],
 		]);
+	});
+
+	it('names how a pass registered, and no mode when nothing was projected', () => {
+		const registration = { purpose: 'runtime_use' };
+		expect(registrationMode({ registration: null, steps: [] })).toBeNull();
+		expect(
+			registrationMode({
+				registration,
+				steps: [{ step: 'attachment' }, { step: 'registration_challenge' }],
+			})
+		).toBe('challenge');
+		expect(
+			registrationMode({
+				registration,
+				steps: [{ step: 'attachment' }, { step: 'registration_use' }],
+			})
+		).toBe('grant');
 	});
 
 	it('loads nothing from an archive whose digest is not the one given', () => {
