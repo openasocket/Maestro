@@ -18,11 +18,11 @@ describe('parseMegaConnectDeepLink', () => {
 
 	it('parses a connect link and uppercases the team code', () => {
 		expect(
-			parseMegaConnectDeepLink('maestro://connect?server=mega.acme.com&team=acme-web-7k3m')
+			parseMegaConnectDeepLink('maestro://connect?server=mega.acme.com&team=acme-web-7k3m0')
 		).toEqual({
 			kind: 'connect',
 			server: 'mega.acme.com',
-			teamCode: 'ACME-WEB-7K3M',
+			teamCode: 'ACME-WEB-7K3M0',
 		});
 	});
 

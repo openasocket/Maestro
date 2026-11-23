@@ -79,45 +79,50 @@ describe('validateServerHost', () => {
 	});
 });
 
+const JL_PIN = 'a'.repeat(64);
+const JL_LINK = `https://mega.acme.com/join/${CODE}#pin=${JL_PIN}`;
+
 describe('validateJoinLink', () => {
-	it('accepts a join link and splits out the host and code', () => {
-		expect(validateJoinLink(`https://Mega.Acme.com/join/${CODE}`)).toEqual({
+	it('accepts a link with its pin and lowercases the host', () => {
+		expect(validateJoinLink(`https://Mega.Acme.com/join/${CODE}#pin=${JL_PIN}`)).toEqual({
 			ok: true,
-			value: { url: `https://mega.acme.com/join/${CODE}`, host: 'mega.acme.com', code: CODE },
+			value: { url: JL_LINK, host: 'mega.acme.com', code: CODE },
 		});
 	});
 
-	it('accepts an explicit 443, a trailing slash and a query; drops the fragment', () => {
-		const result = validateJoinLink(`https://mega.acme.com:443/join/${CODE}/?issuer=abc#frag`);
-		expect(result).toEqual({
+	it('drops an explicit 443 and keeps any other port', () => {
+		expect(validateJoinLink(`https://mega.acme.com:443/join/${CODE}#pin=${JL_PIN}`)).toEqual({
+			ok: true,
+			value: { url: JL_LINK, host: 'mega.acme.com', code: CODE },
+		});
+		expect(validateJoinLink(`https://mega.acme.com:8443/join/${CODE}#pin=${JL_PIN}`)).toEqual({
 			ok: true,
 			value: {
-				url: `https://mega.acme.com/join/${CODE}/?issuer=abc`,
+				url: `https://mega.acme.com:8443/join/${CODE}#pin=${JL_PIN}`,
 				host: 'mega.acme.com',
 				code: CODE,
 			},
 		});
 	});
 
-	it('allows another port only on localhost', () => {
-		expect(validateJoinLink(`https://localhost:8443/join/${CODE}`).ok).toBe(true);
-		expect(reasonOf(validateJoinLink(`https://mega.acme.com:8443/join/${CODE}`))).toBe('badPort');
-	});
-
 	it.each([
 		['', 'empty'],
 		['not a url', 'notAscii'],
 		['mega.acme.com/join/x', 'notUrl'],
-		[`http://mega.acme.com/join/${CODE}`, 'notHttps'],
-		[`maestro://join/${CODE}`, 'notHttps'],
-		[`https://alice:pw@mega.acme.com/join/${CODE}`, 'credentials'],
-		[`https://alice@mega.acme.com/join/${CODE}`, 'credentials'],
-		[`https://mega.acme.com/invite/${CODE}`, 'badPath'],
-		[`https://mega.acme.com/join/${CODE}/extra`, 'badCode'],
-		['https://mega.acme.com/join/short', 'badCode'],
-		[`https://mega.acme.com/join/${'a'.repeat(65)}`, 'badCode'],
-		['https://mega.acme.com/join/abc!def%20ghijklmnopqrstu', 'badCode'],
-		[`https://mega.acme.com/join/${CODE}?x=${'a'.repeat(2048)}`, 'tooLong'],
+		[`http://mega.acme.com/join/${CODE}#pin=${JL_PIN}`, 'notHttps'],
+		[`maestro://join/${CODE}#pin=${JL_PIN}`, 'notHttps'],
+		[`https://alice:pw@mega.acme.com/join/${CODE}#pin=${JL_PIN}`, 'credentials'],
+		[`https://alice@mega.acme.com/join/${CODE}#pin=${JL_PIN}`, 'credentials'],
+		[`https://mega.acme.com/join/${CODE}?issuer=abc#pin=${JL_PIN}`, 'query'],
+		[`https://mega.acme.com/join/${CODE}`, 'badPin'],
+		[`https://mega.acme.com/join/${CODE}#frag`, 'badPin'],
+		[`https://mega.acme.com/join/${CODE}#pin=${JL_PIN.toUpperCase()}`, 'badPin'],
+		[`https://mega.acme.com/invite/${CODE}#pin=${JL_PIN}`, 'badPath'],
+		[`https://mega.acme.com/join/${CODE}/#pin=${JL_PIN}`, 'badCode'],
+		[`https://mega.acme.com/join/${CODE}/extra#pin=${JL_PIN}`, 'badCode'],
+		[`https://mega.acme.com/join/short#pin=${JL_PIN}`, 'badCode'],
+		[`https://mega.acme.com/join/${'a'.repeat(65)}#pin=${JL_PIN}`, 'badCode'],
+		[`https://mega.acme.com/join/${CODE}#pin=${JL_PIN}${'a'.repeat(2048)}`, 'tooLong'],
 	])('rejects %j as %s without echoing it', (input, reason) => {
 		const result = validateJoinLink(input);
 		expect(reasonOf(result)).toBe(reason);
@@ -127,19 +132,22 @@ describe('validateJoinLink', () => {
 });
 
 describe('validateTeamCode', () => {
-	it('accepts and uppercases a team code', () => {
-		expect(validateTeamCode('ACME-WEB-7K3M')).toEqual({ ok: true, value: 'ACME-WEB-7K3M' });
-		expect(validateTeamCode(' abc-def-7k3m ')).toEqual({ ok: true, value: 'ABC-DEF-7K3M' });
+	it('accepts a team code with its check character and uppercases it', () => {
+		expect(validateTeamCode('ACME-WEB-7K3M0')).toEqual({ ok: true, value: 'ACME-WEB-7K3M0' });
+		expect(validateTeamCode(' abc-def-7k3m6 ')).toEqual({ ok: true, value: 'ABC-DEF-7K3M6' });
 	});
 
 	it.each([
 		['', 'empty'],
 		['AB-CD', 'badTeamCode'],
-		['ACMEWEB7K3M', 'badTeamCode'],
+		['ACME-WEB-7K3M', 'badTeamCode'],
+		['ACME-WEB-7K3M1', 'badTeamCode'],
+		['ACME-WEB-7K3I0', 'badTeamCode'],
+		['ACMEWEB7K3M0', 'badTeamCode'],
 		['ACME--WEB', 'badTeamCode'],
 		['-ACME-WEB', 'badTeamCode'],
-		['ACME_WEB-7K3M', 'badTeamCode'],
-		['ACME WEB-7K3M', 'notAscii'],
+		['ACME_WEB-7K3M0', 'badTeamCode'],
+		['ACME WEB-7K3M0', 'notAscii'],
 		['straße-web', 'notAscii'],
 		[`ACME-${'A'.repeat(64)}`, 'tooLong'],
 	])('rejects %j as %s without echoing it', (input, reason) => {
@@ -197,9 +205,9 @@ describe('connect* (contracts authority)', () => {
 	it.each([
 		['email', 'alice@localhost', 'badEmail'],
 		['email', 'alice', 'badEmail'],
-		['joinLink', `https://mega.acme.com/join/${CODE}`, 'badCode'],
-		['joinLink', `https://mega.acme.com/join/${JOIN_CODE}`, 'badCode'],
-		['joinLink', `https://mega.acme.com/join/${JOIN_CODE}?x=1#pin=${PIN}`, 'badCode'],
+		['joinLink', `https://mega.acme.com/join/${CODE}`, 'badPin'],
+		['joinLink', `https://mega.acme.com/join/${JOIN_CODE}`, 'badPin'],
+		['joinLink', `https://mega.acme.com/join/${JOIN_CODE}?x=1#pin=${PIN}`, 'query'],
 		['joinLink', `http://mega.acme.com/join/${JOIN_CODE}#pin=${PIN}`, 'notHttps'],
 		['teamCode', 'ACME-WEB-7K3M', 'badTeamCode'],
 		['teamCode', 'ACME-WEB-7K3M1', 'badTeamCode'],

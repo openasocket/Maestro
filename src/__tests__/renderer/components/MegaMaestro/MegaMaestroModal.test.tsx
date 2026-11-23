@@ -503,13 +503,13 @@ describe('MegaMaestroModal Connect card', () => {
 		fireEvent.click(screen.getByRole('button', { name: 'Use a team code' }));
 		expect(screen.getByLabelText('Team code')).toBeTruthy();
 		expect(screen.getByLabelText('Server')).toBeTruthy();
-		fireEvent.change(screen.getByLabelText('Team code'), { target: { value: 'acme-web-7k3m' } });
+		fireEvent.change(screen.getByLabelText('Team code'), { target: { value: 'acme-web-7k3m0' } });
 		fireEvent.change(screen.getByLabelText('Server'), { target: { value: 'Mega.Acme.com' } });
 		fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
 		await waitFor(() =>
 			expect(connectStart).toHaveBeenCalledWith({
 				kind: 'teamCode',
-				teamCode: 'ACME-WEB-7K3M',
+				teamCode: 'ACME-WEB-7K3M0',
 				server: 'mega.acme.com',
 			})
 		);
@@ -533,22 +533,18 @@ describe('MegaMaestroModal Connect card', () => {
 		);
 		expect(connectStart).not.toHaveBeenCalled();
 
-		connectStart.mockResolvedValue({ ok: true, value: { status: { kind: 'waiting' } } });
+		// The pin is not carried by a join deep link until MSX-01-06, so the shape check refuses the
+		// link before any connection starts.
 		fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
-		await waitFor(() =>
-			expect(connectStart).toHaveBeenCalledWith({
-				kind: 'joinLink',
-				joinLink: `https://mega.acme.com/join/${code}`,
-			})
-		);
+		await waitFor(() => expect(connectStart).not.toHaveBeenCalled());
 	});
 
 	it('a connect deep link prefills the team code and server and never starts a connection', async () => {
 		renderModal();
 		await cardIn('notConnected');
-		prefillPush!({ kind: 'connect', server: 'mega.acme.com', teamCode: 'ACME-WEB-7K3M' });
+		prefillPush!({ kind: 'connect', server: 'mega.acme.com', teamCode: 'ACME-WEB-7K3M0' });
 		await cardIn('linkOrCode');
-		expect((screen.getByLabelText('Team code') as HTMLInputElement).value).toBe('ACME-WEB-7K3M');
+		expect((screen.getByLabelText('Team code') as HTMLInputElement).value).toBe('ACME-WEB-7K3M0');
 		expect((screen.getByLabelText('Server') as HTMLInputElement).value).toBe('mega.acme.com');
 		expect(connectStart).not.toHaveBeenCalled();
 	});

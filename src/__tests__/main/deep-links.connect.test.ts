@@ -39,7 +39,7 @@ vi.mock('../../main/utils/sentry', () => ({ captureException: vi.fn() }));
 
 const CODE = 'Ab3_dE5-fG7hJ9kL2mN4pQ6r';
 const JOIN = `maestro://join?server=mega.acme.com&code=${CODE}`;
-const CONNECT = 'maestro://connect?server=mega.acme.com&team=ACME-WEB-7K3M';
+const CONNECT = 'maestro://connect?server=mega.acme.com&team=ACME-WEB-7K3M0';
 
 function fakeWindow() {
 	return {
@@ -111,7 +111,7 @@ describe('connect deep links', () => {
 		expect(win.webContents.send).toHaveBeenCalledWith('megaConnect:prefill', {
 			kind: 'connect',
 			server: 'mega.acme.com',
-			teamCode: 'ACME-WEB-7K3M',
+			teamCode: 'ACME-WEB-7K3M0',
 		});
 	});
 
@@ -151,7 +151,7 @@ describe('connect deep links', () => {
 		mod.flushPendingDeepLink(getWindow);
 		const text = loggedText();
 		expect(text).not.toContain(CODE);
-		expect(text).not.toContain('ACME-WEB-7K3M');
+		expect(text).not.toContain('ACME-WEB-7K3M0');
 		expect(text).not.toContain('mega.acme.com');
 	});
 

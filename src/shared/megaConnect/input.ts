@@ -25,8 +25,9 @@ export type MegaConnectInputReason =
 	| 'notUrl'
 	| 'notHttps'
 	| 'credentials'
-	| 'badPort'
+	| 'query'
 	| 'badHost'
+	| 'badPin'
 	| 'badPath'
 	| 'badCode'
 	| 'badTeamCode';
@@ -46,15 +47,14 @@ export interface MegaJoinLink {
 
 export const WORK_EMAIL_MAX_LENGTH = 254;
 export const JOIN_LINK_MAX_LENGTH = 2048;
-export const TEAM_CODE_MIN_LENGTH = 8;
 export const TEAM_CODE_MAX_LENGTH = 64;
 
 const ASCII_PRINTABLE = /^[\x21-\x7e]+$/;
 const EMAIL_LOCAL = /^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+$/;
 const DOMAIN_LABEL = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
 const JOIN_CODE = /^[A-Za-z0-9_-]{20,64}$/;
-const JOIN_PATH = /^\/join\/([A-Za-z0-9_-]{20,64})\/?$/;
-const TEAM_CODE = /^[A-Z0-9]+(-[A-Z0-9]+)+$/;
+const JOIN_PATH = /^\/join\/([A-Za-z0-9_-]{20,64})$/;
+const PIN_FRAGMENT = /^#pin=([a-f0-9]{64})$/;
 
 function fail<T>(reason: MegaConnectInputReason): MegaConnectInputResult<T> {
 	return { ok: false, reason };
@@ -110,14 +110,18 @@ export function validateJoinLink(input: string): MegaConnectInputResult<MegaJoin
 	}
 	if (url.protocol !== 'https:') return fail('notHttps');
 	if (url.username !== '' || url.password !== '') return fail('credentials');
+	if (url.search !== '') return fail('query');
 	const host = url.hostname.replace(/^\[(.*)\]$/, '$1').toLowerCase();
 	if (megaServerHostProblem(host) !== null) return fail('badHost');
-	// URL drops the scheme's default port, so an empty port means 443.
-	if (url.port !== '' && url.port !== '443' && host !== 'localhost') return fail('badPort');
 	const match = JOIN_PATH.exec(url.pathname);
 	if (match === null) return fail(url.pathname.startsWith('/join/') ? 'badCode' : 'badPath');
-	url.hash = '';
-	return { ok: true, value: { url: url.toString(), host, code: match[1] } };
+	const pin = PIN_FRAGMENT.exec(url.hash);
+	if (pin === null) return fail('badPin');
+	// Any HTTPS port is valid (the contract accepts any origin); the link keeps its pin.
+	return {
+		ok: true,
+		value: { url: `${url.origin}/join/${match[1]}#pin=${pin[1]}`, host, code: match[1] },
+	};
 }
 
 /**
@@ -143,7 +147,9 @@ export function validateTeamCode(input: string): MegaConnectInputResult<string> 
 	// ASCII before uppercasing: 'ß'.toUpperCase() is 'SS', which would pass.
 	if (!ASCII_PRINTABLE.test(typed)) return fail('notAscii');
 	const code = typed.toUpperCase();
-	if (code.length < TEAM_CODE_MIN_LENGTH || !TEAM_CODE.test(code)) return fail('badTeamCode');
+	const match = CONTRACT_TEAM_CODE.exec(code);
+	if (match === null || teamCodeCheckCharacter(match[1] + match[2] + match[3]) !== match[4])
+		return fail('badTeamCode');
 	return { ok: true, value: code };
 }
 
