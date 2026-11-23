@@ -93,7 +93,7 @@ describe('megaConnect copy', () => {
 			'Your connection expired. Connect again to continue.'
 		);
 		expect(MEGA_CONNECT_COPY.unavailableBody).toBe(
-			'Maestro cannot reach the Mega-Maestro endpoint on this computer. Use Troubleshoot for details.'
+			'Maestro cannot reach the Mega-Maestro endpoint on this computer, or it cannot answer right now. Use Troubleshoot for details.'
 		);
 		expect(MEGA_CONNECT_COPY.connectAgainButton).toBe('Connect again');
 	});

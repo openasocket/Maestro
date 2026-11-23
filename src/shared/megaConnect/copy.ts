@@ -64,7 +64,7 @@ export const MEGA_CONNECT_COPY = {
 	revokedBody: 'Your administrator disconnected this Maestro. Connect again to continue.',
 	grantExpiredBody: 'Your connection expired. Connect again to continue.',
 	unavailableBody:
-		'Maestro cannot reach the Mega-Maestro endpoint on this computer. Use Troubleshoot for details.',
+		'Maestro cannot reach the Mega-Maestro endpoint on this computer, or it cannot answer right now. Use Troubleshoot for details.',
 	connectAgainButton: 'Connect again',
 
 	// PROPOSED: OS notification titles for the transitions a person may miss
