@@ -82,3 +82,6 @@ vendor/mega-maestro/.import-*/
 .tmp-*
 __pycache__/
 .pytest_cache/
+
+# SlopTimize shell tool scratch (written into any folder it runs in)
+.sloptimize/
