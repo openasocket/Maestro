@@ -1,7 +1,7 @@
 /**
  * Connect deep links: maestro://join and maestro://connect.
  *
- *   maestro://join?server=<host>&code=<join code>
+ *   maestro://join?server=<host>&code=<join code>&pin=<issuer pin>
  *   maestro://connect?server=<host>&team=<team code>
  *
  * A deep link only PREFILLS the Connect to your organization form. It never
@@ -17,7 +17,7 @@
  * handles that in the panel.
  */
 
-import { validateJoinCode, validateServerHost, validateTeamCode } from './input';
+import { validateIssuerPin, validateJoinCode, validateServerHost, validateTeamCode } from './input';
 
 export const MEGA_CONNECT_PREFILL_CHANNEL = 'megaConnect:prefill';
 
@@ -27,13 +27,13 @@ export const MEGA_CONNECT_DEEP_LINK_MAX_LENGTH = 2048;
 export type MegaConnectDeepLinkKind = 'join' | 'connect';
 
 export type MegaConnectPrefill =
-	| { kind: 'join'; server: string; code: string }
+	| { kind: 'join'; server: string; code: string; pin: string }
 	| { kind: 'connect'; server: string; teamCode: string };
 
 const SCHEME = /^maestro:(\/\/)?/i;
 
 const PARAMS: Record<MegaConnectDeepLinkKind, readonly string[]> = {
-	join: ['server', 'code'],
+	join: ['server', 'code', 'pin'],
 	connect: ['server', 'team'],
 };
 
@@ -87,7 +87,10 @@ export function parseMegaConnectDeepLink(url: string): MegaConnectPrefill | null
 
 	if (kind === 'join') {
 		const code = validateJoinCode(params.get('code') ?? '');
-		return code.ok ? { kind, server: server.value, code: code.value } : null;
+		const pin = validateIssuerPin(params.get('pin') ?? '');
+		return code.ok && pin.ok
+			? { kind, server: server.value, code: code.value, pin: pin.value }
+			: null;
 	}
 	const team = validateTeamCode(params.get('team') ?? '');
 	return team.ok ? { kind, server: server.value, teamCode: team.value } : null;

@@ -38,7 +38,8 @@ vi.mock('../../main/utils/safe-send', () => ({
 vi.mock('../../main/utils/sentry', () => ({ captureException: vi.fn() }));
 
 const CODE = 'Ab3_dE5-fG7hJ9kL2mN4pQ6r';
-const JOIN = `maestro://join?server=mega.acme.com&code=${CODE}`;
+const PIN = 'a'.repeat(64);
+const JOIN = `maestro://join?server=mega.acme.com&code=${CODE}&pin=${PIN}`;
 const CONNECT = 'maestro://connect?server=mega.acme.com&team=ACME-WEB-7K3M0';
 
 function fakeWindow() {
@@ -100,6 +101,7 @@ describe('connect deep links', () => {
 			kind: 'join',
 			server: 'mega.acme.com',
 			code: CODE,
+			pin: PIN,
 		});
 	});
 

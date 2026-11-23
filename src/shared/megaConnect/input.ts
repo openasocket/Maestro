@@ -128,6 +128,14 @@ export function validateJoinLink(input: string): MegaConnectInputResult<MegaJoin
  * A join code on its own (the last segment of a join link, or the code of a
  * maestro://join deep link): 20 to 64 URL-safe characters, kept as typed.
  */
+/** An issuer pin: a SHA-256 digest as 64 lowercase hex characters, as the join link and deep link carry it. */
+export function validateIssuerPin(input: string): MegaConnectInputResult<string> {
+	const typed = input.trim();
+	if (typed.length === 0) return fail('empty');
+	if (!CONTRACT_PIN.test(typed)) return fail('badPin');
+	return { ok: true, value: typed };
+}
+
 export function validateJoinCode(input: string): MegaConnectInputResult<string> {
 	const code = input.trim();
 	if (code.length === 0) return fail('empty');
