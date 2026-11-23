@@ -787,7 +787,8 @@ export interface EnterpriseService {
 	 * Connect to your organization (`connect.ts`, MSX-02-02): start, status and
 	 * disconnect over Maestro's own ConnectPort. No port is bound until the Mega
 	 * adapter exists (MSX-02-08), so start and disconnect answer
-	 * `endpoint_connect_unavailable` and the status is `unavailable`.
+	 * `endpoint_connect_unavailable` and the status is `unavailable`. Its
+	 * `diagnostics()` is the Copy diagnostics bundle (MSX-03-04).
 	 */
 	readonly connect: ConnectService;
 	/**
@@ -1126,6 +1127,14 @@ export function createEnterpriseService(deps: EnterpriseServiceDeps): Enterprise
 			await deps.openExternal(url);
 		},
 		now,
+		diagnostics: {
+			appVersion: deps.appVersion,
+			socket: () =>
+				resolveEndpointSocket(
+					megaServer.settings().endpointSocket,
+					deps.platform ?? process.platform
+				),
+		},
 	});
 	const connect: ConnectService = {
 		...connectService,

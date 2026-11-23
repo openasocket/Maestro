@@ -13,11 +13,18 @@
  * advertise the connect operations) start and disconnect refuse with
  * `endpoint_connect_unavailable` and the status is `unavailable`.
  *
+ * Every refusal start or disconnect answers is noted, by code alone, in a
+ * 50-entry in-memory history the Copy diagnostics bundle reads
+ * (`connect-diagnostics.ts`, MSX-03-04).
+ *
  * Logging rule: only state names reach the log. The matching number, the
  * request reference, the approval URL, a join code and the socket path never do.
  */
 
 import { logger } from '../utils/logger';
+import type { Redacted } from '../../shared/megaConnect/diagnostics';
+import { resolveEndpointSocket, type ResolvedEndpointSocket } from '../../shared/megaServer';
+import { buildConnectDiagnostics, createConnectRefusalHistory } from './connect-diagnostics';
 import { canonicalJson } from '../../shared/canonicalJson';
 import {
 	connectJoinLink,
@@ -84,6 +91,12 @@ export interface ConnectServiceDeps {
 	/** Opens a URL outside Maestro; called only after the hold allowed it. */
 	openExternal: (url: string) => Promise<void>;
 	now?: () => number;
+	/**
+	 * What the diagnostics bundle reads beyond the service's own state: the app
+	 * version and the endpoint socket in use. Absent: no app version, and the
+	 * platform's standard socket.
+	 */
+	diagnostics?: { appVersion: string | null; socket: () => ResolvedEndpointSocket };
 	setTimer?: (fn: () => void, ms: number) => CancelTimer;
 }
 
@@ -95,6 +108,15 @@ export interface ConnectService {
 	/** The last known status, without asking the port. */
 	current(): ConnectStatusView;
 	disconnect(): Promise<ConnectResult<ConnectStatusView>>;
+	/**
+	 * Note a refusal a caller answered before the service saw the input (the
+	 * handlers' own validation), so the history holds it too. Code only.
+	 */
+	noteRefusal(refusal: ConnectRefusal): void;
+	/** The refusal codes of this app session, oldest first, at most 50. */
+	refusals(): ConnectRefusal[];
+	/** The redacted Copy diagnostics bundle (`connect-diagnostics.ts`). */
+	diagnostics(): Promise<Redacted>;
 	/** Called with every status change; returns an unsubscribe function. */
 	onChange(listener: (view: ConnectStatusView) => void): () => void;
 	/** Start the poll loop (start() starts it too). */
@@ -195,6 +217,11 @@ export function createConnectService(deps: ConnectServiceDeps): ConnectService {
 	const portOf = (): ConnectPort | null =>
 		typeof deps.port === 'function' ? deps.port() : deps.port;
 	const notifier = createMegaConnectNotifier();
+	const refusalHistory = createConnectRefusalHistory();
+	const refuse = <T>(result: ConnectResult<T>): ConnectResult<T> => {
+		if (!result.ok) refusalHistory.note(result.refusal);
+		return result;
+	};
 	const listeners = new Set<(view: ConnectStatusView) => void>();
 	let view: ConnectStatusView = {
 		status: portOf() ? { kind: 'notConnected' } : { kind: 'unavailable' },
@@ -248,74 +275,91 @@ export function createConnectService(deps: ConnectServiceDeps): ConnectService {
 		schedule();
 	};
 
+	const start = async (
+		raw: unknown,
+		effectActor: LocalEffectActor
+	): Promise<ConnectResult<ConnectStatusView>> => {
+		const parsed = parseConnectStartInput(raw);
+		if (!parsed.ok) return { ok: false, refusal: 'invalid_input', reason: parsed.reason };
+		const port = portOf();
+		if (!port) {
+			apply({ status: { kind: 'unavailable' } });
+			return { ok: false, refusal: 'endpoint_connect_unavailable' };
+		}
+		let result;
+		try {
+			result = await port.start(parsed.value);
+		} catch {
+			logger.warn(`connect start failed (${parsed.value.kind})`, LOG_CONTEXT);
+			return { ok: false, refusal: 'endpoint_failed' };
+		}
+		if (
+			!approvalUrlMatchesServer(result.approvalUrl, result.server, requestedServer(parsed.value))
+		) {
+			logger.warn('connect approval page refused: not on the request server', LOG_CONTEXT);
+			return { ok: false, refusal: 'pin_mismatch' };
+		}
+		const decision = await holdLocalEffect(deps.localEffects, {
+			effect: 'open-external',
+			actor: effectActor,
+			target: result.approvalUrl,
+		});
+		if (!decision.allowed) {
+			logger.warn(
+				`connect approval page refused by the local-effects hold (${decision.code})`,
+				LOG_CONTEXT
+			);
+			return { ok: false, refusal: 'open_refused' };
+		}
+		await deps.openExternal(result.approvalUrl);
+		const opened = apply({
+			status: {
+				kind: 'browserOpened',
+				matchNumber: result.number,
+				request: result.requestNumber,
+				serverName: hostOf(result.server),
+			},
+			names: { server: hostOf(result.server) },
+		});
+		watch();
+		schedule();
+		return { ok: true, value: opened };
+	};
+
+	const disconnect = async (): Promise<ConnectResult<ConnectStatusView>> => {
+		const port = portOf();
+		if (!port) {
+			apply({ status: { kind: 'unavailable' } });
+			return { ok: false, refusal: 'endpoint_connect_unavailable' };
+		}
+		try {
+			await port.disconnect();
+		} catch {
+			logger.warn('connect disconnect failed', LOG_CONTEXT);
+			return { ok: false, refusal: 'endpoint_failed' };
+		}
+		const after = apply({ status: { kind: 'notConnected' } });
+		schedule();
+		return { ok: true, value: after };
+	};
+
 	return {
-		async start(raw, actor) {
-			// Read the calling transport before any await, so the hold binds that actor.
-			const effectActor = actor ?? callingLocalEffectActor();
-			const parsed = parseConnectStartInput(raw);
-			if (!parsed.ok) return { ok: false, refusal: 'invalid_input', reason: parsed.reason };
-			const port = portOf();
-			if (!port) {
-				apply({ status: { kind: 'unavailable' } });
-				return { ok: false, refusal: 'endpoint_connect_unavailable' };
-			}
-			let result;
-			try {
-				result = await port.start(parsed.value);
-			} catch {
-				logger.warn(`connect start failed (${parsed.value.kind})`, LOG_CONTEXT);
-				return { ok: false, refusal: 'endpoint_failed' };
-			}
-			if (
-				!approvalUrlMatchesServer(result.approvalUrl, result.server, requestedServer(parsed.value))
-			) {
-				logger.warn('connect approval page refused: not on the request server', LOG_CONTEXT);
-				return { ok: false, refusal: 'pin_mismatch' };
-			}
-			const decision = await holdLocalEffect(deps.localEffects, {
-				effect: 'open-external',
-				actor: effectActor,
-				target: result.approvalUrl,
-			});
-			if (!decision.allowed) {
-				logger.warn(
-					`connect approval page refused by the local-effects hold (${decision.code})`,
-					LOG_CONTEXT
-				);
-				return { ok: false, refusal: 'open_refused' };
-			}
-			await deps.openExternal(result.approvalUrl);
-			const opened = apply({
-				status: {
-					kind: 'browserOpened',
-					matchNumber: result.number,
-					request: result.requestNumber,
-					serverName: hostOf(result.server),
-				},
-				names: { server: hostOf(result.server) },
-			});
-			watch();
-			schedule();
-			return { ok: true, value: opened };
-		},
+		// Read the calling transport before any await, so the hold binds that actor.
+		start: async (raw, actor) => refuse(await start(raw, actor ?? callingLocalEffectActor())),
 		status: poll,
 		current: () => view,
-		async disconnect() {
-			const port = portOf();
-			if (!port) {
-				apply({ status: { kind: 'unavailable' } });
-				return { ok: false, refusal: 'endpoint_connect_unavailable' };
-			}
-			try {
-				await port.disconnect();
-			} catch {
-				logger.warn('connect disconnect failed', LOG_CONTEXT);
-				return { ok: false, refusal: 'endpoint_failed' };
-			}
-			const after = apply({ status: { kind: 'notConnected' } });
-			schedule();
-			return { ok: true, value: after };
-		},
+		disconnect: async () => refuse(await disconnect()),
+		noteRefusal: (refusal) => refusalHistory.note(refusal),
+		refusals: () => refusalHistory.list(),
+		diagnostics: () =>
+			buildConnectDiagnostics({
+				status: view,
+				refusals: refusalHistory.list(),
+				appVersion: deps.diagnostics?.appVersion ?? null,
+				socket: deps.diagnostics?.socket() ?? resolveEndpointSocket('', process.platform),
+				certificateExpiry: null,
+				now: (deps.now ?? Date.now)(),
+			}),
 		onChange(listener) {
 			listeners.add(listener);
 			return () => {

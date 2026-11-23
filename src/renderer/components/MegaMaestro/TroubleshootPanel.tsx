@@ -8,7 +8,13 @@
  * platform's standard socket or an override, the server host and port form
  * with its lookup (moved here in MSX-01-04), the classic enrollment request
  * and phases (MegaMaestroEnrollment), and the last refusal with its code and
- * plain sentence.
+ * the catalog's explanation (`explain(code)`, MSX-03-04: title, explanation and
+ * fix, the advanced hint folded away). A Maestro-local code the catalog does not
+ * know keeps Maestro's own sentence rather than the catalog's generic entry.
+ *
+ * Copy diagnostics (MSX-03-04) puts the bundle main built and redacted
+ * (`enterprise:connectDiagnostics`) on the clipboard; the renderer never
+ * assembles or sees anything else of it.
  *
  * Every save goes through the existing settings path (`megaServerSave`), which
  * main validates again. The socket override clears to an empty value, which
@@ -27,6 +33,13 @@ import type { Theme } from '../../types';
 import type { ConnectStatusView } from '../../../main/enterprise/connect';
 import { MEGA_CONNECT_COPY } from '../../../shared/megaConnect/copy';
 import { viewFor } from '../../../shared/megaConnect/view';
+import { explain, hasTroubleshootingEntry } from '../../../shared/megaConnect/troubleshooting';
+import type { ConnectRefusal } from '../../../main/enterprise/connect';
+import type { MegaConnectInputReason } from '../../../shared/megaConnect/input';
+import { safeClipboardWrite } from '../../utils/clipboard';
+import { flashCopiedToClipboard } from '../../utils/flashCopiedToClipboard';
+import { ipcErrorMessage } from '../../utils/ipcErrorMessage';
+import { notifyToast } from '../../stores/notificationStore';
 import { hostPlatform } from '../../utils/platformUtils';
 import { EnrollmentPhases, describeEnrollmentOutcome } from '../Settings/MegaMaestroEnrollment';
 import { connectRefusalSentence, readLastConnectRefusal } from './ConnectCard';
@@ -190,6 +203,40 @@ export function connectStatusRows(current: ConnectStatusView): Array<[string, st
 	return rows;
 }
 
+/** The refusal line: the catalog's words when it knows the code, Maestro's own sentence otherwise. */
+export function RefusalExplanation({
+	refusal,
+	reason,
+}: {
+	refusal: ConnectRefusal;
+	reason?: MegaConnectInputReason;
+}) {
+	const c = MEGA_CONNECT_COPY;
+	const explained = explain(refusal);
+	return (
+		<div className="space-y-1" data-testid="mega-ts-refusal-explained">
+			{hasTroubleshootingEntry(refusal) ? (
+				<>
+					<p className="font-medium">{explained.title}</p>
+					<p>{explained.explanation}</p>
+					<p>
+						<span className="font-medium">{c.troubleshootRefusalFix}: </span>
+						{explained.fix}
+					</p>
+				</>
+			) : (
+				<p>{connectRefusalSentence(refusal, reason)}</p>
+			)}
+			<details>
+				<summary className="cursor-pointer opacity-70">{c.troubleshootRefusalAdvanced}</summary>
+				<p className="font-mono break-all" data-testid="mega-ts-refusal-advanced">
+					{explained.advancedHint}
+				</p>
+			</details>
+		</div>
+	);
+}
+
 function LookupResult({ lookup, theme }: { lookup: MegaServerLookup; theme: Theme }) {
 	return (
 		<div className="space-y-2 text-sm" aria-live="polite">
@@ -264,6 +311,26 @@ export function TroubleshootPanel({ theme }: { theme: Theme }) {
 	const [requestNote, setRequestNote] = useState<string | null>(null);
 	const [connect, setConnect] = useState<ConnectStatusView>({ status: { kind: 'unavailable' } });
 	const [lastRefusal] = useState(readLastConnectRefusal);
+	const [copying, setCopying] = useState(false);
+
+	// Main built and redacted the text; it goes to the clipboard as is.
+	const copyDiagnostics = async () => {
+		if (!connectApi || copying) return;
+		setCopying(true);
+		try {
+			const text = await connectApi.diagnostics();
+			if (!(await safeClipboardWrite(text))) throw new Error('The clipboard is not available.');
+			flashCopiedToClipboard(undefined, MEGA_CONNECT_COPY.troubleshootDiagnosticsCopied);
+		} catch (error) {
+			notifyToast({
+				color: 'red',
+				title: MEGA_CONNECT_COPY.troubleshootDiagnosticsFailed,
+				message: ipcErrorMessage(error),
+			});
+		} finally {
+			setCopying(false);
+		}
+	};
 
 	useEffect(() => {
 		if (!supported) return;
@@ -371,13 +438,26 @@ export function TroubleshootPanel({ theme }: { theme: Theme }) {
 							rows={[[c.troubleshootRefusalCode, lastRefusal.refusal]]}
 							testId="mega-ts-refusal-code"
 						/>
-						<p>{connectRefusalSentence(lastRefusal.refusal, lastRefusal.reason)}</p>
+						<RefusalExplanation refusal={lastRefusal.refusal} reason={lastRefusal.reason} />
 					</div>
 				) : (
 					<p className="text-xs opacity-70" data-testid="mega-ts-refusal">
 						{c.troubleshootRefusalNone}
 					</p>
 				)}
+			</section>
+
+			<section aria-labelledby="mega-ts-diagnostics-heading" className="space-y-2">
+				<h3 id="mega-ts-diagnostics-heading" className="font-medium">
+					{c.troubleshootDiagnosticsTitle}
+				</h3>
+				<p className="text-xs opacity-70">{c.troubleshootDiagnosticsBody}</p>
+				<PanelButton
+					label={copying ? MEGA_MAESTRO_COPY.working : c.troubleshootCopyDiagnostics}
+					onClick={() => void copyDiagnostics()}
+					disabled={!connectApi || copying}
+					theme={theme}
+				/>
 			</section>
 
 			<section aria-labelledby="mega-server-heading" className="space-y-3">

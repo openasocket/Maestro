@@ -5,8 +5,8 @@
  * managed_locks, managed_policy_refresh, managed_enroll_request,
  * managed_inbox_list, managed_inbox_act, managed_inbox_recover, managed_command,
  * managed_command_status, managed_run, managed_connect_start,
- * managed_connect_status, managed_connect_disconnect. Every one but the connect
- * three is answered from the one facade the
+ * managed_connect_status, managed_connect_disconnect, managed_connect_diagnostics.
+ * Every one but the connect four is answered from the one facade the
  * Settings > Environment pane and the `enterprise:*` IPC handlers read as
  * well, `EnterpriseService.managed` (`createManagedOperations()` in
  * `src/main/enterprise/service.ts`), so `maestro-cli managed` says the same
@@ -34,6 +34,9 @@
  * desktop that cannot connect is a refusal in `outcome`, never a value echoed.
  * Any client may send them; the approval page opens on this desktop only through
  * the local-effects hold, attributed to the transport the dispatcher established.
+ * `managed_connect_diagnostics` (MSX-03-04) answers the redacted Copy diagnostics
+ * bundle the `enterprise:connectDiagnostics` handler copies; it is the CLI's alone,
+ * because the bundle names the local endpoint socket path.
  */
 
 import {
@@ -45,6 +48,7 @@ import { isManagedCommunicationType } from '../../../../shared/maestro-lib/runti
 import {
 	NO_CONNECT_SERVICE,
 	NO_CONNECT_STATUS,
+	readConnectDiagnostics,
 	validateConnectStart,
 	validateEnrollmentRequest,
 } from '../../../ipc/handlers/enterprise';
@@ -70,6 +74,7 @@ export const MANAGED_MESSAGE_TYPES = [
 	'managed_connect_start',
 	'managed_connect_status',
 	'managed_connect_disconnect',
+	'managed_connect_diagnostics',
 ] as const;
 export type ManagedMessageType = (typeof MANAGED_MESSAGE_TYPES)[number];
 
@@ -82,6 +87,7 @@ export const MANAGED_CLI_ONLY_TYPES: readonly ManagedMessageType[] = [
 	'managed_policy_refresh',
 	'managed_inbox_recover',
 	'managed_command',
+	'managed_connect_diagnostics',
 ];
 
 export const NO_MANAGED_SERVICE_MESSAGE =
@@ -94,6 +100,7 @@ const CONNECT_MESSAGE_TYPES: readonly ManagedMessageType[] = [
 	'managed_connect_start',
 	'managed_connect_status',
 	'managed_connect_disconnect',
+	'managed_connect_diagnostics',
 ];
 
 export function isManagedMessageType(type: string): type is ManagedMessageType {
@@ -119,13 +126,18 @@ async function answerConnect(
 	switch (message.type as ManagedMessageType) {
 		case 'managed_connect_start': {
 			const rejected = validateConnectStart(message.input);
-			if (rejected) return { outcome: rejected };
+			if (rejected) {
+				if (!rejected.ok) connect?.noteRefusal(rejected.refusal);
+				return { outcome: rejected };
+			}
 			return { outcome: connect ? await connect.start(message.input) : NO_CONNECT_SERVICE };
 		}
 		case 'managed_connect_status':
 			return { view: connect ? await connect.status() : NO_CONNECT_STATUS };
 		case 'managed_connect_disconnect':
 			return { outcome: connect ? await connect.disconnect() : NO_CONNECT_SERVICE };
+		case 'managed_connect_diagnostics':
+			return { diagnostics: await readConnectDiagnostics(connect) };
 	}
 	throw new Error(`Unknown connect message ${message.type}.`);
 }

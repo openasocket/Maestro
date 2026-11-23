@@ -122,8 +122,9 @@ describe('Enterprise Preload API', () => {
 		]);
 	});
 
-	it('exposes connect to your organization as start, status, disconnect, onStatus and onPrefill', async () => {
+	it('exposes connect to your organization as start, status, disconnect, diagnostics, onStatus and onPrefill', async () => {
 		expect(Object.keys(api.connect).sort()).toEqual([
+			'diagnostics',
 			'disconnect',
 			'onPrefill',
 			'onStatus',
@@ -133,10 +134,12 @@ describe('Enterprise Preload API', () => {
 		await api.connect.start({ kind: 'email', email: 'alice@acme.com' });
 		await api.connect.status();
 		await api.connect.disconnect();
+		await api.connect.diagnostics();
 		expect(mockInvoke.mock.calls).toEqual([
 			['enterprise:connectStart', { kind: 'email', email: 'alice@acme.com' }],
 			['enterprise:connectStatus'],
 			['enterprise:connectDisconnect'],
+			['enterprise:connectDiagnostics'],
 		]);
 
 		const heard = vi.fn();

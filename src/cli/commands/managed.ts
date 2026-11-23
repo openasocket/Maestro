@@ -8,8 +8,9 @@
 // `<type>_result` carries `success` and the named field):
 //   managed_status (state), managed_inventory (inventory), managed_support_matrix (matrix),
 //   managed_locks (locks), managed_policy_refresh (outcome), managed_enroll_request (outcome),
-//   managed_connect_start (outcome), managed_connect_status (view), managed_connect_disconnect (outcome)
-// The last one is for CLI-secret clients only: a browser never enrolls. A
+//   managed_connect_start (outcome), managed_connect_status (view), managed_connect_disconnect (outcome),
+//   managed_connect_diagnostics (diagnostics)
+// The enrollment request and the diagnostics are for CLI-secret clients only: a browser never enrolls. A
 // desktop with no enterprise service answers `success: false` with the
 // service's own line; an older desktop answers the unknown type (exit 4).
 //
@@ -502,4 +503,21 @@ export async function managedConnectDisconnect(options: ManagedOptions): Promise
 		options.json
 	);
 	reportConnect(outcome, options.json);
+}
+
+/**
+ * `managed connect diagnostics`: the Troubleshoot tab's Copy diagnostics,
+ * printed instead of copied. The desktop builds the bundle from its allowlist
+ * and redacts it twice (`connect-diagnostics.ts`) before it crosses the
+ * bridge, so the text printed here is the text the button copies.
+ */
+export async function managedConnectDiagnostics(options: ManagedOptions): Promise<void> {
+	const diagnostics = await askConnect<unknown>(
+		{ type: 'managed_connect_diagnostics' },
+		'managed_connect_diagnostics_result',
+		'diagnostics',
+		options.json
+	);
+	if (options.json) console.log(JSON.stringify({ success: true, diagnostics }));
+	else console.log(JSON.stringify(diagnostics, null, 2));
 }

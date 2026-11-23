@@ -154,6 +154,7 @@ describe('enterprise handlers', () => {
 			'enterprise:commandStatus',
 			'enterprise:completeRegistration',
 			'enterprise:connect',
+			'enterprise:connectDiagnostics',
 			'enterprise:connectDisconnect',
 			'enterprise:connectStart',
 			'enterprise:connectStatus',
@@ -508,6 +509,8 @@ describe('connect to your organization handlers (MSX-02-02)', () => {
 		start: vi.fn(),
 		status: vi.fn(),
 		disconnect: vi.fn(),
+		noteRefusal: vi.fn(),
+		diagnostics: vi.fn(),
 		onChange: vi.fn((fn: (view: unknown) => void) => {
 			listener = fn;
 			return () => undefined;
@@ -559,6 +562,8 @@ describe('connect to your organization handlers (MSX-02-02)', () => {
 			expect(JSON.stringify(answer)).not.toContain('not-an-email');
 		}
 		expect(connect.start).not.toHaveBeenCalled();
+		// The history still hears each refusal, by code alone.
+		expect(connect.noteRefusal.mock.calls).toEqual(Array(6).fill(['invalid_input']));
 	});
 
 	it('decides by the contracts 0.5.0 schemas, not the shape hint (MSX-02-09)', async () => {
@@ -610,6 +615,34 @@ describe('connect to your organization handlers (MSX-02-02)', () => {
 		});
 		expect(await invoke('enterprise:connectStart', { kind: 'email', email: '' })).toMatchObject({
 			refusal: 'invalid_input',
+		});
+	});
+
+	it('answers Copy diagnostics as the redacted bundle text the service built (MSX-03-04)', async () => {
+		register(() => connect);
+		connect.diagnostics.mockResolvedValue({
+			schema: 'maestro-connect-diagnostics/1',
+			recent_refusals: [],
+		});
+		const text = await invoke('enterprise:connectDiagnostics');
+		expect(typeof text).toBe('string');
+		expect(JSON.parse(text)).toEqual({
+			schema: 'maestro-connect-diagnostics/1',
+			recent_refusals: [],
+		});
+		await expect(invoke('enterprise:connectDiagnostics', { all: true })).rejects.toThrow();
+		expect(connect.diagnostics).toHaveBeenCalledTimes(1);
+	});
+
+	it('answers Copy diagnostics without a service from the same allowlist', async () => {
+		register(undefined);
+		const bundle = JSON.parse(await invoke('enterprise:connectDiagnostics'));
+		expect(bundle).toMatchObject({
+			schema: 'maestro-connect-diagnostics/1',
+			connection_status: 'unavailable',
+			app_version: null,
+			recent_refusals: [],
+			certificate_expiry: null,
 		});
 	});
 });

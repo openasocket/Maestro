@@ -62,6 +62,11 @@ function createConnectApi() {
 		/** Revoke this OS account's grant on this installation. */
 		disconnect: (): Promise<ConnectResult<ConnectStatusView>> =>
 			ipcRenderer.invoke('enterprise:connectDisconnect'),
+		/**
+		 * The Copy diagnostics text (MSX-03-04): an allowlisted bundle main has
+		 * already passed through `redact()` and `redactSecrets()`.
+		 */
+		diagnostics: (): Promise<string> => ipcRenderer.invoke('enterprise:connectDiagnostics'),
 		/** Hear every status change main observes; returns the unsubscribe function. */
 		onStatus: (callback: (view: ConnectStatusView) => void): (() => void) => {
 			const handler = (_event: unknown, view: ConnectStatusView) => callback(view);

@@ -138,6 +138,15 @@ export const MEGA_CONNECT_COPY = {
 	troubleshootRefusalCode: 'Code',
 	troubleshootRefusedUnavailable:
 		'The Mega-Maestro endpoint on this computer does not offer Connect yet.',
+	troubleshootRefusalFix: 'What to do',
+	troubleshootRefusalAdvanced: 'Advanced',
+	// Copy diagnostics (MSX-03-04).
+	troubleshootDiagnosticsTitle: 'Diagnostics',
+	troubleshootDiagnosticsBody:
+		'Copies the connection state, the app and library versions, the endpoint socket and the recent refusal codes, to send to your admin. Matching numbers, grant IDs and tokens are left out or removed before anything reaches the clipboard.',
+	troubleshootCopyDiagnostics: 'Copy diagnostics',
+	troubleshootDiagnosticsCopied: 'Diagnostics copied',
+	troubleshootDiagnosticsFailed: 'Could not copy diagnostics',
 
 	// maestro-cli managed connect (MSX-02-04). The CLI prints the indicator
 	// word, then these parts; the number is shown to the person who ran it and

@@ -60,6 +60,7 @@ import { MaestroNotRunningError } from '../../../cli/services/maestro-not-runnin
 import {
 	ENROLLMENT_PHASE_FIELDS,
 	managedConnect,
+	managedConnectDiagnostics,
 	managedConnectDisconnect,
 	managedConnectStatus,
 	managedEnrollRequest,
@@ -796,6 +797,33 @@ describe('maestro-cli managed over the real bridge and facade (MRC2-07-08)', () 
 			'managed_connect_status',
 			'managed_connect_disconnect',
 			'managed_connect_disconnect',
+		]);
+	});
+
+	it('connect diagnostics prints the redacted bundle the Copy diagnostics button copies (MSX-03-04)', async () => {
+		// A started request puts the number, the request and the approval URL in the status.
+		expect((await run(() => managedConnect({ managed: true }))).code).toBeNull();
+		port.start.mockRejectedValueOnce(new Error('endpoint fault'));
+		expect((await run(() => managedConnect({ managed: true }))).code).toBe(1);
+		const plain = await run(() => managedConnectDiagnostics({}));
+		expect(plain.code).toBeNull();
+		const bundle = json(plain.out);
+		expect(bundle).toMatchObject({
+			schema: 'maestro-connect-diagnostics/1',
+			connection_status: 'browserOpened',
+			recent_refusals: ['endpoint_failed'],
+			certificate_expiry: null,
+		});
+		for (const value of [APPROVAL_URL, '1042', 'matchNumber', 'mega.acme.com'])
+			expect(plain.out).not.toContain(value);
+		const wrapped = json((await run(() => managedConnectDiagnostics({ json: true }))).out);
+		expect(wrapped).toEqual({
+			success: true,
+			diagnostics: { ...bundle, collected_at: expect.any(String) },
+		});
+		expect(sent.slice(-2).map((m) => m.type)).toEqual([
+			'managed_connect_diagnostics',
+			'managed_connect_diagnostics',
 		]);
 	});
 

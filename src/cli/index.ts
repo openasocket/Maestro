@@ -227,6 +227,7 @@ import {
 	managedConnect,
 	managedConnectStatus,
 	managedConnectDisconnect,
+	managedConnectDiagnostics,
 } from './commands/managed';
 import {
 	managedInboxList,
@@ -2925,6 +2926,14 @@ managedConnectCmd
 	.description("Disconnect this desktop from your organization (the Connect card's Disconnect)")
 	.option('--json', 'Output as JSON (for scripting)')
 	.action((_options, cmd) => managedConnectDisconnect(cmd.optsWithGlobals()));
+
+managedConnectCmd
+	.command('diagnostics')
+	.description(
+		"Print the Troubleshoot tab's Copy diagnostics bundle (connection state, versions, socket, recent refusal codes), already redacted"
+	)
+	.option('--json', 'Output as JSON (for scripting)')
+	.action((_options, cmd) => managedConnectDiagnostics(cmd.optsWithGlobals()));
 
 managed
 	.command('run <leaseId>')

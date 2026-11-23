@@ -157,6 +157,7 @@ describe('managed bridge handlers (MRC2-07-03)', () => {
 			'managed_policy_refresh',
 			'managed_inbox_recover',
 			'managed_command',
+			'managed_connect_diagnostics',
 		]);
 		const recover = await ask(handler, createClient({ cli: true }), {
 			type: 'managed_inbox_recover',
@@ -579,10 +580,11 @@ describe('managed bridge handlers (MRC2-07-03)', () => {
 		}
 	});
 
-	it('routes exactly the fifteen managed message types and admits exactly the intended remote methods', () => {
+	it('routes exactly the sixteen managed message types and admits exactly the intended remote methods', () => {
 		expect([...MANAGED_MESSAGE_TYPES].sort()).toEqual(
 			[
 				'managed_command',
+				'managed_connect_diagnostics',
 				'managed_connect_disconnect',
 				'managed_connect_start',
 				'managed_connect_status',
@@ -626,6 +628,7 @@ describe('managed bridge handlers (MRC2-07-03)', () => {
 			'enterprise:acknowledgeRevocation',
 			'enterprise:retire',
 			'enterprise:clearIdentity',
+			'enterprise:connectDiagnostics',
 		]) {
 			expect(isRemoteMethodAllowed(method), method).toBe(false);
 		}
@@ -641,7 +644,11 @@ describe('managed connect bridge handlers (MSX-02-03)', () => {
 		names: { tenantDisplayName: 'Acme' },
 	};
 	let handler: WebSocketMessageHandler;
-	let connect: { [K in 'start' | 'status' | 'disconnect']: ReturnType<typeof vi.fn> };
+	let connect: {
+		[K in 'start' | 'status' | 'disconnect' | 'noteRefusal' | 'diagnostics']: ReturnType<
+			typeof vi.fn
+		>;
+	};
 
 	beforeEach(() => {
 		vi.clearAllMocks();
@@ -650,6 +657,11 @@ describe('managed connect bridge handlers (MSX-02-03)', () => {
 			start: vi.fn(async () => ({ ok: true, value: WAITING })),
 			status: vi.fn(async () => WAITING),
 			disconnect: vi.fn(async () => ({ ok: true, value: { status: { kind: 'notConnected' } } })),
+			noteRefusal: vi.fn(),
+			diagnostics: vi.fn(async () => ({
+				schema: 'maestro-connect-diagnostics/1',
+				recent_refusals: ['invalid_input'],
+			})),
 		};
 		handler.setCallbacks({ getConnect: () => connect as unknown as ConnectService });
 	});
@@ -706,6 +718,35 @@ describe('managed connect bridge handlers (MSX-02-03)', () => {
 			expect(JSON.stringify(reply)).not.toContain('ABCD-EFGH');
 		}
 		expect(connect.start).not.toHaveBeenCalled();
+		expect(connect.noteRefusal).toHaveBeenCalledTimes(6);
+		expect(connect.noteRefusal).toHaveBeenCalledWith('invalid_input');
+	});
+
+	it('answers Copy diagnostics to the CLI alone, from the service (MSX-03-04)', async () => {
+		expect(
+			await ask(handler, createClient({ cli: true }), { type: 'managed_connect_diagnostics' })
+		).toMatchObject({
+			type: 'managed_connect_diagnostics_result',
+			success: true,
+			diagnostics: { schema: 'maestro-connect-diagnostics/1', recent_refusals: ['invalid_input'] },
+		});
+		expect(
+			await ask(
+				handler,
+				createClient({ user: { id: 'u1', username: 'ada', displayName: 'Ada' } }),
+				{
+					type: 'managed_connect_diagnostics',
+				}
+			)
+		).toMatchObject({ success: false, error: MANAGED_CLI_ONLY_MESSAGE });
+		expect(connect.diagnostics).toHaveBeenCalledTimes(1);
+		handler.setCallbacks({ getConnect: () => null });
+		expect(
+			await ask(handler, createClient({ cli: true }), { type: 'managed_connect_diagnostics' })
+		).toMatchObject({
+			success: true,
+			diagnostics: { connection_status: 'unavailable', recent_refusals: [], app_version: null },
+		});
 	});
 
 	it('answers endpoint_connect_unavailable and an unavailable status when no service runs', async () => {

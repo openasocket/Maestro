@@ -19,6 +19,7 @@ import type { MegaConnectPrefill } from '../../../../shared/megaConnect/deepLink
 import { LayerStackProvider } from '../../../../renderer/contexts/LayerStackContext';
 import { mockTheme } from '../../../helpers/mockTheme';
 import type { MegaServerLookup } from '../../../../shared/megaServer';
+import { explain } from '../../../../shared/megaConnect/troubleshooting';
 
 vi.mock('../../../../renderer/components/Settings/MegaMaestroSettings', () => ({
 	MegaMaestroSettings: ({ enrollment }: { enrollment?: boolean }) => (
@@ -264,6 +265,9 @@ describe('MegaMaestroModal Connect card', () => {
 	const connectStatus = vi.fn();
 	const connectStart = vi.fn();
 	const connectDisconnect = vi.fn();
+	const connectDiagnostics = vi.fn();
+	const copyTextToClipboard = vi.fn();
+	const DIAGNOSTICS_TEXT = '{\n  "schema": "maestro-connect-diagnostics/1"\n}\n';
 
 	function withStatus(status: MegaConnectStatus) {
 		connectStatus.mockResolvedValue({ status });
@@ -278,6 +282,8 @@ describe('MegaMaestroModal Connect card', () => {
 		connectStatus.mockReset();
 		connectStart.mockReset();
 		connectDisconnect.mockReset();
+		connectDiagnostics.mockReset().mockResolvedValue(DIAGNOSTICS_TEXT);
+		copyTextToClipboard.mockReset().mockResolvedValue(undefined);
 		withStatus({ kind: 'notConnected' });
 		megaServerGet.mockReset().mockResolvedValue({
 			host: 'mega.example.com',
@@ -294,6 +300,7 @@ describe('MegaMaestroModal Connect card', () => {
 					status: connectStatus,
 					start: connectStart,
 					disconnect: connectDisconnect,
+					diagnostics: connectDiagnostics,
 					onStatus: (cb: typeof statusPush) => {
 						statusPush = cb;
 						return () => undefined;
@@ -304,6 +311,7 @@ describe('MegaMaestroModal Connect card', () => {
 					},
 				},
 			},
+			shell: { copyTextToClipboard },
 		});
 	});
 
@@ -690,7 +698,7 @@ describe('MegaMaestroModal Connect card', () => {
 			);
 		});
 
-		it('shows the last refusal of a start with its code and plain sentence', async () => {
+		it('explains the last refusal of a start from the catalog: title, explanation, fix, advanced hint', async () => {
 			connectStart.mockResolvedValue({ ok: false, refusal: 'pin_mismatch' });
 			renderModal();
 			await cardIn('notConnected');
@@ -701,8 +709,13 @@ describe('MegaMaestroModal Connect card', () => {
 			await screen.findByText(/not on the server you named/);
 			fireEvent.click(screen.getByRole('radio', { name: 'Troubleshoot' }));
 			expect(rowValue('mega-ts-refusal-code', 'Code')).toBe('pin_mismatch');
-			expect(screen.getByTestId('mega-ts-refusal').textContent).toContain(
-				'The approval page was not on the server you named, so Maestro did not open it.'
+			const refusal = screen.getByTestId('mega-ts-refusal').textContent ?? '';
+			const explained = explain('pin_mismatch');
+			expect(refusal).toContain(explained.title);
+			expect(refusal).toContain(explained.explanation);
+			expect(refusal).toContain(`What to do: ${explained.fix}`);
+			expect(screen.getByTestId('mega-ts-refusal-advanced').textContent).toBe(
+				explained.advancedHint
 			);
 		});
 
@@ -720,6 +733,40 @@ describe('MegaMaestroModal Connect card', () => {
 			expect(screen.getByTestId('mega-ts-refusal').textContent).toContain(
 				'does not offer Connect yet'
 			);
+			// A Maestro-local code keeps Maestro's sentence, never the catalog's generic entry.
+			expect(screen.getByTestId('mega-ts-refusal').textContent).not.toContain(
+				'Something went wrong'
+			);
+			expect(screen.getByTestId('mega-ts-refusal-advanced').textContent).toBe(
+				'Unknown code endpoint_connect_unavailable.'
+			);
+		});
+
+		it('Copy diagnostics puts exactly the text main answered on the clipboard', async () => {
+			await renderTroubleshoot();
+			fireEvent.click(screen.getByRole('button', { name: 'Copy diagnostics' }));
+			await waitFor(() => expect(copyTextToClipboard).toHaveBeenCalledTimes(1));
+			expect(connectDiagnostics).toHaveBeenCalledTimes(1);
+			expect(copyTextToClipboard).toHaveBeenCalledWith(DIAGNOSTICS_TEXT);
+		});
+
+		it('Copy diagnostics copies nothing when main cannot answer', async () => {
+			connectDiagnostics.mockRejectedValue(new Error('no service'));
+			await renderTroubleshoot();
+			const button = screen.getByRole('button', { name: 'Copy diagnostics' });
+			fireEvent.click(button);
+			await waitFor(() => expect(connectDiagnostics).toHaveBeenCalledTimes(1));
+			await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
+			expect(copyTextToClipboard).not.toHaveBeenCalled();
+		});
+
+		it('Copy diagnostics is off when no connect bridge is present', async () => {
+			setMaestro({
+				enterprise: { megaServerGet, megaServerSave, megaServerLookup, requestEnrollment },
+			});
+			await renderTroubleshoot();
+			const button = screen.getByRole('button', { name: 'Copy diagnostics' });
+			expect((button as HTMLButtonElement).disabled).toBe(true);
 		});
 	});
 });

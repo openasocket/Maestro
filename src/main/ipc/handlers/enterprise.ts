@@ -34,6 +34,11 @@ import {
 	type ConnectService,
 	type ConnectStatusView,
 } from '../../enterprise/connect';
+import {
+	buildConnectDiagnostics,
+	connectDiagnosticsText,
+} from '../../enterprise/connect-diagnostics';
+import type { Redacted } from '../../../shared/megaConnect/diagnostics';
 import type { ManagedRunView } from '../../enterprise/dispatch';
 import type {
 	EnrollmentLifecycle,
@@ -103,6 +108,27 @@ export const NO_CONNECT_SERVICE: ConnectResult<never> = {
 	refusal: 'endpoint_connect_unavailable',
 };
 export const NO_CONNECT_STATUS: ConnectStatusView = { status: { kind: 'unavailable' } };
+
+/**
+ * The Copy diagnostics bundle (MSX-03-04), redacted: the connect service's own
+ * when one runs, otherwise the same allowlist read with no service (status
+ * unavailable, no refusals, no app version, the saved or standard socket).
+ * The IPC handler and the bridge `managed_connect_diagnostics` both answer from it.
+ */
+export function readConnectDiagnostics(
+	connect: ConnectService | null,
+	savedSocket: string = ''
+): Promise<Redacted> {
+	if (connect) return connect.diagnostics();
+	return buildConnectDiagnostics({
+		status: NO_CONNECT_STATUS,
+		refusals: [],
+		appVersion: null,
+		socket: resolveEndpointSocket(savedSocket, process.platform),
+		certificateExpiry: null,
+		now: Date.now(),
+	});
+}
 
 /**
  * The renderer's (or a bridge client's) start input, validated in main by the
@@ -436,7 +462,10 @@ export function registerEnterpriseHandlers(deps: EnterpriseHandlerDependencies):
 			handlerOpts('connectStart'),
 			async (raw: unknown): Promise<ConnectResult<ConnectStatusView>> => {
 				const rejected = validateConnectStart(raw);
-				if (rejected) return rejected;
+				if (rejected) {
+					if (!rejected.ok) deps.getConnect?.()?.noteRefusal(rejected.refusal);
+					return rejected;
+				}
 				return deps.getConnect?.()?.start(raw) ?? NO_CONNECT_SERVICE;
 			}
 		)
@@ -461,6 +490,23 @@ export function registerEnterpriseHandlers(deps: EnterpriseHandlerDependencies):
 			async (raw: unknown): Promise<ConnectResult<ConnectStatusView>> => {
 				if (raw !== undefined && raw !== null) throw new Error('Disconnect takes no argument.');
 				return deps.getConnect?.()?.disconnect() ?? NO_CONNECT_SERVICE;
+			}
+		)
+	);
+
+	// Copy diagnostics (MSX-03-04): the redacted bundle as clipboard text. The renderer
+	// only writes this string to the clipboard; both redactions ran here first.
+	ipcMain.handle(
+		'enterprise:connectDiagnostics',
+		withIpcErrorLogging(
+			handlerOpts('connectDiagnostics'),
+			async (raw: unknown): Promise<string> => {
+				if (raw !== undefined && raw !== null) throw new Error('Diagnostics take no argument.');
+				const redacted = await readConnectDiagnostics(
+					deps.getConnect?.() ?? null,
+					deps.getMegaServer()?.settings().endpointSocket ?? ''
+				);
+				return connectDiagnosticsText(redacted);
 			}
 		)
 	);
