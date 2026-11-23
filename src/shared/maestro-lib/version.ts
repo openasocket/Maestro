@@ -218,8 +218,12 @@ import { MANAGED_CONTRACT_VERSION } from './managed/types';
  * the endpoint renews under a grant is reported by the projected `registration_use` reference, with no
  * challenge, and the live execution check's observation records the registration `mode` (`challenge`
  * or `grant`). The permission flag vocabulary moves to `launch/access-flags.ts` (re-exported). Additions only.
+ * 0.46.0: built against contracts 0.5.1, which publishes the connect operation schemas; the endpoint
+ * port's connect parsers are held equal to them. A connect timestamp is the contract's
+ * `z.iso.datetime({ offset: true })` (any fraction, `Z` or `+hh:mm`), so a valid `connection_status`
+ * with a time like `2026-11-21T10:00:00Z` is no longer dropped as malformed. Additions and that fix only.
  */
-export const MAESTRO_LIB_VERSION = '0.45.0';
+export const MAESTRO_LIB_VERSION = '0.46.0';
 
 /** The Node range the built library runs on; `engines.node` of the built package. */
 export const MAESTRO_LIB_NODE_RANGE = '>=20';

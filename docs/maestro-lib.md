@@ -38,7 +38,7 @@ It is not:
 | `windows-shell` | On Windows, the provider is installed as a `.cmd` shim that only starts through cmd.exe, and an argument cannot pass through cmd.exe intact (a line break, a `%NAME%` pair or `^`; for the prompt, only when the provider cannot read it from stdin). See [Windows](#windows). |
 | `launch`        | The launch could not be planned. The message says why.                                                                                                                                                                                                                         |
 
-What each provider supports in maestro-lib `0.45.0`:
+What each provider supports in maestro-lib `0.46.0`:
 
 | Agent id        | Name            | Runs a turn | Resume | Read-only |
 | --------------- | --------------- | ----------- | ------ | --------- |
@@ -491,7 +491,7 @@ if (problems.length > 0) throw new Error(problems.join('; '));
 
 The client interface carries the extension as `MaestroClient.managed`, optional: a host without it is `unsupported`, never "unmanaged, so allowed".
 
-What that adds up to in `0.45.0`, before the release-by-release detail below:
+What that adds up to in `0.46.0`, before the release-by-release detail below:
 
 - **Standalone is untouched.** A program that never passes `managed` to `createMaestroRuntime`, and a `startTurn` with no `admission`, plan and run exactly as the earlier sections describe. Nothing here reads a keyring, opens a socket or asks a peer.
 - **A managed host admits launches, not providers.** `providerRouteSupport(agentId)` is the table: `managed` is `implemented` on the `child-process` route alone (the launch is admitted at the real spawn), and `unsupported` on `pty`, `codex-app-server`, `opencode-server` and `ssh`. What a provider's own tools do once running is not governed. The one route whose effects are enforced is the synthetic harness route, which qualifies no real provider.
@@ -581,6 +581,8 @@ Since `0.41.0` the library carries its own endpoint socket client (`createLocalE
 Since `0.42.0` the library is built against contracts `0.4.0`, which carries no v1 export (decision D4). The relayed enrollment `request` phase sends the v2 attachment itself as its `identity`, so `ENROLLMENT_IDENTITY_PROTOCOL` and `EndpointEnrollmentIdentity` are removed. Below `1.0` a minor may break, and this one does.
 
 Since `0.44.0` the live execution check renews its lease once, inside its lifetime, before execution (`workflow_renew`).
+
+Since `0.46.0` the library is built against contracts `0.5.1`, which publishes the connect operation schemas; the endpoint port's connect parsers are held equal to them, and a connect timestamp follows the contract's `z.iso.datetime({ offset: true })` (any fraction, `Z` or `+hh:mm`) instead of only `.sssZ`. Additions and that fix only.
 
 Since `0.45.0` the library is built against contracts `0.5.0`. The endpoint port speaks `connect`, `connection_status` and `disconnect` before any attachment and parses each answer with the connect schemas (`LOCAL_ENDPOINT_CONNECT_OPERATIONS`). When the endpoint renews a registration under a grant inside the attachment, the projected `registration_use` reference is the registration and no challenge is sent; the live execution check records which happened as the observation's registration `mode` (`challenge` or `grant`). Additions only.
 
