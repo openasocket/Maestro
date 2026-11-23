@@ -49,9 +49,20 @@
  * authority when it starts. So the check runs up to two passes in this
  * process. The first registers and presents the request file's authority. If
  * it registered and then failed at `workflow_claim`, the check waits for
- * `authority.json` in the work dir ({ challengeId, authority: { delegation,
- * grants } }, naming the first pass's challenge) and runs a second pass on a
- * new connection with that authority and a fresh trigger, run and attempt. The
+ * `authority.json` in the work dir and runs a second pass on a new connection
+ * with that authority and a fresh trigger, run and attempt. What the file must
+ * name depends on how the first pass registered:
+ *
+ *   challenge: { challengeId, authority: { delegation, grants } }, naming the
+ *     first pass's challenge.
+ *   grant (a silent renewal, no challenge): { registration: { referenceDigest,
+ *     processBirthDigest }, workflow: { workflowId, workflowVersion },
+ *     expiresAt, authority: { delegation, grants } }. The registration digests
+ *     must be the ones the first pass observed, the workflow the one it
+ *     claimed, and expiresAt a future time. A challengeId is refused here: no
+ *     challenge was issued, so naming one would be fabricated.
+ *
+ * The
  * observation is the last pass's; `passes` lists each. The endpoint registers
  * an enrolled runtime once, so a run that fails after its redeem needs a new
  * operator session.
@@ -200,13 +211,55 @@ export function readIdentity(file) {
 	};
 }
 
-/** True when a failed pass registered on this process and then stopped at the claim. */
+/**
+ * True when a failed pass registered on this process and then stopped at the
+ * claim: by a redeemed challenge, or by a silent renewal under a grant (a
+ * projected registration with no challenge step).
+ */
 export function needsIssuedAuthority(observation) {
-	return (
-		observation.outcome === 'failed' &&
-		observation.failure?.step === 'workflow_claim' &&
-		observation.steps.some((s) => s.step === 'registration_redeem' && s.status === 'ok')
+	if (observation.outcome !== 'failed' || observation.failure?.step !== 'workflow_claim')
+		return false;
+	const redeemed = observation.steps.some(
+		(s) => s.step === 'registration_redeem' && s.status === 'ok'
 	);
+	return redeemed || registrationMode(observation) === 'grant';
+}
+
+/**
+ * What authority.json must name for this pass, or null when nothing can bind it:
+ * the challenge it redeemed, or (renewed under a grant) the registration it
+ * observed and the workflow it claimed.
+ */
+export function expectedIssuer(observation, challengeId, workflow) {
+	if (challengeId) return { challengeId };
+	if (registrationMode(observation) !== 'grant') return null;
+	const { referenceDigest, processBirthDigest } = observation.registration;
+	return { registration: { referenceDigest, processBirthDigest }, workflow };
+}
+
+/** Why an issued authority does not bind to `expected`, or null. Never echoes a digest it refuses. */
+export function issuedAuthorityProblem(issued, expected, now = Date.now()) {
+	if (!issued?.authority?.delegation || !Array.isArray(issued.authority.grants))
+		return 'authority.json has no authority.delegation and authority.grants';
+	if (expected.challengeId) {
+		return issued.challengeId === expected.challengeId
+			? null
+			: `authority.json names challenge ${issued.challengeId}, not ${expected.challengeId}`;
+	}
+	if (issued.challengeId !== undefined)
+		return 'authority.json names a challenge, but this registration was renewed under a grant with none';
+	for (const field of ['referenceDigest', 'processBirthDigest']) {
+		if (issued.registration?.[field] !== expected.registration[field])
+			return `authority.json registration.${field} is not the registration this pass observed`;
+	}
+	for (const field of ['workflowId', 'workflowVersion']) {
+		if (issued.workflow?.[field] !== expected.workflow[field])
+			return `authority.json workflow.${field} is not ${expected.workflow[field]}`;
+	}
+	const expires = typeof issued.expiresAt === 'string' ? Date.parse(issued.expiresAt) : NaN;
+	if (!Number.isFinite(expires)) return 'authority.json has no expiresAt time';
+	if (expires <= now) return 'authority.json expired before the second pass';
+	return null;
 }
 
 /**
@@ -219,18 +272,14 @@ export function registrationMode(observation) {
 	return observation.steps.some((s) => s.step === 'registration_challenge') ? 'challenge' : 'grant';
 }
 
-/** The operator's delegation to this registration: authority.json naming the challenge, bounded. */
-export async function issuedAuthority(workDir, challengeId, timeoutMs, pollMs = 200) {
+/** The operator's delegation to this registration: authority.json bound to `expected` (see expectedIssuer), bounded. */
+export async function issuedAuthority(workDir, expected, timeoutMs, pollMs = 200) {
 	const file = path.join(workDir, 'authority.json');
 	for (const deadline = Date.now() + timeoutMs; ; await wait(pollMs)) {
 		if (fs.existsSync(file)) {
 			const issued = JSON.parse(fs.readFileSync(file, 'utf8'));
-			if (issued?.challengeId !== challengeId)
-				throw new Error(
-					`authority.json names challenge ${issued?.challengeId}, not ${challengeId}`
-				);
-			if (!issued.authority?.delegation || !Array.isArray(issued.authority.grants))
-				throw new Error('authority.json has no authority.delegation and authority.grants');
+			const problem = issuedAuthorityProblem(issued, expected);
+			if (problem) throw new Error(problem);
 			return issued;
 		}
 		if (Date.now() >= deadline) return null;
@@ -314,6 +363,8 @@ export async function main(argv = process.argv.slice(2)) {
 		requiredCapabilities: [],
 	};
 	const workflow = request.workflow ?? {};
+	const workflowId = workflow.workflowId ?? 'maestro-live-execution-check';
+	const workflowVersion = workflow.workflowVersion ?? 'v1';
 	let challengeId = null;
 	const approve =
 		args.approvalMs > 0
@@ -335,8 +386,8 @@ export async function main(argv = process.argv.slice(2)) {
 				authority,
 				approve,
 				workflow: {
-					workflowId: workflow.workflowId ?? 'maestro-live-execution-check',
-					workflowVersion: workflow.workflowVersion ?? 'v1',
+					workflowId,
+					workflowVersion,
 					triggerId: ids.triggerId ?? `trigger-${randomUUID()}`,
 					runId,
 					attemptId: ids.attemptId ?? `attempt-${randomUUID()}`,
@@ -370,10 +421,13 @@ export async function main(argv = process.argv.slice(2)) {
 	});
 	let observation = await pass(request.authority, true);
 	const passes = [summary(1, 'request', observation)];
-	if (needsIssuedAuthority(observation) && challengeId && args.authorityMs > 0) {
+	const expected = needsIssuedAuthority(observation)
+		? expectedIssuer(observation, challengeId, { workflowId, workflowVersion })
+		: null;
+	if (expected && args.authorityMs > 0) {
 		let issued = null;
 		try {
-			issued = await issuedAuthority(workDir, challengeId, args.authorityMs);
+			issued = await issuedAuthority(workDir, expected, args.authorityMs);
 			if (!issued) passes.push({ pass: 2, refused: 'no authority.json from the operator in time' });
 		} catch (error) {
 			passes.push({ pass: 2, refused: error.message });

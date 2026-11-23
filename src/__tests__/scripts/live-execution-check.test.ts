@@ -17,7 +17,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
 	DEFAULT_SOCKET,
 	extractTar,
+	expectedIssuer,
 	issuedAuthority,
+	issuedAuthorityProblem,
 	loadRuntime,
 	main,
 	needsIssuedAuthority,
@@ -127,18 +129,96 @@ describe('live-execution-check', () => {
 		expect(needsIssuedAuthority(failedAt('execution', true))).toBe(false);
 
 		const dir = tmp();
-		expect(await issuedAuthority(dir, 'c1', 0, 1)).toBeNull();
+		expect(await issuedAuthority(dir, { challengeId: 'c1' }, 0, 1)).toBeNull();
 		const authority = { delegation: { grant: {}, chain: [{}] }, grants: [] };
 		fs.writeFileSync(
 			path.join(dir, 'authority.json'),
 			JSON.stringify({ challengeId: 'old', authority })
 		);
-		await expect(issuedAuthority(dir, 'c1', 0, 1)).rejects.toThrow('names challenge old');
+		await expect(issuedAuthority(dir, { challengeId: 'c1' }, 0, 1)).rejects.toThrow(
+			'names challenge old'
+		);
 		fs.writeFileSync(
 			path.join(dir, 'authority.json'),
 			JSON.stringify({ challengeId: 'c1', authority })
 		);
-		expect((await issuedAuthority(dir, 'c1', 0, 1))?.authority).toEqual(authority);
+		expect((await issuedAuthority(dir, { challengeId: 'c1' }, 0, 1))?.authority).toEqual(authority);
+	});
+
+	describe('a silent renewal under a grant (no challenge)', () => {
+		const registration = {
+			purpose: 'runtime_use',
+			version: 2,
+			enrollmentId: null,
+			processBirthDigest: 'b'.repeat(64),
+			referenceDigest: 'r'.repeat(64),
+			expiresAt: '2026-11-22T12:00:00.000Z',
+		};
+		const renewed = {
+			outcome: 'failed',
+			failure: { step: 'workflow_claim', detail: 'denied lease-invalid' },
+			registration,
+			steps: [
+				{ step: 'attachment', status: 'ok' },
+				{ step: 'registration_use', status: 'projected' },
+				{ step: 'workflow_claim', status: 'denied' },
+			],
+		};
+		const workflow = { workflowId: 'wf', workflowVersion: 'v3' };
+		const authority = { delegation: { grant: {}, chain: [{}] }, grants: [] };
+		const now = Date.parse('2026-11-22T10:00:00.000Z');
+		const good = {
+			registration: { referenceDigest: 'r'.repeat(64), processBirthDigest: 'b'.repeat(64) },
+			workflow,
+			expiresAt: '2026-11-22T10:05:00.000Z',
+			authority,
+		};
+
+		it('waits for authority bound to the observed registration, not to a challenge', () => {
+			expect(needsIssuedAuthority(renewed)).toBe(true);
+			expect(needsIssuedAuthority({ ...renewed, registration: null })).toBe(false);
+			const expected = expectedIssuer(renewed, null, workflow);
+			expect(expected).toEqual({
+				registration: { referenceDigest: 'r'.repeat(64), processBirthDigest: 'b'.repeat(64) },
+				workflow,
+			});
+			expect(expectedIssuer({ ...renewed, registration: null }, null, workflow)).toBeNull();
+			expect(expectedIssuer(renewed, 'c1', workflow)).toEqual({ challengeId: 'c1' });
+			expect(issuedAuthorityProblem(good, expected!, now)).toBeNull();
+		});
+
+		it.each([
+			['a fabricated challenge', { ...good, challengeId: 'c1' }, 'names a challenge'],
+			[
+				'another registration',
+				{ ...good, registration: { ...good.registration, referenceDigest: 'x'.repeat(64) } },
+				'registration.referenceDigest',
+			],
+			[
+				'another process birth',
+				{ ...good, registration: { ...good.registration, processBirthDigest: 'x'.repeat(64) } },
+				'registration.processBirthDigest',
+			],
+			['no registration', { ...good, registration: undefined }, 'registration.referenceDigest'],
+			[
+				'another workflow',
+				{ ...good, workflow: { ...workflow, workflowId: 'other' } },
+				'workflow.workflowId',
+			],
+			[
+				'another workflow version',
+				{ ...good, workflow: { ...workflow, workflowVersion: 'v1' } },
+				'workflow.workflowVersion',
+			],
+			['an expired authority', { ...good, expiresAt: '2026-11-22T09:59:59.000Z' }, 'expired'],
+			['no expiry', { ...good, expiresAt: undefined }, 'no expiresAt'],
+			['an unreadable expiry', { ...good, expiresAt: 'soon' }, 'no expiresAt'],
+			['no delegation', { ...good, authority: { grants: [] } }, 'no authority.delegation'],
+		])('refuses %s', (_, issued, message) => {
+			const expected = expectedIssuer(renewed, null, workflow)!;
+			expect(issuedAuthorityProblem(issued, expected, now)).toContain(message);
+			expect(issuedAuthorityProblem(issued, expected, now)).not.toContain('x'.repeat(64));
+		});
 	});
 
 	it('runs a second pass with the issued authority, the enrolled identity and one key per pass', async () => {
@@ -246,6 +326,102 @@ exports.runLiveExecutionCheck = async (input) => {
 			[2, 'passed'],
 		]);
 	});
+
+	it.each([
+		['binds to the observed registration', false, 0, 'passed'],
+		['refuses a fabricated challenge', true, 1, 'failed'],
+	])(
+		'a renewed pass gets its second pass only from bound authority: %s',
+		async (_, fabricate, exit, outcome) => {
+			const pkg = tmp();
+			const lib = `
+const calls = (globalThis.__liveCheckGrantCalls = []);
+exports.MAESTRO_LIB_VERSION = '0.0.0-test';
+exports.LOCAL_ENDPOINT_PROTOCOL = 2;
+exports.LIVE_EXECUTION_CAPABILITIES = ['registration_use'];
+exports.installationIdentity = () => ({ installationId: 'i', runtimeId: 'r', processEpoch: 'e' });
+exports.createLocalEndpointClient = () => ({ close: async () => {} });
+const registration = { purpose: 'runtime_use', version: 2, enrollmentId: null,
+	processBirthDigest: '${'b'.repeat(64)}', referenceDigest: '${'r'.repeat(64)}', expiresAt: '2099-01-01T00:00:00.000Z' };
+exports.runLiveExecutionCheck = async (input) => {
+	calls.push({ input });
+	if (calls.length === 1) {
+		return { outcome: 'failed', failure: { step: 'workflow_claim', detail: 'denied' }, registration,
+			steps: [{ step: 'attachment', status: 'ok' }, { step: 'registration_use', status: 'projected' }, { step: 'workflow_claim', status: 'denied' }] };
+	}
+	return { outcome: 'passed', registration, steps: [{ step: 'workflow_claim', status: 'ok' }] };
+};`;
+			const archive = path.join(pkg, 'runtime.tgz');
+			fs.writeFileSync(
+				archive,
+				gzipSync(
+					tar(
+						entry('package/', Buffer.alloc(0), '5'),
+						entry('package/library/', Buffer.alloc(0), '5'),
+						entry('package/library/index.js', Buffer.from(lib))
+					)
+				)
+			);
+			const digest = createHash('sha256').update(fs.readFileSync(archive)).digest('hex');
+			const work = tmp();
+			const issued = { delegation: { grant: { g: 2 }, chain: [{ g: 2 }] }, grants: [] };
+			fs.writeFileSync(
+				path.join(work, 'authority.json'),
+				JSON.stringify({
+					...(fabricate ? { challengeId: 'made-up' } : {}),
+					registration: { referenceDigest: 'r'.repeat(64), processBirthDigest: 'b'.repeat(64) },
+					workflow: { workflowId: 'maestro-live-execution-check', workflowVersion: 'v1' },
+					expiresAt: '2099-01-01T00:00:00.000Z',
+					authority: issued,
+				})
+			);
+			const request = path.join(pkg, 'request.json');
+			fs.writeFileSync(
+				request,
+				JSON.stringify({
+					authority: { delegation: { grant: { g: 1 }, chain: [{ g: 1 }] }, grants: [] },
+					execution: { provider: 'synthetic-node', resourceIds: [] },
+				})
+			);
+			const out = path.join(pkg, 'obs.json');
+			const write = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+			const err = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+			let code: number;
+			try {
+				code = await main([
+					'--runtime',
+					archive,
+					'--sha256',
+					digest,
+					'--request',
+					request,
+					'--work-dir',
+					work,
+					'--out',
+					out,
+				]);
+			} finally {
+				write.mockRestore();
+				err.mockRestore();
+			}
+			expect(code).toBe(exit);
+			const calls = (globalThis as { __liveCheckGrantCalls?: any[] }).__liveCheckGrantCalls!;
+			const report = JSON.parse(fs.readFileSync(out, 'utf8'));
+			expect(report.outcome).toBe(outcome);
+			expect(report.registration.mode).toBe('grant');
+			if (fabricate) {
+				expect(calls).toHaveLength(1);
+				expect(report.passes[1]).toEqual({
+					pass: 2,
+					refused:
+						'authority.json names a challenge, but this registration was renewed under a grant with none',
+				});
+			} else {
+				expect(calls).toHaveLength(2);
+				expect(calls[1].input.authority).toEqual(issued);
+			}
+		}
+	);
 
 	it('names how a pass registered, and no mode when nothing was projected', () => {
 		const registration = { purpose: 'runtime_use' };
