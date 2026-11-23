@@ -1,0 +1,69 @@
+{
+  "schema": "maestro-macos-app-build/1",
+  "artifactId": "MAESTRO-MACOS-APP-BUILD",
+  "recordedAt": "2026-11-23T06:55:34.940Z",
+  "platform": "darwin",
+  "arch": "arm64",
+  "head": "e50b4a39a21d6e7ac79efa47a6f6570d325d2a7a",
+  "buildHead": "e50b4a39a21d6e7ac79efa47a6f6570d325d2a7a",
+  "headDelta": "built from 3583fb89c plus the package.json build.files exclusions, uncommitted at build time and committed unchanged as e50b4a39a2; the tree that was built is this commit",
+  "commands": [
+    {
+      "cmd": "CSC_IDENTITY_AUTO_DISCOVERY=false node scripts/set-version.mjs npm run build",
+      "exit": 0
+    },
+    {
+      "cmd": "npm run build:computer-history",
+      "exit": 0
+    },
+    {
+      "cmd": "CSC_IDENTITY_AUTO_DISCOVERY=false node scripts/set-version.mjs electron-builder --mac --config.directories.output=release/macos-046 (node_modules/.bin on PATH; script .maestro/playbooks/Working/MAC-11/build.sh)",
+      "exit": 0
+    }
+  ],
+  "archives": [
+    {
+      "path": "release/macos-046/maestro-1.1.1-RC-arm64-mac.dmg",
+      "sha256": "b03f18942b42e0d7dcf6fdccdffd7015b8b192e762c16be8f758549c6e899848"
+    },
+    {
+      "path": "release/macos-046/maestro-1.1.1-RC-arm64-mac.zip",
+      "sha256": "36cfdccb1e15958067d443a32cb85baf23c929a0ae7fff5ba5a00e723df977e6"
+    }
+  ],
+  "appAsar": {
+    "bytes": 735555795,
+    "distFolders": [
+      "cli",
+      "main",
+      "prompts",
+      "renderer",
+      "shared",
+      "web-desktop"
+    ]
+  },
+  "runtimePin": {
+    "file": "Plans/integration-completion/runtime-conformance.json",
+    "library": "0.46.0",
+    "archiveSha256": "689510ff8954c524885a2c0c36ad7d9094c9bb20a0da53deda4a678fca8c460c"
+  },
+  "contractsPin": {
+    "file": "vendor/mega-maestro/contracts.pin.json",
+    "version": "0.5.1",
+    "sha256": "3396449fa16d5b9efbae54ec68c58339b8388ab406045cda458d1e15d0c471e9"
+  },
+  "libraryVersionInBundle": "0.46.0",
+  "smoke": {
+    "cmd": "node scripts/smoke-packaged-net-fetch.mjs release/macos-046/mac-arm64/Maestro.app",
+    "exit": 0,
+    "discordStatus": 401,
+    "hostApi": "1.31.0",
+    "undici": "7.29.1"
+  },
+  "notes": [
+    "app not launched as a GUI; the smoke test runs the packaged binary as Node (ELECTRON_RUN_AS_NODE)",
+    "unsigned build by design (CSC_IDENTITY_AUTO_DISCOVERY=false); signing is a release gate",
+    "supersedes app-macos-build-0.44.0.json for the current pins; that receipt stays as history",
+    "a first build into dist/macos-046 packed an earlier dist/macos-044 build and reached a 5.7 GB app.asar; it was discarded and fixed by e50b4a39a2"
+  ]
+}
