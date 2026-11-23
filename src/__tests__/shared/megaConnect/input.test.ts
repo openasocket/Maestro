@@ -225,7 +225,7 @@ describe('connect* (contracts authority)', () => {
 		expectNoEcho(input, result);
 	});
 
-	it('agrees with the vendored 0.5.0 schemas on every case', () => {
+	it('agrees with the vendored contracts schemas on every case', () => {
 		const email = zod.z.email().max(254);
 		const emails = [
 			'alice@acme.com',

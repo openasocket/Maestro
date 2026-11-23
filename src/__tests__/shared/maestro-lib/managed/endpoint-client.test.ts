@@ -549,7 +549,8 @@ describe('local endpoint client', () => {
 			);
 			await malformed('connect', { outcome: 'refused', code: 'Bad Code' }, email);
 			await malformed('connection_status', { ...STATUS, state: 'paused' });
-			await malformed('connection_status', { ...STATUS, stateChangedAt: '2026-11-21T10:00:00Z' });
+			// No seconds: the contract's z.iso.datetime refuses it (a Z time without millis is valid).
+			await malformed('connection_status', { ...STATUS, stateChangedAt: '2026-11-21T10:00Z' });
 			await malformed('connection_status', {
 				...STATUS,
 				names: { device: '1b4e28ba-2fa1-11d2-883f-0016d3cca427' },

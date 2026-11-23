@@ -8,10 +8,10 @@
 		"localEndpointSource": "packages/contracts/src/protocol.ts (envelope, attachment, operations, execution, local-control selectors); packages/contracts/src/local-endpoint.ts (byte bounds, denial reasons)",
 		"localEndpointRecordedFrom": {
 			"package": "@mega-maestro/contracts",
-			"version": "0.4.0",
-			"sourceRevision": "e439b39e165cef495558ef363972ea10d5a69fb6",
-			"recordedOn": "2026-11-16",
-			"note": "Protocol 2 only (contracts 0.4.0, decision D4): the operations, envelope and local-control selectors (localControlRequestV2) are read from protocol.js; the byte bounds and denial reasons from local-endpoint.js, which the protocol shares. The protocol 1 facts and the v1 commandRequest selectors are retired with protocol 1."
+			"version": "0.5.1",
+			"sourceRevision": "c8b45dee1ab7d0493d13c004368fa0dd51a84323",
+			"recordedOn": "2026-11-22",
+			"note": "Protocol 2 only (contracts 0.4.0, decision D4): the operations, envelope and local-control selectors (localControlRequestV2) are read from protocol.js; the byte bounds and denial reasons from local-endpoint.js, which the protocol shares. The protocol 1 facts and the v1 commandRequest selectors are retired with protocol 1. Contracts 0.5.1 publishes connect, connection_status and disconnect in the operation map, so Maestro carries no operation extension."
 		}
 	},
 	"runtimePort": {
@@ -61,7 +61,10 @@
 			"workflow_claim",
 			"workflow_renew",
 			"workflow_settle",
-			"workflow_release"
+			"workflow_release",
+			"connect",
+			"connection_status",
+			"disconnect"
 		],
 		"denialReasons": [
 			"unsupported_version",
@@ -93,7 +96,6 @@
 		"denialCodeExtensions": ["context-mismatch", "lease-invalid"],
 		"commandActionExtensions": ["pause_run", "resume_run", "operator_prompt"],
 		"commandActionExtensionsNote": "pause_run and resume_run wait on CP-05; all three are answered unsupported by name",
-		"operationExtensions": ["connect", "connection_status", "disconnect"],
-		"operationExtensionsNote": "Mega source SIMPLE-03-08P, after the published 0.5.0 archive d3d9604f whose operation map lacks them; the endpoint serves them before any session to an account it admits natively"
+		"operationExtensions": []
 	}
 }

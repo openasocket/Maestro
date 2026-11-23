@@ -1139,8 +1139,9 @@ function parseEnvelopeAnswer(
 // Connect (contracts `/connect`: endpointConnectInput, endpointConnectAnswer,
 // connectionStatus, endpointDisconnectAnswer). The endpoint serves these to an
 // account it admits natively, in any session state, so they need no attachment.
-// Transcribed from Mega source at SIMPLE-03-08P; the published 0.5.0 archive
-// exports `connectionStatus` but not the operation schemas yet.
+// Transcribed (product code never loads the vendored contracts); contracts 0.5.1
+// publishes all four schemas, and endpoint-connect-conformance.test.ts holds
+// these parsers equal to them.
 // ---------------------------------------------------------------------------
 
 export const LOCAL_ENDPOINT_CONNECT_OPERATIONS = [
@@ -1216,7 +1217,9 @@ const REFUSAL_CODE = /^[a-z][a-z0-9_]{0,63}$/;
 const LABEL = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
 const SERVER_HOST =
 	/^(?=.{1,253}(?::|$))[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*(:[1-9][0-9]{0,4})?$/;
-const ISO_MILLIS = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+/** The contracts `z.iso.datetime({ offset: true })`: seconds required, any fraction, `Z` or `+hh:mm`. */
+const ISO_DATETIME =
+	/^(\d{4})-(\d{2})-(\d{2})T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/;
 const IDENTIFIER_SHAPED =
 	/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{32}/i;
 const UNPRINTABLE = /[\p{Cc}\p{Cf}\p{Co}\p{Cn}\p{Cs}\p{Zl}\p{Zp}]/u;
@@ -1228,8 +1231,16 @@ export const isServerHost = (value: unknown): value is string =>
 	typeof value === 'string' && SERVER_HOST.test(value) && Number(value.split(':')[1] ?? 1) <= 65535;
 const isLabel = (value: unknown): value is string =>
 	typeof value === 'string' && value.length <= 63 && LABEL.test(value);
-const isTimestamp = (value: unknown): boolean =>
-	typeof value === 'string' && ISO_MILLIS.test(value) && Number.isFinite(Date.parse(value));
+/** A real calendar day, as the contract's date check: no February 30, no February 29 off a leap year. */
+const isTimestamp = (value: unknown): boolean => {
+	if (typeof value !== 'string') return false;
+	const match = ISO_DATETIME.exec(value);
+	if (!match) return false;
+	const [year, month, day] = [Number(match[1]), Number(match[2]), Number(match[3])];
+	return (
+		month >= 1 && month <= 12 && day >= 1 && day <= new Date(Date.UTC(year, month, 0)).getUTCDate()
+	);
+};
 const isDisplayText = (value: unknown, max: number): value is string =>
 	typeof value === 'string' &&
 	value.length >= 1 &&
